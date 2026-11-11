@@ -13,5 +13,7 @@ pub mod scenario;
 pub mod state_hash;
 pub mod stats;
 pub mod time;
+pub mod trig;
+mod trig_table;
 pub mod units;
 pub mod world;
