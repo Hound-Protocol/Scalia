@@ -1,0 +1,19 @@
+// Bulwark: low, wide main battle tank with a sloped front.
+(
+    id: "tank_bulwark",
+    version: 1,
+    name: "Bulwark",
+    class: Tank,
+    hull: (length_mm: 7000, width_mm: 3400, height_mm: 2300, mass_kg: 52000),
+    stats: (speed_mm_s: 14000, crew: 4, passengers: 0, armour: 9),
+    interior: (ramps: 0, doors: 0, corridor_width_cm: 0, seat_cols: 0, seats: 0, rooms: []),
+    model: [
+        Box(x: -1700, y: -3300, z: 0, w: 400, d: 6600, h: 800, color: 2),
+        Box(x: 1300, y: -3300, z: 0, w: 400, d: 6600, h: 800, color: 2),
+        Box(x: -1300, y: -3300, z: 200, w: 2600, d: 6600, h: 900, color: 1),
+        Wedge(x: -1300, y: -3300, z: 1100, w: 2600, d: 1500, h: 300, color: 1),
+        Box(x: -1200, y: -1800, z: 1100, w: 2400, d: 4500, h: 400, color: 1),
+        Cylinder(x: 0, y: 0, z: 1500, radius: 1000, h: 600, color: 3),
+        Box(x: -100, y: -3200, z: 1750, w: 200, d: 2200, h: 200, color: 4),
+    ],
+)

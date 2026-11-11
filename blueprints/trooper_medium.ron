@@ -1,0 +1,20 @@
+// Medium trooper: line infantry with a pack and a helmet.
+(
+    id: "trooper_medium",
+    version: 1,
+    name: "Line Trooper",
+    class: Walker,
+    hull: (length_mm: 600, width_mm: 700, height_mm: 1800, mass_kg: 110),
+    stats: (speed_mm_s: 1500, crew: 1, passengers: 0, armour: 3),
+    interior: (ramps: 0, doors: 0, corridor_width_cm: 0, seat_cols: 0, seats: 0, rooms: []),
+    model: [
+        Box(x: -160, y: -90, z: 0, w: 130, d: 180, h: 800, color: 2),
+        Box(x: 30, y: -90, z: 0, w: 130, d: 180, h: 800, color: 2),
+        Box(x: -170, y: -110, z: 800, w: 340, d: 220, h: 620, color: 1),
+        Box(x: -80, y: -80, z: 1420, w: 160, d: 160, h: 230, color: 3),
+        Wedge(x: -95, y: -95, z: 1650, w: 190, d: 190, h: 120, color: 4),
+        Box(x: -280, y: -60, z: 850, w: 110, d: 120, h: 500, color: 1),
+        Box(x: 170, y: -60, z: 850, w: 110, d: 120, h: 500, color: 1),
+        Box(x: -150, y: 110, z: 850, w: 300, d: 190, h: 500, color: 5),
+    ],
+)

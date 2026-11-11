@@ -1,0 +1,18 @@
+// Light trooper: scout in a plain jerkin, no pack.
+(
+    id: "trooper_light",
+    version: 1,
+    name: "Light Trooper",
+    class: Walker,
+    hull: (length_mm: 500, width_mm: 600, height_mm: 1750, mass_kg: 75),
+    stats: (speed_mm_s: 1800, crew: 1, passengers: 0, armour: 1),
+    interior: (ramps: 0, doors: 0, corridor_width_cm: 0, seat_cols: 0, seats: 0, rooms: []),
+    model: [
+        Box(x: -140, y: -80, z: 0, w: 120, d: 160, h: 800, color: 2),
+        Box(x: 20, y: -80, z: 0, w: 120, d: 160, h: 800, color: 2),
+        Box(x: -150, y: -100, z: 800, w: 300, d: 200, h: 600, color: 1),
+        Box(x: -80, y: -80, z: 1400, w: 160, d: 160, h: 250, color: 3),
+        Box(x: -250, y: -60, z: 850, w: 100, d: 120, h: 500, color: 1),
+        Box(x: 150, y: -60, z: 850, w: 100, d: 120, h: 500, color: 1),
+    ],
+)

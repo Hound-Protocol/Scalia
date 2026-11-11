@@ -1,0 +1,22 @@
+// Heavy trooper: armoured, wide shoulders, cylinder arm guards.
+(
+    id: "trooper_heavy",
+    version: 1,
+    name: "Heavy Trooper",
+    class: Walker,
+    hull: (length_mm: 700, width_mm: 900, height_mm: 1900, mass_kg: 190),
+    stats: (speed_mm_s: 1100, crew: 1, passengers: 0, armour: 6),
+    interior: (ramps: 0, doors: 0, corridor_width_cm: 0, seat_cols: 0, seats: 0, rooms: []),
+    model: [
+        Box(x: -230, y: -120, z: 0, w: 190, d: 240, h: 850, color: 2),
+        Box(x: 40, y: -120, z: 0, w: 190, d: 240, h: 850, color: 2),
+        Box(x: -250, y: -150, z: 850, w: 500, d: 300, h: 650, color: 1),
+        Box(x: -90, y: -90, z: 1500, w: 180, d: 180, h: 260, color: 3),
+        Wedge(x: -110, y: -110, z: 1760, w: 220, d: 220, h: 130, color: 4),
+        Wedge(x: -450, y: -140, z: 1300, w: 200, d: 280, h: 200, color: 4),
+        Wedge(x: 250, y: -140, z: 1300, w: 200, d: 280, h: 200, color: 4),
+        Cylinder(x: -340, y: 0, z: 800, radius: 100, h: 500, color: 1),
+        Cylinder(x: 340, y: 0, z: 800, radius: 100, h: 500, color: 1),
+        Box(x: -200, y: 150, z: 900, w: 400, d: 200, h: 600, color: 5),
+    ],
+)

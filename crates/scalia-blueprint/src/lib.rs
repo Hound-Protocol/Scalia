@@ -3,6 +3,7 @@
 pub mod draw;
 pub mod layout;
 pub mod mesh;
+pub mod shipped;
 pub mod types;
 pub mod validate;
 

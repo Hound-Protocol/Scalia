@@ -1,0 +1,28 @@
+// Ox: boxy troop transport, nose to -y, ramps and engines at the +y end.
+(
+    id: "transport_ox",
+    version: 1,
+    name: "Ox",
+    class: Transport,
+    hull: (length_mm: 24000, width_mm: 9000, height_mm: 6000, mass_kg: 120000),
+    stats: (speed_mm_s: 30000, crew: 6, passengers: 500, armour: 3),
+    interior: (ramps: 2, doors: 4, corridor_width_cm: 120, seat_cols: 20, seats: 600, rooms: [
+        (name: "crew", purpose: Crew, x_mm: -1500, y_mm: -9800, w_mm: 3000, d_mm: 800),
+        (name: "troops", purpose: Troops, x_mm: -3000, y_mm: -9000, w_mm: 6000, d_mm: 12000),
+        (name: "cargo", purpose: Cargo, x_mm: -3000, y_mm: 3200, w_mm: 6000, d_mm: 4000),
+        (name: "engine", purpose: Engine, x_mm: -3000, y_mm: 7400, w_mm: 6000, d_mm: 2000),
+        (name: "bridge", purpose: Bridge, x_mm: -1500, y_mm: 9600, w_mm: 3000, d_mm: 2000),
+    ]),
+    model: [
+        Box(x: -3500, y: -10000, z: 600, w: 7000, d: 20000, h: 4000, color: 1),
+        Wedge(x: -3500, y: -11800, z: 600, w: 7000, d: 1800, h: 4000, color: 1),
+        Box(x: -1500, y: 8000, z: 4600, w: 3000, d: 3000, h: 1200, color: 4),
+        Box(x: -1200, y: 10000, z: 0, w: 2400, d: 1500, h: 300, color: 2),
+        Cylinder(x: -2000, y: 11000, z: 600, radius: 700, h: 3000, color: 3),
+        Cylinder(x: 2000, y: 11000, z: 600, radius: 700, h: 3000, color: 3),
+        Box(x: -4400, y: -6000, z: 0, w: 600, d: 800, h: 700, color: 2),
+        Box(x: 3800, y: -6000, z: 0, w: 600, d: 800, h: 700, color: 2),
+        Box(x: -4400, y: 4000, z: 0, w: 600, d: 800, h: 700, color: 2),
+        Box(x: 3800, y: 4000, z: 0, w: 600, d: 800, h: 700, color: 2),
+    ],
+)

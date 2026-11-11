@@ -1,0 +1,21 @@
+// Hauler: six-wheel cargo truck.
+(
+    id: "truck_hauler",
+    version: 1,
+    name: "Hauler",
+    class: Truck,
+    hull: (length_mm: 9000, width_mm: 2600, height_mm: 3200, mass_kg: 14000),
+    stats: (speed_mm_s: 22000, crew: 2, passengers: 4, armour: 1),
+    interior: (ramps: 0, doors: 0, corridor_width_cm: 0, seat_cols: 0, seats: 4, rooms: []),
+    model: [
+        Box(x: -1100, y: -2200, z: 600, w: 2200, d: 6500, h: 300, color: 2),
+        Box(x: -1200, y: -4300, z: 600, w: 2400, d: 2000, h: 2200, color: 1),
+        Box(x: -1250, y: -2000, z: 900, w: 2500, d: 6000, h: 2000, color: 5),
+        Box(x: -1300, y: -3800, z: 0, w: 250, d: 900, h: 900, color: 3),
+        Box(x: 1050, y: -3800, z: 0, w: 250, d: 900, h: 900, color: 3),
+        Box(x: -1300, y: 1000, z: 0, w: 250, d: 900, h: 900, color: 3),
+        Box(x: 1050, y: 1000, z: 0, w: 250, d: 900, h: 900, color: 3),
+        Box(x: -1300, y: 3000, z: 0, w: 250, d: 900, h: 900, color: 3),
+        Box(x: 1050, y: 3000, z: 0, w: 250, d: 900, h: 900, color: 3),
+    ],
+)
