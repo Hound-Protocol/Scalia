@@ -12,6 +12,7 @@ pub mod roster;
 pub mod scenario;
 pub mod state_hash;
 pub mod stats;
+pub mod system;
 pub mod time;
 pub mod trig;
 mod trig_table;
