@@ -14,6 +14,8 @@ pub enum ProcessError {
     RegionMismatch,
     /// The group already has a process that has not finished at the requested start time.
     Busy,
+    /// The destination body does not exist in the system.
+    UnknownBody,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

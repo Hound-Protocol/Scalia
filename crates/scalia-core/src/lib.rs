@@ -3,6 +3,7 @@
 pub mod boarding;
 pub mod derive;
 pub mod fixed;
+pub mod flight;
 pub mod groups;
 pub mod hash;
 pub mod planet;
