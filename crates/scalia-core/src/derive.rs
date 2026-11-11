@@ -5,7 +5,7 @@ use crate::boarding::board_times;
 use crate::groups::GroupId;
 use crate::hash::{hash4, range_i64, STREAM_FORMATION, STREAM_FORMATION_Y};
 use crate::position::{isqrt, Pos, RegionId};
-use crate::process::{march_pos, Process, ProcessKind};
+use crate::process::{process_pos, Process, ProcessKind};
 use crate::roster::FLAG_PERSISTENT;
 use crate::time::WorldMs;
 use crate::units::Health;
@@ -81,7 +81,9 @@ fn blend(from: Pos, to: Pos, num: u64, den: u64) -> Pos {
 
 fn anchor(w: &World, gid: GroupId, p: &Process, t: WorldMs) -> Pos {
     match p.kind {
-        ProcessKind::March { .. } => march_pos(p, t).unwrap_or_else(|| w.groups.pos(gid)),
+        ProcessKind::March { .. } | ProcessKind::Flight { .. } => {
+            process_pos(p, t).unwrap_or_else(|| w.groups.pos(gid))
+        }
         _ => w.groups.pos(gid),
     }
 }
@@ -102,8 +104,11 @@ fn derive_slot(
     }
     let (dx, dy) = formation_offset(w.seed, gid, slot, n);
     let spot = base.offset(dx, dy, 0);
+    if matches!(p.kind, ProcessKind::Flight { .. }) && p.is_running_at(t) {
+        return None; // aboard a ship in flight
+    }
     let (pos, phase) = match p.kind {
-        ProcessKind::Idle => (spot, Phase::Standing),
+        ProcessKind::Idle | ProcessKind::Flight { .. } => (spot, Phase::Standing),
         ProcessKind::March { .. } => {
             let moving = t >= p.start && t.since(p.start) < p.duration_ms;
             (spot, if moving { Phase::Marching } else { Phase::Standing })

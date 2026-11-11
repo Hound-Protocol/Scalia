@@ -2,10 +2,12 @@
 
 use crate::boarding::ShipLayout;
 use crate::fixed::Fix;
+use crate::flight::plan_flight;
 use crate::groups::{GroupId, Groups};
 use crate::position::Pos;
 use crate::process::{Process, ProcessError, ProcessKind};
 use crate::roster::Roster;
+use crate::system::{BodyId, System};
 use crate::time::WorldMs;
 use crate::units::{Health, FOOD_DRAIN_PCT, SLEEP_DRAIN_PCT, UPKEEP_DRAIN_PCT};
 
@@ -48,11 +50,13 @@ impl World {
         for i in 0..self.groups.len() {
             let id = GroupId(i as u32);
             let p = *self.groups.process(id);
-            if let ProcessKind::March { to, .. } = p.kind {
-                if p.start.saturating_add(p.duration_ms) <= now {
-                    self.groups.set_pos(id, to);
-                    self.groups.set_process(id, Process::idle());
-                }
+            let to = match p.kind {
+                ProcessKind::March { to, .. } | ProcessKind::Flight { to, .. } => to,
+                _ => continue,
+            };
+            if p.start.saturating_add(p.duration_ms) <= now {
+                self.groups.set_pos(id, to);
+                self.groups.set_process(id, Process::idle());
             }
         }
         self.now = now;
@@ -71,6 +75,23 @@ impl World {
         }
         let p = Process::march(self.groups.pos(id), to, speed_mm_s, start)?;
         self.groups.set_process(id, p);
+        Ok(())
+    }
+
+    pub fn start_flight(
+        &mut self,
+        id: GroupId,
+        sys: &System,
+        dest: BodyId,
+        offset: (i64, i64, i64),
+        peak_speed_mm_s: u32,
+        start: WorldMs,
+    ) -> Result<(), ProcessError> {
+        if self.groups.process(id).is_running_at(start) {
+            return Err(ProcessError::Busy);
+        }
+        let plan = plan_flight(sys, self.groups.pos(id), dest, offset, peak_speed_mm_s, start)?;
+        self.groups.set_process(id, Process::flight(&plan));
         Ok(())
     }
 

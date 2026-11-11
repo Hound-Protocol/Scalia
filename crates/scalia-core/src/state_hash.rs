@@ -34,6 +34,7 @@ fn fold_process(h: u64, p: &Process) -> u64 {
             let h = fold(h, layout.seat_cols as u64);
             fold(h, interval_ms)
         }
+        ProcessKind::Flight { from, to } => fold_pos(fold_pos(fold(h, 3), from), to),
     };
     fold(fold(h, p.start.0), p.duration_ms)
 }
