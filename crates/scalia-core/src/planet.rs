@@ -60,3 +60,68 @@ pub fn height_mm(seed: u64, face: u8, x_mm: i64, y_mm: i64) -> i32 {
     let h = TERRAIN_MIN_MM as i64 + n.mul(span).floor_to_i64();
     h.clamp(TERRAIN_MIN_MM as i64, TERRAIN_MAX_MM as i64) as i32
 }
+
+/// A square patch of terrain samples on a regular grid with `CELL_MM` spacing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Chunk {
+    pub cells: u32,
+    /// `(cells + 1)^2` heights in millimetres, row-major with y as the outer index.
+    pub heights: Vec<i32>,
+}
+
+/// Chunk (cx, cy) covers x from `cx * cells * CELL_MM` for `cells * CELL_MM` millimetres,
+/// and the same in y; neighbouring chunks share their edge samples exactly.
+/// Coordinates wrap on i64 overflow rather than panic.
+pub fn chunk(seed: u64, face: u8, cx: i64, cy: i64, cells: u32) -> Chunk {
+    let side = cells as i64 * CELL_MM;
+    let (x0, y0) = (cx.wrapping_mul(side), cy.wrapping_mul(side));
+    let n = cells as usize + 1;
+    let mut heights = Vec::with_capacity(n * n);
+    for j in 0..n as i64 {
+        let y = y0.wrapping_add(j * CELL_MM);
+        for i in 0..n as i64 {
+            heights.push(height_mm(seed, face, x0.wrapping_add(i * CELL_MM), y));
+        }
+    }
+    Chunk { cells, heights }
+}
+
+pub fn chunk_hash(c: &Chunk) -> u64 {
+    let mut h = crate::hash::mix64(c.cells as u64);
+    for &z in &c.heights {
+        h = crate::hash::mix64(h ^ (z as i64 as u64));
+    }
+    h
+}
+
+/// Up to `count` distinct points (cell centres, in millimetres) on cells whose four
+/// corner heights differ by at most 500 mm, picked in hash order.
+pub fn spawn_points(seed: u64, face: u8, cx: i64, cy: i64, cells: u32, count: usize) -> Vec<(i64, i64)> {
+    use crate::hash::{hash4, mix64, range_i64};
+    let mut out: Vec<(i64, i64)> = Vec::new();
+    if count == 0 || cells == 0 {
+        return out;
+    }
+    let c = chunk(seed, face, cx, cy, cells);
+    let side = cells as i64 * CELL_MM;
+    let (x0, y0) = (cx.wrapping_mul(side), cy.wrapping_mul(side));
+    let n = cells as usize + 1;
+    let total = cells as i64 * cells as i64;
+    let tag = (STREAM_TERRAIN << 8) | 0xF;
+    let salt_a = seed ^ mix64(cx as u64);
+    let salt_b = mix64(cy as u64) ^ face as u64;
+    for k in 0..(count as u64).saturating_mul(16) {
+        if out.len() == count {
+            break;
+        }
+        let idx = range_i64(hash4(salt_a, tag, k, salt_b), 0, total) as usize;
+        let (i, j) = (idx % cells as usize, idx / cells as usize);
+        let corners = [c.heights[j * n + i], c.heights[j * n + i + 1], c.heights[(j + 1) * n + i], c.heights[(j + 1) * n + i + 1]];
+        let spread = corners.iter().max().unwrap() - corners.iter().min().unwrap();
+        let p = (x0.wrapping_add(i as i64 * CELL_MM + CELL_MM / 2), y0.wrapping_add(j as i64 * CELL_MM + CELL_MM / 2));
+        if spread <= 500 && !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
+}

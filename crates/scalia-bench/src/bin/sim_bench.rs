@@ -8,6 +8,7 @@ use std::time::Instant;
 
 const TICK_BUDGET_MS: f64 = 5.0;
 const DERIVE_BUDGET_MS: f64 = 2.0;
+const CHUNK_BUDGET_MS: f64 = 1.0;
 
 fn median_ms(mut v: Vec<f64>) -> f64 {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -54,14 +55,26 @@ fn main() {
     assert_eq!(out.len(), 20_000);
     let derive_ms = median_ms(derives);
 
+    let mut chunks = Vec::new();
+    let mut guard = 0u64;
+    for k in 0..30i64 {
+        let s = Instant::now();
+        let c = scalia_core::planet::chunk(42, 0, k, -k, 64);
+        chunks.push(s.elapsed().as_secs_f64() * 1000.0);
+        guard ^= scalia_core::planet::chunk_hash(&c);
+    }
+    let chunk_ms = median_ms(chunks);
+
     // Printing real state keeps the work observable and sanity-checks that ticks drained needs.
     let food: f64 = w.groups.needs(scalia_core::groups::GroupId(5)).food.to_f32() as f64;
     println!("sanity_group5_food={food:.4} after {} ticks", t / 1000);
     let verdict = |ms: f64, budget: f64| if ms <= budget { "PASS" } else { "FAIL" };
     let (v1, v2) = (verdict(tick_ms, TICK_BUDGET_MS), verdict(derive_ms, DERIVE_BUDGET_MS));
+    let v3 = verdict(chunk_ms, CHUNK_BUDGET_MS);
     println!("tick_1m_soldiers_ms={tick_ms:.3} budget=5 {v1}");
     println!("derive_20k_ms={derive_ms:.3} budget=2 {v2}");
-    if !report_only && (v1 == "FAIL" || v2 == "FAIL") {
+    println!("chunk_64_ms={chunk_ms:.3} budget=1 {v3} (check {guard})");
+    if !report_only && (v1 == "FAIL" || v2 == "FAIL" || v3 == "FAIL") {
         std::process::exit(1);
     }
 }
