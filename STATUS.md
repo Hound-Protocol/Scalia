@@ -1,4 +1,8 @@
-# Scalia core: Milestone 0 status
+# Scalia core status
+
+Milestone 0 (core) and Milestone 1 (blueprints, planet, Pages page) are below. Everything is verified with one command: `bash scripts/verify.sh`.
+
+# Milestone 0
 
 Branch `milestone-0`. Measured in the build sandbox (2 CPU cores, no GPU) with `--release`.
 
@@ -37,3 +41,31 @@ and `node crates/scalia-wasm/scripts/check_wasm.mjs`.
 - `ShipLayout` is hand-set in the scenario. It should come from vehicle blueprints once that format exists.
 - Combat, small-fight projectile simulation, economy, networking and persistence are out of scope for this milestone.
 - Anything that needs a real GPU is untested here: WebGPU rendering speed, drawing 5,000 to 20,000 individuals, and the PS1-style look. The first scene on GitHub Pages is the test host.
+
+# Milestone 1: blueprints, planet, Pages page
+
+Measured in the same sandbox, `bash scripts/verify.sh` exit 0: 111 tests in each of debug and release, 0 failures; wasm check 11 of 11 OK.
+
+| Check | Result | Measured |
+|---|---|---|
+| Six original blueprints (RON) load, validate and stay under their triangle budgets | PASS | 3 troopers, tank Bulwark, truck Hauler, transport Ox; golden mesh hash per file |
+| Bad files report the field at fault; no panic on overflow or hostile nesting | PASS | 13 validation tests, plus a 200,000-deep nesting probe |
+| `ShipLayout` comes from a blueprint and drives core boarding | PASS | `transport_boards_a_group_through_core`: 500 seated from the Ox |
+| Planet height is deterministic, in range, continuous through zero, with golden hashes | PASS | 7 height tests, 7 chunk tests; negative chunk indices agree on shared edges |
+| 64 by 64 chunk under 1 ms | PASS | 0.39 to 0.42 ms median |
+| Native and wasm agree on the scenario hash and on a planet chunk and a mesh hash | PASS | scenario hash `11470447963499381888`; chunk golden `15242347213423968789` |
+| Core golden state hash unchanged by this milestone | PASS | `0xcc763f567496bd24` |
+
+## Decisions made where the plan left a choice
+
+- Frame for blueprints: the hull is centred on the origin in x (width) and y (length), z from 0 up. Boxes, wedges and rooms give a minimum corner; a cylinder gives the centre of its base; wedges rise toward +y; cylinders are vertical.
+- Planet noise: base lattice 32 km, halving over four octaves, weights 8, 4, 2, 1; heights -2,000 m to 8,000 m. Faces differ by hash only; terrain does not yet continue across a face edge.
+- A process counts as running until its scheduled end, so a finished boarding no longer blocks a new march (`ProcessError::Busy` otherwise).
+- Groups above 10,000,000 people are refused (`Groups::try_spawn`); `Sim::new` in wasm also refuses scenarios above 20,000,000 people.
+- Wasm exports cap `cells` at 1024.
+
+## Open items
+
+- The Pages page draws blueprints as SVG and one chunk on a 2D canvas. It could not be viewed in the sandbox, only built and fetched. The workflow deploys from `main`; nothing is deployed until this branch is merged (or the workflow is run on a branch the `github-pages` environment allows).
+- No vehicle is derived as an individual yet, even though blueprints exist. Rendering the meshes (WebGPU), textures, the flight model and the planet-to-planet flight are the next milestone.
+- Cross-face terrain continuity, planet-scale (zoomed-out) terrain levels of detail, and a texture for the PS1 look are not built.

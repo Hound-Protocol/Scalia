@@ -32,3 +32,11 @@ fn unknown_field_is_rejected() {
     let e = parse(&text).unwrap_err();
     assert!(e.field.contains("owner") || e.message.contains("owner"), "{e:?}");
 }
+
+#[test]
+fn deeply_nested_input_is_an_error_not_a_crash() {
+    let nasty = "(".repeat(200_000);
+    assert!(parse(&nasty).is_err());
+    let nasty = format!("(id: {}", "[".repeat(200_000));
+    assert!(parse(&nasty).is_err());
+}
