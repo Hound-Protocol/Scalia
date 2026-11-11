@@ -34,4 +34,18 @@ check('derive count in range and buffers finite', n >= 1 && n <= cap && finite &
 // (c) a view in another region sees nobody.
 check('other region returns zero', sim.derive(10_000, 2, -1e6, 6e6, -1e6, 6e6, cap) === 0);
 
+// (d) blueprints: garbage is an error, not a trap; shipped files draw and report.
+let threw = false;
+try { wasm.blueprint_svg('garbage'); } catch (e) { threw = !String(e).includes('not a function'); }
+check('malformed blueprint throws instead of trapping', threw);
+const ox = wasm.shipped_ron(5);
+check('shipped_ron(5) returns text, shipped_ron(99) is undefined', typeof ox === 'string' && wasm.shipped_ron(99) === undefined);
+check('blueprint_svg draws a shipped blueprint', wasm.blueprint_svg(ox).startsWith('<svg'));
+const info = JSON.parse(wasm.blueprint_info(ox));
+check('blueprint_info matches the native golden mesh hash', info.id === 'transport_ox' && info.mesh_hash === '10854958835410261074' && info.triangles === 148, JSON.stringify(info));
+
+// (e) planet: chunk size and the native golden chunk hash.
+check('planet_chunk(1,0,0,0,8) has 81 samples', wasm.planet_chunk(1n, 0, 0, 0, 8).length === 81);
+check('planet chunk hash equals the native golden', wasm.planet_chunk_hash(7n, 0, 3, -2, 16) === 15242347213423968789n);
+
 process.exit(failed ? 1 : 0);

@@ -8,6 +8,59 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use wasm_bindgen::prelude::*;
 
+fn json_str(s: &str) -> String {
+    let mut o = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            c if (c as u32) < 0x20 => o.push(' '),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+/// Parse and validate blueprint text, then draw its top-down SVG.
+#[wasm_bindgen]
+pub fn blueprint_svg(text: &str) -> Result<String, JsError> {
+    let b = scalia_blueprint::parse(text).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(scalia_blueprint::draw::svg(&b))
+}
+
+/// Compact JSON summary: id, name, class, triangles and the mesh hash as a decimal string.
+#[wasm_bindgen]
+pub fn blueprint_info(text: &str) -> Result<String, JsError> {
+    let b = scalia_blueprint::parse(text).map_err(|e| JsError::new(&e.to_string()))?;
+    let m = scalia_blueprint::mesh::mesh(&b);
+    Ok(format!(
+        "{{\"id\":{},\"name\":{},\"class\":\"{:?}\",\"triangles\":{},\"mesh_hash\":\"{}\"}}",
+        json_str(&b.id),
+        json_str(&b.name),
+        b.class,
+        m.indices.len() / 3,
+        scalia_blueprint::mesh::mesh_hash(&m)
+    ))
+}
+
+/// File text of shipped blueprint `index`, or undefined when there is no such blueprint.
+#[wasm_bindgen]
+pub fn shipped_ron(index: u32) -> Option<String> {
+    scalia_blueprint::shipped::SHIPPED_RON.get(index as usize).map(|s| s.to_string())
+}
+
+/// Heights of one planet chunk, `(cells + 1)^2` values in millimetres.
+#[wasm_bindgen]
+pub fn planet_chunk(seed: u64, face: u8, cx: i32, cy: i32, cells: u32) -> Vec<i32> {
+    scalia_core::planet::chunk(seed, face, cx as i64, cy as i64, cells.min(1024)).heights
+}
+
+#[wasm_bindgen]
+pub fn planet_chunk_hash(seed: u64, face: u8, cx: i32, cy: i32, cells: u32) -> u64 {
+    scalia_core::planet::chunk_hash(&scalia_core::planet::chunk(seed, face, cx as i64, cy as i64, cells.min(1024)))
+}
+
 fn to_ms(v: f64) -> u64 {
     if v.is_finite() && v > 0.0 { v as u64 } else { 0 }
 }

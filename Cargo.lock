@@ -89,6 +89,7 @@ version = "0.1.0"
 name = "scalia-wasm"
 version = "0.1.0"
 dependencies = [
+ "scalia-blueprint",
  "scalia-core",
  "wasm-bindgen",
 ]

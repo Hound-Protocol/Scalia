@@ -8,4 +8,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 scalia-core = { path = "../scalia-core" }
+scalia-blueprint = { path = "../scalia-blueprint" }
 wasm-bindgen = "=0.2.130"
