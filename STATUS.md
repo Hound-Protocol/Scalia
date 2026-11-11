@@ -23,6 +23,7 @@ and `node crates/scalia-wasm/scripts/check_wasm.mjs`.
 - `march_pos` returns `Option<Pos>`: an idle or boarding process has no march position, and a dummy origin would hide bugs.
 - Between reaching the ramp top and the seated time, a soldier is `Walking` aboard (ramp top to seat). `Seated` starts exactly at `seated_ms`, so counts match `seated_count`.
 - Boarding hashes use `hash4(seed, stream, group, slot)`; formation hashes use `hash4(seed, group, slot, stream)` as the plan specifies. The streams are independent, so the order does not matter.
+- A march, or boarding a ship, in another region returns `RegionMismatch` (no teleporting).
 - A layout with zero seat columns reports `ZeroSeatCols` before `ZeroThroughput`.
 - Needs drain floors per tick, so drift is under one raw unit (2^-32) per tick; the test tolerance is 256 raw units.
 - `Sim.tick` throws a JavaScript error if time goes backwards. Positions in `Sim.derive` are `f32` metres relative to the view centre.

@@ -10,6 +10,8 @@ pub enum ProcessError {
     ZeroSpeed,
     ZeroThroughput,
     ZeroSeatCols,
+    /// A march or boarding that would cross regions; there is no teleporting.
+    RegionMismatch,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -40,6 +42,9 @@ impl Process {
     ) -> Result<Process, ProcessError> {
         if speed_mm_s == 0 {
             return Err(ProcessError::ZeroSpeed);
+        }
+        if from.region != to.region {
+            return Err(ProcessError::RegionMismatch);
         }
         let d = dist_mm(from, to) as u128;
         let s = speed_mm_s as u128;

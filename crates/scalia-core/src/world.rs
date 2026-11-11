@@ -78,6 +78,9 @@ impl World {
         layout: ShipLayout,
         start: WorldMs,
     ) -> Result<(), ProcessError> {
+        if self.groups.pos(id).region != ship.region {
+            return Err(ProcessError::RegionMismatch);
+        }
         let (rstart, len) = self.groups.roster_range(id);
         let roster = &self.roster;
         let healthy = (0..len).filter(|&s| roster.rec(rstart, s).health == Health::Healthy);

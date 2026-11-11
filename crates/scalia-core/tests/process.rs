@@ -43,3 +43,13 @@ fn zero_length_march_is_instant() {
 fn idle_has_no_march_position() {
     assert_eq!(march_pos(&Process::idle(), WorldMs(10)), None);
 }
+
+#[test]
+fn march_across_regions_errors() {
+    let from = p(0, 0, 0);
+    let to = Pos { region: RegionId(1), x: 10, y: 0, z: 0 };
+    assert_eq!(
+        Process::march(from, to, 1000, WorldMs(0)).unwrap_err(),
+        ProcessError::RegionMismatch
+    );
+}

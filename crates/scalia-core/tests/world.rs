@@ -103,3 +103,13 @@ fn boarding_skips_dead_slots_in_the_record() {
     // Only slot 9 boards, so the queue wait is 9 intervals (1_250 ms each at 800 milli/s).
     assert!(w.groups.process(id).duration_ms >= 9 * 1250);
 }
+
+#[test]
+fn boarding_a_ship_in_another_region_errors_and_leaves_group_unchanged() {
+    let mut w = World::new(1);
+    let id = spawn(&mut w, [10, 0, 0, 0]);
+    let ship = Pos { region: RegionId(9), x: 0, y: 0, z: 0 };
+    let ok = ShipLayout { ramps: 1, doors: 1, corridor_width_cm: 100, seat_cols: 10 };
+    assert_eq!(w.start_boarding(id, ship, ok, WorldMs(0)), Err(ProcessError::RegionMismatch));
+    assert_eq!(*w.groups.process(id), Process::idle());
+}
