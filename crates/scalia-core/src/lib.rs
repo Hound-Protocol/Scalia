@@ -8,6 +8,8 @@ pub mod hash;
 pub mod position;
 pub mod process;
 pub mod roster;
+pub mod scenario;
+pub mod state_hash;
 pub mod stats;
 pub mod time;
 pub mod units;
