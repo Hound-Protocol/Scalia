@@ -1,6 +1,7 @@
 //! Processes are timestamped records: state at any time is a pure function of
 //! the record and the query time, never of how often it was ticked.
 
+use crate::boarding::ShipLayout;
 use crate::position::{dist_mm, Pos};
 use crate::time::WorldMs;
 
@@ -15,6 +16,7 @@ pub enum ProcessError {
 pub enum ProcessKind {
     Idle,
     March { from: Pos, to: Pos, speed_mm_s: u32 },
+    Board { ship: Pos, layout: ShipLayout, interval_ms: u64 },
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -57,6 +59,6 @@ pub fn march_pos(p: &Process, t: WorldMs) -> Option<Pos> {
             }
             Some(from.lerp(to, elapsed, p.duration_ms).unwrap_or(to))
         }
-        ProcessKind::Idle => None,
+        ProcessKind::Idle | ProcessKind::Board { .. } => None,
     }
 }
