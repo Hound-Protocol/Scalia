@@ -1,6 +1,6 @@
 # M2: renderer, units on the ground and the first flight (draft for approval)
 
-Status: draft. Nothing here is built. Every "Recommended" is my default; say so if you want another.
+Status: decisions made by the user on 2026-11-11 (below). Built in two parts: M2a (orbits and flight in the core and wasm, testable natively) then M2b (renderer and page).
 
 ## Where we are
 
@@ -19,14 +19,21 @@ Live on Pages: six blueprints as drawings and one terrain chunk, all from WebAss
 
 **B. Units on the ground.** `derive_visible` output drawn as instanced low-poly figures (about 20,000 on screen), standing, marching and boarding; zoom out to see groups as blocks.
 
-**C. First flight.** A new process kind `Flight` in the core: a timestamped record from a point above one planet to a point above another, in a shared system region, so position at any time is a pure function of the record and the time (no teleport). The Ox takes off, flies and lands; the page shows it.
+**C. First flight.** A new process kind `Flight` in the core: a timestamped, eased record from a point above one planet to a point above another on a moving orbit, in a shared system region, so position at any time is a pure function of the record and the time (no teleport). The Ox flies it; the page shows it.
 
-## Decisions
+## Decisions (made by the user)
 
-1. **Graphics API.** Recommended: WebGPU only for now (matches the plan so far; recent Chrome and Edge). Alternative: also a WebGL2 fallback, which roughly doubles renderer work.
-2. **PS1 look.** Recommended: render to a low internal resolution (about 480 by 270) and scale it up with nearest-neighbour, with a toggle to render at full resolution. Alternative: full resolution only, with the look coming from models and textures alone.
-3. **Flight path.** Recommended: straight transfer between two fixed points in the system region, with an eased start and stop, because it keeps position a pure function of time. Alternative: real orbital mechanics, a much larger change.
-4. **Planets in space.** Recommended: two planets at fixed positions for this milestone; moving orbits later. Alternative: circular orbits from the start (integer angle table).
+1. **Graphics API:** WebGPU only for now. No WebGL2 fallback.
+2. **PS1 look:** render at a low internal resolution (about 480 by 270), scale up with nearest-neighbour, with a toggle for full resolution.
+3. **Flight path:** an eased transfer between two points. The path leads the destination: the arrival point is where the planet will be when the ship gets there. Easing is smootherstep, so speed is zero at both ends.
+4. **Planets:** on circular orbits from the start. Angles come from an integer sine table, so positions are a pure function of time and identical native and in WebAssembly.
+
+## Design notes that follow from the decisions
+
+- A new `system` region holds a star and bodies on circular orbits (radius, period in real milliseconds, starting phase). `body_pos(body, t)` is a pure function of time.
+- `ProcessKind::Flight { from, to }` is a timestamped record like a march, but its fraction of the way is eased. `plan_flight` picks the duration by iterating a fixed number of times on the moving target, in fixed point.
+- Soldiers on a transport are not drawn in flight; the ship is. The ship's pose comes from the flight record.
+- The renderer's presentation maths (camera, GPU buffers) lives in a new f32 crate, `scalia-view`, kept out of the integer-only core. Shaders are checked natively by parsing them with `naga`, since the sandbox has no GPU.
 
 ## Testing limits
 
