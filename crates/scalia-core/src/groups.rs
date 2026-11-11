@@ -1,0 +1,71 @@
+//! Struct-of-arrays store of groups (companies and above).
+
+use crate::position::Pos;
+use crate::roster::Roster;
+use crate::units::{Composition, Needs};
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+pub struct GroupId(pub u32);
+
+#[derive(Copy, Clone, Debug)]
+pub struct GroupSpec {
+    pub pos: Pos,
+    pub composition: Composition,
+    pub needs: Needs,
+}
+
+#[derive(Default)]
+pub struct Groups {
+    pos: Vec<Pos>,
+    composition: Vec<Composition>,
+    needs: Vec<Needs>,
+    roster_start: Vec<u32>,
+    roster_len: Vec<u32>,
+}
+
+impl Groups {
+    pub fn new() -> Groups {
+        Groups::default()
+    }
+
+    pub fn spawn(&mut self, spec: GroupSpec, roster: &mut Roster) -> GroupId {
+        let id = GroupId(self.pos.len() as u32);
+        let people = spec.composition.people();
+        let start = roster.alloc(people);
+        self.pos.push(spec.pos);
+        self.composition.push(spec.composition);
+        self.needs.push(spec.needs);
+        self.roster_start.push(start);
+        self.roster_len.push(people);
+        id
+    }
+
+    pub fn len(&self) -> usize {
+        self.pos.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pos.is_empty()
+    }
+
+    pub fn pos(&self, id: GroupId) -> Pos {
+        self.pos[id.0 as usize]
+    }
+
+    pub fn composition(&self, id: GroupId) -> &Composition {
+        &self.composition[id.0 as usize]
+    }
+
+    pub fn needs(&self, id: GroupId) -> &Needs {
+        &self.needs[id.0 as usize]
+    }
+
+    /// `(start, length)` of the group's slice in the roster.
+    pub fn roster_range(&self, id: GroupId) -> (u32, u32) {
+        (self.roster_start[id.0 as usize], self.roster_len[id.0 as usize])
+    }
+
+    pub fn people(&self, id: GroupId) -> u32 {
+        self.roster_len[id.0 as usize]
+    }
+}
