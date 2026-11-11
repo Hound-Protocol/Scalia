@@ -55,4 +55,21 @@ check('absurd group size throws a readable error', bad);
 const again = new wasm.Sim(42n, 10, 10);
 check('module still works after the error', again.derive(0, 1, -1e6, 6e6, -1e6, 6e6, 100) >= 0);
 
+// (g) orbits and flight match the native core.
+check('two bodies named Aster and Brine', wasm.system_body_count() === 2 && wasm.system_body_name(0) === 'Aster' && wasm.system_body_name(1) === 'Brine');
+check('body 0 starts on the x axis', JSON.stringify(Array.from(wasm.system_body_pos(0, 0))) === '[40000000000,0]');
+check('body position equals the native value', JSON.stringify(Array.from(wasm.system_body_pos(0, 123456))) === '[10976091045,38464591596]');
+check('unknown body has no position', wasm.system_body_pos(5, 0).length === 0 && wasm.system_body_name(5) === undefined);
+const fl = new wasm.Flight(0, 1, 1000, 2e9);
+const dur = fl.duration_ms();
+check('flight takes a sensible time', dur >= 10_000 && dur <= 600_000, `dur=${dur}`);
+check('flight starts at its origin and ends at its target', JSON.stringify(Array.from(fl.pos(1000))) === JSON.stringify(Array.from(fl.from())) && JSON.stringify(Array.from(fl.pos(1000 + dur))) === JSON.stringify(Array.from(fl.to())));
+const tgt = Array.from(wasm.system_body_pos(1, 1000 + dur));
+const to = Array.from(fl.to());
+check('flight ends where the body is, at the parking offset', to[0] === tgt[0] && to[1] === tgt[1] + 50_000_000, `to=${to} body=${tgt}`);
+let e1 = false, e2 = false;
+try { new wasm.Flight(0, 9, 0, 2e9); } catch (e) { e1 = String(e).length > 0 && !String(e).includes('unreachable'); }
+try { new wasm.Flight(0, 1, 0, 0); } catch (e) { e2 = String(e).length > 0 && !String(e).includes('unreachable'); }
+check('bad flights throw readable errors', e1 && e2);
+
 process.exit(failed ? 1 : 0);

@@ -69,3 +69,17 @@ Measured in the same sandbox, `bash scripts/verify.sh` exit 0: 115 tests in each
 - The Pages page draws blueprints as SVG and one chunk on a 2D canvas. It could not be viewed in the sandbox, only built and fetched. The workflow deploys from `main`; nothing is deployed until this branch is merged (or the workflow is run on a branch the `github-pages` environment allows).
 - No vehicle is derived as an individual yet, even though blueprints exist. Rendering the meshes (WebGPU), textures, the flight model and the planet-to-planet flight are the next milestone.
 - Cross-face terrain continuity, planet-scale (zoomed-out) terrain levels of detail, and a texture for the PS1 look are not built.
+
+# Milestone 2a: orbits and first flight (core)
+
+Done in `scalia-core` and exported to wasm; the renderer (M2b) is next.
+
+| Check | Result |
+|---|---|
+| Integer sine/cosine (`trig`), error under 1e-6, wraps for any turns value | 5 tests |
+| Star system with circular orbits (`system`), pure function of time | 8 tests, golden hash |
+| Eased flight that leads a moving target (`flight`), exact arrival | 12 tests, golden plan |
+| Flight as a world process; soldiers aboard are not derived; state hash | 5 tests; old golden state hash unchanged |
+| Wasm: bodies, flight plan; native/wasm agreement | 9 new checks in `check_wasm.mjs` |
+
+Decisions: orbit radius error is under 1e-6 of the radius (about 27 m on the 90,000 km demo orbit); the planner iterates 12 times; a ship parks 50,000 km "above" its body on +y (`PARK_OFFSET`); the demo flight takes about 100 s at a peak of 2,000 km/s.
