@@ -1,6 +1,7 @@
 //! Struct-of-arrays store of groups (companies and above).
 
 use crate::position::Pos;
+use crate::process::Process;
 use crate::roster::Roster;
 use crate::units::{Composition, Needs};
 
@@ -21,6 +22,7 @@ pub struct Groups {
     needs: Vec<Needs>,
     roster_start: Vec<u32>,
     roster_len: Vec<u32>,
+    process: Vec<Process>,
 }
 
 impl Groups {
@@ -37,6 +39,7 @@ impl Groups {
         self.needs.push(spec.needs);
         self.roster_start.push(start);
         self.roster_len.push(people);
+        self.process.push(Process::idle());
         id
     }
 
@@ -63,6 +66,14 @@ impl Groups {
     /// `(start, length)` of the group's slice in the roster.
     pub fn roster_range(&self, id: GroupId) -> (u32, u32) {
         (self.roster_start[id.0 as usize], self.roster_len[id.0 as usize])
+    }
+
+    pub fn process(&self, id: GroupId) -> &Process {
+        &self.process[id.0 as usize]
+    }
+
+    pub fn set_process(&mut self, id: GroupId, p: Process) {
+        self.process[id.0 as usize] = p;
     }
 
     pub fn people(&self, id: GroupId) -> u32 {
