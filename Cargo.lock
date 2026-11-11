@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "scalia-bench"
+version = "0.1.0"
+dependencies = [
+ "scalia-core",
+]
+
+[[package]]
 name = "scalia-core"
 version = "0.1.0"
