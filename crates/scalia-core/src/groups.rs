@@ -68,6 +68,15 @@ impl Groups {
         (self.roster_start[id.0 as usize], self.roster_len[id.0 as usize])
     }
 
+    pub fn set_pos(&mut self, id: GroupId, p: Pos) {
+        self.pos[id.0 as usize] = p;
+    }
+
+    /// All needs, in group order, for one linear pass.
+    pub fn needs_all_mut(&mut self) -> &mut [Needs] {
+        &mut self.needs
+    }
+
     pub fn process(&self, id: GroupId) -> &Process {
         &self.process[id.0 as usize]
     }

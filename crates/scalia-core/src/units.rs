@@ -47,3 +47,8 @@ pub enum Health {
     Wounded = 1,
     Dead = 2,
 }
+
+/// Needs drain per game hour, in percent of a full meter. Morale does not drain in Milestone 0.
+pub const FOOD_DRAIN_PCT: i64 = 4;
+pub const SLEEP_DRAIN_PCT: i64 = 6;
+pub const UPKEEP_DRAIN_PCT: i64 = 1;
