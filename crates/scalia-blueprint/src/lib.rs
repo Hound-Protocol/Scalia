@@ -1,5 +1,6 @@
 //! Scalia blueprints: vehicles as data.
 
+pub mod mesh;
 pub mod types;
 pub mod validate;
 
