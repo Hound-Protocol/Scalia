@@ -60,6 +60,18 @@ pub fn validate(b: &Blueprint) -> Result<(), BlueprintError> {
     if matches!(b.class, Class::Transport | Class::Ship) && b.interior.seat_cols == 0 {
         return Err(err("interior.seat_cols", "a transport or ship needs at least one seat column"));
     }
+    if matches!(b.class, Class::Transport | Class::Ship) {
+        // Boarding throughput is the narrowest of these three; any zero means nobody can board.
+        for (name, v) in [
+            ("interior.ramps", b.interior.ramps),
+            ("interior.doors", b.interior.doors),
+            ("interior.corridor_width_cm", b.interior.corridor_width_cm),
+        ] {
+            if v == 0 {
+                return Err(err(name, "a transport or ship needs this above zero or nobody can board"));
+            }
+        }
+    }
     for (i, r) in b.interior.rooms.iter().enumerate() {
         let f = format!("interior.rooms[{i}]");
         if r.w_mm == 0 || r.d_mm == 0 {

@@ -117,3 +117,40 @@ fn parse_runs_validation() {
     let bad = OK.replace("length_mm: 600", "length_mm: 0");
     assert_eq!(parse(&bad).unwrap_err().field, "hull.length_mm");
 }
+
+fn transport() -> Blueprint {
+    let mut b = ok();
+    b.class = Class::Transport;
+    b.interior.seat_cols = 4;
+    b.interior.ramps = 1;
+    b.interior.doors = 1;
+    b.interior.corridor_width_cm = 100;
+    b
+}
+
+#[test]
+fn transport_with_all_boarding_parts_passes() {
+    assert!(validate(&transport()).is_ok());
+}
+
+#[test]
+fn transport_without_ramps_rejected() {
+    let mut b = transport();
+    b.interior.ramps = 0;
+    assert_eq!(field(&b), "interior.ramps");
+}
+
+#[test]
+fn transport_without_doors_rejected() {
+    let mut b = transport();
+    b.interior.doors = 0;
+    assert_eq!(field(&b), "interior.doors");
+}
+
+#[test]
+fn ship_without_corridor_rejected() {
+    let mut b = transport();
+    b.class = Class::Ship;
+    b.interior.corridor_width_cm = 0;
+    assert_eq!(field(&b), "interior.corridor_width_cm");
+}

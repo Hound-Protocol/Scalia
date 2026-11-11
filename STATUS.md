@@ -44,7 +44,7 @@ and `node crates/scalia-wasm/scripts/check_wasm.mjs`.
 
 # Milestone 1: blueprints, planet, Pages page
 
-Measured in the same sandbox, `bash scripts/verify.sh` exit 0: 111 tests in each of debug and release, 0 failures; wasm check 11 of 11 OK.
+Measured in the same sandbox, `bash scripts/verify.sh` exit 0: 115 tests in each of debug and release, 0 failures; wasm check 11 of 11 OK.
 
 | Check | Result | Measured |
 |---|---|---|
