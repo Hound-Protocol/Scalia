@@ -66,6 +66,9 @@ impl World {
         speed_mm_s: u32,
         start: WorldMs,
     ) -> Result<(), ProcessError> {
+        if self.groups.process(id).is_running_at(start) {
+            return Err(ProcessError::Busy);
+        }
         let p = Process::march(self.groups.pos(id), to, speed_mm_s, start)?;
         self.groups.set_process(id, p);
         Ok(())
@@ -80,6 +83,9 @@ impl World {
     ) -> Result<(), ProcessError> {
         if self.groups.pos(id).region != ship.region {
             return Err(ProcessError::RegionMismatch);
+        }
+        if self.groups.process(id).is_running_at(start) {
+            return Err(ProcessError::Busy);
         }
         let (rstart, len) = self.groups.roster_range(id);
         let roster = &self.roster;

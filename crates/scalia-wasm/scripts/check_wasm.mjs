@@ -48,4 +48,11 @@ check('blueprint_info matches the native golden mesh hash', info.id === 'transpo
 check('planet_chunk(1,0,0,0,8) has 81 samples', wasm.planet_chunk(1n, 0, 0, 0, 8).length === 81);
 check('planet chunk hash equals the native golden', wasm.planet_chunk_hash(7n, 0, 3, -2, 16) === 15242347213423968789n);
 
+// (f) absurd sizes are an error to JS and leave the module usable.
+let bad = false;
+try { new wasm.Sim(1n, 1, 4_000_000_000); } catch (e) { bad = !String(e).includes('unreachable'); }
+check('absurd group size throws a readable error', bad);
+const again = new wasm.Sim(42n, 10, 10);
+check('module still works after the error', again.derive(0, 1, -1e6, 6e6, -1e6, 6e6, 100) >= 0);
+
 process.exit(failed ? 1 : 0);

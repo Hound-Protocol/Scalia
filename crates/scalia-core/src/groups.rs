@@ -15,6 +15,14 @@ pub struct GroupSpec {
     pub needs: Needs,
 }
 
+/// Largest group `try_spawn` accepts (80 MB of roster at 8 bytes a soldier).
+pub const MAX_GROUP_PEOPLE: u32 = 10_000_000;
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum SpawnError {
+    TooLarge,
+}
+
 #[derive(Default)]
 pub struct Groups {
     pos: Vec<Pos>,
@@ -30,7 +38,17 @@ impl Groups {
         Groups::default()
     }
 
+    /// Panics with a clear message when the group is larger than `MAX_GROUP_PEOPLE`.
     pub fn spawn(&mut self, spec: GroupSpec, roster: &mut Roster) -> GroupId {
+        self.try_spawn(spec, roster).expect("group larger than MAX_GROUP_PEOPLE")
+    }
+
+    /// Like `spawn`, but refuses a group whose total count exceeds `MAX_GROUP_PEOPLE`
+    /// and leaves both stores untouched.
+    pub fn try_spawn(&mut self, spec: GroupSpec, roster: &mut Roster) -> Result<GroupId, SpawnError> {
+        if spec.composition.total() > MAX_GROUP_PEOPLE {
+            return Err(SpawnError::TooLarge);
+        }
         let id = GroupId(self.pos.len() as u32);
         let people = spec.composition.people();
         let start = roster.alloc(people);
@@ -40,7 +58,7 @@ impl Groups {
         self.roster_start.push(start);
         self.roster_len.push(people);
         self.process.push(Process::idle());
-        id
+        Ok(id)
     }
 
     pub fn len(&self) -> usize {

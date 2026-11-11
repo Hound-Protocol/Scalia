@@ -12,6 +12,8 @@ pub enum ProcessError {
     ZeroSeatCols,
     /// A march or boarding that would cross regions; there is no teleporting.
     RegionMismatch,
+    /// The group already has a process that has not finished at the requested start time.
+    Busy,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -29,6 +31,11 @@ pub struct Process {
 }
 
 impl Process {
+    /// True while a non-idle process has not reached its scheduled end at time `t`.
+    pub fn is_running_at(&self, t: WorldMs) -> bool {
+        self.kind != ProcessKind::Idle && t < self.start.saturating_add(self.duration_ms)
+    }
+
     pub fn idle() -> Process {
         Process { kind: ProcessKind::Idle, start: WorldMs(0), duration_ms: 0 }
     }

@@ -61,6 +61,9 @@ pub fn planet_chunk_hash(seed: u64, face: u8, cx: i32, cy: i32, cells: u32) -> u
     scalia_core::planet::chunk_hash(&scalia_core::planet::chunk(seed, face, cx as i64, cy as i64, cells.min(1024)))
 }
 
+/// Most soldiers a scenario built from JavaScript may hold (about 160 MB of roster).
+const MAX_SCENARIO_PEOPLE: u64 = 20_000_000;
+
 fn to_ms(v: f64) -> u64 {
     if v.is_finite() && v > 0.0 { v as u64 } else { 0 }
 }
@@ -99,15 +102,18 @@ pub struct Sim {
 #[wasm_bindgen]
 impl Sim {
     #[wasm_bindgen(constructor)]
-    pub fn new(seed: u64, groups: u32, per_group: u32) -> Sim {
-        Sim {
+    pub fn new(seed: u64, groups: u32, per_group: u32) -> Result<Sim, JsError> {
+        if per_group > scalia_core::groups::MAX_GROUP_PEOPLE || groups as u64 * per_group as u64 > MAX_SCENARIO_PEOPLE {
+            return Err(JsError::new("scenario too large: reduce groups or people per group"));
+        }
+        Ok(Sim {
             world: build_scenario(seed, groups, per_group),
             scratch: Vec::new(),
             xs: Vec::new(),
             ys: Vec::new(),
             zs: Vec::new(),
             phases: Vec::new(),
-        }
+        })
     }
 
     pub fn tick(&mut self, now_ms: f64) -> Result<(), JsError> {
