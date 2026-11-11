@@ -11,6 +11,7 @@ pub const STREAM_ACCURACY: u64 = 5;
 pub const STREAM_SPEED: u64 = 6;
 pub const STREAM_COMPOSURE: u64 = 7;
 pub const STREAM_NAME: u64 = 8;
+pub const STREAM_TERRAIN: u64 = 9;
 
 /// SplitMix64 finaliser applied to `x + golden gamma`.
 pub fn mix64(x: u64) -> u64 {

@@ -5,6 +5,7 @@ pub mod derive;
 pub mod fixed;
 pub mod groups;
 pub mod hash;
+pub mod planet;
 pub mod position;
 pub mod process;
 pub mod roster;
