@@ -8,6 +8,7 @@ pub mod hash;
 pub mod position;
 pub mod process;
 pub mod roster;
+pub mod stats;
 pub mod time;
 pub mod units;
 pub mod world;
