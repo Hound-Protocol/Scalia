@@ -1,6 +1,9 @@
 //! Scalia blueprints: vehicles as data.
 
 pub mod types;
+pub mod validate;
+
+pub use validate::{triangle_budget, triangle_count, validate};
 
 use std::fmt;
 use types::Blueprint;
@@ -22,12 +25,14 @@ impl std::error::Error for BlueprintError {}
 
 /// Parse RON text into a `Blueprint`.
 pub fn parse(text: &str) -> Result<Blueprint, BlueprintError> {
-    ron::from_str::<Blueprint>(text).map_err(|e| {
+    let b = ron::from_str::<Blueprint>(text).map_err(|e| {
         let message = format!("{}:{}: {}", e.position.line, e.position.col, e.code);
         let field = match &e.code {
             ron::Error::NoSuchStructField { found, .. } => found.clone(),
             _ => "<syntax>".to_string(),
         };
         BlueprintError { field, message }
-    })
+    })?;
+    validate(&b)?;
+    Ok(b)
 }

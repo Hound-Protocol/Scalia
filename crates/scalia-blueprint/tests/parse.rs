@@ -8,7 +8,7 @@ const MIN: &str = r#"(
     hull: (length_mm: 600, width_mm: 500, height_mm: 1800, mass_kg: 90),
     stats: (speed_mm_s: 1500, crew: 1, passengers: 0, armour: 1),
     interior: (ramps: 0, doors: 0, corridor_width_cm: 0, seat_cols: 0, seats: 0, rooms: []),
-    model: [Box(x: 0, y: 0, z: 0, w: 400, d: 300, h: 1700, color: 1)],
+    model: [Box(x: -200, y: -150, z: 0, w: 400, d: 300, h: 1700, color: 1)],
 )"#;
 
 #[test]
