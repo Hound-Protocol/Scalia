@@ -102,14 +102,14 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
     match pose {
         Pose::Stand => {}
         Pose::Walk => {
-            (p.hip, p.knee) = gait(phase, 0.40, 0.0, 0.85, 0.06);
+            (p.hip, p.knee) = gait(phase, 0.34, 0.0, 0.85, 0.06);
             p.lean = 0.05;
             p.shoulder = [0.45 - 0.08 * sw, 0.35];
             p.elbow = [0.9, 1.0];
             p.rifle = -0.35;
         }
         Pose::Run => {
-            (p.hip, p.knee) = gait(phase, 0.62, 0.12, 1.35, 0.18);
+            (p.hip, p.knee) = gait(phase, 0.48, 0.08, 1.45, 0.2);
             p.lean = 0.25;
             p.shoulder = [0.75 - 0.12 * sw, 0.7];
             p.elbow = [1.55, 1.5];
@@ -117,7 +117,7 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.head = 0.2;
         }
         Pose::Sprint => {
-            (p.hip, p.knee) = gait(phase, 0.85, 0.18, 1.75, 0.22);
+            (p.hip, p.knee) = gait(phase, 0.58, 0.1, 1.9, 0.26);
             p.lean = 0.42;
             p.shoulder = [0.9 - 0.45 * sw, 0.35 + 0.1 * sw];
             p.elbow = [1.5, 1.3];

@@ -37,23 +37,23 @@ fn pose_params(pose: u32, phase: f32) -> PP {
   let sw = sin(phase * 6.2831853);
   var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0);
   if (pose == 1u) {
-    p.hip = gait_hip(phase, 0.40, 0.0);
+    p.hip = gait_hip(phase, 0.34, 0.0);
     p.knee = gait_knee(phase, 0.85, 0.06);
     p.lean = 0.05;
     p.sh = vec2f(0.45 - 0.08 * sw, 0.35);
     p.el = vec2f(0.9, 1.0);
     p.rifle = -0.35;
   } else if (pose == 2u) {
-    p.hip = gait_hip(phase, 0.62, 0.12);
-    p.knee = gait_knee(phase, 1.35, 0.18);
+    p.hip = gait_hip(phase, 0.48, 0.08);
+    p.knee = gait_knee(phase, 1.45, 0.2);
     p.lean = 0.25;
     p.sh = vec2f(0.75 - 0.12 * sw, 0.7);
     p.el = vec2f(1.55, 1.5);
     p.rifle = 0.7;
     p.head = 0.2;
   } else if (pose == 7u) {
-    p.hip = gait_hip(phase, 0.85, 0.18);
-    p.knee = gait_knee(phase, 1.75, 0.22);
+    p.hip = gait_hip(phase, 0.58, 0.1);
+    p.knee = gait_knee(phase, 1.9, 0.26);
     p.lean = 0.42;
     p.sh = vec2f(0.9 - 0.45 * sw, 0.35 + 0.1 * sw);
     p.el = vec2f(1.5, 1.3);
