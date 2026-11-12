@@ -402,7 +402,7 @@ impl Gpu {
         let (l, lc, am) = (f.sky.light_dir, f.sky.light_col, f.sky.ambient);
         u.extend_from_slice(&[l.x, l.y, l.z, 0.0, lc[0], lc[1], lc[2], 0.0, am[0], am[1], am[2], 0.0]);
         // time.z: light depth per metre, so the shader can bias shadows in metres.
-        u.extend_from_slice(&[f.time_s, if f.atmosphere && f.sky.is_day { 1.0 } else { 0.0 }, 1.0 / (2.0 * light_range), 0.0]);
+        u.extend_from_slice(&[f.time_s, if f.atmosphere && f.sky.is_day { 1.0 } else { 0.0 }, 1.0 / (2.0 * light_range), if f.atmosphere { 0.0 } else { 1.0 }]);
         self.queue.write_buffer(&self.uni, 0, f32_bytes(&u));
         let thresh = (f.view_height / h as f32) * 3.0 / (2.0 * f.range);
         // Orthographic depth is linear: 0.5 at the focus, 1/(2 range) per world unit away from the camera.
