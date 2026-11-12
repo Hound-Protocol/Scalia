@@ -33,7 +33,8 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   let ndl = max(dot(n, u.light.xyz), 0.0);
   let lit = textureSampleCompareLevel(sm, smp, uv, lp.z - (0.03 + 0.08 * (1.0 - ndl)) * u.time.z);
   let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && lp.z < 1.0;
-  var shade = select(1.0, lit, inside);
+  // time.w = 1 turns sun shadows off (space views, where a shadow map cannot resolve planets).
+  var shade = select(1.0, lit, inside && u.time.w < 0.5);
   // Drifting cloud shadows (time.y = 1 when the sky has clouds): two octaves of value noise on the ground plane.
   if (u.time.y > 0.5) {
     let cp = i.w.xy * 0.012 + vec2f(u.time.x * 0.036, u.time.x * 0.014);
