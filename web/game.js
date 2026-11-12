@@ -82,7 +82,8 @@ try {
     held.add(k);
     if (k === '1') setScene('ships');
     else if (k === '2') setScene('ground');
-    else if (k === '3') setScene('system');
+    else if (k === '3') setScene('planet');
+    else if (k === '4') setScene('system');
     else if (k === ' ') { e.preventDefault(); v.launch(performance.now()); }
     else if (k === 'f') v.follow();
     else if (k === 'h') toggleHelp();
@@ -121,6 +122,8 @@ try {
       const line = v.frame(now);
       cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
       hud.textContent = `${line} | cpu ${cpuMs.toFixed(1)} ms${cap ? ` | cap ${cap}` : ''}${now < noteUntil ? ` | ${note}` : ''}`;
+      const now_scene = v.scene_name();
+      if (now_scene !== scene) { scene = now_scene; for (const b of document.querySelectorAll('[data-scene]')) b.classList.toggle('on', b.dataset.scene === scene); store.set('scalia.scene', scene); }
       $('launch').hidden = scene !== 'system';
       $('launch').disabled = v.flying();
       sel.hidden = scene !== 'ships';

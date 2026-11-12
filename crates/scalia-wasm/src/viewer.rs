@@ -24,6 +24,14 @@ const ARMIES: [(u32, u32); 4] = [(1, 2000), (10, 2000), (50, 2000), (250, 2000)]
 const MAX_DRAWN: usize = 60_000;
 const CELLS: u32 = 64;
 const KM: f64 = 1e6;
+const GROUND_MAX: f32 = 160.0;
+/// Planet view heights in globe units (the globe has radius 100).
+const PLANET_MIN: f32 = 60.0;
+const PLANET_MAX: f32 = 420.0;
+/// Closest system zoom (thousand km across) and the body the battlefield is on.
+const SYS_NEAR: f32 = 3000.0;
+const HOME_BODY: u8 = 0;
+const GLOBE_R: f32 = 100.0;
 /// The ground scene sits on the demo planet's equator: render chunk (cx, cy) is planet chunk
 /// (cx, cy + EQUATOR_CHUNK). Rendering stays near the origin so f32 positions keep millimetre precision.
 const EQUATOR_CHUNK: i64 = 16_000;
@@ -32,6 +40,7 @@ const EQUATOR_CHUNK: i64 = 16_000;
 enum Scene {
     Ships,
     Ground,
+    Planet,
     System,
 }
 
@@ -60,6 +69,10 @@ pub struct Viewer {
     focus: Vec3,
     system: System,
     sys_scale: f32,
+    sys_follow: Option<u8>,
+    sys_now: WorldMs,
+    planet_view: f32,
+    globe_built: bool,
     docked: u8,
     flight: Option<(FlightPlan, u8)>,
     trail: Vec<(f64, f32, f32)>,
@@ -102,6 +115,10 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         focus: Vec3::ZERO,
         system: System::demo(),
         sys_scale: 260_000.0,
+        sys_follow: None,
+        sys_now: WorldMs(0),
+        planet_view: 220.0,
+        globe_built: false,
         docked: 0,
         flight: None,
         trail: Vec::new(),
@@ -136,6 +153,7 @@ impl Viewer {
     pub fn set_scene(&mut self, name: &str) {
         self.scene = match name {
             "ground" => Scene::Ground,
+            "planet" => Scene::Planet,
             "system" => Scene::System,
             _ => Scene::Ships,
         };
@@ -165,7 +183,12 @@ impl Viewer {
                 let base = self.ground_cam.unwrap_or(self.ground_focus());
                 self.ground_cam = Some(base + delta);
             }
-            Scene::System => self.sys_cam = Some(self.sys_cam.unwrap_or(Vec3::ZERO) + delta),
+            Scene::System => {
+                let base = self.sys_cam.unwrap_or(self.sys_follow_pos());
+                self.sys_follow = None;
+                self.sys_cam = Some(base + delta);
+            }
+            Scene::Planet => self.yaw -= dx / view_h * 3.0,
             Scene::Ships => {
                 let y = self.ship_yaw.unwrap_or(0.0);
                 self.ship_yaw = Some(y - dx / view_h * 3.0);
@@ -183,7 +206,11 @@ impl Viewer {
     pub fn follow(&mut self) {
         match self.scene {
             Scene::Ground => self.ground_cam = None,
-            Scene::System => self.sys_cam = None,
+            Scene::System => {
+                self.sys_cam = None;
+                self.sys_follow = Some(HOME_BODY);
+            }
+            Scene::Planet => {}
             Scene::Ships => self.ship_yaw = None,
         }
     }
@@ -219,6 +246,7 @@ impl Viewer {
         match self.scene {
             Scene::Ships => "ships",
             Scene::Ground => "ground",
+            Scene::Planet => "planet",
             Scene::System => "system",
         }
         .into()
@@ -233,9 +261,29 @@ impl Viewer {
     /// Mouse wheel: positive zooms out.
     pub fn wheel(&mut self, delta: f64) {
         let k = if delta > 0.0 { 1.15 } else { 1.0 / 1.15 };
+        // One continuous zoom: ground -> planet -> star system, and back, by zooming past each limit.
+        let out = delta > 0.0;
         match self.scene {
-            Scene::System => self.sys_scale = (self.sys_scale * k).clamp(30.0, 500_000.0),
-            Scene::Ground => self.ground_view = (self.ground_view * k).clamp(8.0, 160.0),
+            Scene::Ground if out && self.ground_view >= GROUND_MAX => {
+                self.scene = Scene::Planet;
+                self.planet_view = PLANET_MIN;
+            }
+            Scene::Ground => self.ground_view = (self.ground_view * k).clamp(8.0, GROUND_MAX),
+            Scene::Planet if out && self.planet_view >= PLANET_MAX => {
+                self.scene = Scene::System;
+                self.sys_scale = SYS_NEAR;
+                self.sys_follow = Some(HOME_BODY);
+            }
+            Scene::Planet if !out && self.planet_view <= PLANET_MIN => {
+                self.scene = Scene::Ground;
+                self.ground_view = GROUND_MAX;
+            }
+            Scene::Planet => self.planet_view = (self.planet_view * k).clamp(PLANET_MIN, PLANET_MAX),
+            Scene::System if !out && self.sys_scale <= SYS_NEAR && self.sys_follow == Some(HOME_BODY) => {
+                self.scene = Scene::Planet;
+                self.planet_view = PLANET_MAX;
+            }
+            Scene::System => self.sys_scale = (self.sys_scale * k).clamp(SYS_NEAR, 500_000.0),
             Scene::Ships => {}
         }
     }
@@ -274,12 +322,13 @@ impl Viewer {
         let (target, yaw, view_height, range, text) = match self.scene {
             Scene::Ships => self.ships_scene(t, &mut meshes, &mut instanced),
             Scene::Ground => self.ground_scene(t, &mut meshes, &mut instanced),
+            Scene::Planet => self.planet_scene(t, &mut meshes),
             Scene::System => self.system_scene(t, &mut meshes),
         };
         self.last_view = (view_height, self.size.1 as f32);
         let tod = self.time_of_day(t) as f32;
         let (sky_now, atmosphere) = match self.scene {
-            Scene::System => (sky(0.5), false),
+            Scene::System | Scene::Planet => (sky(0.5), false),
             _ => (sky(tod), true),
         };
         let time_s = ((t / 1000.0) % 3600.0) as f32;
@@ -288,12 +337,20 @@ impl Viewer {
             return format!("Render error: {e}");
         }
         let gpu = if self.gpu.software { " | SOFTWARE RENDERING: the CPU is drawing" } else { "" };
-        let time = if self.scene == Scene::System { String::new() } else { format!(" | {}", clock(tod)) };
+        let time = if matches!(self.scene, Scene::System | Scene::Planet) { String::new() } else { format!(" | {}", clock(tod)) };
         format!("{text}{time} | {}x{} | {:.0} fps{gpu}", internal.0, internal.1, self.fps)
     }
 }
 
 impl Viewer {
+    /// Position (thousand km) of the followed body, or the star.
+    fn sys_follow_pos(&self) -> Vec3 {
+        match self.sys_follow.and_then(|b| self.system.body_pos(BodyId(b), self.sys_now)) {
+            Some(p) => Vec3::new((p.x as f64 / KM) as f32, (p.y as f64 / KM) as f32, 0.0),
+            None => Vec3::ZERO,
+        }
+    }
+
     fn time_of_day(&self, t: f64) -> f64 {
         (self.day_start + (t - self.day_at) * self.day_rate).rem_euclid(1.0)
     }
@@ -470,6 +527,65 @@ impl Viewer {
         (target, self.yaw, self.ground_view, 600.0, text)
     }
 
+    /// The demo planet as a globe: longitude from x, latitude from y, relief exaggerated, sea and ice.
+    fn build_globe(&mut self) {
+        let p = Planet::demo(42);
+        let (cols, rows) = (192usize, 96usize);
+        let mut h = vec![0i32; (cols + 1) * (rows + 1)];
+        for j in 0..=rows {
+            for i in 0..=cols {
+                let x = p.width_mm() / cols as i64 * i as i64;
+                let y = p.depth_mm() / rows as i64 * j as i64;
+                h[j * (cols + 1) + i] = p.height_mm(x, y);
+            }
+        }
+        let vert = |i: usize, j: usize| -> [f32; 3] {
+            let lon = i as f32 / cols as f32 * std::f32::consts::TAU;
+            let lat = (j as f32 / rows as f32 - 0.5) * std::f32::consts::PI;
+            let z = h[j * (cols + 1) + i].max(0) as f32; // the sea is flat
+            let r = GLOBE_R * (1.0 + z / 1_000_000.0 * 0.004); // relief exaggerated about 2.6x
+            [r * lat.cos() * lon.cos(), r * lat.cos() * lon.sin(), r * lat.sin()]
+        };
+        let mut m = MeshBuilder::default();
+        for j in 0..rows {
+            for i in 0..cols {
+                let mean = (h[j * (cols + 1) + i] + h[j * (cols + 1) + i + 1] + h[(j + 1) * (cols + 1) + i] + h[(j + 1) * (cols + 1) + i + 1]) / 4;
+                let y = p.depth_mm() / rows as i64 * j as i64 + p.depth_mm() / rows as i64 / 2;
+                let col = if p.is_ice(y) {
+                    15.0
+                } else if mean < 0 {
+                    6.0
+                } else if mean < 1_200_000 {
+                    11.0
+                } else if mean < 2_500_000 {
+                    12.0
+                } else if mean < 4_000_000 {
+                    13.0
+                } else {
+                    2.0
+                };
+                let (a, b, c, d) = (vert(i, j), vert(i + 1, j), vert(i + 1, j + 1), vert(i, j + 1));
+                m.tri(a, b, c, col);
+                m.tri(a, c, d, col);
+            }
+        }
+        // The battlefield: a marker on the equator at x = 0.
+        let site = vert(0, rows / 2);
+        m.diamond([site[0] * 1.03, site[1] * 1.03, site[2]], 2.0, 9.0);
+        self.gpu.upload("globe", m.bytes());
+        self.globe_built = true;
+    }
+
+    fn planet_scene(&mut self, t: f64, meshes: &mut Vec<String>) -> (Vec3, f32, f32, f32, String) {
+        if !self.globe_built {
+            self.build_globe();
+        }
+        meshes.push("globe".into());
+        let spin = self.yaw + (t / 40_000.0) as f32;
+        let text = "Planet: 4,096 km around; zoom in for the ground, out for the star system".to_string();
+        (Vec3::ZERO, spin, self.planet_view, 1000.0, text)
+    }
+
     fn system_scene(&mut self, t: f64, meshes: &mut Vec<String>) -> (Vec3, f32, f32, f32, String) {
         let now = WorldMs(t as u64);
         let mut m = MeshBuilder::default();
@@ -514,7 +630,8 @@ impl Viewer {
         if self.flight.is_some() {
             text.push_str(" (in flight)");
         }
-        let target = self.sys_cam.unwrap_or(Vec3::ZERO);
+        self.sys_now = now;
+        let target = self.sys_cam.unwrap_or_else(|| self.sys_follow_pos());
         (target, self.yaw, self.sys_scale, self.sys_scale * 4.0, text)
     }
 }
