@@ -11,11 +11,24 @@ fn t(num: i64, den: i64) -> Fix {
 
 #[test]
 fn exact_at_quarter_turns() {
-    let cases = [(0, 1, 0i64, 1i64), (1, 4, 1, 0), (1, 2, 0, -1), (3, 4, -1, 0)];
+    let cases = [
+        (0, 1, 0i64, 1i64),
+        (1, 4, 1, 0),
+        (1, 2, 0, -1),
+        (3, 4, -1, 0),
+    ];
     for (n, d, s, c) in cases {
         let (sin, cos) = sin_cos_turns(t(n, d));
-        assert!((sin.0 - s * Fix::ONE.0).abs() <= 1, "sin {n}/{d}: {}", sin.0);
-        assert!((cos.0 - c * Fix::ONE.0).abs() <= 1, "cos {n}/{d}: {}", cos.0);
+        assert!(
+            (sin.0 - s * Fix::ONE.0).abs() <= 1,
+            "sin {n}/{d}: {}",
+            sin.0
+        );
+        assert!(
+            (cos.0 - c * Fix::ONE.0).abs() <= 1,
+            "cos {n}/{d}: {}",
+            cos.0
+        );
     }
 }
 

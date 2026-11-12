@@ -15,8 +15,13 @@ pub struct SoldierRec {
 }
 
 impl SoldierRec {
-    pub const NEW: SoldierRec =
-        SoldierRec { xp: 0, kills: 0, health: Health::Healthy, flags: 0, reserved: 0 };
+    pub const NEW: SoldierRec = SoldierRec {
+        xp: 0,
+        kills: 0,
+        health: Health::Healthy,
+        flags: 0,
+        reserved: 0,
+    };
 }
 
 #[derive(Default)]
@@ -32,7 +37,8 @@ impl Roster {
     /// Appends `n` healthy records and returns the start index.
     pub fn alloc(&mut self, n: u32) -> u32 {
         let start = self.recs.len() as u32;
-        self.recs.resize(self.recs.len() + n as usize, SoldierRec::NEW);
+        self.recs
+            .resize(self.recs.len() + n as usize, SoldierRec::NEW);
         start
     }
 

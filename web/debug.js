@@ -19,11 +19,10 @@ function card(ron) {
 
 function drawChunk() {
   const seed = BigInt(Math.max(0, Math.floor(Number(document.getElementById('seed').value) || 0)));
-  const face = Number(document.getElementById('face').value);
   const cx = Math.trunc(Number(document.getElementById('cx').value) || 0);
   const cy = Math.trunc(Number(document.getElementById('cy').value) || 0);
   const cells = 64;
-  const heights = wasm.planet_chunk(seed, face, cx, cy, cells);
+  const heights = wasm.planet_chunk(seed, cx, cy, cells);
   let lo = Infinity, hi = -Infinity;
   for (const h of heights) { if (h < lo) lo = h; if (h > hi) hi = h; }
   const canvas = document.getElementById('map');
@@ -36,7 +35,7 @@ function drawChunk() {
   });
   ctx.putImageData(img, 0, 0);
   document.getElementById('mapinfo').textContent =
-    `64 m by 64 m patch, 1 m samples. Height ${(lo / 1000).toFixed(2)} m to ${(hi / 1000).toFixed(2)} m (stretched to full grey). Chunk hash ${wasm.planet_chunk_hash(seed, face, cx, cy, cells)}.`;
+    `64 m by 64 m patch, 1 m samples. Height ${(lo / 1000).toFixed(2)} m to ${(hi / 1000).toFixed(2)} m (stretched to full grey). Chunk hash ${wasm.planet_chunk_hash(seed, cx, cy, cells)}.`;
 }
 
 try {
@@ -47,7 +46,7 @@ try {
     if (ron === undefined) break;
     list.append(card(ron));
   }
-  for (const id of ['seed', 'face', 'cx', 'cy']) document.getElementById(id).addEventListener('input', drawChunk);
+  for (const id of ['seed', 'cx', 'cy']) document.getElementById(id).addEventListener('input', drawChunk);
   drawChunk();
   status.textContent = 'Everything below is computed in WebAssembly by the same Rust core as the native build.';
 } catch (e) {

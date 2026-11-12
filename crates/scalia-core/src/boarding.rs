@@ -62,12 +62,23 @@ fn jittered(base: u64, h: u64) -> u64 {
 /// dead or wounded slots leave gaps in the queue.
 pub fn board_times(seed: u64, gid: GroupId, slot: u32, interval_ms: u64) -> BoardTimes {
     let start_walk_ms = (slot as u64).saturating_mul(interval_ms);
-    let walk = jittered(WALK_BASE_MS, hash4(seed, STREAM_WALK, gid.0 as u64, slot as u64));
-    let seat = jittered(SEAT_BASE_MS, hash4(seed, STREAM_SEAT, gid.0 as u64, slot as u64));
+    let walk = jittered(
+        WALK_BASE_MS,
+        hash4(seed, STREAM_WALK, gid.0 as u64, slot as u64),
+    );
+    let seat = jittered(
+        SEAT_BASE_MS,
+        hash4(seed, STREAM_SEAT, gid.0 as u64, slot as u64),
+    );
     let reach_ramp_ms = start_walk_ms.saturating_add(walk);
     let top_ramp_ms = reach_ramp_ms.saturating_add(RAMP_CLIMB_MS);
     let seated_ms = top_ramp_ms.saturating_add(seat);
-    BoardTimes { start_walk_ms, reach_ramp_ms, top_ramp_ms, seated_ms }
+    BoardTimes {
+        start_walk_ms,
+        reach_ramp_ms,
+        top_ramp_ms,
+        seated_ms,
+    }
 }
 
 impl Process {
@@ -85,7 +96,11 @@ impl Process {
             .max()
             .unwrap_or(0);
         Ok(Process {
-            kind: ProcessKind::Board { ship, layout, interval_ms: interval },
+            kind: ProcessKind::Board {
+                ship,
+                layout,
+                interval_ms: interval,
+            },
             start,
             duration_ms,
         })

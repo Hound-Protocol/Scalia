@@ -73,13 +73,13 @@ pub fn shipped_ron(index: u32) -> Option<String> {
 
 /// Heights of one planet chunk, `(cells + 1)^2` values in millimetres.
 #[wasm_bindgen]
-pub fn planet_chunk(seed: u64, face: u8, cx: i32, cy: i32, cells: u32) -> Vec<i32> {
-    scalia_core::planet::chunk(seed, face, cx as i64, cy as i64, cells.min(1024)).heights
+pub fn planet_chunk(seed: u64, cx: i32, cy: i32, cells: u32) -> Vec<i32> {
+    scalia_core::planet::Planet::demo(seed).chunk(cx as i64, cy as i64, cells.min(1024)).heights
 }
 
 #[wasm_bindgen]
-pub fn planet_chunk_hash(seed: u64, face: u8, cx: i32, cy: i32, cells: u32) -> u64 {
-    scalia_core::planet::chunk_hash(&scalia_core::planet::chunk(seed, face, cx as i64, cy as i64, cells.min(1024)))
+pub fn planet_chunk_hash(seed: u64, cx: i32, cy: i32, cells: u32) -> u64 {
+    scalia_core::planet::chunk_hash(&scalia_core::planet::Planet::demo(seed).chunk(cx as i64, cy as i64, cells.min(1024)))
 }
 
 /// Most soldiers a scenario built from JavaScript may hold (about 160 MB of roster).

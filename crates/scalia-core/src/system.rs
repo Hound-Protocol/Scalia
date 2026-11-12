@@ -32,7 +32,12 @@ pub struct System {
 impl System {
     pub fn demo() -> System {
         System {
-            star: Pos { region: SYSTEM_REGION, x: 0, y: 0, z: 0 },
+            star: Pos {
+                region: SYSTEM_REGION,
+                x: 0,
+                y: 0,
+                z: 0,
+            },
             bodies: vec![
                 Body {
                     name: "Aster",

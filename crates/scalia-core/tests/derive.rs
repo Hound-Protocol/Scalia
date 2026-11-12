@@ -9,16 +9,31 @@ use scalia_core::world::World;
 use std::collections::HashSet;
 
 fn pos(x: i64, y: i64) -> Pos {
-    Pos { region: RegionId(0), x, y, z: 0 }
+    Pos {
+        region: RegionId(0),
+        x,
+        y,
+        z: 0,
+    }
 }
 
 fn spawn_at(w: &mut World, at: Pos, c: [u32; 4]) -> GroupId {
-    let spec = GroupSpec { pos: at, composition: Composition(c), needs: Needs::full() };
+    let spec = GroupSpec {
+        pos: at,
+        composition: Composition(c),
+        needs: Needs::full(),
+    };
     w.groups.spawn(spec, &mut w.roster)
 }
 
 fn big_view() -> ViewBox {
-    ViewBox { region: RegionId(0), min_x: -1_000_000, max_x: 1_000_000, min_y: -1_000_000, max_y: 1_000_000 }
+    ViewBox {
+        region: RegionId(0),
+        min_x: -1_000_000,
+        max_x: 1_000_000,
+        min_y: -1_000_000,
+        max_y: 1_000_000,
+    }
 }
 
 #[test]
@@ -53,10 +68,16 @@ fn dead_wounded_persistent_are_none() {
     w.roster.rec_mut(s, 1).health = Health::Wounded;
     w.roster.rec_mut(s, 2).flags = FLAG_PERSISTENT;
     for slot in 0..3 {
-        assert!(derive_soldier(&w, id, slot, WorldMs(0)).is_none(), "slot {slot}");
+        assert!(
+            derive_soldier(&w, id, slot, WorldMs(0)).is_none(),
+            "slot {slot}"
+        );
     }
     for slot in 3..10 {
-        assert!(derive_soldier(&w, id, slot, WorldMs(0)).is_some(), "slot {slot}");
+        assert!(
+            derive_soldier(&w, id, slot, WorldMs(0)).is_some(),
+            "slot {slot}"
+        );
     }
     assert!(derive_soldier(&w, id, 10, WorldMs(0)).is_none());
 }
@@ -93,12 +114,19 @@ fn boarding_phases_and_seats() {
     let mut w = World::new(5);
     let id = spawn_at(&mut w, pos(0, 0), [150, 0, 0, 0]);
     let ship = pos(100_000, 0);
-    let layout = ShipLayout { ramps: 2, doors: 3, corridor_width_cm: 200, seat_cols: 20 };
+    let layout = ShipLayout {
+        ramps: 2,
+        doors: 3,
+        corridor_width_cm: 200,
+        seat_cols: 20,
+    };
     let start = WorldMs(10_000);
     w.start_boarding(id, ship, layout, start).unwrap();
     let dur = w.groups.process(id).duration_ms;
     let at = |t: u64| -> Vec<Derived> {
-        (0..150).filter_map(|s| derive_soldier(&w, id, s, WorldMs(t))).collect()
+        (0..150)
+            .filter_map(|s| derive_soldier(&w, id, s, WorldMs(t)))
+            .collect()
     };
     assert!(at(5000).iter().all(|d| d.phase == Phase::Queued));
     let early = derive_soldier(&w, id, 0, WorldMs(11_000)).unwrap();
@@ -106,7 +134,15 @@ fn boarding_phases_and_seats() {
     for d in at(start.0 + dur) {
         assert_eq!(d.phase, Phase::Seated);
         let (col, row) = ((d.slot % 20) as i64, (d.slot / 20) as i64);
-        assert_eq!(d.pos, Pos { region: RegionId(0), x: 100_000 + col * 600, y: row * 600, z: 2500 });
+        assert_eq!(
+            d.pos,
+            Pos {
+                region: RegionId(0),
+                x: 100_000 + col * 600,
+                y: row * 600,
+                z: 2500
+            }
+        );
     }
     for k in 0..40u64 {
         let t = start.0 + k * dur / 39;
@@ -123,7 +159,10 @@ fn visible_respects_cap_and_region() {
         spawn_at(&mut w, pos(0, 0), [150, 0, 0, 0]);
     }
     let mut out = vec![];
-    let other = ViewBox { region: RegionId(1), ..big_view() };
+    let other = ViewBox {
+        region: RegionId(1),
+        ..big_view()
+    };
     derive_visible(&w, WorldMs(0), &other, 20_000, &mut out);
     assert!(out.is_empty());
     derive_visible(&w, WorldMs(0), &big_view(), 20_000, &mut out);
@@ -134,10 +173,22 @@ fn visible_respects_cap_and_region() {
 fn seated_soldiers_visible_near_ship() {
     let mut w = World::new(5);
     let id = spawn_at(&mut w, pos(0, 0), [30, 0, 0, 0]);
-    let layout = ShipLayout { ramps: 2, doors: 3, corridor_width_cm: 200, seat_cols: 10 };
-    w.start_boarding(id, pos(500_000, 0), layout, WorldMs(0)).unwrap();
+    let layout = ShipLayout {
+        ramps: 2,
+        doors: 3,
+        corridor_width_cm: 200,
+        seat_cols: 10,
+    };
+    w.start_boarding(id, pos(500_000, 0), layout, WorldMs(0))
+        .unwrap();
     let t = WorldMs(w.groups.process(id).duration_ms);
-    let near_ship = ViewBox { region: RegionId(0), min_x: 450_000, max_x: 550_000, min_y: -50_000, max_y: 50_000 };
+    let near_ship = ViewBox {
+        region: RegionId(0),
+        min_x: 450_000,
+        max_x: 550_000,
+        min_y: -50_000,
+        max_y: 50_000,
+    };
     let mut out = vec![];
     derive_visible(&w, t, &near_ship, 1000, &mut out);
     assert_eq!(out.len(), 30);

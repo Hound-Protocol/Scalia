@@ -9,11 +9,21 @@ const SEED: u64 = 42;
 const GID: GroupId = GroupId(7);
 
 fn layout() -> ShipLayout {
-    ShipLayout { ramps: 2, doors: 3, corridor_width_cm: 200, seat_cols: 20 }
+    ShipLayout {
+        ramps: 2,
+        doors: 3,
+        corridor_width_cm: 200,
+        seat_cols: 20,
+    }
 }
 
 fn ship() -> Pos {
-    Pos { region: RegionId(0), x: 0, y: 0, z: 0 }
+    Pos {
+        region: RegionId(0),
+        x: 0,
+        y: 0,
+        z: 0,
+    }
 }
 
 #[test]
@@ -28,11 +38,20 @@ fn zero_layout_errors() {
     for l in [
         ShipLayout { ramps: 0, ..base },
         ShipLayout { doors: 0, ..base },
-        ShipLayout { corridor_width_cm: 0, ..base },
+        ShipLayout {
+            corridor_width_cm: 0,
+            ..base
+        },
     ] {
-        assert_eq!(l.throughput_milli_per_s(), Err(ProcessError::ZeroThroughput));
+        assert_eq!(
+            l.throughput_milli_per_s(),
+            Err(ProcessError::ZeroThroughput)
+        );
     }
-    let l = ShipLayout { seat_cols: 0, ..base };
+    let l = ShipLayout {
+        seat_cols: 0,
+        ..base
+    };
     assert_eq!(l.throughput_milli_per_s(), Err(ProcessError::ZeroSeatCols));
 }
 
@@ -59,7 +78,10 @@ fn queue_position_is_slot_index() {
 #[test]
 fn duration_is_max_seated() {
     let p = Process::board(WorldMs(0), ship(), layout(), SEED, GID, 0..150u32).unwrap();
-    let max = (0..150u32).map(|s| board_times(SEED, GID, s, 625).seated_ms).max().unwrap();
+    let max = (0..150u32)
+        .map(|s| board_times(SEED, GID, s, 625).seated_ms)
+        .max()
+        .unwrap();
     assert_eq!(p.duration_ms, max);
     match p.kind {
         ProcessKind::Board { interval_ms, .. } => assert_eq!(interval_ms, 625),
@@ -73,7 +95,9 @@ fn five_thousand_boarding_query_invariant() {
     let p = Process::board(start, ship(), layout(), SEED, GID, 0..5000u32).unwrap();
     let count = |t: u64| seated_count(SEED, GID, 0..5000u32, 625, start, WorldMs(t));
     assert_eq!(count(start.0 - 1), 0);
-    let times: Vec<u64> = (0..200u64).map(|i| 10_000 + i * (p.duration_ms / 199)).collect();
+    let times: Vec<u64> = (0..200u64)
+        .map(|i| 10_000 + i * (p.duration_ms / 199))
+        .collect();
     let in_order: Vec<u32> = times.iter().map(|&t| count(t)).collect();
     // Same times visited in a shuffled order must give the same answers.
     let mut idx: Vec<usize> = (0..times.len()).collect();
@@ -89,20 +113,44 @@ fn five_thousand_boarding_query_invariant() {
 fn all_dead_group() {
     let p = Process::board(WorldMs(0), ship(), layout(), SEED, GID, std::iter::empty()).unwrap();
     assert_eq!(p.duration_ms, 0);
-    assert_eq!(seated_count(SEED, GID, std::iter::empty(), 625, WorldMs(0), WorldMs(u64::MAX)), 0);
+    assert_eq!(
+        seated_count(
+            SEED,
+            GID,
+            std::iter::empty(),
+            625,
+            WorldMs(0),
+            WorldMs(u64::MAX)
+        ),
+        0
+    );
 }
 
 #[test]
 fn gaps_delay_the_queue() {
     // Slots 0 and 100 healthy: the second still waits 100 intervals.
     let slots = [0u32, 100];
-    let p = Process::board(WorldMs(0), ship(), layout(), SEED, GID, slots.iter().copied()).unwrap();
+    let p = Process::board(
+        WorldMs(0),
+        ship(),
+        layout(),
+        SEED,
+        GID,
+        slots.iter().copied(),
+    )
+    .unwrap();
     assert!(p.duration_ms >= 100 * 625);
 }
 
 #[test]
 fn query_extremes() {
     let start = WorldMs(10_000);
-    assert_eq!(seated_count(SEED, GID, 0..150u32, 625, start, WorldMs(0)), 0);
-    assert_eq!(seated_count(SEED, GID, 0..150u32, 625, start, WorldMs(u64::MAX)), 150);
+    assert_eq!(
+        seated_count(SEED, GID, 0..150u32, 625, start, WorldMs(0)),
+        0
+    );
+    assert_eq!(
+        seated_count(SEED, GID, 0..150u32, 625, start, WorldMs(u64::MAX)),
+        150
+    );
 }

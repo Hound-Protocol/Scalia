@@ -36,7 +36,12 @@ pub struct Needs {
 
 impl Needs {
     pub fn full() -> Needs {
-        Needs { food: Fix::ONE, sleep: Fix::ONE, morale: Fix::ONE, upkeep: Fix::ONE }
+        Needs {
+            food: Fix::ONE,
+            sleep: Fix::ONE,
+            morale: Fix::ONE,
+            upkeep: Fix::ONE,
+        }
     }
 }
 

@@ -3,7 +3,12 @@ use scalia_core::process::{march_pos, Process, ProcessError};
 use scalia_core::time::WorldMs;
 
 fn p(x: i64, y: i64, z: i64) -> Pos {
-    Pos { region: RegionId(0), x, y, z }
+    Pos {
+        region: RegionId(0),
+        x,
+        y,
+        z,
+    }
 }
 
 #[test]
@@ -47,7 +52,12 @@ fn idle_has_no_march_position() {
 #[test]
 fn march_across_regions_errors() {
     let from = p(0, 0, 0);
-    let to = Pos { region: RegionId(1), x: 10, y: 0, z: 0 };
+    let to = Pos {
+        region: RegionId(1),
+        x: 10,
+        y: 0,
+        z: 0,
+    };
     assert_eq!(
         Process::march(from, to, 1000, WorldMs(0)).unwrap_err(),
         ProcessError::RegionMismatch

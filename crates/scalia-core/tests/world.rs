@@ -8,11 +8,20 @@ use scalia_core::units::{Composition, Needs};
 use scalia_core::world::{TickError, World};
 
 fn pos(x: i64) -> Pos {
-    Pos { region: RegionId(0), x, y: 0, z: 0 }
+    Pos {
+        region: RegionId(0),
+        x,
+        y: 0,
+        z: 0,
+    }
 }
 
 fn spawn(w: &mut World, c: [u32; 4]) -> GroupId {
-    let spec = GroupSpec { pos: pos(0), composition: Composition(c), needs: Needs::full() };
+    let spec = GroupSpec {
+        pos: pos(0),
+        composition: Composition(c),
+        needs: Needs::full(),
+    };
     w.groups.spawn(spec, &mut w.roster)
 }
 
@@ -28,7 +37,11 @@ fn needs_drain_one_game_hour() {
         w.tick(WorldMs(s * 1000)).unwrap();
     }
     let n = *w.groups.needs(id);
-    assert!((n.food.0 - (Fix::ONE.0 - pct(4))).abs() <= 256, "food {}", n.food.0);
+    assert!(
+        (n.food.0 - (Fix::ONE.0 - pct(4))).abs() <= 256,
+        "food {}",
+        n.food.0
+    );
     assert!((n.upkeep.0 - (Fix::ONE.0 - pct(1))).abs() <= 256);
     assert!((n.sleep.0 - (Fix::ONE.0 - pct(6))).abs() <= 256);
     assert_eq!(n.morale, Fix::ONE);
@@ -84,8 +97,16 @@ fn empty_and_zero_soldier_world() {
 fn start_boarding_error_leaves_group_unchanged() {
     let mut w = World::new(1);
     let id = spawn(&mut w, [10, 0, 0, 0]);
-    let bad = ShipLayout { ramps: 0, doors: 2, corridor_width_cm: 100, seat_cols: 10 };
-    assert_eq!(w.start_boarding(id, pos(0), bad, WorldMs(0)), Err(ProcessError::ZeroThroughput));
+    let bad = ShipLayout {
+        ramps: 0,
+        doors: 2,
+        corridor_width_cm: 100,
+        seat_cols: 10,
+    };
+    assert_eq!(
+        w.start_boarding(id, pos(0), bad, WorldMs(0)),
+        Err(ProcessError::ZeroThroughput)
+    );
     assert_eq!(*w.groups.process(id), Process::idle());
 }
 
@@ -98,7 +119,12 @@ fn boarding_skips_dead_slots_in_the_record() {
     for slot in 0..9 {
         w.roster.rec_mut(start, slot).health = Health::Dead;
     }
-    let ok = ShipLayout { ramps: 1, doors: 1, corridor_width_cm: 100, seat_cols: 10 };
+    let ok = ShipLayout {
+        ramps: 1,
+        doors: 1,
+        corridor_width_cm: 100,
+        seat_cols: 10,
+    };
     w.start_boarding(id, pos(0), ok, WorldMs(0)).unwrap();
     // Only slot 9 boards, so the queue wait is 9 intervals (1_250 ms each at 800 milli/s).
     assert!(w.groups.process(id).duration_ms >= 9 * 1250);
@@ -108,8 +134,21 @@ fn boarding_skips_dead_slots_in_the_record() {
 fn boarding_a_ship_in_another_region_errors_and_leaves_group_unchanged() {
     let mut w = World::new(1);
     let id = spawn(&mut w, [10, 0, 0, 0]);
-    let ship = Pos { region: RegionId(9), x: 0, y: 0, z: 0 };
-    let ok = ShipLayout { ramps: 1, doors: 1, corridor_width_cm: 100, seat_cols: 10 };
-    assert_eq!(w.start_boarding(id, ship, ok, WorldMs(0)), Err(ProcessError::RegionMismatch));
+    let ship = Pos {
+        region: RegionId(9),
+        x: 0,
+        y: 0,
+        z: 0,
+    };
+    let ok = ShipLayout {
+        ramps: 1,
+        doors: 1,
+        corridor_width_cm: 100,
+        seat_cols: 10,
+    };
+    assert_eq!(
+        w.start_boarding(id, ship, ok, WorldMs(0)),
+        Err(ProcessError::RegionMismatch)
+    );
     assert_eq!(*w.groups.process(id), Process::idle());
 }

@@ -19,7 +19,12 @@ pub fn build_scenario(seed: u64, groups: u32, soldiers_per_group: u32) -> World 
         let r = isqrt(groups.max(1) as u128) as u32;
         if r * r < groups { r + 1 } else { r }.max(1)
     };
-    let layout = ShipLayout { ramps: 2, doors: 3, corridor_width_cm: 200, seat_cols: 20 };
+    let layout = ShipLayout {
+        ramps: 2,
+        doors: 3,
+        corridor_width_cm: 200,
+        seat_cols: 20,
+    };
     for g in 0..groups {
         let pos = Pos {
             region: RegionId(1),
@@ -36,11 +41,13 @@ pub fn build_scenario(seed: u64, groups: u32, soldiers_per_group: u32) -> World 
         match g % 10 {
             0 => {
                 let to = pos.offset(MARCH_DISTANCE_MM, 0, 0);
-                w.start_march(id, to, MARCH_SPEED_MM_S, WorldMs(0)).expect("valid march");
+                w.start_march(id, to, MARCH_SPEED_MM_S, WorldMs(0))
+                    .expect("valid march");
             }
             1 => {
                 let ship = pos.offset(SHIP_OFFSET_X_MM, 0, 0);
-                w.start_boarding(id, ship, layout, WorldMs(0)).expect("valid layout");
+                w.start_boarding(id, ship, layout, WorldMs(0))
+                    .expect("valid layout");
             }
             _ => {}
         }

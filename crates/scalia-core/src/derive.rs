@@ -111,9 +111,20 @@ fn derive_slot(
         ProcessKind::Idle | ProcessKind::Flight { .. } => (spot, Phase::Standing),
         ProcessKind::March { .. } => {
             let moving = t >= p.start && t.since(p.start) < p.duration_ms;
-            (spot, if moving { Phase::Marching } else { Phase::Standing })
+            (
+                spot,
+                if moving {
+                    Phase::Marching
+                } else {
+                    Phase::Standing
+                },
+            )
         }
-        ProcessKind::Board { ship, layout, interval_ms } => {
+        ProcessKind::Board {
+            ship,
+            layout,
+            interval_ms,
+        } => {
             let bt = board_times(w.seed, gid, slot, interval_ms);
             let el = t.since(p.start);
             let ramp_base = ship.offset(RAMP_BASE_DX_MM, 0, 0);
@@ -140,7 +151,12 @@ fn derive_slot(
             }
         }
     };
-    Some(Derived { slot, group: gid, pos, phase })
+    Some(Derived {
+        slot,
+        group: gid,
+        pos,
+        phase,
+    })
 }
 
 /// One soldier at time `t`; `None` unless healthy and not a persistent individual.

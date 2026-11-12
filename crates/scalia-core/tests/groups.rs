@@ -5,11 +5,20 @@ use scalia_core::roster::{Roster, SoldierRec};
 use scalia_core::units::{Composition, Health, Needs};
 
 fn origin() -> Pos {
-    Pos { region: RegionId(0), x: 0, y: 0, z: 0 }
+    Pos {
+        region: RegionId(0),
+        x: 0,
+        y: 0,
+        z: 0,
+    }
 }
 
 fn spec(c: [u32; 4]) -> GroupSpec {
-    GroupSpec { pos: origin(), composition: Composition(c), needs: Needs::full() }
+    GroupSpec {
+        pos: origin(),
+        composition: Composition(c),
+        needs: Needs::full(),
+    }
 }
 
 #[test]

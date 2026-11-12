@@ -17,7 +17,12 @@ fn near(p: Pos, x: i64, y: i64, tol: i64) -> bool {
 fn start_position_is_on_the_phase_axis() {
     let s = System::demo();
     assert!(near(s.body_pos(A, WorldMs(0)).unwrap(), RA, 0, 4));
-    assert!(near(s.body_pos(B, WorldMs(0)).unwrap(), 0, RB, 4 + RB / 1_000_000_000));
+    assert!(near(
+        s.body_pos(B, WorldMs(0)).unwrap(),
+        0,
+        RB,
+        4 + RB / 1_000_000_000
+    ));
 }
 
 #[test]
@@ -46,7 +51,12 @@ fn returns_after_one_period() {
 #[test]
 fn quarter_period_is_quarter_turn() {
     let s = System::demo();
-    assert!(near(s.body_pos(A, WorldMs(150_000)).unwrap(), 0, RA, 20_000));
+    assert!(near(
+        s.body_pos(A, WorldMs(150_000)).unwrap(),
+        0,
+        RA,
+        20_000
+    ));
 }
 
 #[test]
@@ -57,8 +67,18 @@ fn unknown_body_is_none() {
 #[test]
 fn period_zero_stays_at_phase() {
     let s = System {
-        star: Pos { region: SYSTEM_REGION, x: 0, y: 0, z: 0 },
-        bodies: vec![Body { name: "Still", orbit_radius_mm: 1000, period_ms: 0, phase: Fix::ZERO }],
+        star: Pos {
+            region: SYSTEM_REGION,
+            x: 0,
+            y: 0,
+            z: 0,
+        },
+        bodies: vec![Body {
+            name: "Still",
+            orbit_radius_mm: 1000,
+            period_ms: 0,
+            phase: Fix::ZERO,
+        }],
     };
     let p0 = s.body_pos(BodyId(0), WorldMs(0)).unwrap();
     assert_eq!(p0, s.body_pos(BodyId(0), WorldMs(123_456_789)).unwrap());

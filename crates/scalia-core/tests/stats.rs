@@ -6,8 +6,17 @@ use scalia_core::world::World;
 
 fn world_with(n: u32) -> (World, GroupId) {
     let mut w = World::new(11);
-    let pos = Pos { region: RegionId(0), x: 0, y: 0, z: 0 };
-    let spec = GroupSpec { pos, composition: Composition([n, 0, 0, 0]), needs: Needs::full() };
+    let pos = Pos {
+        region: RegionId(0),
+        x: 0,
+        y: 0,
+        z: 0,
+    };
+    let spec = GroupSpec {
+        pos,
+        composition: Composition([n, 0, 0, 0]),
+        needs: Needs::full(),
+    };
     let id = w.groups.spawn(spec, &mut w.roster);
     (w, id)
 }
@@ -32,7 +41,9 @@ fn skills_in_range() {
 #[test]
 fn xp_adds_exactly_twenty() {
     let (mut w, id) = world_with(150);
-    let before: Vec<_> = (0..150).map(|s| soldier_stats(&w, id, s).unwrap()).collect();
+    let before: Vec<_> = (0..150)
+        .map(|s| soldier_stats(&w, id, s).unwrap())
+        .collect();
     let (start, _) = w.groups.roster_range(id);
     for slot in 0..150 {
         w.roster.rec_mut(start, slot).xp = 1000;

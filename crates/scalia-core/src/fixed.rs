@@ -41,7 +41,10 @@ impl Fix {
         if o.0 == 0 {
             return None;
         }
-        Some(Fix(saturate(floor_div((self.0 as i128) << FRAC, o.0 as i128))))
+        Some(Fix(saturate(floor_div(
+            (self.0 as i128) << FRAC,
+            o.0 as i128,
+        ))))
     }
 
     pub fn floor_to_i64(self) -> i64 {

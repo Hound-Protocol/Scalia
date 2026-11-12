@@ -59,7 +59,7 @@ fn main() {
     let mut guard = 0u64;
     for k in 0..30i64 {
         let s = Instant::now();
-        let c = scalia_core::planet::chunk(42, 0, k, -k, 64);
+        let c = scalia_core::planet::Planet::demo(42).chunk(k, 1000 - k, 64);
         chunks.push(s.elapsed().as_secs_f64() * 1000.0);
         guard ^= scalia_core::planet::chunk_hash(&c);
     }

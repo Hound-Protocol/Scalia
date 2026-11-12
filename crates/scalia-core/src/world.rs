@@ -34,7 +34,12 @@ fn drain(meter: Fix, rate_pct: i64, game_dt_ms: u64) -> Fix {
 
 impl World {
     pub fn new(seed: u64) -> World {
-        World { seed, now: WorldMs(0), groups: Groups::new(), roster: Roster::new() }
+        World {
+            seed,
+            now: WorldMs(0),
+            groups: Groups::new(),
+            roster: Roster::new(),
+        }
     }
 
     pub fn tick(&mut self, now: WorldMs) -> Result<(), TickError> {
@@ -90,7 +95,14 @@ impl World {
         if self.groups.process(id).is_running_at(start) {
             return Err(ProcessError::Busy);
         }
-        let plan = plan_flight(sys, self.groups.pos(id), dest, offset, peak_speed_mm_s, start)?;
+        let plan = plan_flight(
+            sys,
+            self.groups.pos(id),
+            dest,
+            offset,
+            peak_speed_mm_s,
+            start,
+        )?;
         self.groups.set_process(id, Process::flight(&plan));
         Ok(())
     }

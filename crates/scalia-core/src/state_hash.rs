@@ -23,10 +23,16 @@ fn fold_pos(h: u64, p: Pos) -> u64 {
 fn fold_process(h: u64, p: &Process) -> u64 {
     let h = match p.kind {
         ProcessKind::Idle => fold(h, 0),
-        ProcessKind::March { from, to, speed_mm_s } => {
-            fold(fold_pos(fold_pos(fold(h, 1), from), to), speed_mm_s as u64)
-        }
-        ProcessKind::Board { ship, layout, interval_ms } => {
+        ProcessKind::March {
+            from,
+            to,
+            speed_mm_s,
+        } => fold(fold_pos(fold_pos(fold(h, 1), from), to), speed_mm_s as u64),
+        ProcessKind::Board {
+            ship,
+            layout,
+            interval_ms,
+        } => {
             let h = fold_pos(fold(h, 2), ship);
             let h = fold(h, layout.ramps as u64);
             let h = fold(h, layout.doors as u64);
@@ -56,7 +62,10 @@ pub fn state_hash(w: &World) -> u64 {
         h = fold(fold(h, start as u64), len as u64);
         for slot in 0..len {
             let r = w.roster.rec(start, slot);
-            h = fold(h, r.xp as u64 | (r.kills as u64) << 16 | (r.health as u64) << 32);
+            h = fold(
+                h,
+                r.xp as u64 | (r.kills as u64) << 16 | (r.health as u64) << 32,
+            );
             h = fold(h, r.flags as u64 | (r.reserved as u64) << 8);
         }
     }

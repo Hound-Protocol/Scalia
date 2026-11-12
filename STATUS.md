@@ -92,3 +92,18 @@ Verified in a real Chrome on GitHub Pages (software WebGPU adapter, so frame rat
 - Pixel-art pass: one-pixel silhouettes from depth, convex-edge highlights from normals, camera snapped to the texel grid with the snap error shifted out in the upscale (toggle "outlines").
 - Verified again after the Pages fix: ground shows 150 soldiers in formation on terrain with relief; a full Aster-to-Brine flight (99 s) ends docked at Brine.
 - Not built: shader validation outside a browser, instanced figures (soldiers are rebuilt each frame, capped at 400), a continuous zoom from galaxy to one soldier, marching in the viewer, textures.
+
+# Milestone 3: own engine on wgpu, full-screen game, wrapping planets
+
+Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md`.
+
+- **Renderer in Rust** (`crates/scalia-render`, wgpu 30): camera, texel snap, sun shadow camera and mesh building are
+  tested natively; all WGSL shaders are validated with naga in the test suite. The JavaScript renderer is removed.
+- **Game page** (`web/index.html`, `web/game.js`): fills the window; about 300 internal rows scaled up with sharp
+  pixels; drag/WASD pan, wheel zoom, Q/E rotate, F follow, Space launch, 1-3 scenes, O outlines, R full resolution.
+  Blueprint cards and the chunk viewer moved to `web/debug.html`.
+- **Wrapping planets** (`Planet` in `scalia-core::planet`): width a multiple of 32 km (demo 4,096 km), x wraps exactly
+  (every noise layer tiles), y clamps at the poles, the top and bottom tenth is polar ice (no spawns). The cube faces
+  are gone. Golden hashes changed: height `11417373502760628042`, chunk `9283842558404932274` (`Planet::demo(7).chunk(3, 1000, 16)`).
+- Terrain chunks are about twice as fast (lattice-corner cache, 64-bit fractions; bit-identical results).
+- Verified in Chrome on an RTX 3050 Ti (Vulkan): 60 fps on all three scenes.

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use glam::Vec3;
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
-use scalia_core::planet;
+use scalia_core::planet::Planet;
 use scalia_core::position::RegionId;
 use scalia_core::scenario::build_scenario;
 use scalia_core::system::{BodyId, System, PARK_OFFSET};
@@ -19,6 +19,9 @@ use wasm_bindgen::prelude::*;
 const SOLDIERS: u32 = 2000;
 const CELLS: u32 = 64;
 const KM: f64 = 1e6;
+/// The ground scene sits on the demo planet's equator: render chunk (cx, cy) is planet chunk
+/// (cx, cy + EQUATOR_CHUNK). Rendering stays near the origin so f32 positions keep millimetre precision.
+const EQUATOR_CHUNK: i64 = 16_000;
 
 #[derive(Copy, Clone, PartialEq)]
 enum Scene {
@@ -287,7 +290,7 @@ impl Viewer {
 
     fn chunk(&mut self, cx: i64, cy: i64) -> &Vec<f32> {
         if !self.chunks.contains_key(&(cx, cy)) {
-            let c = planet::chunk(42, 0, cx, cy, CELLS);
+            let c = Planet::demo(42).chunk(cx, cy + EQUATOR_CHUNK, CELLS);
             let n = CELLS as usize + 1;
             let hm: Vec<f32> = c.heights.iter().map(|&h| h as f32 / 1000.0).collect();
             let mut m = MeshBuilder::default();

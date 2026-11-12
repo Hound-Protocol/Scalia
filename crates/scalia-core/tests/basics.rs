@@ -44,19 +44,42 @@ fn time_game_ms() {
 #[test]
 fn pos_lerp_floors() {
     let r = RegionId(1);
-    let a = Pos { region: r, x: -1, y: 0, z: 0 };
-    let b = Pos { region: r, x: 0, y: 0, z: 0 };
+    let a = Pos {
+        region: r,
+        x: -1,
+        y: 0,
+        z: 0,
+    };
+    let b = Pos {
+        region: r,
+        x: 0,
+        y: 0,
+        z: 0,
+    };
     assert_eq!(a.lerp(b, 1, 3).unwrap().x, -1);
     assert_eq!(b.lerp(a, 1, 3).unwrap().x, -1);
-    let c = Pos { region: RegionId(2), ..b };
+    let c = Pos {
+        region: RegionId(2),
+        ..b
+    };
     assert!(a.lerp(c, 1, 3).is_none());
 }
 
 #[test]
 fn pos_dist() {
     let r = RegionId(1);
-    let a = Pos { region: r, x: 0, y: 0, z: 0 };
-    let b = Pos { region: r, x: 3000, y: 4000, z: 0 };
+    let a = Pos {
+        region: r,
+        x: 0,
+        y: 0,
+        z: 0,
+    };
+    let b = Pos {
+        region: r,
+        x: 3000,
+        y: 4000,
+        z: 0,
+    };
     assert_eq!(dist_mm(a, b), 5000);
     assert_eq!(isqrt(0), 0);
     assert_eq!(isqrt(24), 4);

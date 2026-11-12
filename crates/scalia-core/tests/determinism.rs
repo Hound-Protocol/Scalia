@@ -16,7 +16,13 @@ fn run(seed: u64) -> World {
 }
 
 fn view() -> ViewBox {
-    ViewBox { region: RegionId(1), min_x: -1_000_000, max_x: 6_000_000, min_y: -1_000_000, max_y: 6_000_000 }
+    ViewBox {
+        region: RegionId(1),
+        min_x: -1_000_000,
+        max_x: 6_000_000,
+        min_y: -1_000_000,
+        max_y: 6_000_000,
+    }
 }
 
 #[test]
@@ -24,7 +30,10 @@ fn same_seed_same_hash() {
     let (a, b) = (run(42), run(42));
     assert_eq!(state_hash(&a), state_hash(&b));
     let t = WorldMs(10_000);
-    assert_eq!(derive_hash(&a, t, &view(), 50_000), derive_hash(&b, t, &view(), 50_000));
+    assert_eq!(
+        derive_hash(&a, t, &view(), 50_000),
+        derive_hash(&b, t, &view(), 50_000)
+    );
 }
 
 #[test]
@@ -32,7 +41,10 @@ fn different_seed_different_hash() {
     let (a, b) = (run(42), run(43));
     assert_ne!(state_hash(&a), state_hash(&b));
     let t = WorldMs(10_000);
-    assert_ne!(derive_hash(&a, t, &view(), 50_000), derive_hash(&b, t, &view(), 50_000));
+    assert_ne!(
+        derive_hash(&a, t, &view(), 50_000),
+        derive_hash(&b, t, &view(), 50_000)
+    );
 }
 
 #[test]

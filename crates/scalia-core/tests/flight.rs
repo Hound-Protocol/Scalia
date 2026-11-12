@@ -10,7 +10,9 @@ const A: BodyId = BodyId(0);
 const B: BodyId = BodyId(1);
 
 fn parked(s: &System, id: BodyId, t: u64) -> Pos {
-    s.body_pos(id, WorldMs(t)).unwrap().offset(PARK_OFFSET.0, PARK_OFFSET.1, PARK_OFFSET.2)
+    s.body_pos(id, WorldMs(t))
+        .unwrap()
+        .offset(PARK_OFFSET.0, PARK_OFFSET.1, PARK_OFFSET.2)
 }
 
 #[test]
@@ -37,7 +39,15 @@ fn arrival_is_where_the_body_will_be() {
     let s = System::demo();
     for start in [0u64, 1_000, 77_777, 400_000, 1_234_567] {
         let from = parked(&s, A, start);
-        let p = plan_flight(&s, from, B, PARK_OFFSET, DEMO_PEAK_SPEED_MM_S, WorldMs(start)).unwrap();
+        let p = plan_flight(
+            &s,
+            from,
+            B,
+            PARK_OFFSET,
+            DEMO_PEAK_SPEED_MM_S,
+            WorldMs(start),
+        )
+        .unwrap();
         assert_eq!(p.to, parked(&s, B, start + p.duration_ms));
         assert_eq!(p.from, from);
     }
@@ -56,7 +66,15 @@ fn peak_speed_is_close_to_requested() {
 #[test]
 fn starts_and_ends_exactly() {
     let s = System::demo();
-    let p = plan_flight(&s, parked(&s, A, 5000), B, PARK_OFFSET, DEMO_PEAK_SPEED_MM_S, WorldMs(5000)).unwrap();
+    let p = plan_flight(
+        &s,
+        parked(&s, A, 5000),
+        B,
+        PARK_OFFSET,
+        DEMO_PEAK_SPEED_MM_S,
+        WorldMs(5000),
+    )
+    .unwrap();
     assert_eq!(flight_pos(&p, WorldMs(0)), p.from);
     assert_eq!(flight_pos(&p, WorldMs(5000)), p.from);
     assert_eq!(flight_pos(&p, WorldMs(5000 + p.duration_ms)), p.to);
@@ -66,7 +84,15 @@ fn starts_and_ends_exactly() {
 #[test]
 fn speed_is_zero_at_both_ends() {
     let s = System::demo();
-    let p = plan_flight(&s, parked(&s, A, 0), B, PARK_OFFSET, DEMO_PEAK_SPEED_MM_S, WorldMs(0)).unwrap();
+    let p = plan_flight(
+        &s,
+        parked(&s, A, 0),
+        B,
+        PARK_OFFSET,
+        DEMO_PEAK_SPEED_MM_S,
+        WorldMs(0),
+    )
+    .unwrap();
     let d = dist_mm(p.from, p.to);
     assert!(dist_mm(p.from, flight_pos(&p, WorldMs(1))) <= d / 100_000);
     assert!(dist_mm(p.to, flight_pos(&p, WorldMs(p.duration_ms - 1))) <= d / 100_000);
@@ -75,7 +101,15 @@ fn speed_is_zero_at_both_ends() {
 #[test]
 fn progress_is_monotone() {
     let s = System::demo();
-    let p = plan_flight(&s, parked(&s, A, 0), B, PARK_OFFSET, DEMO_PEAK_SPEED_MM_S, WorldMs(0)).unwrap();
+    let p = plan_flight(
+        &s,
+        parked(&s, A, 0),
+        B,
+        PARK_OFFSET,
+        DEMO_PEAK_SPEED_MM_S,
+        WorldMs(0),
+    )
+    .unwrap();
     let mut last = 0;
     for i in 0..=200u64 {
         let d = dist_mm(p.from, flight_pos(&p, WorldMs(p.duration_ms * i / 200)));
@@ -89,8 +123,20 @@ fn demo_flight_takes_a_sensible_time() {
     let s = System::demo();
     for i in 0..20u64 {
         let t = mix64(i) % 2_000_000;
-        let p = plan_flight(&s, parked(&s, A, t), B, PARK_OFFSET, DEMO_PEAK_SPEED_MM_S, WorldMs(t)).unwrap();
-        assert!((10_000..=600_000).contains(&p.duration_ms), "{}", p.duration_ms);
+        let p = plan_flight(
+            &s,
+            parked(&s, A, t),
+            B,
+            PARK_OFFSET,
+            DEMO_PEAK_SPEED_MM_S,
+            WorldMs(t),
+        )
+        .unwrap();
+        assert!(
+            (10_000..=600_000).contains(&p.duration_ms),
+            "{}",
+            p.duration_ms
+        );
     }
 }
 
@@ -98,10 +144,22 @@ fn demo_flight_takes_a_sensible_time() {
 fn bad_inputs_are_rejected() {
     let s = System::demo();
     let from = parked(&s, A, 0);
-    assert_eq!(plan_flight(&s, from, B, PARK_OFFSET, 0, WorldMs(0)), Err(ProcessError::ZeroSpeed));
-    assert_eq!(plan_flight(&s, from, BodyId(9), PARK_OFFSET, 1, WorldMs(0)), Err(ProcessError::UnknownBody));
-    let other = Pos { region: RegionId(1), ..from };
-    assert_eq!(plan_flight(&s, other, B, PARK_OFFSET, 1, WorldMs(0)), Err(ProcessError::RegionMismatch));
+    assert_eq!(
+        plan_flight(&s, from, B, PARK_OFFSET, 0, WorldMs(0)),
+        Err(ProcessError::ZeroSpeed)
+    );
+    assert_eq!(
+        plan_flight(&s, from, BodyId(9), PARK_OFFSET, 1, WorldMs(0)),
+        Err(ProcessError::UnknownBody)
+    );
+    let other = Pos {
+        region: RegionId(1),
+        ..from
+    };
+    assert_eq!(
+        plan_flight(&s, other, B, PARK_OFFSET, 1, WorldMs(0)),
+        Err(ProcessError::RegionMismatch)
+    );
 }
 
 #[test]
@@ -118,13 +176,32 @@ fn zero_distance_has_zero_duration() {
 fn huge_start_does_not_panic() {
     let s = System::demo();
     let t = u64::MAX - 5;
-    let p = plan_flight(&s, parked(&s, A, t), B, PARK_OFFSET, DEMO_PEAK_SPEED_MM_S, WorldMs(t)).unwrap();
+    let p = plan_flight(
+        &s,
+        parked(&s, A, t),
+        B,
+        PARK_OFFSET,
+        DEMO_PEAK_SPEED_MM_S,
+        WorldMs(t),
+    )
+    .unwrap();
     let _ = flight_pos(&p, WorldMs(u64::MAX));
 }
 
 #[test]
 fn golden_flight_plan() {
     let s = System::demo();
-    let p = plan_flight(&s, parked(&s, A, 0), B, PARK_OFFSET, DEMO_PEAK_SPEED_MM_S, WorldMs(0)).unwrap();
-    assert_eq!((p.to.x, p.to.y, p.duration_ms), (-31891477111, 84210154052, 103768));
+    let p = plan_flight(
+        &s,
+        parked(&s, A, 0),
+        B,
+        PARK_OFFSET,
+        DEMO_PEAK_SPEED_MM_S,
+        WorldMs(0),
+    )
+    .unwrap();
+    assert_eq!(
+        (p.to.x, p.to.y, p.duration_ms),
+        (-31891477111, 84210154052, 103768)
+    );
 }

@@ -1,91 +1,126 @@
 use scalia_core::hash::mix64;
-use scalia_core::planet::{chunk, height_mm, TERRAIN_MAX_MM, TERRAIN_MIN_MM};
+use scalia_core::planet::{Planet, CELL_MM, TERRAIN_MAX_MM, TERRAIN_MIN_MM};
+
+fn demo() -> Planet {
+    Planet::demo(42)
+}
+
+#[test]
+fn width_must_be_a_multiple_of_the_lattice() {
+    assert!(Planet::new(1, 0).is_none());
+    assert!(Planet::new(1, 33).is_none());
+    let p = Planet::new(1, 64).unwrap();
+    assert_eq!(p.width_mm(), 64_000_000);
+    assert_eq!(p.depth_mm(), 32_000_000);
+}
 
 #[test]
 fn same_inputs_same_height() {
-    assert_eq!(height_mm(1, 0, 123_456, -789_012), height_mm(1, 0, 123_456, -789_012));
-}
-
-fn grid(seed: u64, face: u8) -> Vec<i32> {
-    let mut v = Vec::new();
-    for j in 0..10i64 {
-        for i in 0..10i64 {
-            v.push(height_mm(seed, face, i * 3_700_000 - 17_000_000, j * 4_100_000 - 9_000_000));
-        }
-    }
-    v
+    let p = demo();
+    assert_eq!(
+        p.height_mm(123_456, 789_012_000),
+        p.height_mm(123_456, 789_012_000)
+    );
 }
 
 #[test]
 fn different_seed_differs_somewhere() {
-    assert_ne!(grid(1, 0), grid(2, 0));
+    let grid = |p: &Planet| {
+        (0..100i64)
+            .map(|k| p.height_mm(k * 3_700_000, k * 4_100_000 + 1_000_000_000))
+            .collect::<Vec<_>>()
+    };
+    assert_ne!(grid(&Planet::demo(1)), grid(&Planet::demo(2)));
 }
 
 #[test]
-fn different_face_differs_somewhere() {
-    assert_ne!(grid(1, 0), grid(1, 1));
+fn wraps_east_west_exactly() {
+    let p = demo();
+    let w = p.width_mm();
+    for k in 0..200i64 {
+        let (x, y) = (k * 977_131, p.depth_mm() / 3 + k * 1_299_709);
+        let h = p.height_mm(x, y);
+        assert_eq!(h, p.height_mm(x + w, y));
+        assert_eq!(h, p.height_mm(x - w, y));
+        assert_eq!(h, p.height_mm(x - 7 * w, y));
+    }
 }
 
 #[test]
-fn heights_within_range() {
-    let big = [i64::MIN, -1_000_000_000_000, -1, 0, 1, 1_000_000_000_000, i64::MAX];
+fn the_seam_is_smooth() {
+    // Walking east across x = 0 (the date line) steps no more than an ordinary metre does.
+    let p = demo();
+    for k in 0..50i64 {
+        let y = p.depth_mm() / 4 + k * 13_000_000;
+        let (a, b) = (p.height_mm(p.width_mm() - CELL_MM, y), p.height_mm(0, y));
+        assert!((a - b).abs() <= 450, "y {y}: {a} vs {b}");
+    }
+}
+
+#[test]
+fn heights_within_range_for_any_input() {
+    let p = demo();
+    let big = [
+        i64::MIN,
+        -1_000_000_000_000,
+        -1,
+        0,
+        1,
+        1_000_000_000_000,
+        i64::MAX,
+    ];
     for &x in &big {
         for &y in &big {
-            let h = height_mm(9, 3, x, y);
-            assert!((TERRAIN_MIN_MM..=TERRAIN_MAX_MM).contains(&h), "{x},{y} -> {h}");
+            let h = p.height_mm(x, y);
+            assert!(
+                (TERRAIN_MIN_MM..=TERRAIN_MAX_MM).contains(&h),
+                "{x},{y} -> {h}"
+            );
         }
     }
-    for k in 0..10_000i64 {
-        let h = height_mm(5, 5, k * 977_131 - 4_000_000_000, k * 1_299_709);
-        assert!((TERRAIN_MIN_MM..=TERRAIN_MAX_MM).contains(&h));
-    }
 }
 
 #[test]
-fn face_above_five_is_clamped_to_five() {
-    assert_eq!(height_mm(3, 9, 1000, 2000), height_mm(3, 5, 1000, 2000));
+fn beyond_the_poles_clamps() {
+    let p = demo();
+    assert_eq!(p.height_mm(5_000, -9_000_000), p.height_mm(5_000, 0));
+    assert_eq!(
+        p.height_mm(5_000, p.depth_mm() + 9_000_000),
+        p.height_mm(5_000, p.depth_mm())
+    );
 }
 
 #[test]
-fn continuous_across_zero() {
-    for y in [-5_000i64, 0, 5_000, 777_777] {
-        let (a, b) = (height_mm(4, 0, -1, y), height_mm(4, 0, 0, y));
-        assert!((a - b).abs() < 5_000, "{a} vs {b}");
-        let (c, d) = (height_mm(4, 0, y, -1), height_mm(4, 0, y, 0));
-        assert!((c - d).abs() < 5_000, "{c} vs {d}");
-    }
-}
-
-#[test]
-fn golden_height_hash() {
-    let mut h = 0u64;
-    for j in 0..64i64 {
-        for i in 0..64i64 {
-            let z = height_mm(42, 0, i * 1_000_000 - 32_000_000, j * 1_000_000 - 32_000_000);
-            h = mix64(h ^ (z as i64 as u64));
-        }
-    }
-    println!("GOLDEN {h}");
-    assert_eq!(h, 13530145724189886874, "golden height hash changed");
+fn polar_ice_at_both_edges_only() {
+    let p = demo();
+    let d = p.depth_mm();
+    assert!(p.is_ice(0) && p.is_ice(d / 20) && p.is_ice(d - d / 20) && p.is_ice(d));
+    assert!(!p.is_ice(d / 2) && !p.is_ice(d / 5) && !p.is_ice(d - d / 5));
 }
 
 #[test]
 fn local_relief_visible_at_soldier_scale() {
-    // Every 64 m patch, including those at lattice points where the coarse noise is flat,
-    // shows at least 1.5 m of relief, so the ground is never a featureless plane.
-    let spots = (0..20i64).map(|k| (k * 37 - 300, k * 11 - 90)).chain([(0, 0), (-1, 0), (0, -1), (-1, -1)]);
-    for (cx, cy) in spots {
-        let c = chunk(42, 0, cx, cy, 64);
-        let (lo, hi) = (*c.heights.iter().min().unwrap(), *c.heights.iter().max().unwrap());
+    let p = demo();
+    let mid = p.depth_mm() / 2 / (64 * CELL_MM);
+    for (cx, cy) in (0..20i64)
+        .map(|k| (k * 37 - 300, mid + k * 11 - 90))
+        .chain([(0, mid), (-1, mid)])
+    {
+        let c = p.chunk(cx, cy, 64);
+        let (lo, hi) = (
+            *c.heights.iter().min().unwrap(),
+            *c.heights.iter().max().unwrap(),
+        );
         assert!(hi - lo >= 1_500, "chunk ({cx},{cy}): relief {} mm", hi - lo);
     }
 }
 
 #[test]
 fn slopes_are_walkable() {
-    // Adjacent 1 m samples never differ by more than 0.45 m (about 24 degrees).
+    let p = Planet::demo(7);
+    let mid = p.depth_mm() / 2 / (64 * CELL_MM);
     for k in 0..20i64 {
-        let c = chunk(7, 2, k * 53 - 500, 300 - k * 29, 64);
+        let c = p.chunk(k * 53 - 500, mid + 30 - k * 3, 64);
         let n = 65usize;
         for j in 0..n {
             for i in 0..n - 1 {
@@ -94,4 +129,17 @@ fn slopes_are_walkable() {
             }
         }
     }
+}
+
+#[test]
+fn golden_height_hash() {
+    let p = demo();
+    let mut h = 0u64;
+    for j in 0..64i64 {
+        for i in 0..64i64 {
+            let z = p.height_mm(i * 1_000_000 - 32_000_000, p.depth_mm() / 2 + j * 1_000_000);
+            h = mix64(h ^ (z as i64 as u64));
+        }
+    }
+    assert_eq!(h, 11417373502760628042, "golden height hash changed");
 }

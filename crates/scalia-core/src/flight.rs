@@ -68,7 +68,9 @@ pub fn plan_flight(
         return Err(ProcessError::RegionMismatch);
     }
     let target_at = |ms: u64| -> Result<Pos, ProcessError> {
-        let p = sys.body_pos(dest, start.saturating_add(ms)).ok_or(ProcessError::UnknownBody)?;
+        let p = sys
+            .body_pos(dest, start.saturating_add(ms))
+            .ok_or(ProcessError::UnknownBody)?;
         Ok(p.offset(offset.0, offset.1, offset.2))
     };
     let mut duration_ms = 0u64;
@@ -76,5 +78,10 @@ pub fn plan_flight(
         duration_ms = duration_for(dist_mm(from, target_at(duration_ms)?), peak_speed_mm_s);
     }
     let to = target_at(duration_ms)?;
-    Ok(FlightPlan { from, to, start, duration_ms })
+    Ok(FlightPlan {
+        from,
+        to,
+        start,
+        duration_ms,
+    })
 }

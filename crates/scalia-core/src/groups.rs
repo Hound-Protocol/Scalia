@@ -40,12 +40,17 @@ impl Groups {
 
     /// Panics with a clear message when the group is larger than `MAX_GROUP_PEOPLE`.
     pub fn spawn(&mut self, spec: GroupSpec, roster: &mut Roster) -> GroupId {
-        self.try_spawn(spec, roster).expect("group larger than MAX_GROUP_PEOPLE")
+        self.try_spawn(spec, roster)
+            .expect("group larger than MAX_GROUP_PEOPLE")
     }
 
     /// Like `spawn`, but refuses a group whose total count exceeds `MAX_GROUP_PEOPLE`
     /// and leaves both stores untouched.
-    pub fn try_spawn(&mut self, spec: GroupSpec, roster: &mut Roster) -> Result<GroupId, SpawnError> {
+    pub fn try_spawn(
+        &mut self,
+        spec: GroupSpec,
+        roster: &mut Roster,
+    ) -> Result<GroupId, SpawnError> {
         if spec.composition.total() > MAX_GROUP_PEOPLE {
             return Err(SpawnError::TooLarge);
         }
@@ -83,7 +88,10 @@ impl Groups {
 
     /// `(start, length)` of the group's slice in the roster.
     pub fn roster_range(&self, id: GroupId) -> (u32, u32) {
-        (self.roster_start[id.0 as usize], self.roster_len[id.0 as usize])
+        (
+            self.roster_start[id.0 as usize],
+            self.roster_len[id.0 as usize],
+        )
     }
 
     pub fn set_pos(&mut self, id: GroupId, p: Pos) {
