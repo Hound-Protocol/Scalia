@@ -56,7 +56,7 @@ try {
   // Model viewer: pose, level of detail and colour variant for the soldier.
   const poseSel = $('poseSel'), detailSel = $('detailSel'), variantSel = $('variantSel');
   poseSel.append(new Option('all poses', -1));
-  ['walk', 'run', 'stand', 'crouch', 'cover aim', 'prone', 'standing aim'].forEach((n, i) => poseSel.append(new Option(n, i)));
+  ['walk', 'run', 'stand', 'crouch', 'cover aim', 'prone', 'standing aim', 'sprint'].forEach((n, i) => poseSel.append(new Option(n, i)));
   for (let i = 0; v.variant_name(i) !== undefined; i++) variantSel.append(new Option(v.variant_name(i), i));
   poseSel.addEventListener('change', () => v.preview_pose(Number(poseSel.value)));
   detailSel.addEventListener('change', () => v.set_model_detail(Number(detailSel.value)));
@@ -106,7 +106,18 @@ try {
     }
   }, { passive: false });
   // Left button: drag pans, a click without movement selects. Right button: order the selected group.
-  let drag = null, moved = 0;
+  let drag = null, moved = 0, box = null;
+  const boxEl = document.createElement('div');
+  boxEl.id = 'selbox'; boxEl.hidden = true;
+  document.body.append(boxEl);
+  const showBox = () => {
+    const r = canvas.getBoundingClientRect();
+    Object.assign(boxEl.style, {
+      left: r.left + Math.min(box.x0, box.x1) + 'px', top: r.top + Math.min(box.y0, box.y1) + 'px',
+      width: Math.abs(box.x1 - box.x0) + 'px', height: Math.abs(box.y1 - box.y0) + 'px',
+    });
+    boxEl.hidden = false;
+  };
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button === 2) {
@@ -115,11 +126,19 @@ try {
       return;
     }
     if (e.button !== 0) return;
+    if (e.shiftKey && scene === 'ground') {
+      // Shift + drag draws a selection box.
+      box = { x0: e.offsetX, y0: e.offsetY, x1: e.offsetX, y1: e.offsetY };
+      canvas.setPointerCapture(e.pointerId);
+      showBox();
+      return;
+    }
     drag = [e.clientX, e.clientY]; moved = 0;
     canvas.setPointerCapture(e.pointerId);
     canvas.classList.add('dragging');
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (box) { box.x1 = e.offsetX; box.y1 = e.offsetY; showBox(); return; }
     if (!drag) return;
     const dx = e.clientX - drag[0], dy = e.clientY - drag[1];
     moved += Math.abs(dx) + Math.abs(dy);
@@ -127,6 +146,15 @@ try {
     drag = [e.clientX, e.clientY];
   });
   const endDrag = (e) => {
+    if (box) {
+      if (e.type === 'pointerup') {
+        const msg = v.select_box(box.x0 * dpr(), box.y0 * dpr(), box.x1 * dpr(), box.y1 * dpr(), performance.now());
+        if (msg) flash(msg);
+      }
+      box = null;
+      boxEl.hidden = true;
+      return;
+    }
     if (drag && moved <= 4 && e.type === 'pointerup') {
       const msg = v.click(e.offsetX * dpr(), e.offsetY * dpr(), performance.now());
       if (msg) flash(msg);

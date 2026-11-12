@@ -22,24 +22,43 @@ fn leg(q: vec3f, hip: f32, knee: f32) -> vec3f {
   return rot(rot(q, 0.0, 0.46, -knee), 0.0, 0.88, hip);
 }
 
+// Gait for both legs (port of pose.rs `gait`): x = left, y = right; the right leg is half a cycle behind.
+fn gait_hip(phase: f32, swing: f32, forward: f32) -> vec2f {
+  return vec2f(swing * sin(phase * 6.2831853) + forward, swing * sin((phase + 0.5) * 6.2831853) + forward);
+}
+fn gait_knee(phase: f32, lift: f32, base: f32) -> vec2f {
+  let cl = cos(phase * 6.2831853);
+  let cr = cos((phase + 0.5) * 6.2831853);
+  return vec2f(base + lift * pow(max(cl, 0.0), 1.5) + 0.22 * max(-cl, 0.0),
+               base + lift * pow(max(cr, 0.0), 1.5) + 0.22 * max(-cr, 0.0));
+}
+
 fn pose_params(pose: u32, phase: f32) -> PP {
-  let l = sin(phase * 6.2831853);
-  let r = -l;
+  let sw = sin(phase * 6.2831853);
   var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0);
   if (pose == 1u) {
-    p.hip = vec2f(0.45 * l, 0.45 * r);
-    p.knee = vec2f(0.8 * max(l, 0.0) + 0.05, 0.8 * max(r, 0.0) + 0.05);
-    p.sh = vec2f(-0.4 * l, 0.2 - 0.08 * r);
-    p.el = vec2f(0.25 + 0.15 * max(l, 0.0), 0.6);
-    p.rifle = 0.25;
+    p.hip = gait_hip(phase, 0.40, 0.0);
+    p.knee = gait_knee(phase, 0.85, 0.06);
+    p.lean = 0.05;
+    p.sh = vec2f(0.45 - 0.08 * sw, 0.35);
+    p.el = vec2f(0.9, 1.0);
+    p.rifle = -0.35;
   } else if (pose == 2u) {
-    p.lean = 0.3;
-    p.hip = vec2f(0.75 * l + 0.1, 0.75 * r + 0.1);
-    p.knee = vec2f(1.3 * max(l, 0.0) + 0.3, 1.3 * max(r, 0.0) + 0.3);
-    p.sh = vec2f(0.5 - 0.3 * l, 0.6 - 0.1 * r);
-    p.el = vec2f(1.3, 1.1);
-    p.rifle = 0.6;
-    p.head = 0.25;
+    p.hip = gait_hip(phase, 0.62, 0.12);
+    p.knee = gait_knee(phase, 1.35, 0.18);
+    p.lean = 0.25;
+    p.sh = vec2f(0.75 - 0.12 * sw, 0.7);
+    p.el = vec2f(1.55, 1.5);
+    p.rifle = 0.7;
+    p.head = 0.2;
+  } else if (pose == 7u) {
+    p.hip = gait_hip(phase, 0.85, 0.18);
+    p.knee = gait_knee(phase, 1.75, 0.22);
+    p.lean = 0.42;
+    p.sh = vec2f(0.9 - 0.45 * sw, 0.35 + 0.1 * sw);
+    p.el = vec2f(1.5, 1.3);
+    p.rifle = -0.6;
+    p.head = 0.38;
   } else if (pose == 3u) {
     p.lean = 0.45;
     p.hip = vec2f(1.4);
@@ -78,7 +97,9 @@ fn ground_drop(hip: vec2f, knee: vec2f) -> f32 {
   return -low;
 }
 
-fn blend(a: PP, b: PP, w: f32) -> PP {
+fn blend(a: PP, b: PP, w0: f32) -> PP {
+  // Eased (smoothstep), like pose.rs.
+  let w = w0 * w0 * (3.0 - 2.0 * w0);
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0);
   p.drop = select(select(ground_drop(p.hip, p.knee), b.drop, w >= 1.0), a.drop, w <= 0.0);

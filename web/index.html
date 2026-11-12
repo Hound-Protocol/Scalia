@@ -41,6 +41,8 @@
     background: #1d2b3a; color: #e8eef5; border: 1px solid #4b7bb0; border-radius: 6px; padding: 7px 10px 7px 14px;
     font: 13px system-ui, sans-serif; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
   #update[hidden] { display: none; }
+  #selbox { position: fixed; border: 1px solid #f2d36b; background: rgba(242, 211, 107, 0.12); pointer-events: none; z-index: 5; }
+  #selbox[hidden] { display: none; }
   #update button { margin-left: 10px; background: #4b7bb0; color: #fff; border: 0; border-radius: 4px;
     padding: 4px 10px; font: inherit; cursor: pointer; }
   #update button:hover { background: #5e91c9; }
@@ -71,7 +73,8 @@
     <tr><td>1 2 3 4</td><td>Ships, ground, planet, star system</td></tr>
     <tr><td>Wheel</td><td>Zoom; past the limit it moves ground, planet, system</td></tr>
     <tr><td>Click</td><td>Select a group (Ground)</td></tr>
-    <tr><td>Right click</td><td>March the selected group there (Shift: run)</td></tr>
+    <tr><td>Shift + drag</td><td>Box-select groups</td></tr>
+    <tr><td>Right click</td><td>March the selection there (Shift: sprint)</td></tr>
     <tr><td>P</td><td>Stance of the selected group: stand, crouch, cover, prone, aim</td></tr>
     <tr><td>Drag / WASD</td><td>Pan (turn the ship in Ships)</td></tr>
     <tr><td>Q / E</td><td>Rotate the camera</td></tr>

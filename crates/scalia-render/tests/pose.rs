@@ -26,7 +26,7 @@ fn standing_is_the_mesh_itself() {
 
 #[test]
 fn feet_stay_on_the_ground_in_every_pose_and_phase() {
-    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Crouch, Pose::CoverAim, Pose::StandAim] {
+    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::StandAim] {
         for k in 0..16 {
             let v = posed(pose, k as f32 / 16.0);
             let b = bottom(&v);
@@ -73,7 +73,7 @@ fn walking_swings_the_legs_and_running_leans_forward() {
 
 #[test]
 fn pose_ids_round_trip() {
-    for p in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Crouch, Pose::CoverAim, Pose::Prone, Pose::StandAim] {
+    for p in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Prone, Pose::StandAim] {
         assert_eq!(Pose::from_id(p as u32), p);
     }
     assert_eq!(Pose::from_id(99), Pose::Stand);
@@ -128,3 +128,43 @@ fn aiming_raises_the_rifle_with_bent_elbows() {
     assert!(pp.elbow[0] > 0.2 && pp.elbow[1] > 0.2, "elbows straight: {:?}", pp.elbow);
 }
 
+
+/// Height of the hips (the pelvis) in a pose at a phase.
+fn hip_height(pose: Pose, phase: f32) -> f32 {
+    let pp = params(pose, phase);
+    pose_vertex(Vec3::new(0.0, 0.0, scalia_render::pose::HIP_Z), Part::Torso, &pp).z
+}
+
+#[test]
+fn walking_has_weight_the_hips_dip_twice_per_stride() {
+    // Motion guide rule 2: the stance knee flexes, so the body sinks at mid-step and rises as the legs pass.
+    let heights: Vec<f32> = (0..32).map(|k| hip_height(Pose::Walk, k as f32 / 32.0)).collect();
+    let (lo, hi) = heights.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+    assert!(hi - lo > 0.015 && hi - lo < 0.08, "bob {}", hi - lo);
+    // Twice per stride: count the local minima around the cycle.
+    // Smooth out millimetre ripples (where the lowest point switches between heel and toe), then count.
+    let sm: Vec<f32> = (0..32).map(|k| (heights[(k + 30) % 32] + heights[(k + 31) % 32] + heights[k] + heights[(k + 1) % 32] + heights[(k + 2) % 32]) / 5.0).collect();
+    let minima = (0..32).filter(|&k| sm[k] < sm[(k + 31) % 32] && sm[k] <= sm[(k + 1) % 32]).count();
+    assert_eq!(minima, 2, "{heights:?}");
+}
+
+#[test]
+fn sprinting_leans_further_and_carries_the_rifle_muzzle_down() {
+    let (run, sprint) = (params(Pose::Run, 0.0), params(Pose::Sprint, 0.0));
+    assert!(sprint.lean > run.lean, "sprint leans more");
+    assert!(sprint.rifle < 0.0, "rifle angled down across the body");
+    let walk = params(Pose::Walk, 0.0);
+    assert!(walk.rifle < 0.0, "walking carries the rifle at low ready");
+    assert!(run.rifle > 0.3, "running holds it at high port");
+}
+
+#[test]
+fn pose_changes_ease_in_and_out() {
+    use scalia_render::pose::blend;
+    let (a, b) = (params(Pose::Stand, 0.0), params(Pose::Crouch, 0.0));
+    // A quarter of the way through the time, an eased blend has covered less than a quarter of the distance.
+    let q = blend(&a, &b, 0.25);
+    assert!((q.lean - a.lean) / (b.lean - a.lean) < 0.2, "{}", q.lean);
+    let h = blend(&a, &b, 0.5);
+    assert!(((h.lean - a.lean) / (b.lean - a.lean) - 0.5).abs() < 0.01);
+}

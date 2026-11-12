@@ -135,6 +135,8 @@ pub struct Viewer {
     /// Camera of the last frame: target, yaw, view height (for picking).
     last_cam: (Vec3, f32, f32),
     selected: Option<u32>,
+    /// Every selected group (box selection); `selected` is the first of them.
+    selection: Vec<u32>,
     follow_group: u32,
     /// Idle stance per group (P cycles it for the selected group).
     stance: HashMap<u32, Pose>,
@@ -203,6 +205,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         last_internal: (1, 1),
         last_cam: (Vec3::ZERO, 0.0, 60.0),
         selected: Some(0),
+        selection: vec![0],
         follow_group: 0,
         stance: HashMap::new(),
         group_pose: HashMap::new(),
@@ -405,9 +408,40 @@ impl Viewer {
             }
         }
         self.selected = best.map(|b| b.0);
+        self.selection = self.selected.into_iter().collect();
         match self.selected {
             Some(g) => format!("selected group {} ({} soldiers)", g, self.world.groups.people(GroupId(g))),
             None => "nothing selected".into(),
+        }
+    }
+
+    /// Shift + drag: selects every group whose centre lies inside the screen rectangle (projected onto the ground).
+    pub fn select_box(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, now_ms: f64) -> String {
+        if self.scene != Scene::Ground {
+            return String::new();
+        }
+        let t = WorldMs(self.sim_ms(now_ms) as u64);
+        let quad = [self.pick(x0, y0), self.pick(x1, y0), self.pick(x1, y1), self.pick(x0, y1)];
+        let inside = |q: Vec3| {
+            let mut sign = 0.0f32;
+            for k in 0..4 {
+                let (a, b) = (quad[k], quad[(k + 1) % 4]);
+                let cross = (b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x);
+                if cross != 0.0 {
+                    if sign != 0.0 && cross.signum() != sign {
+                        return false;
+                    }
+                    sign = cross.signum();
+                }
+            }
+            true
+        };
+        self.selection = (0..self.world.groups.len() as u32).filter(|&i| inside(self.group_centre(i, t))).collect();
+        self.selected = self.selection.first().copied();
+        match self.selection.len() {
+            0 => "nothing selected".into(),
+            1 => format!("selected group {}", self.selection[0]),
+            n => format!("selected {n} groups"),
         }
     }
 
@@ -416,21 +450,32 @@ impl Viewer {
         if self.scene != Scene::Ground {
             return String::new();
         }
-        let Some(g) = self.selected else { return "select a group first (left click)".into() };
+        let Some(g) = self.selected else { return "select a group first (left click, or Shift + drag a box)".into() };
         let t = WorldMs(self.sim_ms(now_ms) as u64);
-        let _ = self.world.tick(WorldMs(t.0.max(self.world.now.0)));
+        let now = WorldMs(t.0.max(self.world.now.0));
+        let _ = self.world.tick(now);
         let p = self.pick(px, py);
-        let to = Pos { region: RegionId(1), x: (p.x as f64 * 1000.0) as i64, y: (p.y as f64 * 1000.0) as i64, z: 0 };
         let speed = if run { RUN_SPEED_MM_S } else { MARCH_SPEED_MM_S };
-        match self.world.order_march(GroupId(g), to, speed, WorldMs(t.0.max(self.world.now.0))) {
-            Ok(()) => {
-                self.order_dest = Some(p);
-                self.ground_cam = None;
-                self.follow_group = g;
-                format!("group {g} {} to ({:.0}, {:.0})", if run { "running" } else { "marching" }, p.x, p.y)
+        // Several groups keep their spacing: each goes to the click plus its offset from the selection's centre.
+        let groups = if self.selection.is_empty() { vec![g] } else { self.selection.clone() };
+        let centres: Vec<Vec3> = groups.iter().map(|&i| self.group_centre(i, now)).collect();
+        let mid = centres.iter().fold(Vec3::ZERO, |a, c| a + *c) / centres.len() as f32;
+        let mut moved = 0;
+        for (&i, c) in groups.iter().zip(&centres) {
+            let d = p + (*c - mid);
+            let to = Pos { region: RegionId(1), x: (d.x as f64 * 1000.0) as i64, y: (d.y as f64 * 1000.0) as i64, z: 0 };
+            if self.world.order_march(GroupId(i), to, speed, now).is_ok() {
+                moved += 1;
             }
-            Err(e) => format!("cannot order group {g}: {e:?}"),
         }
+        if moved == 0 {
+            return "those groups cannot move right now".into();
+        }
+        self.order_dest = Some(p);
+        self.ground_cam = None;
+        self.follow_group = g;
+        let verb = if run { "sprinting" } else { "marching" };
+        if groups.len() == 1 { format!("group {g} {verb} to ({:.0}, {:.0})", p.x, p.y) } else { format!("{moved} groups {verb} to ({:.0}, {:.0})", p.x, p.y) }
     }
 
     /// Holds pose `i` in the soldier preview (walk, run, stand, crouch, cover aim, prone, standing aim); -1 cycles.
@@ -643,9 +688,9 @@ impl Viewer {
             plinth.cuboid([-1.0, -1.0, -0.1], [1.0, 1.0, 0.0], 12.0);
             self.gpu.upload("plinth", plinth.bytes());
             // Every 3 seconds the next pose: walk, run, stand, crouch, cover aim, prone, standing aim.
-            const SHOW: [(Pose, f32); 7] = [
+            const SHOW: [(Pose, f32); 8] = [
                 (Pose::Walk, 0.9), (Pose::Run, 1.35), (Pose::Stand, 0.0), (Pose::Crouch, 0.0),
-                (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0),
+                (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0), (Pose::Sprint, 1.45),
             ];
             let (pose, steps) = SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()];
             let ts = ((t / 1000.0) % 86_400.0) as f32;
@@ -774,13 +819,13 @@ impl Viewer {
             let walking = d.phase == Phase::Marching || d.phase == Phase::Walking || d.phase == Phase::Climbing;
             let running = walking && matches!(self.world.groups.process(d.group).kind, ProcessKind::March { speed_mm_s, .. } if speed_mm_s >= RUN_SPEED_MM_S);
             let (pose, steps) = if running {
-                (Pose::Run, 1.35 + jitter * 0.1)
+                (Pose::Sprint, 1.45 + jitter * 0.1)
             } else if walking {
                 (Pose::Walk, 0.9 + jitter * 0.1)
             } else {
                 (self.stance.get(&d.group.0).copied().unwrap_or(Pose::Stand), 0.0)
             };
-            let body = if self.selected == Some(d.group.0) { 14.0 } else if walking { 7.0 } else { 6.0 };
+            let body = if self.selection.contains(&d.group.0) { 14.0 } else if walking { 7.0 } else { 6.0 };
             // Pose changes are tracked per group and ripple through it: each soldier starts up to 0.4 s late.
             let entry = self.group_pose.entry(d.group.0).or_insert((pose, pose, -1000.0));
             if entry.0 != pose {
@@ -874,7 +919,7 @@ impl Viewer {
                 let c = self.group_centre(i, tick);
                 let h = self.surface_m(c.x, c.y);
                 let (rx, ry) = ((c.x as f64 - self.origin.0) as f32, (c.y as f64 - self.origin.1) as f32);
-                m.diamond([rx, ry, h + pix * 3.0], pix * 2.0, if self.selected == Some(i) { 14.0 } else { 9.0 });
+                m.diamond([rx, ry, h + pix * 3.0], pix * 2.0, if self.selection.contains(&i) { 14.0 } else { 9.0 });
             }
             self.gpu.upload("markers", m.bytes());
             meshes.push("markers".into());
