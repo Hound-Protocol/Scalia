@@ -777,6 +777,12 @@ impl Viewer {
             self.cine = Some((up, self.frame_ms, from));
         }
         self.tablet = up;
+        // Putting it away lands back close on the commander (25 m across), however the field was zoomed before.
+        if !up && self.scene == Scene::Ground && !self.map_active {
+            self.zoom_step = 1;
+            self.zoom_m = LADDER[1];
+            self.ground_view = LADDER[1];
+        }
         if up && self.map_cam.ground_cam.is_none() {
             self.map_cam.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
         }
@@ -856,14 +862,15 @@ impl Viewer {
         }
         format!("[{}]", out.join(","))
     }
-    /// The tablet map glides back over the commander at the zoom it opens at (from wherever it was, the planet or
+    /// The tablet map glides back over the commander, close in (from wherever it was, the planet or
     /// the star system included).
     pub fn map_center_commander(&mut self) {
         let was = self.map_active;
         self.use_map(true);
         self.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
         self.sys_follow = Some(HOME_BODY);
-        self.zoom_step = 6;
+        // Close enough to see him standing in his ring (25 m across).
+        self.zoom_step = 1;
         self.use_map(was);
     }
     /// Selects one unit (from the roster) and centres the tablet's map on it.

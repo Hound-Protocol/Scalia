@@ -177,14 +177,13 @@ fn pose_changes_ease_in_and_out() {
 
 #[test]
 fn both_hands_hold_the_rifle_when_aiming() {
-    use scalia_render::pose::{hand, Side};
+    use scalia_render::pose::{hand, held, Side, RIFLE_GUARD};
     for pose in [Pose::StandAim, Pose::CoverAim] {
         let pp = params(pose, 0.0);
         let (l, r) = (hand(&pp, Side::Left), hand(&pp, Side::Right));
-        // The left hand sits on the rifle just in front of the magazine: 0.21 m ahead of the right hand along it.
-        let along = Vec3::new(0.0, pp.rifle.cos(), pp.rifle.sin());
-        let grip = r + along * 0.21;
-        assert!((l - grip).length() < 0.06, "{pose:?}: left hand {l:?} is {:.3} m from the rifle at {grip:?}", (l - grip).length());
+        // The left palm on the handguard, under the barrel.
+        let guard = held(RIFLE_GUARD, &pp);
+        assert!((l - guard).length() < 0.05, "{pose:?}: left hand {l:?} is {:.3} m from the handguard at {guard:?}", (l - guard).length());
         // Elbows low: below the hands (motion guide rule 4).
         assert!(r.z > 1.0 || pose == Pose::CoverAim, "{pose:?}: rifle too low {r:?}");
     }
@@ -192,15 +191,15 @@ fn both_hands_hold_the_rifle_when_aiming() {
 
 #[test]
 fn soldiers_can_walk_while_aiming() {
-    use scalia_render::pose::{hand, layer, Side};
+    use scalia_render::pose::{hand, held, layer, Side, RIFLE_GUARD};
     // Legs from the walk, everything above the hips from the aim (motion guide rule 1).
     for k in 0..8 {
         let phase = k as f32 / 8.0;
         let pp = layer(&params(Pose::Walk, phase), &params(Pose::StandAim, phase));
         let walk = params(Pose::Walk, phase);
         assert_eq!((pp.hip, pp.knee, pp.drop), (walk.hip, walk.knee, walk.drop), "legs keep walking");
-        let (l, r) = (hand(&pp, Side::Left), hand(&pp, Side::Right));
-        assert!((l - (r + Vec3::new(0.0, 0.21, 0.0))).length() < 0.06, "both hands stay on the rifle");
+        let l = hand(&pp, Side::Left);
+        assert!((l - held(RIFLE_GUARD, &pp)).length() < 0.05, "both hands stay on the rifle");
         let low = figure().vertices.iter().map(|v| pose_vertex(Vec3::from(v.pos), part_of(v.color), &pp).z).fold(f32::MAX, f32::min);
         assert!((-0.04..=0.06).contains(&low), "feet on the ground at phase {phase}: {low}");
     }
@@ -208,15 +207,16 @@ fn soldiers_can_walk_while_aiming() {
 
 #[test]
 fn every_carry_holds_the_rifle_in_both_hands() {
-    use scalia_render::pose::{hand, Side};
+    use scalia_render::pose::{hand, held, Side, RIFLE_GUARD};
     // The carrying positions from the reference chart: safe hang (stand), low ready (walk, crouch), collapsed
     // low ready (run, sprint), high ready (cover), ready up (aim).
     for (pose, rifle_lo, rifle_hi) in [
         (Pose::Stand, -1.4, -1.0),
         (Pose::Walk, -0.7, -0.3),
         (Pose::Crouch, -0.7, -0.3),
-        (Pose::Run, -1.2, -0.8),
-        (Pose::Sprint, -1.2, -0.8),
+        // Running and sprinting: muzzle down at about 40 degrees, not hanging straight down.
+        (Pose::Run, -0.95, -0.5),
+        (Pose::Sprint, -0.95, -0.5),
         (Pose::Cover, 0.6, 1.1),
         (Pose::StandAim, -0.1, 0.1),
         (Pose::CoverAim, -0.1, 0.1),
@@ -224,12 +224,9 @@ fn every_carry_holds_the_rifle_in_both_hands() {
         for k in 0..4 {
             let pp = params(pose, k as f32 / 4.0);
             assert!((rifle_lo..=rifle_hi).contains(&pp.rifle), "{pose:?}: rifle angle {}", pp.rifle);
-            let (l, r) = (hand(&pp, Side::Left), hand(&pp, Side::Right));
-            // The left hand lies on the rifle: near the line from the grip forward along the barrel.
-            let dir = Vec3::new(0.0, pp.rifle.cos(), pp.rifle.sin());
-            let t = (l - r).dot(dir).clamp(0.1, 0.35);
-            let miss = (l - (r + dir * t)).length();
-            assert!(miss < 0.05, "{pose:?}: left hand {miss:.3} m off the rifle");
+            // The left palm on the handguard (the right holds the pistol grip by construction).
+            let miss = (hand(&pp, Side::Left) - held(RIFLE_GUARD, &pp)).length();
+            assert!(miss < 0.05, "{pose:?}: left hand {miss:.3} m off the handguard");
         }
     }
 }

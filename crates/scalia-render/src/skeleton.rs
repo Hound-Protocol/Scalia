@@ -6,7 +6,7 @@
 //! `pose::pose_vertex` puts it (the tests check this for every part), and vertices shared between bones blend.
 
 use crate::mesh::Part;
-use crate::pose::{hand, slung, PoseParams, Side, ELBOW_Z, GRIP_Z, HIP_Z, KNEE_Z, NECK_Z, PRONE_LIFT, SHOULDER_X, SHOULDER_Z};
+use crate::pose::{hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, SHOULDER_X, SHOULDER_Z};
 use glam::{Affine3A, Mat3A, Vec3, Vec3A};
 
 /// The bones, in the order of `skin_matrices`.
@@ -107,7 +107,8 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     let spine = body * pitch_at(HIP_Z, -p.lean) * Affine3A::from_rotation_z(p.twist);
     let head = spine * Affine3A::from_rotation_z(p.look) * pitch_at(NECK_Z, p.head);
     let h = hand(p, Side::Right);
-    let held = Affine3A::from_translation(Vec3::new(h.x - SHOULDER_X, h.y, h.z - GRIP_Z)) * pitch_at(GRIP_Z, p.rifle);
+    let g = Vec3::new(0.0, RIFLE_GRIP.y, RIFLE_GRIP.z);
+    let held = Affine3A::from_translation(h - RIFLE_GRIP) * Affine3A::from_translation(g) * Affine3A::from_rotation_x(p.rifle) * Affine3A::from_translation(-g);
     let rifle = if p.sling > 0.0 { lerp_affine(held, slung_affine(), p.sling) } else { held };
     let thigh = |i: usize| body * pitch_at(HIP_Z, p.hip[i]);
     let shin = |i: usize| body * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);
@@ -140,7 +141,7 @@ pub fn rest_joint(b: Bone) -> Vec3 {
         Bone::RightThigh => Vec3::new(0.105, 0.0, HIP_Z),
         Bone::LeftShin => Vec3::new(-0.105, 0.0, KNEE_Z),
         Bone::RightShin => Vec3::new(0.105, 0.0, KNEE_Z),
-        Bone::Rifle => Vec3::new(SHOULDER_X, 0.0, GRIP_Z),
+        Bone::Rifle => RIFLE_GRIP,
     }
 }
 

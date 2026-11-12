@@ -38,9 +38,14 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   // Hard sun shadow: one comparison tap into the light-space depth map.
   let lp = u.lm * vec4f(i.w, 1.0);
   let uv = vec2f(lp.x * 0.5 + 0.5, 0.5 - lp.y * 0.5);
-  // Bias in metres (a few centimetres, more on surfaces turned away from the light), converted to light depth.
+  // Bias in metres, converted to light depth: a few centimetres close up, and at least a couple of shadow-map
+  // texels (their size read from the light matrix: it maps 2 / texel-width metres across 2048 texels) when zoomed
+  // out, more on slopes turned from the sun. Too little and gentle slopes shadow themselves in moiré rings.
   let ndl = max(dot(n, u.light.xyz), 0.0);
-  let lit = textureSampleCompareLevel(sm, smp, uv, lp.z - (0.03 + 0.08 * (1.0 - ndl)) * u.time.z);
+  let texel_m = 2.0 / (length(vec3f(u.lm[0].x, u.lm[1].x, u.lm[2].x)) * 2048.0);
+  let slope = sqrt(max(1.0 - ndl * ndl, 0.0)) / max(ndl, 0.2);
+  let bias_m = max(0.03 + 0.08 * (1.0 - ndl), texel_m * (1.5 + 1.5 * slope));
+  let lit = textureSampleCompareLevel(sm, smp, uv, lp.z - bias_m * u.time.z);
   let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && lp.z < 1.0;
   // time.w = 1 turns sun shadows off (space views, where a shadow map cannot resolve planets).
   var shade = select(1.0, lit, inside && u.time.w < 0.5);

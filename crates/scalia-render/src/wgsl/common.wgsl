@@ -61,11 +61,11 @@ fn gait_knee(phase: f32, lift: f32, base: f32) -> vec2f {
 // Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
 // 4 ready up. Sets both arms and the rifle angle.
 fn carry(p: ptr<function, PP>, c: u32) {
-  if (c == 0u) { (*p).sh = vec2f(0.71, 0.05); (*p).el = vec2f(0.06, 1.46); (*p).reach = vec2f(0.83, 1.02); (*p).abd = vec2f(0.03, 0.41); (*p).rifle = -1.2; }
-  else if (c == 1u) { (*p).sh = vec2f(0.88, -0.03); (*p).el = vec2f(0.14, 1.64); (*p).reach = vec2f(0.72, 1.19); (*p).abd = vec2f(0.11, 0.63); (*p).rifle = -0.5; }
-  else if (c == 2u) { (*p).sh = vec2f(0.84, -0.09); (*p).el = vec2f(0.00, 1.70); (*p).reach = vec2f(0.66, 1.23); (*p).abd = vec2f(-0.09, 0.64); (*p).rifle = -1.0; }
-  else if (c == 3u) { (*p).sh = vec2f(0.94, -0.13); (*p).el = vec2f(0.61, 1.72); (*p).reach = vec2f(0.98, 0.86); (*p).abd = vec2f(0.73, 0.39); (*p).rifle = 0.85; }
-  else { (*p).sh = vec2f(1.21, 0.50); (*p).el = vec2f(0.58, 2.17); (*p).reach = vec2f(0.66, 0.57); (*p).abd = vec2f(0.21, 0.53); (*p).rifle = 0.0; }
+  if (c == 0u) { (*p).sh = vec2f(0.43, 0.48); (*p).el = vec2f(0.75, 1.89); (*p).reach = vec2f(0.89, 0.86); (*p).abd = vec2f(0.55, 0.67); (*p).rifle = -1.2; }
+  else if (c == 1u) { (*p).sh = vec2f(0.89, 0.33); (*p).el = vec2f(0.40, 1.60); (*p).reach = vec2f(0.18, 1.32); (*p).abd = vec2f(0.02, 0.94); (*p).rifle = -0.5; }
+  else if (c == 2u) { (*p).sh = vec2f(0.70, 0.84); (*p).el = vec2f(0.97, 1.68); (*p).reach = vec2f(0.21, 0.87); (*p).abd = vec2f(0.12, 1.04); (*p).rifle = -0.75; }
+  else if (c == 3u) { (*p).sh = vec2f(1.15, -0.31); (*p).el = vec2f(0.95, 1.80); (*p).reach = vec2f(0.62, 1.19); (*p).abd = vec2f(0.64, 0.72); (*p).rifle = 0.85; }
+  else { (*p).sh = vec2f(1.45, 0.58); (*p).el = vec2f(0.29, 2.23); (*p).reach = vec2f(0.44, 0.56); (*p).abd = vec2f(0.28, 1.15); (*p).rifle = 0.0; }
 }
 
 // The stride's life (port of pose.rs `stride`): rise and fall, upper body turning against the legs, rifle sway.
@@ -121,14 +121,14 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     stride(&p, phase, 0.018, 0.06, 0.035, 0.025);
   } else if (pose == 2u) {
     p.hip = gait_hip(phase, 0.48, 0.08);
-    p.knee = gait_knee(phase, 1.45, 0.2);
+    p.knee = gait_knee(phase, 1.0, 0.2);
     p.lean = 0.25;
     carry(&p, 2u);
     p.head = 0.2;
     stride(&p, phase, 0.03, 0.1, 0.05, 0.04);
   } else if (pose == 7u) {
     p.hip = gait_hip(phase, 0.58, 0.1);
-    p.knee = gait_knee(phase, 1.9, 0.26);
+    p.knee = gait_knee(phase, 1.35, 0.26);
     p.lean = 0.42;
     carry(&p, 2u);
     p.head = 0.38;
@@ -205,8 +205,9 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   else if (part == 12u) { q = arm(v, p.sh.y, p.el.y, p.reach.y, p.abd.y, 0.238); }
   else if (part == 10u) { q = turn(rot(v, 0.0, 1.46, p.head), p.look); }
   else if (part == 9u) {
-    let hand = arm(vec3f(0.238, 0.0, 0.81), p.sh.y, p.el.y, p.reach.y, p.abd.y, 0.238);
-    q = rot(v, 0.0, 0.81, p.rifle) + vec3f(hand.x - 0.238, hand.y, hand.z - 0.81);
+    // Pistol grip (pose.rs RIFLE_GRIP) in the right palm (PALM).
+    let hand = arm(vec3f(0.18, 0.0, 0.80), p.sh.y, p.el.y, p.reach.y, p.abd.y, 0.238);
+    q = rot(v, 0.03, 0.78, p.rifle) + hand - vec3f(0.238, 0.03, 0.78);
     if (p.sling > 0.0) { q = mix(q, slung(v), p.sling); }
   }
   if (part != 1u && part != 2u && part != 6u && part != 7u) {
