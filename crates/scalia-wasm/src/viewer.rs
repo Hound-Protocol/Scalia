@@ -101,6 +101,8 @@ const CMD_SPRINT: f32 = 4.6;
 const GLIDE_MS: f64 = 90.0;
 /// How long the previous terrain detail level lingers over the new one (ms).
 const FADE_MS: f64 = 600.0;
+/// Height between the ground's contour colour bands (metres).
+const BAND_M: f32 = 3.0;
 /// A game day lasts one real hour.
 const DAY_RATE: f64 = 1.0 / 3_600_000.0;
 /// Orders at or above this speed run (Shift + right click).
@@ -1383,9 +1385,10 @@ impl Viewer {
         for j in (0..CELLS as usize).step_by(step) {
             for i in (0..CELLS as usize).step_by(step) {
                 let (a, b, c, d) = (p(i, j), p(i + step, j), p(i + step, j + step), p(i, j + step));
-                // Contour bands from the quad's mean height; wider bands on coarse meshes so they stay smooth.
+                // Contour bands from the quad's mean height, a fixed BAND_M apart: wide enough that neighbouring
+                // quads share a colour, so seen from afar the ground never breaks into a checkerboard.
                 let mean = (a[2] + b[2] + c[2] + d[2]) / 4.0;
-                let col = 10.0 + ((mean * 8.0 / step as f32).floor().rem_euclid(4.0));
+                let col = 10.0 + (mean / BAND_M).floor().rem_euclid(4.0);
                 m.tri(a, b, c, col);
                 m.tri(a, c, d, col);
             }
@@ -2199,8 +2202,8 @@ fn far_colour(planet: &Planet, mean_m: f32, y_planet_mm: i64, cell_m: f32) -> f3
     } else if mean_m < 0.0 {
         6.0
     } else if cell_m < 16.0 {
-        // The same contour bands as the close-up chunks (4 m and finer), so the hand-over at 160 m is seamless.
-        10.0 + (mean_m * 8.0 / cell_m).floor().rem_euclid(4.0)
+        // The same contour bands as the close-up chunks, so the hand-over at 160 m is seamless.
+        10.0 + (mean_m / BAND_M).floor().rem_euclid(4.0)
     } else if mean_m < 150.0 {
         // Broad height zones further out: bands every few metres turned into stripes on every slope.
         10.0

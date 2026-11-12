@@ -660,6 +660,17 @@ try {
 // A new deploy carries a new version stamp: poll for it and offer a reload.
 // This build's update number (stamped by the deploy).
 const UPDATE = '__UPDATE__';
+// The prototype notice: shown before play; entering also unlocks sound (browsers need a first click).
+(function prototypeNotice() {
+  const box = document.getElementById('proto');
+  if (!box) return;
+  document.getElementById('protoVer').textContent = UPDATE.startsWith('__') ? 'LOCAL BUILD' : `UPDATE ${UPDATE}`;
+  const go = () => { box.hidden = true; removeEventListener('keydown', key, true); };
+  // While it is up, keys go nowhere else; Enter, Space or Escape enters.
+  const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };
+  document.getElementById('protoGo').addEventListener('click', go);
+  addEventListener('keydown', key, true);
+})();
 (function watchForUpdates() {
   const mine = new URL(import.meta.url).searchParams.get('v');
   if (!mine) return; // local build

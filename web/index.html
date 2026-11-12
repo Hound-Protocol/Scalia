@@ -100,6 +100,27 @@
   #radio .foot .led { width: 1vh; height: 1vh; border-radius: 50%; background: #20323c; }
   #radio.tx .foot .led { background: #ff3b30; box-shadow: 0 0 8px #ff3b30; }
   #radio.rx .foot .led { background: #38d16a; box-shadow: 0 0 8px #38d16a; }
+  /* The prototype notice: shown before play, over a blurred view of the game. */
+  #proto { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+    background: rgba(6, 8, 6, 0.45); backdrop-filter: blur(10px) saturate(0.8); -webkit-backdrop-filter: blur(10px) saturate(0.8); }
+  #proto[hidden] { display: none; }
+  #proto .card { position: relative; width: min(560px, 90vw); padding: 26px 28px 22px 34px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(28, 32, 24, 0.97), rgba(14, 16, 12, 0.97)); color: #e4e8dc;
+    border: 1px solid #4d5a37; border-radius: 8px; box-shadow: 0 24px 60px rgba(0,0,0,.6);
+    font: 13px/1.55 ui-monospace, 'SFMono-Regular', Menlo, monospace; animation: proto-in .5s cubic-bezier(.2,.9,.25,1.1) both; }
+  #proto .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 7px;
+    background: repeating-linear-gradient(-45deg, #e0a526 0 7px, #16180f 7px 14px); }
+  #proto .tag { color: #e0a526; letter-spacing: .3em; font-size: 11px; }
+  #proto h2 { margin: 6px 0 12px; font-size: 22px; letter-spacing: .12em; color: #f2f4ee; }
+  #proto p { margin: 0 0 10px; color: #c3cab6; }
+  #proto ul { margin: 0 0 18px; padding-left: 18px; color: #9aa58a; }
+  #proto .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #proto .ver { color: #7c8670; font-size: 11px; letter-spacing: .1em; }
+  #proto button { font: inherit; letter-spacing: .16em; font-weight: bold; cursor: pointer; padding: 10px 18px; color: #16180f;
+    background: linear-gradient(180deg, #f2c14e, #d39a1f); border: 1px solid #8a6514; border-radius: 4px;
+    box-shadow: 0 2px 0 #6b4f10, inset 0 1px 0 rgba(255,255,255,.45); }
+  #proto button:hover { filter: brightness(1.1); }
+  @keyframes proto-in { from { transform: translateY(16px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
   @keyframes upd-drop { from { transform: translate(-50%, -140%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
   @keyframes upd-ping { 0% { box-shadow: 0 0 0 0 rgba(224,165,38,.7); } 70% { box-shadow: 0 0 0 10px rgba(224,165,38,0); } 100% { box-shadow: 0 0 0 0 rgba(224,165,38,0); } }
   @keyframes upd-sweep { 0%, 55% { left: -60%; } 100% { left: 130%; } }
@@ -266,6 +287,13 @@
   </div>
 </div>
 </div>
+<div id="proto"><div class="card">
+  <div class="tag">⚠ PROTOTYPE</div>
+  <h2>PROJECT SCALIA</h2>
+  <p>You are playing an early prototype of Scalia. The gameplay is a heavy subject of change: what you see today may work differently, or be gone, tomorrow.</p>
+  <ul><li>You will encounter bugs.</li><li>Many features are unfinished or placeholders.</li><li>Your feedback shapes what comes next.</li></ul>
+  <div class="row"><span class="ver" id="protoVer"></span><button id="protoGo">UNDERSTOOD · ENTER</button></div>
+</div></div>
 <div id="update" hidden><span class="sig"></span><span class="txt"><span class="ttl">UPDATE RECEIVED</span><span class="sub" id="update-sub">A new build is ready for deployment.</span></span><button id="update-reload">REDEPLOY</button><button id="update-close" title="Later">✕</button></div>
 <script type="module" src="./game.js"></script>
 </body>
