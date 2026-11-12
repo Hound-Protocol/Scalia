@@ -658,6 +658,8 @@ try {
 }
 
 // A new deploy carries a new version stamp: poll for it and offer a reload.
+// This build's update number (stamped by the deploy).
+const UPDATE = '__UPDATE__';
 (function watchForUpdates() {
   const mine = new URL(import.meta.url).searchParams.get('v');
   if (!mine) return; // local build
@@ -668,10 +670,12 @@ try {
   const check = async () => {
     try {
       const r = await fetch('version.json', { cache: 'no-store' });
-      const live = (await r.json()).v;
+      const info = await r.json();
+      const live = info.v;
       if (live && live !== mine && live !== dismissed) {
         bar.dataset.v = live;
-        document.getElementById('update-sub').textContent = `Build ${String(live).slice(0, 7)} is ready · you run ${mine.slice(0, 7)}`;
+        document.querySelector('#update .ttl').textContent = `UPDATE ${info.n || ''} RECEIVED`;
+        document.getElementById('update-sub').textContent = `${info.title ? info.title[0].toUpperCase() + info.title.slice(1) : 'A new build is ready.'} · you run ${UPDATE.startsWith('__') ? mine.slice(0, 7) : UPDATE}`;
         if (bar.hidden) { bar.hidden = false; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
       }
     } catch (_) { /* offline: try again later */ }

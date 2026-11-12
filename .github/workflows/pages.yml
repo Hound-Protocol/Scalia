@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the update number counts every change so far
       - name: Rust toolchain and wasm target
         run: |
           rustup show
@@ -42,7 +44,11 @@ jobs:
           sed -i "s#src=\"./game.js\"#src=\"./game.js?v=$v\"#; s#src=\"./debug.js\"#src=\"./debug.js?v=$v\"#; s#src=\"./models.js\"#src=\"./models.js?v=$v\"#" web/*.html
           # Images and sounds too: a changed picture under the same name must not come from the cache.
           sed -i -E "s#\./(img|sfx)/([A-Za-z0-9_.-]+\.(webp|png|mp3))#./\1/\2?v=$v#g" web/*.html web/game.js
-          echo "{\"v\":\"$v\"}" > web/version.json
+          # Updates are named 0.0.<changes so far> with the change's title (its commit subject without the prefix).
+          n="0.0.$(git rev-list --count HEAD)"
+          title=$(git log -1 --pretty=%s | sed -E 's/^[a-z]+(\([^)]*\))?!?: //')
+          sed -i "s#__UPDATE__#$n#" web/game.js
+          python3 -c 'import json,sys; print(json.dumps({"v": sys.argv[1], "n": sys.argv[2], "title": sys.argv[3]}))' "$v" "$n" "$title" > web/version.json
           grep -c "v=$v" web/game.js web/pkg/scalia_wasm.js web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
