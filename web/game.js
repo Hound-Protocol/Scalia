@@ -186,7 +186,7 @@ try {
   // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
   let tabletShown = false;
   const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
-  const DIVE_AT_MS = 850; // matches the viewer's CINE_RISE_MS + CINE_HOLD_MS
+  const DIVE_AT_MS = 0; // the zoom starts at once
   let diveSound = 0;
   const setTablet = (up) => {
     if (up === tabletUp) return;

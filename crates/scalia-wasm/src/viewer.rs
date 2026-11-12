@@ -54,16 +54,12 @@ fn pose_of(s: Stance) -> Pose {
     }
 }
 
-// The tablet cinematic: swing up above the commander at the same zoom, hold half a second, dive onto his hands;
-// closing pulls straight back.
-const CINE_RISE_MS: f64 = 350.0;
-const CINE_HOLD_MS: f64 = 500.0;
-const CINE_OPEN_MS: f64 = 1_300.0;
-const CINE_CLOSE_MS: f64 = 550.0;
-/// Camera elevation high above, and view height and elevation close on the hands.
-const CINE_HIGH_ELEV: f32 = 1.4;
+// The tablet cinematic: a straight zoom from the player's view onto the tablet in the commander's hands (same
+// angle and rotation); closing zooms straight back out.
+const CINE_OPEN_MS: f64 = 650.0;
+const CINE_CLOSE_MS: f64 = 500.0;
+/// View height (metres) close on the hands.
 const CINE_CLOSE_H: f32 = 0.5;
-const CINE_CLOSE_ELEV: f32 = 0.95;
 
 const ARMIES: [(u32, u32); 5] = [(8, 12), (1, 2000), (10, 2000), (50, 2000), (250, 2000)];
 /// The testing ground: a military base on a levelled pad, (BASE_LO..BASE_HI) metres on both axes.
@@ -1822,31 +1818,19 @@ impl Viewer {
         // Over his shoulder: the camera looks the way he faces, at the tablet in his hands.
         let at = scalia_render::pose::TABLET_AT;
         let hands = base + Vec3::new(at.x * h.cos() - at.y * h.sin(), at.x * h.sin() + at.y * h.cos(), at.z);
-        let close = (hands, h, CINE_CLOSE_H, CINE_CLOSE_ELEV);
-        // Overhead at the zoom the player had: only the angle changes on the way up.
-        let high = (base + Vec3::Z, from.1, from.2, CINE_HIGH_ELEV);
+        // Same angle and rotation as the player's view: only the zoom and the point it looks at change.
+        let close = (hands, from.1, CINE_CLOSE_H, from.3);
         let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * (3.0 - 2.0 * x) };
         let mix = |a: (Vec3, f32, f32, f32), b: (Vec3, f32, f32, f32), w: f32| {
-            let mut dy = b.1 - a.1;
-            while dy > std::f32::consts::PI { dy -= std::f32::consts::TAU; }
-            while dy < -std::f32::consts::PI { dy += std::f32::consts::TAU; }
-            // Zoom eases in log space, so the dive keeps an even pace from far to near.
+            // Zoom eases in log space, so it keeps an even pace from far to near.
             let vh = (a.2.ln() + (b.2.ln() - a.2.ln()) * w).exp();
-            (a.0 + (b.0 - a.0) * w, a.1 + dy * w, vh, a.3 + (b.3 - a.3) * w)
+            (a.0 + (b.0 - a.0) * w, a.1, vh, a.3 + (b.3 - a.3) * w)
         };
         let e = now_ms - start;
         if opening {
-            Some(if e < CINE_RISE_MS {
-                mix(from, high, ease(e / CINE_RISE_MS))
-            } else if e < CINE_RISE_MS + CINE_HOLD_MS {
-                high
-            } else if e < CINE_OPEN_MS {
-                mix(high, close, ease((e - CINE_RISE_MS - CINE_HOLD_MS) / (CINE_OPEN_MS - CINE_RISE_MS - CINE_HOLD_MS)))
-            } else {
-                close
-            })
+            Some(if e < CINE_OPEN_MS { mix(from, close, ease(e / CINE_OPEN_MS)) } else { close })
         } else if e < CINE_CLOSE_MS {
-            Some(mix(from, (live.0, live.1, live.2, el), ease(e / CINE_CLOSE_MS)))
+            Some(mix(from, (live.0, from.1, live.2, el), ease(e / CINE_CLOSE_MS)))
         } else {
             self.cine = None;
             None
