@@ -89,16 +89,14 @@
   #radioLog div { color: #d6f6ff; }
   #radioLog div b { display: block; color: #ff8a7a; font-size: 1vh; letter-spacing: .12em; }
   #radioLog div.unit b { color: #8cff9e; }
-  #radio .wave { height: 3.2vh; display: flex; align-items: center; gap: .25vh; opacity: .25; }
-  #radio .wave i { flex: 1; height: 15%; background: #4ad8ff; border-radius: 1px; }
+  #radio .wave { height: 3.2vh; display: flex; align-items: center; gap: .35vh; opacity: .45; }
+  #radio .wave i { flex: 1; height: 8%; background: #4ad8ff; border-radius: 1px; transition: height 40ms linear; }
   #radio.tx .wave, #radio.rx .wave { opacity: 1; }
-  #radio.tx .wave i, #radio.rx .wave i { animation: wt-voice .5s ease-in-out infinite alternate; }
   #radio.tx .wave i { background: #ff8a7a; }
   #radio .foot { display: flex; justify-content: space-between; align-items: center; color: #6fc8e8; letter-spacing: .12em; }
   #radio .foot .led { width: 1vh; height: 1vh; border-radius: 50%; background: #20323c; }
   #radio.tx .foot .led { background: #ff3b30; box-shadow: 0 0 8px #ff3b30; }
   #radio.rx .foot .led { background: #38d16a; box-shadow: 0 0 8px #38d16a; }
-  @keyframes wt-voice { from { height: 12%; } to { height: 95%; } }
   @keyframes upd-drop { from { transform: translate(-50%, -140%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
   @keyframes upd-ping { 0% { box-shadow: 0 0 0 0 rgba(224,165,38,.7); } 70% { box-shadow: 0 0 0 10px rgba(224,165,38,0); } 100% { box-shadow: 0 0 0 0 rgba(224,165,38,0); } }
   @keyframes upd-sweep { 0%, 55% { left: -60%; } 100% { left: 130%; } }
@@ -121,7 +119,7 @@
   #tablet .display { position: absolute; left: 10.492%; top: 11.94%; width: 79.297%; height: 75.77%; overflow: hidden;
     border-radius: 3px; background: #0b0f13; box-shadow: inset 0 0 18px rgba(120, 200, 140, 0.08); opacity: 0; transition: opacity 0.25s ease 0.25s; }
   #tablet.up .display { opacity: 1; pointer-events: auto; }
-  #tablet .hw { z-index: 3; position: absolute; left: 91.571%; width: 4.141%; height: 6.6%; border: 0; border-radius: 22%; background: transparent; cursor: pointer; pointer-events: auto; }
+  #tablet .hw { z-index: 3; position: absolute; left: 91.78%; width: 3.83%; height: 7.2%; border: 0; border-radius: 22%; background: transparent; cursor: pointer; pointer-events: auto; }
   #tablet .hw:hover { box-shadow: 0 0 0 2px rgba(150, 220, 160, 0.55); }
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
   #tablet .menu button { display: none; }
@@ -226,18 +224,18 @@
   <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
   <div class="who"><small id="rDir">STANDBY</small><b id="rWho">—</b></div>
   <div id="radioLog"></div>
-  <div class="wave"><i style="animation-delay:-0.00s"></i><i style="animation-delay:-0.14s"></i><i style="animation-delay:-0.27s"></i><i style="animation-delay:-0.41s"></i><i style="animation-delay:-0.05s"></i><i style="animation-delay:-0.19s"></i><i style="animation-delay:-0.32s"></i><i style="animation-delay:-0.46s"></i><i style="animation-delay:-0.10s"></i><i style="animation-delay:-0.23s"></i><i style="animation-delay:-0.37s"></i><i style="animation-delay:-0.01s"></i><i style="animation-delay:-0.14s"></i><i style="animation-delay:-0.28s"></i><i style="animation-delay:-0.42s"></i><i style="animation-delay:-0.06s"></i><i style="animation-delay:-0.19s"></i><i style="animation-delay:-0.33s"></i><i style="animation-delay:-0.47s"></i><i style="animation-delay:-0.10s"></i><i style="animation-delay:-0.24s"></i><i style="animation-delay:-0.38s"></i><i style="animation-delay:-0.01s"></i><i style="animation-delay:-0.15s"></i><i style="animation-delay:-0.29s"></i><i style="animation-delay:-0.43s"></i><i style="animation-delay:-0.06s"></i><i style="animation-delay:-0.20s"></i></div>
+  <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div class="foot"><span id="rState">ONLINE</span><span class="led"></span></div>
 </div></div>
 <div id="tablet">
   <img class="fp" src="./img/fp_back.webp" alt="" draggable="false">
   <img class="device" src="./img/pda_front.webp" alt="" draggable="false">
-  <button class="hw" data-hw="close" style="top:17.8%" title="Put away (Tab)"></button>
-  <button class="hw" data-hw="home" style="top:26.2%" title="Home"></button>
-  <button class="hw" data-hw="map" style="top:34.2%" title="Map"></button>
-  <button class="hw" data-hw="roster" style="top:42.7%" title="Roster"></button>
-  <button class="hw" data-hw="comms" style="top:51.4%" title="Comms hub"></button>
-  <button class="hw" data-hw="manner" style="top:59.9%" title="Calm / aggressive"></button>
+  <button class="hw" data-hw="close" style="top:17.50%" title="Put away (Tab)"></button>
+  <button class="hw" data-hw="home" style="top:25.90%" title="Home"></button>
+  <button class="hw" data-hw="map" style="top:34.15%" title="Map"></button>
+  <button class="hw" data-hw="roster" style="top:42.60%" title="Roster"></button>
+  <button class="hw" data-hw="comms" style="top:50.90%" title="Comms hub"></button>
+  <button class="hw" data-hw="manner" style="top:59.35%" title="Calm / aggressive"></button>
   <div class="display">
   <div class="menu">
     <span class="brand">COMMAND</span>

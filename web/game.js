@@ -333,6 +333,59 @@ try {
   // The walkie-talkie: comes up on screen, the commander speaks the order, waits for the unit, then it moves.
   const radio = $('radio');
   const VERB = { 0: ['move to', 'moving'], 1: ['defend', 'defending'], 2: ['assault', 'assaulting'], 3: ['support at', 'supporting'], 10: ['take', 'taking'], 11: ['hold', 'holding'] };
+  // The handset's spectrum: 20 bars, log-spaced from 40 Hz to 10 kHz. Every sound the game plays itself goes
+  // through an analyser (radio clicks now; recorded voices later) and drives them for real. The browser's speech
+  // voice cannot be listened to by the page, so while it talks the bars pulse on each word it reports, in the
+  // spectral shape of a voice on a radio band.
+  const BANDS = 20, F_LO = 40, F_HI = 10000;
+  let actx = null, analyser = null, fbins = null;
+  const audioGraph = () => {
+    if (actx) return actx;
+    try {
+      actx = new AudioContext();
+      analyser = actx.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0.55;
+      analyser.connect(actx.destination);
+      fbins = new Float32Array(analyser.frequencyBinCount);
+    } catch (_) { actx = null; }
+    return actx;
+  };
+  // Plays a sound through the analyser (falls back to plain playback before audio is allowed).
+  const playAnalysed = (proto, vol) => new Promise((done) => {
+    const a = proto.cloneNode(); a.volume = vol;
+    a.onended = done; a.onerror = done; setTimeout(done, 1500);
+    const ctx = audioGraph();
+    if (ctx) { try { if (ctx.state === 'suspended') ctx.resume(); ctx.createMediaElementSource(a).connect(analyser); } catch (_) { /* plain */ } }
+    a.play().catch(done);
+  });
+  const edges = Array.from({ length: BANDS + 1 }, (_, k) => F_LO * Math.pow(F_HI / F_LO, k / BANDS));
+  let wordEnergy = 0, wordAt = 0;
+  // A voice heard over a radio: most energy between 300 Hz and 3 kHz, little below or above.
+  const voiceShape = edges.slice(0, BANDS).map((f, k) => { const g = Math.sqrt(f * edges[k + 1]); return Math.exp(-Math.pow(Math.log(g / 1100) / 1.0, 2)); });
+  const waveBars = () => [...document.querySelectorAll('#radio .wave i')];
+  const drawSpectrum = () => {
+    const bars = waveBars();
+    if (radio.classList.contains('up')) {
+      let real = null;
+      if (analyser) {
+        analyser.getFloatFrequencyData(fbins);
+        const hz = actx.sampleRate / 2 / fbins.length;
+        real = edges.slice(0, BANDS).map((f, k) => {
+          const a = Math.max(0, Math.floor(f / hz)), b = Math.max(a + 1, Math.ceil(edges[k + 1] / hz));
+          let m = -200;
+          for (let i = a; i < b && i < fbins.length; i++) m = Math.max(m, fbins[i]);
+          return Math.min(1, Math.max(0, (m + 85) / 60)); // -85 dB silent, -25 dB full
+        });
+      }
+      const e = wordEnergy * Math.exp(-(performance.now() - wordAt) / 160);
+      bars.forEach((bar, k) => {
+        const synth = e * voiceShape[k] * (0.55 + 0.45 * Math.random());
+        const v = Math.max(real ? real[k] : 0, synth, 0.06 + 0.04 * Math.random()); // a little radio hiss
+        bar.style.height = `${Math.round(8 + v * 92)}%`;
+      });
+    }
+    requestAnimationFrame(drawSpectrum);
+  };
+  requestAnimationFrame(drawSpectrum);
   const say = (text, pitch, rate) => new Promise((done) => {
     if (!('speechSynthesis' in window)) { setTimeout(done, 400 + text.length * 45); return; }
     const u = new SpeechSynthesisUtterance(text); u.pitch = pitch; u.rate = rate;
@@ -340,6 +393,9 @@ try {
     if (voices.length) u.voice = voices[pitch < 1 ? Math.min(1, voices.length - 1) : 0];
     let over = false; const end = () => { if (!over) { over = true; done(); } };
     u.onend = end; u.onerror = end; setTimeout(end, 1500 + text.length * 90);
+    // Each word the voice starts: a burst on the handset's spectrum, louder for longer words.
+    u.onboundary = (ev) => { wordEnergy = Math.min(1, 0.55 + (ev.charLength || 4) * 0.06); wordAt = performance.now(); };
+    u.onstart = () => { wordEnergy = 0.8; wordAt = performance.now(); };
     speechSynthesis.speak(u);
   });
   const line = (who, name, text) => {
@@ -352,7 +408,8 @@ try {
 
   // The talkie button: a click as the button is pressed and another as it is let go.
   const keyClick = new Audio('./sfx/radio-key.mp3'); keyClick.preload = 'auto';
-  const click = () => new Promise((done) => {
+  const click = () => playAnalysed(keyClick, 0.8);
+  const clickPlain = () => new Promise((done) => {
     const a = keyClick.cloneNode(); a.volume = 0.8;
     a.onended = done; a.onerror = done; setTimeout(done, 450);
     a.play().catch(done);

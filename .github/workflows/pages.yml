@@ -40,6 +40,8 @@ jobs:
           sed -i "s#'./pkg/scalia_wasm.js'#'./pkg/scalia_wasm.js?v=$v'#" web/game.js web/debug.js web/models.js
           sed -i "s#scalia_wasm_bg.wasm', import.meta.url#scalia_wasm_bg.wasm?v=$v', import.meta.url#" web/pkg/scalia_wasm.js
           sed -i "s#src=\"./game.js\"#src=\"./game.js?v=$v\"#; s#src=\"./debug.js\"#src=\"./debug.js?v=$v\"#; s#src=\"./models.js\"#src=\"./models.js?v=$v\"#" web/*.html
+          # Images and sounds too: a changed picture under the same name must not come from the cache.
+          sed -i -E "s#\./(img|sfx)/([A-Za-z0-9_.-]+\.(webp|png|mp3))#./\1/\2?v=$v#g" web/*.html web/game.js
           echo "{\"v\":\"$v\"}" > web/version.json
           grep -c "v=$v" web/game.js web/pkg/scalia_wasm.js web/index.html
       - uses: actions/upload-pages-artifact@v3
