@@ -42,13 +42,13 @@ impl System {
                 Body {
                     name: "Aster",
                     orbit_radius_mm: 40_000_000_000,
-                    period_ms: 600_000,
+                    period_ms: 86_400_000, // one orbit per real day
                     phase: Fix::ZERO,
                 },
                 Body {
                     name: "Brine",
                     orbit_radius_mm: 90_000_000_000,
-                    period_ms: 1_800_000,
+                    period_ms: 259_200_000, // three real days
                     phase: Fix::from_ratio(1, 4).unwrap(),
                 },
             ],

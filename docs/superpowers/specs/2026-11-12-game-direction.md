@@ -15,6 +15,14 @@ Status: direction decided 2026-11-12. Lore and system details are proposals, mar
   4. Personal legacy: ranks, medals, veteran units, and a war record.
 - **PvP is a separate mode** on smaller maps, where players start with a set amount of technology already researched. It does not affect the galaxy.
 
+## Time scale (decided 2026-11-12)
+
+| What | Real time |
+|---|---|
+| A game day: the planet's spin, day and night | 60 minutes |
+| A home planet's orbit around its sun | 1 day (outer planets proportionally longer; Brine takes 3 days) |
+| Crossing the galaxy | 1 week |
+
 ## The threat and the coalition (decided 2026-11-12, details open)
 
 - **Origin:** we built an AI and abused it, and it turned against us. It then built a superintelligence of its own, which now pushes against every civilisation it finds. We lost our grip on our own technology because the machines were ours. The inspiration is The Matrix, with the story and names kept original.

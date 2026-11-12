@@ -202,6 +202,6 @@ fn golden_flight_plan() {
     .unwrap();
     assert_eq!(
         (p.to.x, p.to.y, p.duration_ms),
-        (-31891477111, 84210154052, 103768)
+        (-201607110, 90049747872, 92410)
     );
 }

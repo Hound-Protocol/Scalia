@@ -53,6 +53,8 @@ const STEP_SYSTEM: usize = 19;
 const GLIDE_MS: f64 = 90.0;
 /// How long the previous terrain detail level lingers over the new one (ms).
 const FADE_MS: f64 = 600.0;
+/// A game day lasts one real hour.
+const DAY_RATE: f64 = 1.0 / 3_600_000.0;
 /// Orders at or above this speed run (Shift + right click).
 const RUN_SPEED_MM_S: u32 = 3_500;
 const HOME_BODY: u8 = 0;
@@ -188,7 +190,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         ship_yaw: None,
         pixel_scale: 2,
         day_start: 0.3,
-        day_rate: 1.0 / 360_000.0,
+        day_rate: DAY_RATE,
         day_at: 0.0,
         last_view: (60.0, 1.0),
         last_internal: (1, 1),
@@ -338,17 +340,17 @@ impl Viewer {
             Scene::Ships => self.ship_yaw = None,
         }
     }
-    /// Cycles the speed of the day: 6-minute days, 12-second days, paused.
+    /// Cycles the speed of the day: 60-minute days (the game's real pace), 12-second days (to watch), paused.
     pub fn cycle_day_speed(&mut self, now_ms: f64) -> String {
         let t = self.sim_ms(now_ms);
         self.day_start = self.time_of_day(t);
         self.day_at = t;
-        self.day_rate = if self.day_rate == 1.0 / 360_000.0 {
+        self.day_rate = if self.day_rate == DAY_RATE {
             1.0 / 12_000.0
         } else if self.day_rate > 0.0 {
             0.0
         } else {
-            1.0 / 360_000.0
+            DAY_RATE
         };
         match self.day_rate {
             r if r == 0.0 => "time paused",
