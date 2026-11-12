@@ -13,6 +13,14 @@ This replaces the "player is the general of a whole army" framing; the premise a
 - **A huge multiplayer PvE world:** players together reclaim the universe and make contact with other
   civilisations. Cooperation at large scale is the point.
 - **Later:** players request resources, assaults and reinforcements from one another.
+- **Where you appear:** each player starts on the home planet as a single commander. Once players create,
+  capture or rebuild cities, other players may spawn there too.
+- **You manage, you do not puppet.** Troops join your battalion; you run it. You feed them, tend to their needs and
+  keep their morale up. Soldiers who are rested, well fed and free of combat fatigue fight better, and can even be
+  eager for a fight.
+- **Permadeath.** Soldiers can be severely wounded. If you have the equipment, you rescue them and bring them back
+  to the ship to be treated. Depending on the wounds, they may need transport to a field hospital, unless the ship
+  carries the equipment to treat them on board.
 - **Light infantry look:** an olive jumpsuit with chest pockets, a dark hood and mask, dark shoulder and elbow pads,
   one rolled sleeve, a pouch belt, a drop-leg holster and a rear back pouch.
 
