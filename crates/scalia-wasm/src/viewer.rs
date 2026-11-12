@@ -17,6 +17,7 @@ use scalia_core::units::{Composition, Needs, UnitType};
 use scalia_core::system::{BodyId, System, PARK_OFFSET};
 use scalia_core::time::WorldMs;
 use scalia_core::world::World;
+use scalia_render::bend::{globe_point, Bend};
 use scalia_render::gpu::{FrameDesc, Gpu};
 use scalia_render::mesh::{figure, figure_lo, grass_tuft, MeshBuilder};
 use scalia_render::pose::Pose;
@@ -29,16 +30,22 @@ const ARMIES: [(u32, u32); 4] = [(1, 2000), (10, 2000), (50, 2000), (250, 2000)]
 const MAX_DRAWN: usize = 60_000;
 const CELLS: u32 = 64;
 const KM: f64 = 1e6;
-const GROUND_MAX: f32 = 160.0;
+/// Above this view height the ground is drawn from coarse far tiles instead of 1 m chunks.
+const NEAR_MAX: f32 = 160.0;
+/// Above this view height soldiers are too small to draw one by one; groups show as markers.
+const UNITS_MAX: f32 = 2_000.0;
+/// Planet radius in metres (the 4,096 km wrapping map is 2πR around).
+const PLANET_R: f32 = 651_898.6;
+/// The ground view zooms out to the whole globe; past this it hands over to the star system.
+const GROUND_TOP: f32 = 4.0 * PLANET_R;
+/// The view height the "Planet" button jumps to.
+const GLOBE_VIEW: f32 = 2.6 * PLANET_R;
 /// Orders at or above this speed run (Shift + right click).
 const RUN_SPEED_MM_S: u32 = 3_500;
-/// Planet view heights in globe units (the globe has radius 100).
-const PLANET_MIN: f32 = 60.0;
-const PLANET_MAX: f32 = 420.0;
-/// Closest system zoom (thousand km across) and the body the battlefield is on.
-const SYS_NEAR: f32 = 3000.0;
+/// Closest system zoom (thousand km across): the same framing as the ground view's widest, so the hand-over is
+/// seamless. The battlefield is on body 0.
+const SYS_NEAR: f32 = GROUND_TOP / 1e6;
 const HOME_BODY: u8 = 0;
-const GLOBE_R: f32 = 100.0;
 /// The ground scene sits on the demo planet's equator: render chunk (cx, cy) is planet chunk
 /// (cx, cy + EQUATOR_CHUNK). Rendering stays near the origin so f32 positions keep millimetre precision.
 const EQUATOR_CHUNK: i64 = 16_000;
@@ -47,7 +54,6 @@ const EQUATOR_CHUNK: i64 = 16_000;
 enum Scene {
     Ships,
     Ground,
-    Planet,
     System,
 }
 
@@ -80,8 +86,13 @@ pub struct Viewer {
     sys_scale: f32,
     sys_follow: Option<u8>,
     sys_now: WorldMs,
-    planet_view: f32,
-    globe_built: bool,
+    /// Far terrain tiles built so far: (level, tile x, tile y); level k has 2^k m cells.
+    far_tiles: std::collections::HashSet<(u32, i64, i64)>,
+    /// Level of far tiles being drawn.
+    far_level: Option<u32>,
+    planet: Planet,
+    /// The home planet's globe for the system view, oriented to match the ground view it was entered from.
+    home_globe: Vec<([Vec3; 3], f32)>,
     /// Unit globes for the star system view: one per body (its own map), and the sun.
     body_globes: Vec<Vec<([Vec3; 3], f32)>>,
     sun_globe: Vec<([Vec3; 3], f32)>,
@@ -142,8 +153,10 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         sys_scale: 260_000.0,
         sys_follow: None,
         sys_now: WorldMs(0),
-        planet_view: 220.0,
-        globe_built: false,
+        far_tiles: std::collections::HashSet::new(),
+        far_level: None,
+        planet: Planet::demo(42),
+        home_globe: Vec::new(),
         body_globes: vec![globe_triangles(42, 64, 32), globe_triangles(7, 64, 32)],
         sun_globe: sphere_triangles(32, 16, 14.0),
         docked: 0,
@@ -246,7 +259,10 @@ impl Viewer {
     pub fn set_scene(&mut self, name: &str) {
         self.scene = match name {
             "ground" => Scene::Ground,
-            "planet" => Scene::Planet,
+            "planet" => {
+                self.ground_view = GLOBE_VIEW;
+                Scene::Ground
+            }
             "system" => Scene::System,
             _ => Scene::Ships,
         };
@@ -281,7 +297,6 @@ impl Viewer {
                 self.sys_follow = None;
                 self.sys_cam = Some(base + delta);
             }
-            Scene::Planet => self.yaw -= dx / view_h * 3.0,
             Scene::Ships => {
                 let y = self.ship_yaw.unwrap_or(0.0);
                 self.ship_yaw = Some(y - dx / view_h * 3.0);
@@ -303,7 +318,6 @@ impl Viewer {
                 self.sys_cam = None;
                 self.sys_follow = Some(HOME_BODY);
             }
-            Scene::Planet => {}
             Scene::Ships => self.ship_yaw = None,
         }
     }
@@ -414,8 +428,8 @@ impl Viewer {
     pub fn scene_name(&self) -> String {
         match self.scene {
             Scene::Ships => "ships",
+            Scene::Ground if self.ground_view > 100_000.0 => "planet",
             Scene::Ground => "ground",
-            Scene::Planet => "planet",
             Scene::System => "system",
         }
         .into()
@@ -433,24 +447,19 @@ impl Viewer {
         // One continuous zoom: ground -> planet -> star system, and back, by zooming past each limit.
         let out = delta > 0.0;
         match self.scene {
-            Scene::Ground if out && self.ground_view >= GROUND_MAX => {
-                self.scene = Scene::Planet;
-                self.planet_view = PLANET_MIN;
-            }
-            Scene::Ground => self.ground_view = (self.ground_view * k).clamp(8.0, GROUND_MAX),
-            Scene::Planet if out && self.planet_view >= PLANET_MAX => {
+            Scene::Ground if out && self.ground_view >= GROUND_TOP => {
+                // Hand over to the star system with the same framing and the globe turned the same way.
+                let tgt = self.ground_cam.unwrap_or(self.focus);
+                self.home_globe = oriented_globe(&self.planet, tgt.x, tgt.y, 96, 48);
                 self.scene = Scene::System;
                 self.sys_scale = SYS_NEAR;
+                self.sys_cam = None;
                 self.sys_follow = Some(HOME_BODY);
             }
-            Scene::Planet if !out && self.planet_view <= PLANET_MIN => {
-                self.scene = Scene::Ground;
-                self.ground_view = GROUND_MAX;
-            }
-            Scene::Planet => self.planet_view = (self.planet_view * k).clamp(PLANET_MIN, PLANET_MAX),
+            Scene::Ground => self.ground_view = (self.ground_view * k).clamp(8.0, GROUND_TOP),
             Scene::System if !out && self.sys_scale <= SYS_NEAR && self.sys_follow == Some(HOME_BODY) => {
-                self.scene = Scene::Planet;
-                self.planet_view = PLANET_MAX;
+                self.scene = Scene::Ground;
+                self.ground_view = GROUND_TOP;
             }
             Scene::System => self.sys_scale = (self.sys_scale * k).clamp(SYS_NEAR, 500_000.0),
             Scene::Ships => {}
@@ -491,24 +500,27 @@ impl Viewer {
         let (target, yaw, view_height, range, text) = match self.scene {
             Scene::Ships => self.ships_scene(t, &mut meshes, &mut instanced),
             Scene::Ground => self.ground_scene(t, &mut meshes, &mut instanced, &mut decor),
-            Scene::Planet => self.planet_scene(t, &mut meshes),
             Scene::System => self.system_scene(t, &mut meshes),
         };
         self.last_view = (view_height, self.size.1 as f32);
         self.last_cam = (target, yaw, view_height);
         let tod = self.time_of_day(t) as f32;
         let (sky_now, atmosphere) = match self.scene {
-            Scene::System | Scene::Planet => (sky(0.5), false),
-            _ => (sky(tod), true),
+            // Close to home the planet keeps the ground's light, so the hand-over does not flash.
+            Scene::System if self.sys_follow == Some(HOME_BODY) && self.sys_scale < 50.0 => (sky(tod), false),
+            Scene::System => (sky(0.5), false),
+            Scene::Ground => (sky(tod), self.ground_view < 40_000.0),
+            Scene::Ships => (sky(tod), true),
         };
+        let bend = if self.scene == Scene::Ground { self.ground_bend() } else { Bend::FLAT };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere, time_s };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere, time_s, bend };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
         self.last_internal = internal;
-        let time = if matches!(self.scene, Scene::System | Scene::Planet) { String::new() } else { format!(" | {}", clock(tod)) };
+        let time = if self.scene == Scene::System { String::new() } else { format!(" | {}", clock(tod)) };
         format!("{text}{time}")
     }
 }
@@ -680,7 +692,11 @@ impl Viewer {
         let (lx, ly) = ((look.x as f64 * 1000.0) as i64, (look.y as f64 * 1000.0) as i64);
         let view = ViewBox { region: RegionId(1), min_x: lx - r, max_x: lx + r, min_y: ly - r, max_y: ly + r };
         let mut out = std::mem::take(&mut self.derived);
-        derive_visible(&self.world, tick, &view, MAX_DRAWN, &mut out);
+        if self.ground_view <= UNITS_MAX {
+            derive_visible(&self.world, tick, &view, MAX_DRAWN, &mut out);
+        } else {
+            out.clear();
+        }
         let n = out.len();
         // Follow the first group: its formation centre at this moment.
         // Follow the chosen group: its formation centre at this moment.
@@ -723,7 +739,7 @@ impl Viewer {
         let mut vehicles: Vec<DerivedVehicle> = Vec::new();
         for i in 0..self.world.groups.len() as u32 {
             let c = self.group_centre(i, tick);
-            if (c.x - look.x).abs() <= self.ground_view * 1.6 + 120.0 && (c.y - look.y).abs() <= self.ground_view * 1.6 + 120.0 {
+            if self.ground_view <= UNITS_MAX && (c.x - look.x).abs() <= self.ground_view * 1.6 + 120.0 && (c.y - look.y).abs() <= self.ground_view * 1.6 + 120.0 {
                 derive_vehicles(&self.world, GroupId(i), tick, &mut vehicles);
             }
         }
@@ -742,6 +758,9 @@ impl Viewer {
         instanced.push(("ship3".into(), "tanks".into()));
         instanced.push(("ship4".into(), "trucks".into()));
         let look = self.ground_cam.map(|c| (c.x as f64, c.y as f64)).unwrap_or((cx, cy));
+        if self.ground_view > NEAR_MAX {
+            self.far_terrain(Vec3::new(look.0 as f32, look.1 as f32, 0.0), meshes);
+        } else {
         let (gx, gy) = ((look.0 / CELLS as f64).floor() as i64, (look.1 / CELLS as f64).floor() as i64);
         // Enough chunks to cover a wide screen at any yaw; at most a few new ones per frame to avoid hitches.
         let rad = (self.ground_view * 1.3 / CELLS as f32).ceil() as i64 + 1;
@@ -786,6 +805,19 @@ impl Viewer {
             self.gpu.drop_buffer(&format!("grass{},{}", k.0, k.1));
             self.gpu.drop_buffer(&format!("terrain{},{}", k.0, k.1));
         }
+        }
+        if self.ground_view > UNITS_MAX {
+            // Groups as markers, each a few pixels big, sitting on the planet's surface.
+            let pix = self.ground_view / self.size.1.max(1) as f32 * self.pixel_scale as f32;
+            let mut m = MeshBuilder::default();
+            for i in 0..self.world.groups.len() as u32 {
+                let c = self.group_centre(i, tick);
+                let h = self.surface_m(c.x, c.y);
+                m.diamond([c.x, c.y, h + pix * 3.0], pix * 2.0, if self.selected == Some(i) { 14.0 } else { 9.0 });
+            }
+            self.gpu.upload("markers", m.bytes());
+            meshes.push("markers".into());
+        }
         // Full figure close up, the lighter one when zoomed out.
         let fig = if self.ground_view <= 70.0 { "figure" } else { "figure_lo" };
         instanced.push((fig.into(), "soldiers".into()));
@@ -804,34 +836,74 @@ impl Viewer {
         }
         self.focus = Vec3::new(cx as f32, cy as f32, 0.0);
         let mut target = self.ground_cam.unwrap_or(self.focus);
-        target.z = self.height_at(target.x, target.y);
+        // Zoomed far out the camera sinks to the planet's centre, so the globe ends up in the middle of the screen.
+        let sink = smooth_log(self.ground_view, 400_000.0, 2_400_000.0);
+        let ground_z = if self.ground_view <= NEAR_MAX { self.height_at(target.x, target.y) } else { self.surface_m(target.x, target.y) };
+        target.z = ground_z + (-PLANET_R - ground_z) * sink;
         let mode = if self.ground_cam.is_some() { "free camera (F follows)".to_string() } else { format!("following group {lead}") };
         let sel = match self.selected { Some(g) => format!(", group {g} selected"), None => String::new() };
         let total: u64 = (0..self.world.groups.len()).map(|i| self.world.groups.people(scalia_core::groups::GroupId(i as u32)) as u64).sum();
         let text = format!("Ground: {n} of {total} soldiers drawn, {mode}{sel}, {:.0} m view", self.ground_view);
-        (target, self.yaw, self.ground_view, 600.0, text)
+        let range = 600f32.max(self.ground_view * 2.0 + PLANET_R * 2.0 * self.ground_bend().t);
+        (target, self.yaw, self.ground_view, range, text)
     }
 
-    /// The demo planet as a globe, with a marker where the battlefield is.
-    fn build_globe(&mut self) {
-        let mut m = MeshBuilder::default();
-        for (tri, col) in globe_triangles(42, 192, 96) {
-            m.tri((tri[0] * GLOBE_R).to_array(), (tri[1] * GLOBE_R).to_array(), (tri[2] * GLOBE_R).to_array(), col);
-        }
-        let site = Vec3::new(1.0, 0.0, 0.0) * GLOBE_R * 1.03;
-        m.diamond(site.to_array(), 2.0, 9.0);
-        self.gpu.upload("globe", m.bytes());
-        self.globe_built = true;
+    /// How far the map is bent into a globe at the current zoom: flat below 30 km, a full globe from 1,500 km.
+    fn ground_bend(&self) -> Bend {
+        let tg = self.ground_cam.unwrap_or(self.focus);
+        Bend { tx: tg.x, ty: tg.y, radius: PLANET_R, t: smooth_log(self.ground_view, 30_000.0, 1_500_000.0) }
     }
 
-    fn planet_scene(&mut self, t: f64, meshes: &mut Vec<String>) -> (Vec3, f32, f32, f32, String) {
-        if !self.globe_built {
-            self.build_globe();
+    /// Planet surface height in metres at a ground-scene point (sea level where the ground is under water).
+    fn surface_m(&self, x: f32, y: f32) -> f32 {
+        let (xm, ym) = ((x as f64 * 1000.0) as i64, ((y as f64 + HALF_DEPTH as f64) * 1000.0) as i64);
+        (self.planet.height_mm(xm, ym.clamp(0, self.planet.depth_mm() - 1)) as f32 / 1000.0).max(0.0)
+    }
+
+    /// Coarse terrain for zoomed-out views: square tiles of 64 x 64 cells, each cell 2^level metres, enough of
+    /// them to cover the screen (or the whole planet once it is a globe). A level is drawn only when all its
+    /// tiles are ready; until then the previous level stays, so zooming never shows holes.
+    fn far_terrain(&mut self, tg: Vec3, meshes: &mut Vec<String>) {
+        let want = ((self.ground_view / 100.0).log2().ceil() as i32).clamp(1, 20) as u32;
+        let needed = |level: u32| -> Vec<(u32, i64, i64)> {
+            let ts = 64.0 * (1u64 << level) as f32;
+            let cov = (1.6 * self.ground_view).min(PLANET_R * std::f32::consts::PI);
+            let (x0, x1) = (((tg.x - cov) / ts).floor() as i64, ((tg.x + cov) / ts).floor() as i64);
+            let (y0, y1) = (((tg.y - cov).max(-HALF_DEPTH) / ts).floor() as i64, ((tg.y + cov).min(HALF_DEPTH - 1.0) / ts).floor() as i64);
+            (y0..=y1).flat_map(|y| (x0..=x1).map(move |x| (level, x, y))).collect()
+        };
+        let tiles = needed(want);
+        let mut budget = 6;
+        let mut missing = false;
+        for &key in &tiles {
+            if !self.far_tiles.contains(&key) {
+                if budget == 0 {
+                    missing = true;
+                    continue;
+                }
+                budget -= 1;
+                let m = far_tile_mesh(&self.planet, key.0, key.1, key.2);
+                self.gpu.upload(&format!("far{},{},{}", key.0, key.1, key.2), m.bytes());
+                self.far_tiles.insert(key);
+            }
         }
-        meshes.push("globe".into());
-        let spin = self.yaw + (t / 40_000.0) as f32;
-        let text = "Planet: 4,096 km around; zoom in for the ground, out for the star system".to_string();
-        (Vec3::ZERO, spin, self.planet_view, 1000.0, text)
+        if !missing {
+            self.far_level = Some(want);
+        }
+        let level = if missing { self.far_level.unwrap_or(want) } else { want };
+        let draw = if level == want { tiles } else { needed(level) };
+        for key in &draw {
+            if self.far_tiles.contains(key) {
+                meshes.push(format!("far{},{},{}", key.0, key.1, key.2));
+            }
+        }
+        // Forget tiles of other levels, and ones far off screen.
+        let keep: std::collections::HashSet<_> = draw.iter().copied().chain(needed(want)).collect();
+        let stale: Vec<_> = self.far_tiles.iter().copied().filter(|k| !keep.contains(k)).collect();
+        for k in stale {
+            self.far_tiles.remove(&k);
+            self.gpu.drop_buffer(&format!("far{},{},{}", k.0, k.1, k.2));
+        }
     }
 
     fn system_scene(&mut self, t: f64, meshes: &mut Vec<String>) -> (Vec3, f32, f32, f32, String) {
@@ -843,8 +915,11 @@ impl Viewer {
             let p = self.system.body_pos(BodyId(i as u8), now).expect("known body");
             m.ring([0.0, 0.0], (b.orbit_radius_mm as f64 / KM) as f32, (pix * 0.6).max(20.0), 128, 3.0);
             let c = Vec3::new((p.x as f64 / KM) as f32, (p.y as f64 / KM) as f32, 0.0);
-            let r = (pix * 5.0).max(800.0);
-            for (tri, col) in &self.body_globes[i] {
+            let r = pix * 5.0;
+            let globe = if i == HOME_BODY as usize && !self.home_globe.is_empty() { &self.home_globe } else { &self.body_globes[i] };
+            // True size when close, a visible marker size when far.
+            let r = r.max(PLANET_R / 1e6 * if i == HOME_BODY as usize { 1.0 } else { 0.0 });
+            for (tri, col) in globe {
                 m.tri((tri[0] * r + c).to_array(), (tri[1] * r + c).to_array(), (tri[2] * r + c).to_array(), *col);
             }
         }
@@ -947,6 +1022,98 @@ fn sphere_triangles(cols: usize, rows: usize, col: f32) -> Vec<([Vec3; 3], f32)>
     for j in 0..rows {
         for i in 0..cols {
             let (a, b, c, d) = (vert(i, j), vert(i + 1, j), vert(i + 1, j + 1), vert(i, j + 1));
+            out.push(([a, b, c], col));
+            out.push(([a, c, d], col));
+        }
+    }
+    out
+}
+
+/// Half the planet map's north-south extent in metres: the poles are at y = +-HALF_DEPTH in the ground scene.
+const HALF_DEPTH: f32 = (EQUATOR_CHUNK * CELLS as i64) as f32;
+
+/// Smoothstep on a log scale: 0 at or below `a`, 1 at or above `b`.
+fn smooth_log(v: f32, a: f32, b: f32) -> f32 {
+    let x = ((v.ln() - a.ln()) / (b.ln() - a.ln())).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// Colour of a patch of ground from its mean height (metres) when seen from far away.
+fn far_colour(planet: &Planet, mean_m: f32, y_planet_mm: i64, cell_m: f32) -> f32 {
+    if planet.is_ice(y_planet_mm) {
+        15.0
+    } else if mean_m < 0.0 {
+        6.0
+    } else if cell_m < 256.0 {
+        // The same contour bands as the close-up chunks.
+        10.0 + (mean_m * 8.0 / cell_m).floor().rem_euclid(4.0)
+    } else if mean_m < 1200.0 {
+        11.0
+    } else if mean_m < 2500.0 {
+        12.0
+    } else if mean_m < 4000.0 {
+        13.0
+    } else {
+        2.0
+    }
+}
+
+/// One far terrain tile: 64 x 64 cells of 2^level metres, seas flat at sea level.
+fn far_tile_mesh(planet: &Planet, level: u32, ix: i64, iy: i64) -> MeshBuilder {
+    const N: usize = 64;
+    let cell = (1u64 << level) as f32;
+    let (x0, y0) = (ix as f64 * N as f64 * cell as f64, iy as f64 * N as f64 * cell as f64);
+    let depth = planet.depth_mm();
+    let ymm = |y: f64| (((y + HALF_DEPTH as f64) * 1000.0) as i64).clamp(0, depth - 1);
+    let mut h = vec![0f32; (N + 1) * (N + 1)];
+    for j in 0..=N {
+        for i in 0..=N {
+            let (x, y) = (x0 + i as f64 * cell as f64, y0 + j as f64 * cell as f64);
+            let (xm, ym) = ((x * 1000.0) as i64, ymm(y));
+            let mm = if cell < 256.0 { planet.height_mm(xm, ym) } else { planet.coarse_height_mm(xm, ym) };
+            h[j * (N + 1) + i] = mm as f32 / 1000.0;
+        }
+    }
+    let mut m = MeshBuilder::default();
+    let p = |i: usize, j: usize| {
+        let y = (y0 + j as f64 * cell as f64).clamp(-HALF_DEPTH as f64, HALF_DEPTH as f64);
+        [(x0 + i as f64 * cell as f64) as f32, y as f32, h[j * (N + 1) + i].max(0.0)]
+    };
+    for j in 0..N {
+        for i in 0..N {
+            let mean = (h[j * (N + 1) + i] + h[j * (N + 1) + i + 1] + h[(j + 1) * (N + 1) + i] + h[(j + 1) * (N + 1) + i + 1]) / 4.0;
+            let col = far_colour(planet, mean, ymm(y0 + (j as f64 + 0.5) * cell as f64), cell);
+            let (a, b, c, d) = (p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1));
+            m.tri(a, b, c, col);
+            m.tri(a, c, d, col);
+        }
+    }
+    m
+}
+
+/// The home planet as a unit globe around its centre, turned exactly as the ground view's fully bent map is when
+/// the camera target is at (tx, ty): the target faces up (towards the camera), north along +y.
+fn oriented_globe(planet: &Planet, tx: f32, ty: f32, cols: usize, rows: usize) -> Vec<([Vec3; 3], f32)> {
+    let w = std::f32::consts::TAU * PLANET_R;
+    let depth = planet.depth_mm();
+    let vert = |i: usize, j: usize| -> (Vec3, f32) {
+        let x = tx + (i as f32 / cols as f32 - 0.5) * w;
+        let y = -HALF_DEPTH + j as f32 / rows as f32 * 2.0 * HALF_DEPTH;
+        let ym = (((y as f64 + HALF_DEPTH as f64) * 1000.0) as i64).clamp(0, depth - 1);
+        let hm = planet.coarse_height_mm((x as f64 * 1000.0) as i64, ym) as f32 / 1000.0;
+        let p = globe_point(x - tx, y - ty, hm.max(0.0), ty / PLANET_R, PLANET_R) + Vec3::new(0.0, 0.0, PLANET_R);
+        (p / PLANET_R, hm)
+    };
+    let mut out = Vec::with_capacity(cols * rows * 2);
+    for j in 0..rows {
+        for i in 0..cols {
+            let (a, ha) = vert(i, j);
+            let (b, hb) = vert(i + 1, j);
+            let (c, hc) = vert(i + 1, j + 1);
+            let (d, hd) = vert(i, j + 1);
+            let y = -HALF_DEPTH + (j as f32 + 0.5) / rows as f32 * 2.0 * HALF_DEPTH;
+            let ym = (((y as f64 + HALF_DEPTH as f64) * 1000.0) as i64).clamp(0, depth - 1);
+            let col = far_colour(planet, (ha + hb + hc + hd) / 4.0, ym, 1e9);
             out.push(([a, b, c], col));
             out.push(([a, c, d], col));
         }

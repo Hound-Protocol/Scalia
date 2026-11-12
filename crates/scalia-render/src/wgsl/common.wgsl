@@ -1,4 +1,4 @@
-struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f };
+struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f, bend: vec4f };
 
 // Instances: a = (x, y, z, palette for the body), b = (heading, phase offset, steps per second, pose id),
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
@@ -134,4 +134,23 @@ fn palette_index(c: f32, a: vec4f) -> u32 {
   // Negative codes and swaying parts (grass) take the instance colour.
   let instance_colour = c < 0.0 || floor(c / 16.0) == 5.0;
   return u32(max(select(c - 16.0 * floor(c / 16.0), a.w, instance_colour), 0.0));
+}
+
+// Bends the flat wrapping map into a globe (port of `bend.rs`): b = (target x, target y, planet radius, amount 0..1).
+fn bend_point(p: vec3f, b: vec4f) -> vec3f {
+  if (b.w <= 0.0) { return p; }
+  let r = b.z;
+  let rr = r + p.z;
+  let lon = (p.x - b.x) / r;
+  let dlat = (p.y - b.y) / r;
+  let lat0 = b.y / r;
+  let lat = lat0 + dlat;
+  let shl = sin(lon * 0.5);
+  let sha = sin(dlat * 0.5);
+  let cl = cos(lat);
+  let vers = 2.0 * shl * shl;
+  let curved = vec3f(rr * cl * sin(lon) + b.x,
+                     rr * (sin(dlat) + cl * sin(lat0) * vers) + b.y,
+                     p.z - rr * (2.0 * sha * sha + cl * cos(lat0) * vers));
+  return mix(p, curved, min(b.w, 1.0));
 }
