@@ -251,7 +251,8 @@ try {
     }
     const [x, y] = onMap(() => v.map_point(px, py));
     const acts = JSON.parse(v.actions_at(x, y));
-    const grid = `${String(Math.round(x / 10) & 0xffff).padStart(4, '0')} ${String(Math.round(y / 10) & 0xffff).padStart(4, '0')}`;
+    const g4 = (m) => String(((Math.round(m / 10) % 10000) + 10000) % 10000).padStart(4, '0'); // 10 m squares
+    const grid = `${g4(x)} ${g4(y)}`;
     actionsBox.innerHTML = `<div class="head">${onMap(() => v.selection_name())} → grid ${grid}</div>` + acts.map((a) =>
       `<button data-id="${a.id}" ${a.ok ? '' : 'disabled'} title="${a.reason}">${a.label}${a.ok ? '' : ` <small>${a.reason}</small>`}</button>`).join('') +
       '<button class="cancel">Cancel</button>';
