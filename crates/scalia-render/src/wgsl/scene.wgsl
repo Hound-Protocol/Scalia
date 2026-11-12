@@ -15,17 +15,24 @@ fn vnoise(p: vec2f) -> f32 {
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var sm: texture_depth_2d;
 @group(0) @binding(2) var smp: sampler_comparison;
-struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32 };
+struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32, @location(2) @interpolate(flat) fade: f32 };
 @vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) ia: vec4f, @location(3) ib: vec4f, @location(4) ic: vec4f) -> VO {
   let w = bend_point(animate(p, c, ia, ib, ic, u.time.x), u.bend);
   var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
   o.ci = palette_index(c, ia);
+  // Instance c.w: how far this draw has dissolved (0 solid, 1 gone); used to cross-fade terrain detail levels.
+  o.fade = ic.w;
   return o;
 }
 struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
 @fragment fn fs(i: VO) -> FO {
   var n = normalize(cross(dpdx(i.w), dpdy(i.w)));
   if (dot(n, u.vdir.xyz) < 0.0) { n = -n; }
+  let bayer = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+  let px = vec2u(i.pos.xy) % vec2u(4u, 4u);
+  let threshold = (bayer[px.y * 4u + px.x] + 0.5) / 16.0;
+  // Dissolve with the same 4x4 pattern as the shading: the pixel-art cross-fade.
+  if (i.fade > 0.0 && threshold < i.fade) { discard; }
   // Hard sun shadow: one comparison tap into the light-space depth map.
   let lp = u.lm * vec4f(i.w, 1.0);
   let uv = vec2f(lp.x * 0.5 + 0.5, 0.5 - lp.y * 0.5);
@@ -43,8 +50,6 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   }
   let l = max(dot(n, u.light.xyz), 0.0) * shade;
   // Four light steps with a 4x4 ordered dither between them: the hand-shaded pixel-art look.
-  let bayer = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
-  let px = vec2u(i.pos.xy) % vec2u(4u, 4u);
   // Space views (time.w = 1) light smoothly: dithering a faceted globe makes moire rings.
   let q = select(floor(l * 4.0 + bayer[px.y * 4u + px.x] / 16.0) / 4.0, l, u.time.w > 0.5);
   var o: FO;

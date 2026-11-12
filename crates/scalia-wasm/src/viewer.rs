@@ -38,13 +38,23 @@ const UNITS_MAX: f32 = 2_000.0;
 const PLANET_R: f32 = 651_898.6;
 /// The ground view zooms out to the whole globe; past this it hands over to the star system.
 const GROUND_TOP: f32 = 4.0 * PLANET_R;
-/// The view height the "Planet" button jumps to.
-const GLOBE_VIEW: f32 = 2.6 * PLANET_R;
+/// The zoom ladder: view heights in metres, one wheel notch per step. Up to GROUND_TOP the ground scene draws
+/// them (squad, platoon, company, battlefield, region, globe); above it the star system does (orbit to system).
+const LADDER: [f32; 21] = [
+    12.0, 25.0, 50.0, 100.0, 160.0, 400.0, 1_000.0, 3_000.0, 10_000.0, 30_000.0, 100_000.0, 300_000.0, 800_000.0,
+    1_700_000.0, GROUND_TOP, 1e7, 5e7, 2.5e8, 1.2e9, 6e9, 1.5e11,
+];
+/// Ladder steps the scene buttons jump to.
+const STEP_GROUND: usize = 2;
+const STEP_PLANET: usize = 13;
+const STEP_HANDOFF: usize = 14;
+const STEP_SYSTEM: usize = 19;
+/// How quickly the camera glides to the next step (time constant, ms).
+const GLIDE_MS: f64 = 90.0;
+/// How long a terrain detail change dissolves (ms).
+const FADE_MS: f64 = 400.0;
 /// Orders at or above this speed run (Shift + right click).
 const RUN_SPEED_MM_S: u32 = 3_500;
-/// Closest system zoom (thousand km across): the same framing as the ground view's widest, so the hand-over is
-/// seamless. The battlefield is on body 0.
-const SYS_NEAR: f32 = GROUND_TOP / 1e6;
 const HOME_BODY: u8 = 0;
 /// The ground scene sits on the demo planet's equator: render chunk (cx, cy) is planet chunk
 /// (cx, cy + EQUATOR_CHUNK). Rendering stays near the origin so f32 positions keep millimetre precision.
@@ -90,6 +100,12 @@ pub struct Viewer {
     far_tiles: std::collections::HashSet<(u32, i64, i64)>,
     /// Level of far tiles being drawn.
     far_level: Option<u32>,
+    /// Cross-fade from a previous far level: (level, start of the fade in ms).
+    far_fade: Option<(u32, f64)>,
+    /// Zoom: the ladder step aimed at and the view height (metres) the camera is gliding through.
+    zoom_step: usize,
+    zoom_m: f32,
+    last_frame_ms: f64,
     planet: Planet,
     /// The home planet's globe for the system view, oriented to match the ground view it was entered from.
     home_globe: Vec<([Vec3; 3], f32)>,
@@ -155,6 +171,10 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         sys_now: WorldMs(0),
         far_tiles: std::collections::HashSet::new(),
         far_level: None,
+        far_fade: None,
+        zoom_step: STEP_GROUND,
+        zoom_m: LADDER[STEP_GROUND],
+        last_frame_ms: 0.0,
         planet: Planet::demo(42),
         home_globe: Vec::new(),
         body_globes: vec![globe_triangles(42, 64, 32), globe_triangles(7, 64, 32)],
@@ -258,12 +278,9 @@ fn bytes(v: &[f32]) -> &[u8] {
 impl Viewer {
     pub fn set_scene(&mut self, name: &str) {
         self.scene = match name {
-            "ground" => Scene::Ground,
-            "planet" => {
-                self.ground_view = GLOBE_VIEW;
-                Scene::Ground
-            }
-            "system" => Scene::System,
+            "ground" => self.jump(STEP_GROUND),
+            "planet" => self.jump(STEP_PLANET),
+            "system" => self.jump(STEP_SYSTEM),
             _ => Scene::Ships,
         };
     }
@@ -441,29 +458,14 @@ impl Viewer {
         self.size = (w.max(1), h.max(1));
         self.gpu.resize(self.size.0, self.size.1);
     }
-    /// Mouse wheel: positive zooms out.
+    /// Mouse wheel: one call is one step of the zoom ladder (positive zooms out); the camera glides there.
     pub fn wheel(&mut self, delta: f64) {
-        let k = if delta > 0.0 { 1.15 } else { 1.0 / 1.15 };
-        // One continuous zoom: ground -> planet -> star system, and back, by zooming past each limit.
-        let out = delta > 0.0;
-        match self.scene {
-            Scene::Ground if out && self.ground_view >= GROUND_TOP => {
-                // Hand over to the star system with the same framing and the globe turned the same way.
-                let tgt = self.ground_cam.unwrap_or(self.focus);
-                self.home_globe = oriented_globe(&self.planet, tgt.x, tgt.y, 96, 48);
-                self.scene = Scene::System;
-                self.sys_scale = SYS_NEAR;
-                self.sys_cam = None;
-                self.sys_follow = Some(HOME_BODY);
-            }
-            Scene::Ground => self.ground_view = (self.ground_view * k).clamp(8.0, GROUND_TOP),
-            Scene::System if !out && self.sys_scale <= SYS_NEAR && self.sys_follow == Some(HOME_BODY) => {
-                self.scene = Scene::Ground;
-                self.ground_view = GROUND_TOP;
-            }
-            Scene::System => self.sys_scale = (self.sys_scale * k).clamp(SYS_NEAR, 500_000.0),
-            Scene::Ships => {}
+        if self.scene == Scene::Ships || delta == 0.0 {
+            return;
         }
+        // Away from home the ground is not under the camera: the system's closest step is as far in as it goes.
+        let lowest = if self.scene == Scene::System && self.sys_follow != Some(HOME_BODY) { STEP_HANDOFF + 1 } else { 0 };
+        self.zoom_step = if delta > 0.0 { (self.zoom_step + 1).min(LADDER.len() - 1) } else { self.zoom_step.saturating_sub(1).max(lowest) };
     }
     pub fn flying(&self) -> bool {
         self.flight.is_some()
@@ -496,6 +498,7 @@ impl Viewer {
         }
         let ps = if self.full { 1 } else { self.pixel_scale };
         let internal = ((self.size.0 / ps).max(1), (self.size.1 / ps).max(1));
+        self.glide(now_ms);
         let (mut meshes, mut instanced, mut decor) = (Vec::new(), Vec::new(), Vec::new());
         let (target, yaw, view_height, range, text) = match self.scene {
             Scene::Ships => self.ships_scene(t, &mut meshes, &mut instanced),
@@ -765,7 +768,7 @@ impl Viewer {
         instanced.push(("ship4".into(), "trucks".into()));
         let look = self.ground_cam.map(|c| (c.x as f64, c.y as f64)).unwrap_or((cx, cy));
         if self.ground_view > NEAR_MAX {
-            self.far_terrain(Vec3::new(look.0 as f32, look.1 as f32, 0.0), meshes);
+            self.far_terrain(Vec3::new(look.0 as f32, look.1 as f32, 0.0), t, meshes, instanced);
         } else {
         let (gx, gy) = ((look.0 / CELLS as f64).floor() as i64, (look.1 / CELLS as f64).floor() as i64);
         // Enough chunks to cover a wide screen at any yaw; at most a few new ones per frame to avoid hitches.
@@ -869,12 +872,13 @@ impl Viewer {
     /// Coarse terrain for zoomed-out views: square tiles of 64 x 64 cells, each cell 2^level metres, enough of
     /// them to cover the screen (or the whole planet once it is a globe). A level is drawn only when all its
     /// tiles are ready; until then the previous level stays, so zooming never shows holes.
-    fn far_terrain(&mut self, tg: Vec3, meshes: &mut Vec<String>) {
+    fn far_terrain(&mut self, tg: Vec3, now: f64, _meshes: &mut Vec<String>, instanced: &mut Vec<(String, String)>) {
         // Cells about five screen pixels wide: any finer and the globe shimmers as the camera moves.
         let want = ((self.ground_view / 64.0).log2().ceil() as i32).clamp(1, 20) as u32;
+        let view = self.ground_view;
         let needed = |level: u32| -> Vec<(u32, i64, i64)> {
             let ts = 64.0 * (1u64 << level) as f32;
-            let cov = (1.6 * self.ground_view).min(PLANET_R * std::f32::consts::PI);
+            let cov = (1.6 * view).min(PLANET_R * std::f32::consts::PI);
             let (x0, x1) = (((tg.x - cov) / ts).floor() as i64, ((tg.x + cov) / ts).floor() as i64);
             let (y0, y1) = (((tg.y - cov).max(-HALF_DEPTH) / ts).floor() as i64, ((tg.y + cov).min(HALF_DEPTH - 1.0) / ts).floor() as i64);
             (y0..=y1).flat_map(|y| (x0..=x1).map(move |x| (level, x, y))).collect()
@@ -894,22 +898,99 @@ impl Viewer {
                 self.far_tiles.insert(key);
             }
         }
-        if !missing {
+        // A new level takes over only when complete, dissolving in over the old one.
+        if !missing && self.far_level != Some(want) {
+            if let Some(old) = self.far_level {
+                self.far_fade = Some((old, now));
+            }
             self.far_level = Some(want);
         }
-        let level = if missing { self.far_level.unwrap_or(want) } else { want };
-        let draw = if level == want { tiles } else { needed(level) };
-        for key in &draw {
+        let shown = self.far_level.unwrap_or(want);
+        let fade = self.far_fade.and_then(|(old, start)| {
+            let p = ((now - start) / FADE_MS) as f32;
+            (p < 1.0 && old != shown).then_some((old, p))
+        });
+        if fade.is_none() {
+            self.far_fade = None;
+        }
+        let p = fade.map_or(1.0, |f| f.1);
+        let inst = |w: f32| bytes(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, w]).to_vec();
+        self.gpu.upload_instances("fade_in", &inst(1.0 - p));
+        self.gpu.upload_instances("fade_out", &inst(p));
+        let new_tiles = if shown == want { tiles.clone() } else { needed(shown) };
+        for key in &new_tiles {
             if self.far_tiles.contains(key) {
-                meshes.push(format!("far{},{},{}", key.0, key.1, key.2));
+                instanced.push((format!("far{},{},{}", key.0, key.1, key.2), "fade_in".into()));
+            }
+        }
+        let mut keep: std::collections::HashSet<_> = new_tiles.iter().copied().chain(tiles).collect();
+        if let Some((old, _)) = fade {
+            for key in needed(old) {
+                if self.far_tiles.contains(&key) {
+                    instanced.push((format!("far{},{},{}", key.0, key.1, key.2), "fade_out".into()));
+                }
+                keep.insert(key);
             }
         }
         // Forget tiles of other levels, and ones far off screen.
-        let keep: std::collections::HashSet<_> = draw.iter().copied().chain(needed(want)).collect();
         let stale: Vec<_> = self.far_tiles.iter().copied().filter(|k| !keep.contains(k)).collect();
         for k in stale {
             self.far_tiles.remove(&k);
             self.gpu.drop_buffer(&format!("far{},{},{}", k.0, k.1, k.2));
+        }
+    }
+
+    /// Jumps straight to a ladder step (scene buttons) and returns the scene that shows it.
+    fn jump(&mut self, step: usize) -> Scene {
+        self.zoom_step = step;
+        self.zoom_m = LADDER[step];
+        if step > STEP_HANDOFF {
+            let tgt = self.ground_cam.unwrap_or(self.focus);
+            self.home_globe = oriented_globe(&self.planet, tgt.x, tgt.y, 96, 48);
+            self.sys_follow = Some(HOME_BODY);
+            self.sys_cam = None;
+            self.sys_scale = self.zoom_m / 1e6;
+            Scene::System
+        } else {
+            self.ground_view = self.zoom_m;
+            Scene::Ground
+        }
+    }
+
+    /// Glides the camera towards the aimed ladder step (exponentially, on a log scale) and hands the view between
+    /// the ground and the star system at GROUND_TOP, where both frame the planet identically.
+    fn glide(&mut self, now_ms: f64) {
+        let dt = (now_ms - self.last_frame_ms).clamp(0.0, 100.0);
+        self.last_frame_ms = now_ms;
+        if self.scene == Scene::Ships {
+            return;
+        }
+        let goal = LADDER[self.zoom_step];
+        let k = 1.0 - (-dt / GLIDE_MS).exp();
+        let (a, b) = (self.zoom_m.ln(), goal.ln());
+        let mut z = (a + (b - a) * k as f32).exp();
+        if (z / goal - 1.0).abs() < 1e-3 {
+            z = goal;
+        }
+        if self.scene == Scene::System && self.sys_follow != Some(HOME_BODY) {
+            z = z.max(GROUND_TOP * 1.001);
+        }
+        self.zoom_m = z;
+        if z <= GROUND_TOP {
+            if self.scene == Scene::System {
+                self.scene = Scene::Ground;
+            }
+            self.ground_view = z;
+        } else {
+            if self.scene == Scene::Ground {
+                // Hand over to the star system with the same framing and the globe turned the same way.
+                let tgt = self.ground_cam.unwrap_or(self.focus);
+                self.home_globe = oriented_globe(&self.planet, tgt.x, tgt.y, 96, 48);
+                self.scene = Scene::System;
+                self.sys_cam = None;
+                self.sys_follow = Some(HOME_BODY);
+            }
+            self.sys_scale = z / 1e6;
         }
     }
 

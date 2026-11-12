@@ -75,7 +75,23 @@ try {
   if (store.get('scalia.help') === '0') help.classList.add('hidden');
 
   // Mouse: wheel zooms, drag pans.
-  canvas.addEventListener('wheel', (e) => { e.preventDefault(); v.wheel(e.deltaY); }, { passive: false });
+  // One mouse-wheel notch (about 100 px) is one zoom step; trackpads send many small deltas, summed into steps.
+  let wheelSum = 0, wheelAt = 0;
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.timeStamp - wheelAt > 300) wheelSum = 0; // a pause forgets leftovers
+    wheelAt = e.timeStamp;
+    const px = e.deltaMode === 1 ? e.deltaY * 33.4 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
+    // The first movement of a gesture steps at once, so a single notch never feels dead.
+    const fresh = wheelSum === 0;
+    wheelSum += px;
+    const STEP = 100;
+    if (fresh && Math.abs(wheelSum) < STEP) { v.wheel(Math.sign(wheelSum)); wheelSum = Math.sign(wheelSum) * -STEP + wheelSum; }
+    while (Math.abs(wheelSum) >= STEP) {
+      v.wheel(Math.sign(wheelSum));
+      wheelSum -= Math.sign(wheelSum) * STEP;
+    }
+  }, { passive: false });
   // Left button: drag pans, a click without movement selects. Right button: order the selected group.
   let drag = null, moved = 0;
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
