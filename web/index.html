@@ -165,6 +165,13 @@
   #home .apps { display: flex; gap: 14px; }
   #home .apps button { flex: 1; padding: 22px 10px; background: #18212b; color: #dfe7f0; border: 1px solid #34414f; border-radius: 8px; font: inherit; font-size: 15px; letter-spacing: 0.1em; cursor: pointer; }
   #home .apps button:hover { background: #22303f; }
+  #tablet .set-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #1f2830; font: 13px/1 ui-monospace, monospace; letter-spacing: .06em; color: #c9d3dc; }
+  #tablet .set-row span { width: 160px; text-transform: uppercase; color: #7f8b98; }
+  #tablet .set-row input[type=range] { width: 260px; accent-color: #d4a72c; }
+  #tablet .set-row b { width: 48px; color: #d4a72c; }
+  #tablet .toggle { background: #1a2129; color: #7f8b98; border: 1px solid #2c3742; padding: 6px 16px; font: 12px ui-monospace, monospace; letter-spacing: .1em; cursor: pointer; }
+  #tablet .toggle.on { color: #0f1317; background: #d4a72c; border-color: #d4a72c; }
+  #tablet .set-note { color: #56616c; font-size: 12px; margin-top: 18px; }
   #tablet .screen.page { background: #0f1317; pointer-events: auto; padding: 16px 20px; overflow: hidden auto; box-sizing: border-box; }
   #tablet .hint { position: absolute; right: 10px; bottom: 8px; color: #9fb3c8; background: rgba(8, 12, 16, 0.7); padding: 4px 8px; border-radius: 4px; }
   #roster table { border-collapse: collapse; width: 100%; }
@@ -259,7 +266,7 @@
   <button class="hw" data-hw="map" style="top:34.15%" title="Map"></button>
   <button class="hw" data-hw="roster" style="top:42.60%" title="Roster"></button>
   <button class="hw" data-hw="comms" style="top:50.90%" title="Comms hub"></button>
-  <button class="hw" data-hw="manner" style="top:59.35%" title="Calm / aggressive"></button>
+  <button class="hw" data-hw="settings" style="top:59.35%" title="Settings"></button>
   <div class="display">
   <div class="menu">
     <span class="brand">COMMAND</span>
@@ -269,13 +276,17 @@
     <button data-page="comms">COMMS HUB</button>
     <span class="status" id="pdaStatus"></span>
     <span class="spacer"></span>
-    <button id="mCalm" class="on" title="Orders are carried out calmly">CALM</button>
-    <button id="mAggr" title="Orders are carried out aggressively">AGGRESSIVE</button>
     <button id="tabletClose" title="Tab">CLOSE ✕</button>
   </div>
   <div class="screen page" id="home"></div>
   <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div class="hint">click a unit, then click a place to give it an order · Shift + drag: box · drag/WASD: pan · wheel: zoom</div></div>
   <div class="screen page" id="roster" hidden></div>
+  <div class="screen page" id="settings" hidden>
+    <h3>Settings</h3>
+    <div class="set-row"><span>Music</span><button id="musicOn" class="toggle on">ON</button></div>
+    <div class="set-row"><span>Music volume</span><input id="musicVol" type="range" min="0" max="100" value="50"><b id="musicVolTxt">50%</b></div>
+    <p class="set-note">Placeholder track: Operation Vance.</p>
+  </div>
   <div class="screen page" id="comms" hidden>
     <h3>Communications Hub</h3>
     <div class="channels">

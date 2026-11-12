@@ -15,6 +15,28 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
 };
 
+// Background music (placeholder track): starts at 50% once the player enters the game, loops, and can be turned
+// off or turned down on the tablet's settings page. The choice is remembered.
+const music = (() => {
+  const el = new Audio('./sfx/music-vance.mp3');
+  el.loop = true;
+  el.preload = 'auto';
+  const saved = parseFloat(store.get('music.vol'));
+  const m = {
+    on: store.get('music.on') !== '0',
+    vol: Number.isFinite(saved) ? Math.min(Math.max(saved, 0), 1) : 0.5,
+    started: false,
+    start() { m.started = true; m.apply(); },
+    apply() {
+      el.volume = m.vol;
+      if (m.on && m.started && m.vol > 0) el.play().catch(() => { /* blocked until a click */ });
+      else el.pause();
+    },
+    set(on, vol) { m.on = on; m.vol = vol; store.set('music.on', on ? '1' : '0'); store.set('music.vol', String(vol)); m.apply(); },
+  };
+  return m;
+})();
+
 try {
   await init();
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser.');
@@ -171,8 +193,8 @@ try {
   // the roster lists the units, the comms hub is a placeholder for talking to other commanders.
   let tabletUp = false, page = 'home';
   const tablet = $('tablet');
-  const PAGE_NAME = { home: 'HOME', map: 'MAP', roster: 'ROSTER', comms: 'COMMS HUB' };
-  const pdaStatus = () => { $('pdaStatus').innerHTML = `${PAGE_NAME[page] || ''} · ORDERS <b>${manner === 1 ? 'AGGRESSIVE' : 'CALM'}</b>`; };
+  const PAGE_NAME = { home: 'HOME', map: 'MAP', roster: 'ROSTER', comms: 'COMMS HUB', settings: 'SETTINGS' };
+  const pdaStatus = () => { $('pdaStatus').innerHTML = PAGE_NAME[page] || ''; };
   const setPage = (p) => {
     page = p;
     for (const b of tablet.querySelectorAll('[data-page]')) b.classList.toggle('on', b.dataset.page === p);
@@ -182,8 +204,9 @@ try {
     if (p === 'map') sizeMap();
     $('roster').hidden = p !== 'roster';
     $('comms').hidden = p !== 'comms';
+    $('settings').hidden = p !== 'settings';
     if (p === 'roster') drawRoster();
-    try { pdaStatus(); } catch (_) { /* before the manner exists */ }
+    pdaStatus();
   };
   // Tab: the commander raises the tablet. The camera rises above him, holds, then dives onto his hands (the
   // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
@@ -248,7 +271,6 @@ try {
   for (const b of tablet.querySelectorAll('.hw')) b.addEventListener('click', () => {
     const k = b.dataset.hw;
     if (k === 'close') setTablet(false);
-    else if (k === 'manner') setManner(manner === 0 ? 1 : 0);
     else setPage(k);
   });
   // Home: the overview the tablet opens on.
@@ -472,13 +494,12 @@ try {
   const radioOrder = (id, label, x, y, grid) => {
     const who = v.selection_name(), first = who.split(',')[0];
     const [verb, ing] = VERB[id] || VERB[0];
-    const how = manner === 1 ? ', aggressive' : ', calm';
     if (onAir) flash('net busy: your order goes out next');
     net.push(async () => {
       $('radioLog').innerHTML = '';
       talkingTo('TALKING TO', who);
       v.set_radio(true); await keyUp();
-      const order = `${who}, ${verb} grid ${grid}${id === 0 ? '' : how}. Over.`;
+      const order = `${who}, ${verb} grid ${grid}. Over.`;
       await transmit('tx', 'cmd', 'Commander', order, { pitch: 1.0, rate: 1.05 });
       await new Promise((r) => setTimeout(r, 500 + Math.random() * 700)); // the unit keys up
       const reply = `${first} copies, ${ing} grid ${grid}. Out.`;
@@ -512,10 +533,15 @@ try {
   };
   for (const b of tablet.querySelectorAll('[data-page]')) b.addEventListener('click', () => setPage(b.dataset.page));
   $('tabletClose').addEventListener('click', () => setTablet(false));
-  let manner = 0;
-  const setManner = (m) => { manner = m; pdaStatus(); v.set_manner(m); $('mCalm').classList.toggle('on', m === 0); $('mAggr').classList.toggle('on', m === 1); };
-  $('mCalm').addEventListener('click', () => setManner(0));
-  $('mAggr').addEventListener('click', () => setManner(1));
+  // Settings: music on/off and volume, kept between visits.
+  const musicOn = $('musicOn'), musicVol = $('musicVol');
+  const showMusic = () => {
+    musicOn.classList.toggle('on', music.on); musicOn.textContent = music.on ? 'ON' : 'OFF';
+    musicVol.value = Math.round(music.vol * 100); $('musicVolTxt').textContent = `${musicVol.value}%`;
+  };
+  musicOn.addEventListener('click', () => { music.set(!music.on, music.vol); showMusic(); });
+  musicVol.addEventListener('input', () => { music.set(music.on, musicVol.value / 100); showMusic(); });
+  showMusic();
   // Pages keep up with the units while open: redrawn only when something changed, and never while a picker is open
   // (a redraw would close it under the mouse).
   let rosterSeen = '';
@@ -665,7 +691,7 @@ const UPDATE = '__UPDATE__';
   const box = document.getElementById('proto');
   if (!box) return;
   document.getElementById('protoVer').textContent = UPDATE.startsWith('__') ? 'LOCAL BUILD' : `UPDATE ${UPDATE}`;
-  const go = () => { box.hidden = true; removeEventListener('keydown', key, true); };
+  const go = () => { box.hidden = true; removeEventListener('keydown', key, true); music.start(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
   const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };
   document.getElementById('protoGo').addEventListener('click', go);

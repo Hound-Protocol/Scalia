@@ -24,3 +24,6 @@
   [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
   Source: https://sketchfab.com/3d-models/walkie-talkie-88d0177b7801448397b69fcd81220c3a
   Changes: rendered face-on with its display blanked for the game's live radio screen (`web/img/walkie.webp`).
+
+## Music
+- "Operation Vance" — temporary placeholder track supplied by the project lead (`web/sfx/music-vance.mp3`).

@@ -187,6 +187,8 @@ pub struct Viewer {
     arrive_stance: HashMap<u32, Pose>,
     /// The commander's gait phase (0..1; -1 standing).
     cmd_phase: f32,
+    /// The commander's instance record from this frame's main pass (the map draws him from it, solid).
+    cmd_rec: [f32; 12],
     /// How much of the screen's height the tablet close-up covers (set by the page).
     tablet_fit: f32,
     /// The tablet cinematic: opening (true) or closing, when it began (ms), and the camera it started from.
@@ -327,6 +329,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         agent_anim: HashMap::new(),
         arrive_stance: HashMap::new(),
         cmd_phase: -1.0,
+        cmd_rec: [0.0; 12],
         tablet_fit: 0.6,
         cine: None,
         chain: Command::default(),
@@ -1593,7 +1596,15 @@ impl Viewer {
             self.build_base();
         }
         if self.map_pass {
-            instanced.push(("commander".into(), "commander_at".into()));
+            // On the map he is always solid (the main view dissolves him behind the tablet), with a red
+            // "you are here" ring and pointer that stay a few pixels big at any zoom.
+            let mut me = self.cmd_rec;
+            me[11] = 0.0;
+            self.gpu.upload_instances("commander_map_at", bytes(&me));
+            instanced.push(("commander".into(), "commander_map_at".into()));
+            let pix = self.ground_view / self.size.1.max(1) as f32 * self.pixel_scale as f32;
+            self.gpu.upload("you_marker", you_marker([me[0], me[1], me[2]], pix).bytes());
+            meshes.push("you_marker".into());
         } else {
             self.update_commander(t, ts, instanced);
         }
@@ -1806,6 +1817,7 @@ impl Viewer {
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
         let rec = [rx, ry, z, 9.0, self.cmd_heading, 0.37, steps, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
+        self.cmd_rec = rec;
         let mut me = rec;
         me[11] = self.cine_fade(self.frame_ms);
         self.gpu.upload_instances("commander_at", bytes(&me));
@@ -2442,4 +2454,22 @@ struct MapCam {
     size: (u32, u32),
     last_frame_ms: f64,
     last_internal: (u32, u32),
+}
+
+/// The commander's map marker: a red ring on the ground around him and a diamond above his head, sized in
+/// screen pixels (`pix` metres per pixel) but never smaller than him.
+fn you_marker(at: [f32; 3], pix: f32) -> MeshBuilder {
+    const RED: f32 = 5.0;
+    let mut m = MeshBuilder::default();
+    let r = (pix * 10.0).max(1.0);
+    let w = (pix * 1.6).max(0.12);
+    let z = at[2] + 0.05;
+    let n = 32;
+    let q = |a: f32, rr: f32| [at[0] + a.cos() * rr, at[1] + a.sin() * rr, z];
+    for i in 0..n {
+        let (a0, a1) = (i as f32 / n as f32 * std::f32::consts::TAU, (i + 1) as f32 / n as f32 * std::f32::consts::TAU);
+        m.quad(q(a0, r - w), q(a1, r - w), q(a1, r + w), q(a0, r + w), RED);
+    }
+    m.diamond([at[0], at[1], at[2] + 2.2 + pix * 8.0], (pix * 4.0).max(0.3), RED);
+    m
 }
