@@ -54,5 +54,5 @@ fn grass_tuft_is_tiny_and_sways() {
     assert!(g.vertices.len() / 3 <= 6);
     assert!(g.vertices.iter().all(|v| part_of(v.color) == Part::Sway));
     let top = g.vertices.iter().map(|v| v.pos[2]).fold(0.0, f32::max);
-    assert!((0.2..=0.5).contains(&top));
+    assert!((0.3..=0.6).contains(&top));
 }

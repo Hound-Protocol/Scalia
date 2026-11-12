@@ -191,7 +191,7 @@ fn grass_for(hm: &[f32], cx: i64, cy: i64) -> Vec<f32> {
             }
             let fx = ((h >> 8) & 0xff) as f32 / 255.0;
             let fy = ((h >> 16) & 0xff) as f32 / 255.0;
-            let colour = [10.0, 11.0, 12.0][((h >> 24) % 3) as usize];
+            let colour = [7.0, 12.0, 11.0, 12.0][((h >> 24) % 4) as usize];
             let z0 = bilinear(hm, n, i, j, fx, fy);
             let x = cx as f32 * CELLS as f32 + i as f32 + fx;
             let y = cy as f32 * CELLS as f32 + j as f32 + fy;

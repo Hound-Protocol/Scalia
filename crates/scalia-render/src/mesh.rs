@@ -117,14 +117,15 @@ pub fn figure() -> MeshBuilder {
     f
 }
 
-/// A grass tuft: five thin blades fanning out, 0.25-0.4 m tall, all swaying. The instance picks the colour.
+/// A grass tuft: five blades fanning out, 0.35-0.55 m tall and wide enough to cover a pixel at
+/// battlefield zoom, all swaying. The instance picks the colour.
 pub fn grass_tuft() -> MeshBuilder {
     let mut g = MeshBuilder::default();
-    let blades = [(0.0f32, 0.38f32), (1.3, 0.3), (2.5, 0.34), (3.8, 0.27), (5.0, 0.32)];
+    let blades = [(0.0f32, 0.55f32), (1.3, 0.42), (2.5, 0.48), (3.8, 0.36), (5.0, 0.45)];
     for (a, h) in blades {
         let (s, c) = a.sin_cos();
-        let (dx, dy) = (c * 0.03, s * 0.03);
-        let tip = [s * 0.08, -c * 0.08, h];
+        let (dx, dy) = (c * 0.1, s * 0.1);
+        let tip = [s * 0.15, -c * 0.15, h];
         g.tri([-dx, -dy, 0.0], [dx, dy, 0.0], tip, code(0, Part::Sway));
     }
     g
