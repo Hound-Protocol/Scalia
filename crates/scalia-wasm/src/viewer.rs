@@ -1398,10 +1398,11 @@ impl Viewer {
         for j in (0..CELLS as usize).step_by(step) {
             for i in (0..CELLS as usize).step_by(step) {
                 let (a, b, c, d) = (p(i, j), p(i + step, j), p(i + step, j + step), p(i, j + step));
-                // Contour bands from the quad's mean height, a fixed BAND_M apart: wide enough that neighbouring
-                // quads share a colour, so seen from afar the ground never breaks into a checkerboard.
+                // Contour bands from the quad's mean height, BAND_M apart, only at the close-up step: further out a
+                // band is narrower than a pixel on any slope and the bands interfere into rings. There the ground
+                // takes its broad height zone instead.
                 let mean = (a[2] + b[2] + c[2] + d[2]) / 4.0;
-                let col = 10.0 + (mean / BAND_M).floor().rem_euclid(4.0);
+                let col = if step <= 2 { 10.0 + (mean / BAND_M).floor().rem_euclid(4.0) } else { zone_colour(mean) };
                 m.tri(a, b, c, col);
                 m.tri(a, c, d, col);
             }
@@ -2223,10 +2224,15 @@ fn far_colour(planet: &Planet, mean_m: f32, y_planet_mm: i64, cell_m: f32) -> f3
         15.0
     } else if mean_m < 0.0 {
         6.0
-    } else if cell_m < 16.0 {
-        // The same contour bands as the close-up chunks, so the hand-over at 160 m is seamless.
-        10.0 + (mean_m / BAND_M).floor().rem_euclid(4.0)
-    } else if mean_m < 150.0 {
+    } else {
+        let _ = cell_m;
+        zone_colour(mean_m)
+    }
+}
+
+/// Broad height zones: the ground's colour wherever contour bands would be finer than a pixel.
+fn zone_colour(mean_m: f32) -> f32 {
+    if mean_m < 150.0 {
         // Broad height zones further out: bands every few metres turned into stripes on every slope.
         10.0
     } else if mean_m < 450.0 {

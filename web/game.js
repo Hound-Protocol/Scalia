@@ -256,11 +256,12 @@ try {
       const tick = (t) => {
         if (run !== bootRun || !tabletShown) { term.className = 'term'; done(); return; }
         const k = (t - t0) / 1000;
-        // Lines arrive over 0.7 s (the kernel's in a rush, systemd a touch slower); the command is typed after.
-        const n = Math.min(lines.length, Math.floor(lines.length * Math.min(k / 0.7, 1) ** 0.8) + 1);
-        const cmd = 'startx cmdui'.slice(0, Math.max(0, Math.floor((k - 0.72) / 0.016)));
-        term.innerHTML = lines.slice(0, n).join('\n') + (n === lines.length ? esc(cmd) : '') + '<span class="cur"></span>';
-        if (k < 1.0) { requestAnimationFrame(tick); return; }
+        // Every line shows, from the first: they arrive over 0.75 s, the command is typed, and the finished screen
+        // holds a moment before the UI takes over.
+        const n = Math.min(lines.length, Math.floor(lines.length * Math.min(k / 0.75, 1)) + 1);
+        const cmd = 'startx cmdui'.slice(0, Math.max(0, Math.floor((k - 0.78) / 0.018)));
+        term.innerHTML = '<div class="log">' + lines.slice(0, n).join('\n') + (n === lines.length ? esc(cmd) : '') + '<span class="cur"></span></div>';
+        if (k < 1.2) { requestAnimationFrame(tick); return; }
         term.className = 'term off';
         setTimeout(() => { if (run === bootRun) term.className = 'term'; }, 170);
         done();
