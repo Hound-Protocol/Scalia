@@ -107,3 +107,19 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
   are gone. Golden hashes changed: height `11417373502760628042`, chunk `9283842558404932274` (`Planet::demo(7).chunk(3, 1000, 16)`).
 - Terrain chunks are about twice as fast (lattice-corner cache, 64-bit fractions; bit-identical results).
 - Verified in Chrome on an RTX 3050 Ti (Vulkan): 60 fps on all three scenes.
+- **Mood:** day and night (`scalia-render::sky`, tested): moving sun and moon, warm low light, blue night,
+  shadows follow the light; 4 light steps with ordered dithering; distance haze and sky background; vignette;
+  drifting cloud shadows by day. T cycles the day speed (6-minute day, 12-second day, paused).
+- **Soldier model:** 108 triangles: legs, arms, torso in the unit colour, helmet, pack, rifle. Walk cycle on the GPU
+  (legs and free arm swing, rifle arm sways); soldiers face their march; shadows animate too. Ships > "Soldier".
+- **Scale:** soldiers are derived only near the camera; terrain uses coarser meshes when zoomed out; N cycles the army
+  (2k, 20k, 100k, 500k). Measured in Chrome on the RTX 3050 Ti: 500,000 simulated, 4,000 drawn at 60 m: 60 fps, 1.0 ms
+  CPU per frame; 12,000 drawn at 160 m: 60 fps, 2.4 ms.
+- **Planet view and one zoom:** the demo planet drawn as a globe (equirectangular, relief, polar ice, battlefield marker);
+  zooming past a limit moves ground -> planet -> star system and back. The jump from 160 m to the globe is still a cut:
+  a truly continuous zoom needs regional terrain levels between them.
+- **Frame pacing:** L cycles a frame cap (off, 60, 30); the HUD shows fps and CPU ms per frame. Everything moves by time,
+  so a lower frame rate only drops frames.
+
+Open items: sea level and the heightmap design (the noise is almost all above 0 m, so the globe has no oceans);
+regional terrain levels for a seamless zoom; GPU timing in the HUD; vehicles on the ground; a fresh review of the branch.
