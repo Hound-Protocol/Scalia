@@ -319,7 +319,12 @@ impl Viewer {
         match self.scene {
             Scene::Ground => {
                 let base = self.ground_cam.unwrap_or(self.ground_focus());
-                self.ground_cam = Some(base + delta);
+                let mut c = base + delta;
+                // North and south end at the poles; east and west wrap around the planet.
+                c.y = c.y.clamp(-HALF_DEPTH + 1.0, HALF_DEPTH - 1.0);
+                let w = std::f32::consts::TAU * PLANET_R;
+                c.x = (c.x + w / 2.0).rem_euclid(w) - w / 2.0;
+                self.ground_cam = Some(c);
             }
             Scene::System => {
                 let base = self.sys_cam.unwrap_or(self.sys_follow_pos());
