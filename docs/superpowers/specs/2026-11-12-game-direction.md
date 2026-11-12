@@ -5,7 +5,7 @@ Status: direction decided 2026-11-12. Lore and system details are proposals, mar
 ## Decisions from the project lead
 
 - **The game is mostly about war, and logistics is just as central.** Logistics is **fully physical**: every shell, fuel can and ration is produced, loaded and moved by trucks, trains and ships that you can watch, and that the enemy can cut off. Without supply, units stop fighting.
-- **The shared galaxy is PvE.** Everyone fights a **spreading AI threat**, in the spirit of Helldivers 2. It is the thing that broke civilisation and made people lose their grip on their own technology.
+- **The shared galaxy is PvE.** Everyone fights a **spreading AI threat**, in the spirit of Helldivers 2, together with a growing coalition of species. See the threat and coalition section below.
 - **Defeating the threat matters more than any PvP.** The game does **not** reward PvP in the galaxy. It rewards **cooperation**, and working together moves the whole galaxy forward.
 - **Persistence:** imperiums, territory, infrastructure and veterans persist.
 - **The galactic mode has four long-term goals, all of them:**
@@ -15,15 +15,17 @@ Status: direction decided 2026-11-12. Lore and system details are proposals, mar
   4. Personal legacy: ranks, medals, veteran units, and a war record.
 - **PvP is a separate mode** on smaller maps, where players start with a set amount of technology already researched. It does not affect the galaxy.
 
-## Proposal: the threat and the lost technology (to decide)
+## The threat and the coalition (decided 2026-11-12, details open)
 
-- **Premise:** humanity's networked machines were turned against it. Call the event "the Severance"; the name is a placeholder. The threat lives in the old technology itself.
-- **The dilemma, Helldivers-style:**
-  - Recovering lost technology is the main way to progress.
-  - But powerful old technology attracts the threat, or can be corrupted by it.
-  - Every advance is a risk the galaxy takes together.
-- **The threat spreads across the galaxy map,** world by world. It counter-attacks where logistics are weak and grows where nobody holds the line. The war map is live and shared, with "major orders" that the whole player base works on.
-- **Recovered technology is shared.** Liberating a world can recover a technology. That unlocks it for everyone, and the contributors are named on it.
+- **Origin:** we built an AI and abused it, and it turned against us. It then built a superintelligence of its own, which now pushes against every civilisation it finds. We lost our grip on our own technology because the machines were ours. The inspiration is The Matrix, with the story and names kept original.
+- **Not only humanity:** other species are also threatened, and none of them can beat it alone. They have to unite, the way Mass Effect brings its races together.
+- **The galactic arc:**
+  - Players start as humanity.
+  - Together, the player base must make contact with the other species and bring them into the coalition. Their names are still open.
+  - Each species that joins brings its worlds, its technology and its ways of fighting into the shared war.
+  - First contact and each species joining are the big collective events of the galaxy, driven by "major orders".
+- **The technology dilemma still applies:** recovering old technology is how the galaxy progresses, but powerful old machines attract the enemy, or can be turned by it.
+- **Open:** whether the AI can ever be bargained with, or only beaten. The abuse gives it a motive, and that could make a strong late-game moral choice for the whole galaxy.
 
 ## Proposal: rewarding cooperation, not PvP (to design)
 
