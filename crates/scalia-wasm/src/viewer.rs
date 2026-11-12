@@ -54,9 +54,11 @@ fn pose_of(s: Stance) -> Pose {
     }
 }
 
-// The tablet cinematic: a straight zoom from the player's view onto the tablet in the commander's hands (same
-// angle and rotation); closing zooms straight back out.
-const CINE_OPEN_MS: f64 = 650.0;
+// The tablet cinematic: a quick swing round behind the commander (same zoom and angle), a short hold, then a swift
+// zoom onto the tablet in his hands; closing zooms straight back out.
+const CINE_TURN_MS: f64 = 250.0;
+const CINE_HOLD_MS: f64 = 300.0;
+const CINE_OPEN_MS: f64 = 950.0;
 const CINE_CLOSE_MS: f64 = 500.0;
 /// View height (metres) close on the hands.
 const CINE_CLOSE_H: f32 = 0.5;
@@ -1802,7 +1804,7 @@ impl Viewer {
     fn cine_fade(&self, now_ms: f64) -> f32 {
         let s = |a: f64, b: f64, x: f64| { let k = ((x - a) / (b - a)).clamp(0.0, 1.0) as f32; k * k * (3.0 - 2.0 * k) };
         match self.cine {
-            Some((true, start, _)) => s(CINE_OPEN_MS - 450.0, CINE_OPEN_MS - 120.0, now_ms - start),
+            Some((true, start, _)) => s(CINE_OPEN_MS - 280.0, CINE_OPEN_MS - 80.0, now_ms - start),
             Some((false, start, _)) => 1.0 - s(0.0, CINE_CLOSE_MS * 0.45, now_ms - start),
             None => 0.0,
         }
@@ -1818,19 +1820,31 @@ impl Viewer {
         // Over his shoulder: the camera looks the way he faces, at the tablet in his hands.
         let at = scalia_render::pose::TABLET_AT;
         let hands = base + Vec3::new(at.x * h.cos() - at.y * h.sin(), at.x * h.sin() + at.y * h.cos(), at.z);
-        // Same angle and rotation as the player's view: only the zoom and the point it looks at change.
-        let close = (hands, from.1, CINE_CLOSE_H, from.3);
+        // Behind him, looking the way he faces: first the camera swings round at the player's zoom, then dives.
+        let behind = (base + Vec3::Z, h, from.2, from.3);
+        let close = (hands, h, CINE_CLOSE_H, from.3);
         let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * (3.0 - 2.0 * x) };
         let mix = |a: (Vec3, f32, f32, f32), b: (Vec3, f32, f32, f32), w: f32| {
+            let mut dy = b.1 - a.1;
+            while dy > std::f32::consts::PI { dy -= std::f32::consts::TAU; }
+            while dy < -std::f32::consts::PI { dy += std::f32::consts::TAU; }
             // Zoom eases in log space, so it keeps an even pace from far to near.
             let vh = (a.2.ln() + (b.2.ln() - a.2.ln()) * w).exp();
-            (a.0 + (b.0 - a.0) * w, a.1, vh, a.3 + (b.3 - a.3) * w)
+            (a.0 + (b.0 - a.0) * w, a.1 + dy * w, vh, a.3 + (b.3 - a.3) * w)
         };
         let e = now_ms - start;
         if opening {
-            Some(if e < CINE_OPEN_MS { mix(from, close, ease(e / CINE_OPEN_MS)) } else { close })
+            Some(if e < CINE_TURN_MS {
+                mix(from, behind, ease(e / CINE_TURN_MS))
+            } else if e < CINE_TURN_MS + CINE_HOLD_MS {
+                behind
+            } else if e < CINE_OPEN_MS {
+                mix(behind, close, ease((e - CINE_TURN_MS - CINE_HOLD_MS) / (CINE_OPEN_MS - CINE_TURN_MS - CINE_HOLD_MS)))
+            } else {
+                close
+            })
         } else if e < CINE_CLOSE_MS {
-            Some(mix(from, (live.0, from.1, live.2, el), ease(e / CINE_CLOSE_MS)))
+            Some(mix(from, (live.0, live.1, live.2, el), ease(e / CINE_CLOSE_MS)))
         } else {
             self.cine = None;
             None

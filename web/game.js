@@ -186,7 +186,11 @@ try {
   // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
   let tabletShown = false;
   const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
-  const DIVE_AT_MS = 0; // the zoom starts at once
+  const sfx = (src, vol) => { const a = new Audio(src); a.preload = 'auto'; a.volume = vol; return () => { const b = a.cloneNode(); b.volume = vol; b.play().catch(() => {}); }; };
+  const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-close.mp3', 0.7), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
+  // Every button on the tablet, on screen or on the device, taps.
+  tablet.addEventListener('click', (e) => { if (e.target.closest('button')) pdaTap(); }, true);
+  const DIVE_AT_MS = 550; // matches the viewer's CINE_TURN_MS + CINE_HOLD_MS: the zoom begins
   let diveSound = 0;
   const setTablet = (up) => {
     if (up === tabletUp) return;
@@ -199,6 +203,7 @@ try {
       diveSound = setTimeout(() => { if (tabletUp) { const a = whoosh.cloneNode(); a.volume = 0.7; a.play().catch(() => {}); } }, DIVE_AT_MS);
       return;
     }
+    if (tabletShown) pdaClose();
     tabletShown = false;
     document.body.classList.remove('pda');
     tablet.classList.remove('up');
@@ -220,6 +225,7 @@ try {
   const syncTablet = () => {
     if (tabletUp && !tabletShown && v.tablet_view() === 2) {
       tabletShown = true;
+      pdaOpen();
       document.body.classList.add('pda');
       tablet.classList.add('up');
       setPage(page);

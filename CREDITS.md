@@ -17,3 +17,6 @@
   `assets/source/military_rugged_pda.glb`.
 - **Grass footsteps** (`web/sfx/steps-grass.mp3`): "joentnt walk on grass 1 291984", supplied by the project lead
   (Pixabay sound library naming).
+- **UI sounds** (`web/sfx/pda-open.mp3`, `pda-close.mp3` reversed from it, `pda-tap.mp3`): "juniorsoundays ui sound 10
+  527836" and "ui sound 39 527833"; **dive swoosh** (`web/sfx/dive-whoosh.mp3`): "stereogenicstudio swish swoosh woosh
+  sfx 25 357177"; all supplied by the project lead (Pixabay sound library naming).
