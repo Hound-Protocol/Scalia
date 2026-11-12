@@ -1,4 +1,4 @@
-struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f, bend: vec4f, bend2: vec4f };
+struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f, bend: vec4f, bend2: vec4f };
 
 // Instances: a = (x, y, z, palette for the body), b = (heading, phase offset, steps per second, pose id),
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
@@ -113,7 +113,7 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
 
 fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32) -> vec3f {
   var q = v;
-  let part = select(u32(floor(c / 16.0)), 8u, c < 0.0);
+  let part = select(u32(floor(c / 32.0)), 8u, c < 0.0);
   if (part == 5u) {
     // Wind: a slow gust that travels across the field, scaled by height so the roots stay put.
     let gust = sin(time * 1.7 + a.x * 0.35 + a.y * 0.21 + b.y * 6.28) * 0.5 + 0.5;
@@ -132,8 +132,9 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32) -> vec3f {
 
 fn palette_index(c: f32, a: vec4f) -> u32 {
   // Negative codes and swaying parts (grass) take the instance colour.
-  let instance_colour = c < 0.0 || floor(c / 16.0) == 5.0;
-  return u32(max(select(c - 16.0 * floor(c / 16.0), a.w, instance_colour), 0.0));
+  // Negative codes, swaying parts (grass) and palette 31 on any part take the instance colour.
+  let instance_colour = c < 0.0 || floor(c / 32.0) == 5.0 || (c - 32.0 * floor(c / 32.0)) == 31.0;
+  return u32(max(select(c - 32.0 * floor(c / 32.0), a.w, instance_colour), 0.0));
 }
 
 // Bends the flat wrapping map into a globe (port of `bend.rs`): b = (target x, target y, planet radius, amount

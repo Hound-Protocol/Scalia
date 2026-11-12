@@ -51,11 +51,10 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
     shade = shade * (1.0 - 0.55 * smoothstep(0.52, 0.62, cloud));
   }
   let l = max(dot(n, u.light.xyz), 0.0) * shade;
-  // Four light steps with a 4x4 ordered dither between them: the hand-shaded pixel-art look.
-  // Space views (time.w = 1) light smoothly: dithering a faceted globe makes moire rings.
-  let q = select(floor(l * 4.0 + bayer[px.y * 4u + px.x] / 16.0) / 4.0, l, u.time.w > 0.5);
+  // Smooth flat shading (the art reference): each facet lit by its own angle, no stepped dither.
+  let q = l;
   var o: FO;
-  o.c = vec4f(u.pal[i.ci & 15u].rgb * (u.ambient.rgb + u.light_col.rgb * q), 1.0);
+  o.c = vec4f(u.pal[i.ci & 31u].rgb * (u.ambient.rgb + u.light_col.rgb * q), 1.0);
   o.n = vec4f(n * 0.5 + 0.5, 1.0);
   return o;
 }

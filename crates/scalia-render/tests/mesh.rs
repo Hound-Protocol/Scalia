@@ -21,11 +21,11 @@ fn diamond_and_ring_counts() {
 #[test]
 fn figure_is_small_and_uses_instance_colour_for_the_torso() {
     let f = figure();
-    assert!(f.vertices.len() / 3 <= 420, "{} triangles", f.vertices.len() / 3);
-    assert!(f.vertices.iter().any(|v| v.color < 0.0));
+    assert!(f.vertices.len() / 3 <= 1200, "{} triangles", f.vertices.len() / 3);
+    assert!(f.vertices.iter().any(|v| scalia_render::mesh::palette_of(v.color) == scalia_render::mesh::TEAM as u32), "team colour somewhere");
     let top = f.vertices.iter().map(|v| v.pos[2]).fold(0.0, f32::max);
     assert!((1.6..=1.9).contains(&top), "height {top}");
-    assert!(scalia_render::mesh::figure_lo().vertices.len() / 3 <= 140);
+    assert!(scalia_render::mesh::figure_lo().vertices.len() / 3 <= 160);
 }
 
 #[test]
@@ -46,12 +46,15 @@ fn figure_has_two_legs_and_two_arms_that_can_swing() {
 fn part_encoding_round_trips() {
     assert_eq!(part_of(-1.0), Part::Torso);
     assert_eq!(part_of(3.0), Part::Body);
-    assert_eq!(part_of(3.0 + 16.0 * 2.0), Part::RightThigh);
-    assert_eq!(part_of(16.0 * 9.0), Part::Rifle);
-    assert_eq!(part_of(5.0 + 16.0 * 4.0), Part::RightArm);
-    assert_eq!(part_of(16.0 * 10.0), Part::Head);
-    assert_eq!(part_of(2.0 + 16.0 * 11.0), Part::LeftForearm);
-    assert_eq!(part_of(16.0 * 12.0), Part::RightForearm);
+    assert_eq!(part_of(3.0 + 32.0 * 2.0), Part::RightThigh);
+    assert_eq!(part_of(32.0 * 9.0), Part::Rifle);
+    assert_eq!(part_of(5.0 + 32.0 * 4.0), Part::RightArm);
+    assert_eq!(part_of(32.0 * 10.0), Part::Head);
+    assert_eq!(part_of(2.0 + 32.0 * 11.0), Part::LeftForearm);
+    assert_eq!(part_of(32.0 * 12.0), Part::RightForearm);
+    // Palette indices above 15 (the gear colours) survive the round trip too.
+    assert_eq!(part_of(scalia_render::mesh::code(27, Part::Torso)), Part::Torso);
+    assert_eq!(scalia_render::mesh::palette_of(scalia_render::mesh::code(27, Part::Torso)), 27);
 }
 
 #[test]
@@ -66,7 +69,7 @@ fn grass_tuft_is_tiny_and_sways() {
 #[test]
 fn figure_carries_gear_and_forearms_hang_from_the_elbows() {
     let f = figure();
-    assert!(f.vertices.len() / 3 >= 300, "only {} triangles", f.vertices.len() / 3);
+    assert!(f.vertices.len() / 3 >= 700, "only {} triangles", f.vertices.len() / 3);
     let span = |p: Part| {
         let z = f.vertices.iter().filter(|v| part_of(v.color) == p).map(|v| v.pos[2]);
         (z.clone().fold(f32::MAX, f32::min), z.fold(f32::MIN, f32::max))
@@ -85,5 +88,5 @@ fn far_figure_is_a_handful_of_triangles_with_the_same_height() {
     assert!(f.vertices.len() / 3 <= 24, "{} triangles", f.vertices.len() / 3);
     let top = f.vertices.iter().map(|v| v.pos[2]).fold(0.0, f32::max);
     assert!((1.6..=1.8).contains(&top), "height {top}");
-    assert!(f.vertices.iter().any(|v| v.color < 0.0), "body takes the instance colour");
+    assert!(f.vertices.iter().any(|v| scalia_render::mesh::palette_of(v.color) == scalia_render::mesh::TEAM as u32), "helmet takes the team colour");
 }
