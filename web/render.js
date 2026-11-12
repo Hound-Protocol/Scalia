@@ -6,9 +6,15 @@ const PALETTE = [
   [0.40, 0.52, 0.28], [0.48, 0.44, 0.30], [0.95, 0.80, 0.35], [0.85, 0.85, 0.90],
 ];
 
+/** Direction towards the sun; shared by the shading and the shadow camera. */
+const SUN = (() => { const v = [0.4, -0.3, 0.85], l = Math.hypot(...v); return v.map((x) => x / l); })();
+
 const SCENE_WGSL = `
-struct U { m: mat4x4f, vdir: vec4f, pal: array<vec4f, 16> };
+const SUN = vec3f(${SUN.join(', ')});
+struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16> };
 @group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var sm: texture_depth_2d;
+@group(0) @binding(2) var smp: sampler_comparison;
 struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32 };
 // Instance attribute: xyz offset and a palette index in w, used where the mesh colour is negative.
 @vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) inst: vec4f) -> VO {
@@ -21,7 +27,13 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
 @fragment fn fs(i: VO) -> FO {
   var n = normalize(cross(dpdx(i.w), dpdy(i.w)));
   if (dot(n, u.vdir.xyz) < 0.0) { n = -n; }
-  let l = max(dot(n, normalize(vec3f(0.4, -0.3, 0.85))), 0.0);
+  // Hard sun shadow: one comparison tap into the light-space depth map.
+  let lp = u.lm * vec4f(i.w, 1.0);
+  let uv = vec2f(lp.x * 0.5 + 0.5, 0.5 - lp.y * 0.5);
+  let lit = textureSampleCompareLevel(sm, smp, uv, lp.z - 0.0015);
+  let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && lp.z < 1.0;
+  let sun = select(1.0, lit, inside);
+  let l = max(dot(n, SUN), 0.0) * sun;
   let q = floor(l * 4.0 + 0.5) / 4.0;
   var o: FO;
   o.c = vec4f(u.pal[i.ci & 15u].rgb * (0.45 + 0.55 * q), 1.0);
@@ -31,6 +43,14 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
 
 // Upscale pass: fetches the low-resolution texel under each screen pixel (shifted by the camera
 // snap error), darkens object silhouettes from depth and lightens convex edges from normals.
+// Depth-only pass from the sun.
+const SHADOW_WGSL = `
+struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16> };
+@group(0) @binding(0) var<uniform> u: U;
+@vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) inst: vec4f) -> @builtin(position) vec4f {
+  return u.lm * vec4f(p + inst.xyz, 1.0);
+}`;
+
 const BLIT_WGSL = `
 struct B { off: vec2f, size: vec2f, thresh: f32, outline: f32, pad: vec2f };
 @group(0) @binding(0) var col: texture_2d<f32>;
@@ -102,6 +122,30 @@ export function snapTarget(target, yaw, texel) {
   return { target: t, ex: er / texel, ey: -eu / texel };
 }
 
+const SHADOW_SIZE = 2048;
+
+/** Orthographic sun camera centred on `target`, `half` metres each way, texel-snapped so shadows do not shimmer. */
+export function lightMatrix(target, half, range) {
+  const f = SUN.map((x) => -x);
+  const cr = [f[1], -f[0], 0], rl = Math.hypot(...cr); // cross(f, z)
+  const R = cr.map((x) => x / rl);
+  const Up = [R[1] * f[2] - R[2] * f[1], R[2] * f[0] - R[0] * f[2], R[0] * f[1] - R[1] * f[0]];
+  const texel = (2 * half) / SHADOW_SIZE;
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const er = dot(R, target) - Math.round(dot(R, target) / texel) * texel;
+  const eu = dot(Up, target) - Math.round(dot(Up, target) / texel) * texel;
+  const t = [0, 1, 2].map((k) => target[k] - R[k] * er - Up[k] * eu);
+  const rows = [R.map((x) => x / half), Up.map((x) => x / half), f.map((x) => x / (2 * range))];
+  const off = [0, 0, 0.5];
+  const m = new Float32Array(16);
+  for (let r = 0; r < 3; r++) {
+    for (let k = 0; k < 3; k++) m[k * 4 + r] = rows[r][k];
+    m[12 + r] = off[r] - dot(rows[r], t);
+  }
+  m[15] = 1;
+  return m;
+}
+
 export class Mesh {
   constructor() { this.v = []; }
   tri(a, b, c, ci) { for (const p of [a, b, c]) this.v.push(p[0], p[1], p[2], ci); }
@@ -147,10 +191,10 @@ export async function createRenderer(canvas) {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: 'opaque' });
 
-  const uni = device.createBuffer({ size: 64 + 16 + 16 * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const uni = device.createBuffer({ size: 64 + 64 + 16 + 16 * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const pal = new Float32Array(64);
   PALETTE.forEach((c, i) => pal.set([c[0], c[1], c[2], 1], i * 4));
-  const udata = new Float32Array(20 + 64); udata.set(pal, 20);
+  const udata = new Float32Array(36 + 64); udata.set(pal, 36);
 
   const sceneMod = device.createShaderModule({ code: SCENE_WGSL });
   const scenePipe = device.createRenderPipeline({
@@ -162,7 +206,21 @@ export async function createRenderer(canvas) {
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
   });
-  const sceneBind = device.createBindGroup({ layout: scenePipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uni } }] });
+  const shadowTex = device.createTexture({ size: [SHADOW_SIZE, SHADOW_SIZE], format: 'depth32float',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+  const cmpSampler = device.createSampler({ compare: 'less', magFilter: 'nearest', minFilter: 'nearest' });
+  const sceneBind = device.createBindGroup({ layout: scenePipe.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: uni } }, { binding: 1, resource: shadowTex.createView() }, { binding: 2, resource: cmpSampler }] });
+  const shadowMod = device.createShaderModule({ code: SHADOW_WGSL });
+  const shadowPipe = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: { module: shadowMod, entryPoint: 'vs', buffers: [{ arrayStride: 16, attributes: [
+      { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32' }] },
+      { arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 2, offset: 0, format: 'float32x4' }] }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' },
+  });
+  const shadowBind = device.createBindGroup({ layout: shadowPipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uni } }] });
 
   const blitMod = device.createShaderModule({ code: BLIT_WGSL });
   const blitPipe = device.createRenderPipeline({
@@ -213,12 +271,25 @@ export async function createRenderer(canvas) {
     // stable pixels with smooth motion.
     const snap = snapTarget(target, yaw, viewHeight / h);
     const { m, vdir } = isoMatrix(snap.target, yaw, (viewHeight * (h + 2)) / h, (w + 2) / (h + 2), range);
-    udata.set(m, 0); udata.set([vdir[0], vdir[1], vdir[2], 0], 16);
+    udata.set(m, 0);
+    udata.set(lightMatrix(snap.target, viewHeight * 1.3, Math.max(range, viewHeight * 4)), 16);
+    udata.set([vdir[0], vdir[1], vdir[2], 0], 32);
     device.queue.writeBuffer(uni, 0, udata);
     // Depth is linear in an orthographic view: about three texels of world distance counts as an edge.
     const thresh = ((viewHeight / h) * 3) / (2 * range);
     device.queue.writeBuffer(bUni, 0, new Float32Array([snap.ex, snap.ey, w, h, thresh, outline ? 1 : 0, 0, 0]));
     const enc = device.createCommandEncoder();
+    const drawAll = (pass) => {
+      pass.setVertexBuffer(1, oneInstance);
+      for (const k of keys) { const e = buffers.get(k); if (e && e.count) { pass.setVertexBuffer(0, e.buf); pass.draw(e.count); } }
+      for (const { mesh, instances } of instanced) {
+        const m = buffers.get(mesh), ins = buffers.get(instances);
+        if (m && ins && m.count && ins.count) { pass.setVertexBuffer(0, m.buf); pass.setVertexBuffer(1, ins.buf); pass.draw(m.count, ins.count); }
+      }
+    };
+    const p0 = enc.beginRenderPass({ colorAttachments: [],
+      depthStencilAttachment: { view: shadowTex.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' } });
+    p0.setPipeline(shadowPipe); p0.setBindGroup(0, shadowBind); drawAll(p0); p0.end();
     const p1 = enc.beginRenderPass({
       colorAttachments: [
         { view: color.createView(), clearValue: { r: 0.05, g: 0.06, b: 0.09, a: 1 }, loadOp: 'clear', storeOp: 'store' },
@@ -226,12 +297,7 @@ export async function createRenderer(canvas) {
       depthStencilAttachment: { view: depth.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
     });
     p1.setPipeline(scenePipe); p1.setBindGroup(0, sceneBind);
-    p1.setVertexBuffer(1, oneInstance);
-    for (const k of keys) { const e = buffers.get(k); if (e && e.count) { p1.setVertexBuffer(0, e.buf); p1.draw(e.count); } }
-    for (const { mesh, instances } of instanced) {
-      const m = buffers.get(mesh), ins = buffers.get(instances);
-      if (m && ins && m.count && ins.count) { p1.setVertexBuffer(0, m.buf); p1.setVertexBuffer(1, ins.buf); p1.draw(m.count, ins.count); }
-    }
+    drawAll(p1);
     p1.end();
     const p2 = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
     p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end();
