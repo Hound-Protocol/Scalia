@@ -35,7 +35,7 @@ export async function startViewer(wasm, ui) {
     f.box(0.26, 0.05, 1.0, 0.33, 0.85, 1.08, 0); // rifle
     r.upload('figure', f.array());
   }
-  let groundView = 24;
+  let groundView = 60;
   const inst = new Float32Array(SOLDIERS * 4);
   const CELLS = 64;
   const chunks = new Map(); // "cx,cy" -> heights (metres)
@@ -180,7 +180,9 @@ export async function startViewer(wasm, ui) {
     ui.shipSel.hidden = state.scene !== 'ships';
     r.frame({ ...cam, internal, outline: state.outline });
     tickFps(now);
-    ui.hud.textContent = `${text} | ${internal[0]}x${internal[1]} | ${state.fps.toFixed(0)} fps | ${gpuNote}`;
+    ui.hud.textContent = r.gpuError
+      ? `GPU ERROR: ${r.gpuError.slice(0, 600)}`
+      : `${text} | ${internal[0]}x${internal[1]} | ${state.fps.toFixed(0)} fps | ${gpuNote}`;
   }
   requestAnimationFrame(render);
   window.scaliaViewer = { state, simMs, get flight() { return flight; } };

@@ -136,6 +136,10 @@ export async function createRenderer(canvas) {
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('No WebGPU adapter found');
   const device = await adapter.requestDevice();
+  // Validation errors never throw in WebGPU; collect the first one so the page can show it.
+  let gpuError = null;
+  device.addEventListener('uncapturederror', (e) => { if (!gpuError) gpuError = e.error.message || String(e.error); console.error('WebGPU:', e.error); });
+  device.lost.then((i) => { gpuError = gpuError || `device lost: ${i.message}`; });
   const info = adapter.info || {};
   const software = !!info.isFallbackAdapter || /swiftshader|llvmpipe/i.test(`${info.architecture} ${info.description}`);
   const adapterName = info.description || [info.vendor, info.architecture].filter(Boolean).join(' ') || 'unknown GPU';
@@ -233,5 +237,5 @@ export async function createRenderer(canvas) {
     p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end();
     device.queue.submit([enc.finish()]);
   }
-  return { upload, drop, frame, device, software, adapterName };
+  return { upload, drop, frame, device, software, adapterName, get gpuError() { return gpuError; } };
 }
