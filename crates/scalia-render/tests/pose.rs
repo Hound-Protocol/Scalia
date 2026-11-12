@@ -123,9 +123,11 @@ fn prone_soldier_lifts_his_head_rests_on_his_elbows_and_shoulders_the_rifle() {
 }
 
 #[test]
-fn aiming_raises_the_rifle_with_bent_elbows() {
+fn aiming_tucks_the_firing_elbow_and_reaches_across_with_the_other() {
     let pp = params(Pose::StandAim, 0.0);
-    assert!(pp.elbow[0] > 0.2 && pp.elbow[1] > 0.2, "elbows straight: {:?}", pp.elbow);
+    // The right (firing) elbow is tucked and bent; the left arm reaches nearly straight to the rifle and swings in.
+    assert!(pp.elbow[1] > 1.0, "firing elbow not bent: {:?}", pp.elbow);
+    assert!(pp.reach[0] > 0.3, "support arm does not reach across: {:?}", pp.reach);
 }
 
 
@@ -167,4 +169,35 @@ fn pose_changes_ease_in_and_out() {
     assert!((q.lean - a.lean) / (b.lean - a.lean) < 0.2, "{}", q.lean);
     let h = blend(&a, &b, 0.5);
     assert!(((h.lean - a.lean) / (b.lean - a.lean) - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn both_hands_hold_the_rifle_when_aiming() {
+    use scalia_render::pose::{hand, Side};
+    for pose in [Pose::StandAim, Pose::CoverAim] {
+        let pp = params(pose, 0.0);
+        let (l, r) = (hand(&pp, Side::Left), hand(&pp, Side::Right));
+        // The left hand sits on the rifle just in front of the magazine: 0.21 m ahead of the right hand along it.
+        let along = Vec3::new(0.0, pp.rifle.cos(), pp.rifle.sin());
+        let grip = r + along * 0.21;
+        assert!((l - grip).length() < 0.06, "{pose:?}: left hand {l:?} is {:.3} m from the rifle at {grip:?}", (l - grip).length());
+        // Elbows low: below the hands (motion guide rule 4).
+        assert!(r.z > 1.0 || pose == Pose::CoverAim, "{pose:?}: rifle too low {r:?}");
+    }
+}
+
+#[test]
+fn soldiers_can_walk_while_aiming() {
+    use scalia_render::pose::{hand, layer, Side};
+    // Legs from the walk, everything above the hips from the aim (motion guide rule 1).
+    for k in 0..8 {
+        let phase = k as f32 / 8.0;
+        let pp = layer(&params(Pose::Walk, phase), &params(Pose::StandAim, phase));
+        let walk = params(Pose::Walk, phase);
+        assert_eq!((pp.hip, pp.knee, pp.drop), (walk.hip, walk.knee, walk.drop), "legs keep walking");
+        let (l, r) = (hand(&pp, Side::Left), hand(&pp, Side::Right));
+        assert!((l - (r + Vec3::new(0.0, 0.21, 0.0))).length() < 0.06, "both hands stay on the rifle");
+        let low = figure().vertices.iter().map(|v| pose_vertex(Vec3::from(v.pos), part_of(v.color), &pp).z).fold(f32::MAX, f32::min);
+        assert!((-0.04..=0.06).contains(&low), "feet on the ground at phase {phase}: {low}");
+    }
 }

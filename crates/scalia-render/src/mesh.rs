@@ -186,7 +186,7 @@ impl MeshBuilder {
 /// Low-poly soldier facing +y, 1.76 m to the top of the helmet, in the faceted style of the art reference:
 /// tapered limbs and torso, plate carrier with magazine pouches, coyote pack, knee pads, gloves, balaclava,
 /// goggles and a domed helmet with a band in the instance (team) colour. Thighs hang from the hips (0.88 m), shins
-/// from the knees (0.46 m), upper arms from the shoulders (1.40 m), forearms from the elbows (1.14 m), and the head
+/// from the knees (0.46 m), upper arms from the shoulders (1.40 m), forearms from the elbows (1.09 m), and the head
 /// nods around the neck (1.46 m); the rifle is gripped in the right hand.
 pub fn figure() -> MeshBuilder {
     use kit::*;
@@ -233,23 +233,23 @@ pub fn figure() -> MeshBuilder {
     // Arms: upper arm with a team patch, forearm with an elbow pad, gloved hand.
     for (s, arm, fore) in [(-1.0f32, Part::LeftArm, Part::LeftForearm), (1.0, Part::RightArm, Part::RightForearm)] {
         let x = s * 0.238;
-        f.prism([x, 0.0, 1.14], [0.052, 0.056], [x, 0.0, 1.40], [0.064, 0.068], 8, c(UNIFORM, arm));
+        f.prism([x, 0.0, 1.09], [0.052, 0.056], [x, 0.0, 1.40], [0.064, 0.068], 8, c(UNIFORM, arm));
         // Rounded shoulder cap, so the arm grows out of the torso instead of standing beside it.
         f.dome([x - s * 0.01, 0.0, 1.40], [0.072, 0.074], 0.065, 8, 2, c(UNIFORM, arm));
         f.cuboid([x + s * 0.05 - 0.012, -0.035, 1.27], [x + s * 0.05 + 0.012, 0.035, 1.35], c(TEAM, arm));
-        f.prism([x, 0.0, 0.97], [0.044, 0.048], [x, 0.0, 1.16], [0.05, 0.054], 8, c(UNIFORM, fore));
-        f.cuboid([x - 0.052, -0.075, 1.09], [x + 0.052, -0.03, 1.17], c(PAD, fore));
-        f.cuboid([x - 0.036, -0.04, 0.89], [x + 0.036, 0.05, 0.98], c(GLOVE, fore));
+        f.prism([x, 0.0, 0.86], [0.044, 0.048], [x, 0.0, 1.12], [0.05, 0.054], 8, c(UNIFORM, fore));
+        f.cuboid([x - 0.052, -0.075, 1.04], [x + 0.052, -0.03, 1.115], c(PAD, fore));
+        f.cuboid([x - 0.036, -0.04, 0.77], [x + 0.036, 0.05, 0.865], c(GLOVE, fore));
     }
     // Rifle: stock, receiver, grip, magazine, handguard, barrel, optic.
     let r = |p: u8| code(p, Part::Rifle);
-    f.cuboid([0.218, -0.20, 0.92], [0.258, 0.0, 0.995], r(METAL));
-    f.cuboid([0.215, 0.0, 0.93], [0.261, 0.36, 1.01], r(METAL));
-    f.cuboid([0.225, 0.02, 0.87], [0.251, 0.07, 0.93], r(VEST));
-    f.cuboid([0.225, 0.12, 0.84], [0.251, 0.19, 0.93], r(VEST));
-    f.cuboid([0.217, 0.36, 0.94], [0.259, 0.58, 1.0], r(COYOTE_DARK));
-    f.cuboid([0.230, 0.58, 0.958], [0.246, 0.77, 0.976], r(METAL));
-    f.cuboid([0.223, 0.08, 1.01], [0.253, 0.2, 1.055], r(VEST));
+    f.cuboid([0.218, -0.20, 0.780], [0.258, 0.0, 0.855], r(METAL));
+    f.cuboid([0.215, 0.0, 0.790], [0.261, 0.36, 0.870], r(METAL));
+    f.cuboid([0.225, 0.02, 0.730], [0.251, 0.07, 0.790], r(VEST));
+    f.cuboid([0.225, 0.12, 0.700], [0.251, 0.19, 0.790], r(VEST));
+    f.cuboid([0.217, 0.36, 0.800], [0.259, 0.58, 0.860], r(COYOTE_DARK));
+    f.cuboid([0.230, 0.58, 0.818], [0.246, 0.77, 0.836], r(METAL));
+    f.cuboid([0.223, 0.08, 0.870], [0.253, 0.2, 0.915], r(VEST));
     f
 }
 
@@ -264,11 +264,11 @@ pub fn figure_lo() -> MeshBuilder {
     f.cuboid([-0.15, -0.31, 1.0], [0.15, -0.155, 1.38], code(PACK, Part::Torso));
     f.cuboid([-0.08, -0.09, 1.42], [0.08, 0.1, 1.62], code(BALACLAVA, Part::Head));
     f.cuboid([-0.12, -0.13, 1.6], [0.12, 0.14, 1.74], code(TEAM, Part::Head));
-    f.cuboid([-0.31, -0.06, 1.12], [-0.22, 0.06, 1.42], code(UNIFORM, Part::LeftArm));
-    f.cuboid([0.22, -0.06, 1.12], [0.31, 0.06, 1.42], code(UNIFORM, Part::RightArm));
-    f.cuboid([-0.31, -0.06, 0.90], [-0.22, 0.06, 1.16], code(UNIFORM, Part::LeftForearm));
-    f.cuboid([0.22, -0.06, 0.90], [0.31, 0.06, 1.16], code(UNIFORM, Part::RightForearm));
-    f.cuboid([0.25, -0.1, 0.92], [0.30, 0.72, 1.0], code(METAL, Part::Rifle));
+    f.cuboid([-0.29, -0.06, 1.09], [-0.19, 0.06, 1.42], code(UNIFORM, Part::LeftArm));
+    f.cuboid([0.19, -0.06, 1.09], [0.29, 0.06, 1.42], code(UNIFORM, Part::RightArm));
+    f.cuboid([-0.29, -0.06, 0.77], [-0.19, 0.06, 1.12], code(UNIFORM, Part::LeftForearm));
+    f.cuboid([0.19, -0.06, 0.77], [0.29, 0.06, 1.12], code(UNIFORM, Part::RightForearm));
+    f.cuboid([0.21, -0.1, 0.78], [0.26, 0.72, 0.86], code(METAL, Part::Rifle));
     f
 }
 

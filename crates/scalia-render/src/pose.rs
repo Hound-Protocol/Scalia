@@ -8,10 +8,12 @@ use crate::mesh::Part;
 pub const HIP_Z: f32 = 0.88;
 pub const KNEE_Z: f32 = 0.46;
 pub const SHOULDER_Z: f32 = 1.40;
-pub const ELBOW_Z: f32 = 1.14;
+pub const ELBOW_Z: f32 = 1.09;
+/// Shoulders sit this far either side of the centre line.
+pub const SHOULDER_X: f32 = 0.238;
 pub const NECK_Z: f32 = 1.46;
 /// Where the right hand grips the rifle in the rest pose.
-pub const GRIP_Z: f32 = 0.95;
+pub const GRIP_Z: f32 = 0.81;
 /// How far the lying body is lifted so the chest rests on the ground.
 pub const PRONE_LIFT: f32 = 0.15;
 
@@ -54,6 +56,9 @@ pub struct PoseParams {
     pub shoulder: [f32; 2],
     /// Elbow bend, left then right (positive swings the forearm forward).
     pub elbow: [f32; 2],
+    /// Inward swing of each arm around the vertical through its shoulder (radians, positive towards the centre
+    /// line), so the support hand can reach across to the rifle.
+    pub reach: [f32; 2],
     /// Head nod around the neck (positive tilts the face up).
     pub head: f32,
     /// Rifle pitch around the grip (positive points the muzzle up).
@@ -71,8 +76,26 @@ pub fn rot(q: Vec3, pivot_y: f32, pivot_z: f32, a: f32) -> Vec3 {
     Vec3::new(q.x, pivot_y + dy * c - dz * s, pivot_z + dy * s + dz * c)
 }
 
-fn arm(q: Vec3, shoulder: f32, elbow: f32) -> Vec3 {
-    rot(rot(q, 0.0, ELBOW_Z, elbow), 0.0, SHOULDER_Z, shoulder)
+/// An arm point: bend at the elbow, swing at the shoulder, then turn inward around the vertical through the
+/// shoulder (`side_x` is the shoulder's x; the turn is towards the centre line).
+fn arm(q: Vec3, shoulder: f32, elbow: f32, reach: f32, side_x: f32) -> Vec3 {
+    let p = rot(rot(q, 0.0, ELBOW_Z, elbow), 0.0, SHOULDER_Z, shoulder);
+    let a = reach * side_x.signum();
+    let (s, c) = a.sin_cos();
+    let (dx, dy) = (p.x - side_x, p.y);
+    Vec3::new(side_x + dx * c - dy * s, dx * s + dy * c, p.z)
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+/// Where a hand grips, in the figure's frame before lean (for tests and tuning).
+pub fn hand(p: &PoseParams, side: Side) -> Vec3 {
+    let (i, x) = if side == Side::Left { (0, -SHOULDER_X) } else { (1, SHOULDER_X) };
+    arm(Vec3::new(x, 0.0, GRIP_Z), p.shoulder[i], p.elbow[i], p.reach[i], x)
 }
 
 fn leg(q: Vec3, hip: f32, knee: f32) -> Vec3 {
@@ -137,9 +160,8 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.lean = 0.2;
             p.hip = [1.4, 1.4];
             p.knee = [2.4, 2.4];
-            p.shoulder = [1.1, 1.2];
-            p.elbow = [0.4, 0.6];
-            p.head = 0.15;
+            aim_arms(&mut p);
+            p.head = 0.05;
         }
         Pose::Prone => {
             p.prone = 1.0;
@@ -149,12 +171,27 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.head = 1.0;
         }
         Pose::StandAim => {
-            p.shoulder = [1.1, 1.2];
-            p.elbow = [0.4, 0.6];
+            aim_arms(&mut p);
+            p.head = -0.1;
         }
     }
     p.drop = ground_drop(p.hip, p.knee);
     p
+}
+
+/// Two layers (motion guide rule 1): the legs of one pose (gait, crouch) under the upper body of another (aim,
+/// carry), so a soldier can walk while aiming.
+pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
+    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, ..*legs }
+}
+
+/// Shouldered rifle: right elbow low with the grip by the chest, left arm reaching across to hold the rifle in
+/// front of the magazine (angles found by search; `both_hands_hold_the_rifle_when_aiming` checks them).
+fn aim_arms(p: &mut PoseParams) {
+    p.shoulder = [1.45, 0.5];
+    p.elbow = [-0.05, 1.95];
+    p.reach = [0.6, 0.4];
+    p.rifle = 0.0;
 }
 
 /// Vertical shift that puts the lowest heel or toe of either leg on the ground.
@@ -176,13 +213,13 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightThigh => rot(v, 0.0, HIP_Z, p.hip[1]),
         Part::LeftShin => leg(v, p.hip[0], p.knee[0]),
         Part::RightShin => leg(v, p.hip[1], p.knee[1]),
-        Part::LeftArm => rot(v, 0.0, SHOULDER_Z, p.shoulder[0]),
-        Part::RightArm => rot(v, 0.0, SHOULDER_Z, p.shoulder[1]),
-        Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0]),
-        Part::RightForearm => arm(v, p.shoulder[1], p.elbow[1]),
+        Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], -SHOULDER_X),
+        Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], SHOULDER_X),
+        Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], -SHOULDER_X),
+        Part::RightForearm => arm(v, p.shoulder[1], p.elbow[1], p.reach[1], SHOULDER_X),
         Part::Rifle => {
-            let hand = arm(Vec3::new(0.0, 0.0, GRIP_Z), p.shoulder[1], p.elbow[1]);
-            rot(v, 0.0, GRIP_Z, p.rifle) + Vec3::new(0.0, hand.y, hand.z - GRIP_Z)
+            let h = hand(p, Side::Right);
+            rot(v, 0.0, GRIP_Z, p.rifle) + Vec3::new(h.x - SHOULDER_X, h.y, h.z - GRIP_Z)
         }
         Part::Head => rot(v, 0.0, NECK_Z, p.head),
         Part::Torso => v,
@@ -214,6 +251,7 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         knee,
         shoulder: m2(a.shoulder, b.shoulder),
         elbow: m2(a.elbow, b.elbow),
+        reach: m2(a.reach, b.reach),
         head: m(a.head, b.head),
         rifle: m(a.rifle, b.rifle),
         prone: m(a.prone, b.prone),

@@ -693,12 +693,14 @@ impl Viewer {
                 (Pose::Walk, 0.9), (Pose::Run, 1.35), (Pose::Stand, 0.0), (Pose::Crouch, 0.0),
                 (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0), (Pose::Sprint, 1.45),
             ];
-            let (pose, steps) = SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()];
+            // Entry 8 is "walk while aiming": the walk with an aiming upper body layered on top.
+            let walk_aim = self.preview_pose == Some(8);
+            let (pose, steps) = if walk_aim { (Pose::Walk, 0.9) } else { SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()] };
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
             let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
             let colour = VARIANTS[self.model_variant as usize % VARIANTS.len()].1;
-            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), 0.0, 0.0]));
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), if walk_aim { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 }, 0.0]));
             meshes.push("plinth".into());
             let (mesh, tris, detail) = match self.model_detail {
                 1 => ("figure_lo", figure_lo().vertices.len() / 3, "mid detail, 70-250 m"),
@@ -833,7 +835,10 @@ impl Viewer {
                 *entry = (pose, entry.0, ts);
             }
             let (prev, since) = (entry.1, entry.2 + jitter * 0.4);
-            inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, pose as u32 as f32, prev as u32 as f32, since, 0.0, 0.0]);
+            // A group set to aim keeps aiming while it moves: walking legs under an aiming upper body.
+            let aiming = matches!(self.stance.get(&d.group.0), Some(Pose::StandAim | Pose::CoverAim));
+            let upper = if walking && !running && aiming { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 };
+            inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, pose as u32 as f32, prev as u32 as f32, since, upper, 0.0]);
         }
         self.derived = out;
         self.gpu.upload_instances("soldiers", bytes(&inst));

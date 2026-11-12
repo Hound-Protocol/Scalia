@@ -56,7 +56,7 @@ try {
   // Model viewer: pose, level of detail and colour variant for the soldier.
   const poseSel = $('poseSel'), detailSel = $('detailSel'), variantSel = $('variantSel');
   poseSel.append(new Option('all poses', -1));
-  ['walk', 'run', 'stand', 'crouch', 'cover aim', 'prone', 'standing aim', 'sprint'].forEach((n, i) => poseSel.append(new Option(n, i)));
+  ['walk', 'run', 'stand', 'crouch', 'cover aim', 'prone', 'standing aim', 'sprint', 'walk while aiming'].forEach((n, i) => poseSel.append(new Option(n, i)));
   for (let i = 0; v.variant_name(i) !== undefined; i++) variantSel.append(new Option(v.variant_name(i), i));
   poseSel.addEventListener('change', () => v.preview_pose(Number(poseSel.value)));
   detailSel.addEventListener('change', () => v.set_model_detail(Number(detailSel.value)));
