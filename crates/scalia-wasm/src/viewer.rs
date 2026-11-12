@@ -652,7 +652,9 @@ impl Viewer {
             let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
             let variant = VARIANTS[self.model_variant as usize % VARIANTS.len()].0;
             let cycling = if self.preview_pose.is_none() { " (poses change every 3 s)" } else { "" };
-            return (Vec3::new(0.0, 0.0, 0.9), yaw, 2.6, 10.0, format!("Soldier, {variant}: {tris} triangles, {detail}, pose {pose:?}{cycling}"));
+            // A prone soldier lies 2.5 m forward from where he stood: centre on him and pull back.
+            let (centre, size) = if pose == Pose::Prone { (Vec3::new(0.0, 1.2, 0.3), 3.4) } else { (Vec3::new(0.0, 0.0, 0.9), 2.6) };
+            return (centre, yaw, size, 10.0, format!("Soldier, {variant}: {tris} triangles, {detail}, pose {pose:?}{cycling}"));
         }
         let s = self.ship_info(i);
         let ext = s.hi - s.lo;
