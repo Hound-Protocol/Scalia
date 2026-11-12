@@ -43,7 +43,7 @@ fn returns_after_one_period() {
     for i in 0..200u64 {
         let t = mix64(i) % 5_000_000;
         let a = s.body_pos(A, WorldMs(t)).unwrap();
-        let b = s.body_pos(A, WorldMs(t + 600_000)).unwrap();
+        let b = s.body_pos(A, WorldMs(t + s.bodies[0].period_ms)).unwrap();
         assert!(dist_mm(a, b) <= 4_000, "{}", dist_mm(a, b));
     }
 }
@@ -52,7 +52,7 @@ fn returns_after_one_period() {
 fn quarter_period_is_quarter_turn() {
     let s = System::demo();
     assert!(near(
-        s.body_pos(A, WorldMs(150_000)).unwrap(),
+        s.body_pos(A, WorldMs(s.bodies[0].period_ms / 4)).unwrap(),
         0,
         RA,
         20_000
@@ -103,5 +103,12 @@ fn golden_system_hash() {
         }
     }
     let _ = RegionId(0);
-    assert_eq!(h, 3716267243279158290);
+    assert_eq!(h, 11094922984895476705);
+}
+
+#[test]
+fn body_position_matches_the_wasm_check() {
+    // crates/scalia-wasm/scripts/check_wasm.mjs asserts this exact value through WebAssembly.
+    let p = System::demo().body_pos(A, WorldMs(123_456)).unwrap();
+    assert_eq!((p.x, p.y), (39_998_382_022, 359_114_063));
 }
