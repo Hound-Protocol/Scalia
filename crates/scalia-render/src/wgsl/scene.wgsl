@@ -22,6 +22,8 @@ struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @
   o.ci = palette_index(c, ia);
   // Instance c.w: how far this draw has dissolved (0 solid, 1 gone); used to cross-fade terrain detail levels.
   o.fade = ic.w;
+  // A fading layer is nudged towards the camera so it lies over the solid one instead of fighting it for depth.
+  if (ic.w > 0.0) { o.pos.z = o.pos.z - 0.0005 * o.pos.w; }
   return o;
 }
 struct FO { @location(0) c: vec4f, @location(1) n: vec4f };

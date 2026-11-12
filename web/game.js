@@ -67,6 +67,8 @@ try {
   // Toggles and actions.
   const fullres = $('fullres'), outline = $('outline');
   fullres.addEventListener('change', () => v.set_full(fullres.checked));
+  // Full resolution for now (the chunky pixel look is switched off; R brings it back).
+  fullres.checked = true; v.set_full(true);
   outline.addEventListener('change', () => v.set_outline(outline.checked));
   $('launch').addEventListener('click', () => v.launch(performance.now()));
   $('follow').addEventListener('click', () => v.follow());
@@ -238,3 +240,20 @@ try {
   showError(`Scalia could not start: ${e.message || e}. It needs a browser with WebGPU (Chrome or Edge; on Linux, Chrome with Vulkan enabled).`);
   hud.textContent = '';
 }
+
+// A new deploy carries a new version stamp: poll for it and offer a reload.
+(function watchForUpdates() {
+  const mine = new URL(import.meta.url).searchParams.get('v');
+  if (!mine) return; // local build
+  const bar = document.getElementById('update');
+  document.getElementById('update-reload').addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const r = await fetch('version.json', { cache: 'no-store' });
+      const live = (await r.json()).v;
+      if (live && live !== mine) bar.hidden = false;
+    } catch (_) { /* offline: try again later */ }
+  };
+  setInterval(check, 60_000);
+  check();
+})();

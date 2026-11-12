@@ -51,8 +51,8 @@ const STEP_HANDOFF: usize = 14;
 const STEP_SYSTEM: usize = 19;
 /// How quickly the camera glides to the next step (time constant, ms).
 const GLIDE_MS: f64 = 90.0;
-/// How long a terrain detail change dissolves (ms).
-const FADE_MS: f64 = 400.0;
+/// How long the previous terrain detail level lingers over the new one (ms).
+const FADE_MS: f64 = 600.0;
 /// Orders at or above this speed run (Shift + right click).
 const RUN_SPEED_MM_S: u32 = 3_500;
 const HOME_BODY: u8 = 0;
@@ -915,8 +915,10 @@ impl Viewer {
         }
         let p = fade.map_or(1.0, |f| f.1);
         let inst = |w: f32| bytes(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, w]).to_vec();
-        self.gpu.upload_instances("fade_in", &inst(1.0 - p));
-        self.gpu.upload_instances("fade_out", &inst(p));
+        // The new level is solid at once; the old one lies over it at half strength and thins out to nothing,
+        // a gentle blend rather than a flicker between the two.
+        self.gpu.upload_instances("fade_in", &inst(0.0));
+        self.gpu.upload_instances("fade_out", &inst(0.5 + 0.5 * p));
         let new_tiles = if shown == want { tiles.clone() } else { needed(shown) };
         for key in &new_tiles {
             if self.far_tiles.contains(key) {

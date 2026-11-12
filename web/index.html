@@ -37,6 +37,13 @@
   #perf .warn { color: #ff8a65; margin-top: 4px; }
   #error { inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; }
   a { color: #9cc4ff; }
+  #update { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 20;
+    background: #1d2b3a; color: #e8eef5; border: 1px solid #4b7bb0; border-radius: 6px; padding: 7px 10px 7px 14px;
+    font: 13px system-ui, sans-serif; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+  #update[hidden] { display: none; }
+  #update button { margin-left: 10px; background: #4b7bb0; color: #fff; border: 0; border-radius: 4px;
+    padding: 4px 10px; font: inherit; cursor: pointer; }
+  #update button:hover { background: #5e91c9; }
 </style>
 </head>
 <body>
@@ -49,7 +56,7 @@
   <select id="shipSel" title="Blueprint"></select>
   <button id="launch" title="Space">Launch</button>
   <button id="follow" title="F">Follow</button>
-  <label title="R"><input type="checkbox" id="fullres"> full resolution</label>
+  <label title="R" hidden><input type="checkbox" id="fullres"> full resolution</label>
   <label title="O"><input type="checkbox" id="outline" checked> outlines</label>
   <button id="helpBtn" title="H">? Help</button>
 </div>
@@ -65,7 +72,7 @@
     <tr><td>Q / E</td><td>Rotate the camera</td></tr>
     <tr><td>F</td><td>Follow the units again</td></tr>
     <tr><td>Space</td><td>Launch to the other planet (System)</td></tr>
-    <tr><td>O / R</td><td>Outlines / full resolution</td></tr>
+    <tr><td>O / R</td><td>Outlines / chunky pixels</td></tr>
     <tr><td>T</td><td>Day speed: normal, fast, paused</td></tr>
     <tr><td>L</td><td>Frame cap: off, 60, 30</td></tr>
     <tr><td>N</td><td>Army size: 2k, 20k, 100k, 500k (Ground)</td></tr>
@@ -84,6 +91,7 @@
   <div class="warn" id="pWarn" hidden></div>
 </div>
 <div id="error" class="panel"></div>
+<div id="update" hidden>A new version is out. <button id="update-reload">Refresh to apply</button></div>
 <script type="module" src="./game.js"></script>
 </body>
 </html>
