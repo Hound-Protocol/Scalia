@@ -823,7 +823,8 @@ impl Viewer {
         // Enough chunks to cover a wide screen at any yaw; at most a few new ones per frame to avoid hitches.
         let rad = (self.ground_view * 1.3 / CELLS as f32).ceil() as i64 + 1;
         // Coarser terrain when zoomed out; all chunks share one step, so neighbours always match.
-        let step = if self.ground_view <= 70.0 { 1 } else if self.ground_view <= 130.0 { 2 } else { 4 };
+        // Reasonably sized triangles: 2 m close up (the grass carries the fine detail), 4 m further out.
+        let step = if self.ground_view <= 130.0 { 2 } else { 4 };
         self.terrain_step = step;
         let mut budget = 6;
         for dy in -rad..=rad {
