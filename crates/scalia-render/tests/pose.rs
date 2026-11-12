@@ -46,7 +46,7 @@ fn crouching_is_lower_and_prone_is_flat() {
     let prone = posed(Pose::Prone, 0.0);
     assert!((1.7..=1.85).contains(&stand), "stand {stand}");
     assert!(crouch < 1.5, "crouch (kneeling) {crouch}");
-    assert!(top(&prone) < 0.5, "prone height {}", top(&prone));
+    assert!(top(&prone) < 0.6, "prone height {}", top(&prone));
     assert!(bottom(&prone) > -0.05, "prone sinks: {}", bottom(&prone));
     let len = prone.iter().map(|p| p.1.y).fold(f32::MIN, f32::max) - prone.iter().map(|p| p.1.y).fold(f32::MAX, f32::min);
     assert!(len > 1.5, "lying length {len}");

@@ -21,7 +21,7 @@ fn diamond_and_ring_counts() {
 #[test]
 fn figure_is_small_and_uses_instance_colour_for_the_torso() {
     let f = figure();
-    assert!(f.vertices.len() / 3 <= 1200, "{} triangles", f.vertices.len() / 3);
+    assert!(f.vertices.len() / 3 <= 2000, "{} triangles", f.vertices.len() / 3);
     assert!(f.vertices.iter().any(|v| scalia_render::mesh::palette_of(v.color) == scalia_render::mesh::TEAM as u32), "team colour somewhere");
     let top = f.vertices.iter().map(|v| v.pos[2]).fold(0.0, f32::max);
     assert!((1.6..=1.9).contains(&top), "height {top}");

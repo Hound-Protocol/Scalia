@@ -74,15 +74,15 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     p.sh = p.sh + vec2f(0.04 * sw);
     p.head = 0.38;
   } else if (pose == 3u) {
-    p.hip = vec2f(1.45, 0.05);
-    p.knee = vec2f(1.45, 1.55);
-    p.lean = 0.08;
+    p.hip = vec2f(1.55, -0.1);
+    p.knee = vec2f(1.8, 1.75);
+    p.lean = 0.12;
     carry(&p, 1u);
     p.head = 0.35;
   } else if (pose == 4u) {
-    p.hip = vec2f(1.45, 0.05);
-    p.knee = vec2f(1.45, 1.55);
-    p.lean = 0.08;
+    p.hip = vec2f(1.55, -0.1);
+    p.knee = vec2f(1.8, 1.75);
+    p.lean = 0.12;
     carry(&p, 4u);
     p.head = 0.05;
   } else if (pose == 5u) {
@@ -110,8 +110,8 @@ fn pose_params(pose: u32, phase: f32) -> PP {
 fn ground_drop(hip: vec2f, knee: vec2f) -> f32 {
   var low = 1e9;
   for (var i = 0; i < 2; i++) {
-    low = min(low, leg(vec3f(0.0, -0.10, 0.0), hip[i], knee[i]).z);
-    low = min(low, leg(vec3f(0.0, 0.14, 0.0), hip[i], knee[i]).z);
+    low = min(low, leg(vec3f(0.0, -0.115, 0.0), hip[i], knee[i]).z);
+    low = min(low, leg(vec3f(0.0, 0.19, 0.0), hip[i], knee[i]).z);
   }
   return -low;
 }
@@ -147,7 +147,7 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   q.z = q.z + p.drop;
   if (p.prone > 0.0) {
     q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
-    q.z = q.z + 0.15 * p.prone + 0.12 * sin(3.1415927 * p.prone);
+    q.z = q.z + 0.23 * p.prone + 0.12 * sin(3.1415927 * p.prone);
   }
   return q;
 }

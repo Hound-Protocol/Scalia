@@ -30,29 +30,30 @@ pub const PALETTE_SIZE: u32 = 32;
 /// Palette index that means "the instance's colour" on any part (team colours, selection).
 pub const TEAM: u8 = 31;
 
-/// Light infantry kit colours (palette 16-30).
+/// The basic soldier's kit colours (palette 16-30).
 pub mod kit {
+    /// Tan uniform, and its darker shade (pockets, helmet rim).
     pub const UNIFORM: u8 = 16;
     pub const UNIFORM_DARK: u8 = 17;
-    /// Dark grey: shoulder pads, hood pads.
+    /// Plate carrier.
     pub const VEST: u8 = 18;
-    /// Webbing: belt, leg straps.
+    /// Boot laces (light grey).
     pub const STRAP: u8 = 19;
-    /// Pouches, holster, rear back pouch.
+    /// Pouches.
     pub const PACK: u8 = 20;
     pub const BOOT: u8 = 21;
     pub const GLOVE: u8 = 22;
     pub const BALACLAVA: u8 = 23;
-    /// The yellow collar tab.
+    /// Goggle lens.
     pub const LENS: u8 = 24;
-    /// The mask over the mouth and nose.
+    /// Goggle frame and strap.
     pub const GOGGLE: u8 = 25;
-    /// The hood's hard shell.
     pub const HELMET: u8 = 26;
     pub const SKIN: u8 = 27;
+    /// Boot cuffs and soles.
     pub const PAD: u8 = 28;
     pub const METAL: u8 = 29;
-    /// The rolled-up sleeve.
+    /// Spare (the commander's rolled sleeve once used it).
     pub const COYOTE_DARK: u8 = 30;
 }
 
@@ -190,71 +191,75 @@ impl MeshBuilder {
     }
 }
 
-/// Light infantry, facing +y, about 1.74 m tall, in the faceted low-poly style: an olive jumpsuit with two chest
-/// pockets and a collar with a yellow tab, dark shoulder and elbow pads, the left sleeve rolled up, fingerless
-/// gloves, a pouch belt with a rear back pouch, a drop-leg holster on the right thigh, boots, and a dark hood with
-/// a hard shell and a mask; a team-colour patch on each upper arm. Thighs hang from the hips (0.88 m), shins from
-/// the knees (0.46 m), upper arms from the shoulders (1.40 m), forearms from the elbows (1.09 m), and the head nods
-/// around the neck (1.46 m); the rifle is gripped in the right hand.
+/// The basic soldier, facing +y, about 1.78 m to the top of the helmet: chunky low-poly volumes after the art
+/// reference. Tan uniform with thigh cargo pockets; plate carrier with front pouches and wings at the back; layered
+/// shoulder pads; gloves with fingers and bare fingertips; boots with sole, heel, rounded toe cap, dark cuff and lace
+/// stripes; dark balaclava with goggles; a tan helmet with a flared brim and neck guard; skin at the neck; a team
+/// colour patch on each upper arm. Thighs hang from the hips (0.88 m), shins from the knees (0.46 m), upper arms
+/// from the shoulders (1.40 m), forearms from the elbows (1.09 m), and the head nods around the neck (1.46 m); the
+/// rifle is gripped in the right hand.
 pub fn figure() -> MeshBuilder {
     use kit::*;
     let mut f = MeshBuilder::default();
     let c = |p: u8, part: Part| code(p, part);
     for (s, thigh, shin) in [(-1.0f32, Part::LeftThigh, Part::LeftShin), (1.0, Part::RightThigh, Part::RightShin)] {
-        let x = s * 0.10;
-        f.prism([x, 0.0, 0.50], [0.074, 0.08], [x, 0.0, 0.92], [0.098, 0.104], 8, c(UNIFORM, thigh));
-        // Cargo pocket on the left thigh; a drop-leg holster with two straps on the right.
-        if s < 0.0 {
-            f.cuboid([x - 0.115, -0.05, 0.60], [x - 0.07, 0.05, 0.75], c(UNIFORM_DARK, thigh));
-        } else {
-            f.cuboid([x + 0.07, -0.06, 0.58], [x + 0.135, 0.06, 0.80], c(PACK, thigh));
-            f.cuboid([x + 0.10, -0.045, 0.80], [x + 0.13, 0.045, 0.86], c(PACK, thigh));
-            for z in [0.62, 0.74] {
-                f.prism([x, 0.0, z], [0.102, 0.108], [x, 0.0, z + 0.03], [0.102, 0.108], 8, c(STRAP, thigh));
-            }
+        let x = s * 0.105;
+        // Thigh, full and tapering to the knee, with a cargo pocket on the outside.
+        f.prism([x, 0.0, 0.48], [0.085, 0.092], [x, 0.0, 0.93], [0.118, 0.126], 8, c(UNIFORM, thigh));
+        f.cuboid([x + s * 0.095 - 0.035, -0.06, 0.58], [x + s * 0.095 + 0.035, 0.07, 0.76], c(UNIFORM_DARK, thigh));
+        f.cuboid([x + s * 0.095 - 0.037, -0.062, 0.74], [x + s * 0.095 + 0.037, 0.072, 0.775], c(UNIFORM, thigh));
+        // Shin, then the boot: shaft, dark cuff, laces, foot with a raised heel and a rounded toe cap, sole.
+        f.prism([x, 0.0, 0.22], [0.072, 0.078], [x, 0.0, 0.49], [0.086, 0.092], 8, c(UNIFORM, shin));
+        f.prism([x, -0.005, 0.07], [0.078, 0.086], [x, 0.0, 0.24], [0.084, 0.09], 8, c(BOOT, shin));
+        f.prism([x, 0.0, 0.215], [0.092, 0.1], [x, 0.0, 0.265], [0.096, 0.104], 8, c(PAD, shin));
+        for k in 0..3 {
+            let z = 0.11 + k as f32 * 0.035;
+            f.cuboid([x - 0.03, 0.078, z], [x + 0.03, 0.094, z + 0.016], c(STRAP, shin));
         }
-        f.prism([x, 0.0, 0.13], [0.06, 0.066], [x, 0.0, 0.48], [0.074, 0.08], 8, c(UNIFORM, shin));
-        f.cuboid([x - 0.068, 0.035, 0.37], [x + 0.068, 0.105, 0.50], c(PAD, shin));
-        f.prism([x, 0.0, 0.07], [0.064, 0.07], [x, 0.0, 0.17], [0.062, 0.068], 8, c(BOOT, shin));
-        f.cuboid([x - 0.062, -0.09, 0.0], [x + 0.062, 0.15, 0.085], c(BOOT, shin));
+        f.cuboid([x - 0.074, -0.11, 0.025], [x + 0.074, 0.10, 0.11], c(BOOT, shin));
+        f.prism([x, 0.115, 0.025], [0.074, 0.06], [x, 0.125, 0.095], [0.066, 0.05], 8, c(BOOT, shin));
+        f.cuboid([x - 0.078, -0.115, 0.0], [x + 0.078, 0.19, 0.03], c(PAD, shin));
+        f.cuboid([x - 0.07, -0.115, 0.03], [x + 0.07, -0.05, 0.06], c(PAD, shin));
     }
-    // Jumpsuit: hips and torso, chest pockets with flaps, collar with the yellow tab.
-    f.prism([0.0, 0.0, 0.83], [0.17, 0.11], [0.0, 0.0, 0.98], [0.163, 0.106], 10, c(UNIFORM, Part::Torso));
-    f.prism([0.0, 0.0, 0.97], [0.152, 0.10], [0.0, 0.01, 1.41], [0.19, 0.118], 10, c(UNIFORM, Part::Torso));
-    for x in [-0.115f32, 0.035] {
-        f.cuboid([x, 0.105, 1.18], [x + 0.08, 0.135, 1.30], c(UNIFORM, Part::Torso));
-        f.cuboid([x - 0.005, 0.11, 1.28], [x + 0.085, 0.142, 1.31], c(UNIFORM_DARK, Part::Torso));
+    // Hips and a broad torso in the uniform; skin at the neck.
+    f.prism([0.0, 0.0, 0.82], [0.19, 0.125], [0.0, 0.0, 0.99], [0.185, 0.12], 10, c(UNIFORM, Part::Torso));
+    f.prism([0.0, 0.0, 0.97], [0.18, 0.115], [0.0, 0.0, 1.42], [0.225, 0.14], 10, c(UNIFORM, Part::Torso));
+    f.prism([0.0, 0.0, 1.38], [0.08, 0.075], [0.0, 0.0, 1.47], [0.07, 0.07], 8, c(SKIN, Part::Torso));
+    // Plate carrier: front plate with three pouches, back plate with wings, cummerbund.
+    f.cuboid([-0.19, 0.12, 1.0], [0.19, 0.175, 1.39], c(VEST, Part::Torso));
+    f.cuboid([-0.19, -0.175, 1.0], [0.19, -0.12, 1.39], c(VEST, Part::Torso));
+    f.prism([0.0, 0.0, 0.99], [0.235, 0.15], [0.0, 0.0, 1.2], [0.24, 0.152], 10, c(VEST, Part::Torso));
+    for x in [-0.15f32, -0.045, 0.06] {
+        f.cuboid([x, 0.175, 1.02], [x + 0.09, 0.22, 1.17], c(VEST, Part::Torso));
+        f.cuboid([x - 0.003, 0.175, 1.15], [x + 0.093, 0.225, 1.18], c(METAL, Part::Torso));
     }
-    f.prism([0.0, 0.0, 1.38], [0.075, 0.075], [0.0, 0.0, 1.46], [0.07, 0.07], 8, c(UNIFORM, Part::Torso));
-    f.cuboid([0.03, 0.05, 1.40], [0.08, 0.08, 1.45], c(LENS, Part::Torso));
-    // Pouch belt: the belt, magazine pouches at the front, a rear back pouch.
-    f.prism([0.0, 0.0, 0.90], [0.18, 0.12], [0.0, 0.0, 0.97], [0.18, 0.12], 10, c(STRAP, Part::Torso));
-    for x in [-0.15f32, -0.07, 0.03] {
-        f.cuboid([x, 0.115, 0.88], [x + 0.065, 0.16, 1.0], c(PACK, Part::Torso));
+    for s in [-1.0f32, 1.0] {
+        f.cuboid([s * 0.17 - 0.07, -0.205, 1.08], [s * 0.17 + 0.07, -0.15, 1.2], c(VEST, Part::Torso));
+        f.cuboid([s * 0.12 - 0.035, -0.17, 1.38], [s * 0.12 + 0.035, 0.17, 1.42], c(VEST, Part::Torso));
     }
-    f.cuboid([-0.12, -0.19, 0.86], [0.12, -0.115, 1.02], c(PACK, Part::Torso));
-    f.cuboid([-0.12, -0.195, 1.0], [0.12, -0.115, 1.03], c(UNIFORM_DARK, Part::Torso));
-    // Head: neck, balaclava, a mask over mouth and nose, the hood's hard shell.
-    f.prism([0.0, 0.0, 1.40], [0.05, 0.05], [0.0, 0.0, 1.52], [0.052, 0.052], 8, c(BALACLAVA, Part::Head));
-    f.prism([0.0, 0.005, 1.50], [0.084, 0.095], [0.0, 0.0, 1.66], [0.08, 0.09], 10, c(BALACLAVA, Part::Head));
-    f.prism([0.0, 0.07, 1.52], [0.055, 0.04], [0.0, 0.085, 1.59], [0.05, 0.04], 8, c(GOGGLE, Part::Head));
-    f.dome([0.0, -0.005, 1.62], [0.096, 0.106], 0.12, 10, 3, c(HELMET, Part::Head));
-    f.cuboid([-0.10, -0.02, 1.60], [-0.085, 0.05, 1.68], c(VEST, Part::Head));
-    f.cuboid([0.085, -0.02, 1.60], [0.10, 0.05, 1.68], c(VEST, Part::Head));
-    // Arms: dark shoulder pads with a team patch, elbow pads, the left sleeve rolled up, fingerless gloves.
+    // Head: balaclava, goggles, a tan helmet with a flared brim and neck guard.
+    f.prism([0.0, 0.0, 1.44], [0.055, 0.055], [0.0, 0.0, 1.52], [0.06, 0.06], 8, c(BALACLAVA, Part::Head));
+    f.prism([0.0, 0.01, 1.50], [0.092, 0.104], [0.0, 0.0, 1.67], [0.088, 0.098], 10, c(BALACLAVA, Part::Head));
+    f.prism([0.0, 0.0, 1.595], [0.097, 0.11], [0.0, 0.0, 1.635], [0.097, 0.11], 10, c(GOGGLE, Part::Head));
+    f.cuboid([-0.082, 0.094, 1.592], [0.082, 0.124, 1.64], c(LENS, Part::Head));
+    f.prism([0.0, -0.015, 1.60], [0.14, 0.155], [0.0, -0.005, 1.66], [0.125, 0.14], 10, c(UNIFORM_DARK, Part::Head));
+    f.dome([0.0, -0.005, 1.655], [0.125, 0.14], 0.125, 10, 3, c(HELMET, Part::Head));
+    f.cuboid([-0.11, -0.165, 1.56], [0.11, -0.12, 1.64], c(HELMET, Part::Head));
+    // Arms: layered shoulder pads with a team patch, a thick sleeve, gloves with fingers and bare fingertips.
     for (s, arm, fore) in [(-1.0f32, Part::LeftArm, Part::LeftForearm), (1.0, Part::RightArm, Part::RightForearm)] {
         let x = s * 0.238;
-        f.prism([x, 0.0, 1.09], [0.052, 0.056], [x, 0.0, 1.40], [0.064, 0.068], 8, c(UNIFORM, arm));
-        f.dome([x - s * 0.01, 0.0, 1.38], [0.076, 0.078], 0.07, 8, 2, c(VEST, arm));
-        f.prism([x, 0.0, 1.24], [0.068, 0.072], [x, 0.0, 1.39], [0.072, 0.076], 8, c(VEST, arm));
-        f.cuboid([x + s * 0.068 - 0.01, -0.03, 1.27], [x + s * 0.068 + 0.01, 0.03, 1.33], c(TEAM, arm));
-        let sleeve = if s < 0.0 { SKIN } else { UNIFORM };
-        f.prism([x, 0.0, 0.86], [0.044, 0.048], [x, 0.0, 1.12], [0.05, 0.054], 8, c(sleeve, fore));
-        if s < 0.0 {
-            f.prism([x, 0.0, 1.0], [0.054, 0.058], [x, 0.0, 1.07], [0.056, 0.06], 8, c(COYOTE_DARK, fore));
+        f.prism([x, 0.0, 1.09], [0.064, 0.068], [x, 0.0, 1.40], [0.078, 0.082], 8, c(UNIFORM, arm));
+        f.dome([x - s * 0.005, 0.0, 1.37], [0.09, 0.094], 0.075, 8, 2, c(UNIFORM, arm));
+        f.prism([x, 0.0, 1.27], [0.086, 0.09], [x, 0.0, 1.33], [0.09, 0.094], 8, c(UNIFORM_DARK, arm));
+        f.prism([x, 0.0, 1.21], [0.082, 0.086], [x, 0.0, 1.27], [0.086, 0.09], 8, c(UNIFORM, arm));
+        f.cuboid([x + s * 0.088 - 0.01, -0.035, 1.22], [x + s * 0.088 + 0.01, 0.035, 1.3], c(TEAM, arm));
+        f.prism([x, 0.0, 0.88], [0.056, 0.06], [x, 0.0, 1.12], [0.064, 0.068], 8, c(UNIFORM, fore));
+        f.cuboid([x - 0.045, -0.045, 0.80], [x + 0.045, 0.055, 0.885], c(GLOVE, fore));
+        for k in 0..4 {
+            let fy = -0.03 + k as f32 * 0.025;
+            f.cuboid([x - 0.044, fy, 0.75], [x + 0.044, fy + 0.02, 0.80], c(GLOVE, fore));
+            f.cuboid([x - 0.04, fy + 0.002, 0.73], [x + 0.04, fy + 0.018, 0.75], c(SKIN, fore));
         }
-        f.cuboid([x - 0.054, -0.075, 1.04], [x + 0.054, -0.03, 1.115], c(PAD, fore));
-        f.cuboid([x - 0.036, -0.04, 0.77], [x + 0.036, 0.05, 0.865], c(GLOVE, fore));
     }
     // Rifle: stock, receiver, grip, magazine, handguard, barrel, optic.
     let r = |p: u8| code(p, Part::Rifle);

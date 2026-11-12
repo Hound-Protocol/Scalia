@@ -15,7 +15,7 @@ pub const NECK_Z: f32 = 1.46;
 /// Where the right hand grips the rifle in the rest pose.
 pub const GRIP_Z: f32 = 0.81;
 /// How far the lying body is lifted so the chest rests on the ground.
-pub const PRONE_LIFT: f32 = 0.15;
+pub const PRONE_LIFT: f32 = 0.23;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Pose {
@@ -193,9 +193,9 @@ pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
 /// Kneeling: left thigh level with the foot planted ahead, right thigh down with the knee on the ground and the
 /// shin lying back; torso upright.
 fn kneel(p: &mut PoseParams) {
-    p.hip = [1.45, 0.05];
-    p.knee = [1.45, 1.55];
-    p.lean = 0.08;
+    p.hip = [1.55, -0.1];
+    p.knee = [1.8, 1.75];
+    p.lean = 0.12;
 }
 
 /// How the rifle is carried (the reference chart's positions); each sets both arms and the rifle angle so the
@@ -238,7 +238,7 @@ fn aim_arms(p: &mut PoseParams) {
 pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
     let mut low = f32::MAX;
     for i in 0..2 {
-        for y in [-0.10, 0.14] {
+        for y in [-0.115, 0.19] {
             low = low.min(leg(Vec3::new(0.0, y, 0.0), hip[i], knee[i]).z);
         }
     }
