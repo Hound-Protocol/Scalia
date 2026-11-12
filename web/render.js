@@ -64,12 +64,6 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 }
 fn ld(p: vec2i) -> f32 { return textureLoad(dep, p, 0); }
 fn ln(p: vec2i) -> vec3f { return textureLoad(nrm, p, 0).xyz * 2.0 - 1.0; }
-@fragment fn fs_red(i: VO) -> @location(0) vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }
-@fragment fn fs_plain(i: VO) -> @location(0) vec4f {
-  let full = vec2i(textureDimensions(col));
-  let p = clamp(vec2i(floor(i.uv * b.size + b.off)) + vec2i(1, 1), vec2i(1, 1), full - vec2i(2, 2));
-  return vec4f(textureLoad(col, p, 0).rgb, 1.0);
-}
 @fragment fn fs(i: VO) -> @location(0) vec4f {
   let full = vec2i(textureDimensions(col));
   let p = clamp(vec2i(floor(i.uv * b.size + b.off)) + vec2i(1, 1), vec2i(1, 1), full - vec2i(2, 2));
@@ -234,11 +228,6 @@ export async function createRenderer(canvas) {
     vertex: { module: blitMod, entryPoint: 'vs' },
     fragment: { module: blitMod, entryPoint: 'fs', targets: [{ format }] },
   });
-  // Debug variants, chosen with window.scaliaBlitMode = 'red' | 'plain'.
-  const variant = (entry) => device.createRenderPipeline({ layout: 'auto',
-    vertex: { module: blitMod, entryPoint: 'vs' }, fragment: { module: blitMod, entryPoint: entry, targets: [{ format }] } });
-  const debugPipes = { red: variant('fs_red'), plain: variant('fs_plain') };
-  const debugBinds = {};
   const bUni = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
   // Internal targets carry a one-texel margin on every side so the sub-texel shift never shows an edge.
@@ -312,14 +301,7 @@ export async function createRenderer(canvas) {
     p1.end();
     const screen = ctx.getCurrentTexture();
     const p2 = enc.beginRenderPass({ colorAttachments: [{ view: screen.createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
-    const mode = window.scaliaBlitMode;
-    if (mode && debugPipes[mode]) {
-      const dp = debugPipes[mode];
-      const entries = mode === 'red' ? [] : [{ binding: 0, resource: color.createView() }, { binding: 3, resource: { buffer: bUni } }];
-      p2.setPipeline(dp);
-      if (entries.length) p2.setBindGroup(0, device.createBindGroup({ layout: dp.getBindGroupLayout(0), entries }));
-      p2.draw(3); p2.end();
-    } else { p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end(); }
+    p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end();
     let readback = null;
     if (capture) {
       // Copy a texture to a buffer (rows padded to 256 bytes) and hand back RGBA pixels.
