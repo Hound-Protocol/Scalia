@@ -118,8 +118,11 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
 - **Planet view and one zoom:** the demo planet drawn as a globe (equirectangular, relief, polar ice, battlefield marker);
   zooming past a limit moves ground -> planet -> star system and back. The jump from 160 m to the globe is still a cut:
   a truly continuous zoom needs regional terrain levels between them.
+- **Orders:** click selects a group (yellow), right click marches it there; a new order mid-march redirects from
+  the current position (`World::order_march`, 4 tests). Picking goes through the orthographic camera onto the terrain.
 - **Frame pacing:** L cycles a frame cap (off, 60, 30); the HUD shows fps and CPU ms per frame. Everything moves by time,
   so a lower frame rate only drops frames.
 
-Open items: sea level and the heightmap design (the noise is almost all above 0 m, so the globe has no oceans);
+Open items: boarding seats use an abstract 20-column grid (about 60 m long) instead of the blueprint's interior, so no
+transport is drawn yet; animation and cloud time wrap every hour (a visible jump); sea level and the heightmap design (the noise is almost all above 0 m, so the globe has no oceans);
 regional terrain levels for a seamless zoom; GPU timing in the HUD; vehicles on the ground; a fresh review of the branch.

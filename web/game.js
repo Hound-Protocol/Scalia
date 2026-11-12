@@ -27,6 +27,16 @@ try {
     return [w, h];
   }
   fit();
+  // Browsers do not tell wgpu the adapter's name; ask directly so a CPU renderer is flagged.
+  let gpuNote = '';
+  try {
+    const a = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    const info = a && a.info;
+    if (!a) gpuNote = ' | no WebGPU adapter';
+    else if (info && (info.isFallbackAdapter || /swiftshader|llvmpipe/i.test(`${info.architecture} ${info.description}`)))
+      gpuNote = ' | SOFTWARE RENDERING: the CPU draws; enable hardware WebGPU (Vulkan) in Chrome';
+    else if (info) gpuNote = ` | ${[info.vendor, info.architecture].filter(Boolean).join(' ')}`;
+  } catch { /* informational only */ }
   const v = await wasm.start_viewer(canvas);
   const pixelScale = (h) => Math.max(1, Math.round(h / 300)); // about 300 internal rows on any screen
   function resize() { const [w, h] = fit(); v.resize(w, h); v.set_pixel_scale(pixelScale(h)); }
@@ -143,7 +153,7 @@ try {
       const t0 = performance.now();
       const line = v.frame(now);
       cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
-      hud.textContent = `${line} | cpu ${cpuMs.toFixed(1)} ms${cap ? ` | cap ${cap}` : ''}${now < noteUntil ? ` | ${note}` : ''}`;
+      hud.textContent = `${line} | cpu ${cpuMs.toFixed(1)} ms${cap ? ` | cap ${cap}` : ''}${gpuNote}${now < noteUntil ? ` | ${note}` : ''}`;
       const now_scene = v.scene_name();
       if (now_scene !== scene) { scene = now_scene; for (const b of document.querySelectorAll('[data-scene]')) b.classList.toggle('on', b.dataset.scene === scene); store.set('scalia.scene', scene); }
       $('launch').hidden = scene !== 'system';
