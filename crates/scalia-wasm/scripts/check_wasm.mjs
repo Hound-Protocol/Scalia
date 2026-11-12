@@ -46,7 +46,7 @@ check('blueprint_info matches the native golden mesh hash', info.id === 'transpo
 
 // (e) planet: chunk size and the native golden chunk hash.
 check('planet_chunk(1,0,0,0,8) has 81 samples', wasm.planet_chunk(1n, 0, 0, 0, 8).length === 81);
-check('planet chunk hash equals the native golden', wasm.planet_chunk_hash(7n, 0, 3, -2, 16) === 15242347213423968789n);
+check('planet chunk hash equals the native golden', wasm.planet_chunk_hash(7n, 0, 3, -2, 16) === 7773885423361474584n);
 
 // (f) absurd sizes are an error to JS and leave the module usable.
 let bad = false;

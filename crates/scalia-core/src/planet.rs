@@ -18,6 +18,12 @@ const BASE_LATTICE_MM: i64 = 32_000_000;
 /// Octave weights 8, 4, 2, 1 out of 15.
 const WEIGHT_TOTAL: i64 = 15;
 
+/// Fine detail on top of the coarse terrain: (lattice spacing, peak amplitude), both in mm.
+/// Slopes stay gentle: each layer's steepest slope is 1.5 * 2 * amplitude / spacing, at most 0.094.
+const DETAIL: [(i64, i64); 4] = [(512_000, 8_000), (128_000, 3_000), (32_000, 1_000), (8_000, 200)];
+/// Octave tags for the detail layers, after the coarse octaves 0..4.
+const DETAIL_TAG_BASE: u64 = 8;
+
 fn lattice_value(seed: u64, face: u8, octave: u64, ix: i64, iy: i64) -> Fix {
     let tag = (STREAM_TERRAIN << 8) | ((face as u64) << 4) | octave;
     unit(hash4(seed, tag, ix as u64, iy as u64))
@@ -37,7 +43,10 @@ fn lerp(a: Fix, b: Fix, t: Fix) -> Fix {
 /// Noise in [0, 1) at (x, y) for one octave, using floor division so negative
 /// coordinates continue smoothly through zero.
 fn octave_noise(seed: u64, face: u8, octave: u64, x: i64, y: i64) -> Fix {
-    let l = BASE_LATTICE_MM >> octave;
+    noise_at(seed, face, octave, BASE_LATTICE_MM >> octave, x, y)
+}
+
+fn noise_at(seed: u64, face: u8, octave: u64, l: i64, x: i64, y: i64) -> Fix {
     let (ix, iy) = (x.div_euclid(l), y.div_euclid(l));
     let tx = smooth(Fix::from_ratio(x.rem_euclid(l), l).unwrap());
     let ty = smooth(Fix::from_ratio(y.rem_euclid(l), l).unwrap());
@@ -57,7 +66,12 @@ pub fn height_mm(seed: u64, face: u8, x_mm: i64, y_mm: i64) -> i32 {
     }
     let n = Fix((sum / WEIGHT_TOTAL as i128) as i64); // in [0, 1)
     let span = Fix::from_int(TERRAIN_MAX_MM - TERRAIN_MIN_MM);
-    let h = TERRAIN_MIN_MM as i64 + n.mul(span).floor_to_i64();
+    let mut h = TERRAIN_MIN_MM as i64 + n.mul(span).floor_to_i64();
+    for (k, &(l, amp)) in DETAIL.iter().enumerate() {
+        // Centred noise in [-amp, amp).
+        let v = noise_at(seed, face, DETAIL_TAG_BASE + k as u64, l, x_mm, y_mm);
+        h += ((v.0 as i128 * 2 * amp as i128) >> 32) as i64 - amp;
+    }
     h.clamp(TERRAIN_MIN_MM as i64, TERRAIN_MAX_MM as i64) as i32
 }
 

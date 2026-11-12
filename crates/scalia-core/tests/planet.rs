@@ -1,5 +1,5 @@
 use scalia_core::hash::mix64;
-use scalia_core::planet::{height_mm, TERRAIN_MAX_MM, TERRAIN_MIN_MM};
+use scalia_core::planet::{chunk, height_mm, TERRAIN_MAX_MM, TERRAIN_MIN_MM};
 
 #[test]
 fn same_inputs_same_height() {
@@ -66,5 +66,32 @@ fn golden_height_hash() {
         }
     }
     println!("GOLDEN {h}");
-    assert_eq!(h, 15696378756055189239, "golden height hash changed");
+    assert_eq!(h, 13530145724189886874, "golden height hash changed");
+}
+
+#[test]
+fn local_relief_visible_at_soldier_scale() {
+    // Every 64 m patch, including those at lattice points where the coarse noise is flat,
+    // shows at least 1.5 m of relief, so the ground is never a featureless plane.
+    let spots = (0..20i64).map(|k| (k * 37 - 300, k * 11 - 90)).chain([(0, 0), (-1, 0), (0, -1), (-1, -1)]);
+    for (cx, cy) in spots {
+        let c = chunk(42, 0, cx, cy, 64);
+        let (lo, hi) = (*c.heights.iter().min().unwrap(), *c.heights.iter().max().unwrap());
+        assert!(hi - lo >= 1_500, "chunk ({cx},{cy}): relief {} mm", hi - lo);
+    }
+}
+
+#[test]
+fn slopes_are_walkable() {
+    // Adjacent 1 m samples never differ by more than 0.45 m (about 24 degrees).
+    for k in 0..20i64 {
+        let c = chunk(7, 2, k * 53 - 500, 300 - k * 29, 64);
+        let n = 65usize;
+        for j in 0..n {
+            for i in 0..n - 1 {
+                let d = (c.heights[j * n + i + 1] - c.heights[j * n + i]).abs();
+                assert!(d <= 450, "chunk {k} ({i},{j}): step {d} mm");
+            }
+        }
+    }
 }

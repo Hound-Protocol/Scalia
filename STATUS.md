@@ -53,13 +53,13 @@ Measured in the same sandbox, `bash scripts/verify.sh` exit 0: 115 tests in each
 | `ShipLayout` comes from a blueprint and drives core boarding | PASS | `transport_boards_a_group_through_core`: 500 seated from the Ox |
 | Planet height is deterministic, in range, continuous through zero, with golden hashes | PASS | 7 height tests, 7 chunk tests; negative chunk indices agree on shared edges |
 | 64 by 64 chunk under 1 ms | PASS | 0.39 to 0.42 ms median |
-| Native and wasm agree on the scenario hash and on a planet chunk and a mesh hash | PASS | scenario hash `11470447963499381888`; chunk golden `15242347213423968789` |
+| Native and wasm agree on the scenario hash and on a planet chunk and a mesh hash | PASS | scenario hash `11470447963499381888`; chunk golden `7773885423361474584` (changed in M2b: detail octaves) |
 | Core golden state hash unchanged by this milestone | PASS | `0xcc763f567496bd24` |
 
 ## Decisions made where the plan left a choice
 
 - Frame for blueprints: the hull is centred on the origin in x (width) and y (length), z from 0 up. Boxes, wedges and rooms give a minimum corner; a cylinder gives the centre of its base; wedges rise toward +y; cylinders are vertical.
-- Planet noise: base lattice 32 km, halving over four octaves, weights 8, 4, 2, 1; heights -2,000 m to 8,000 m. Faces differ by hash only; terrain does not yet continue across a face edge.
+- Planet noise: base lattice 32 km, halving over four octaves, weights 8, 4, 2, 1; heights -2,000 m to 8,000 m. Faces differ by hash only; terrain does not yet continue across a face edge. M2b adds four fine detail layers (512 m, 128 m, 32 m, 8 m lattices; 8 m, 3 m, 1 m, 0.2 m amplitude) so the ground has relief at soldier scale; walkable-slope and relief tests pin it.
 - A process counts as running until its scheduled end, so a finished boarding no longer blocks a new march (`ProcessError::Busy` otherwise).
 - Groups above 10,000,000 people are refused (`Groups::try_spawn`); `Sim::new` in wasm also refuses scenarios above 20,000,000 people.
 - Wasm exports cap `cells` at 1024.

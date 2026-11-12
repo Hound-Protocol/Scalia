@@ -103,21 +103,21 @@ export async function startViewer(wasm, ui) {
       const s = shipMesh(state.shipIndex);
       const size = Math.max(s.hi[0] - s.lo[0], s.hi[1] - s.lo[1], s.hi[2] - s.lo[2]);
       cam = { keys: ['ship' + state.shipIndex], target: [(s.lo[0] + s.hi[0]) / 2, (s.lo[1] + s.hi[1]) / 2, (s.lo[2] + s.hi[2]) / 2],
-        yaw: t / 2500, viewHeight: size * 1.5, range: size * 3 };
+        yaw: t / 2500, viewHeight: size * 1.0, range: size * 3 };
       text = `${s.info.name}: ${s.info.triangles} triangles, ${(s.hi[1] - s.lo[1]).toFixed(1)} m long`;
     } else if (state.scene === 'ground') {
       sim.tick(t);
       const n = sim.derive(t, 1, -1e9, 1e9, -1e9, 1e9, 400);
       const xs = sim.xs(), ys = sim.ys(), ph = sim.phases();
       let cx = 0, cy = 0;
-      for (let i = 0; i < n; i++) { cx += xs[i] / 1000; cy += ys[i] / 1000; }
+      for (let i = 0; i < n; i++) { cx += xs[i]; cy += ys[i]; }
       if (n) { cx /= n; cy /= n; }
       const gx = Math.floor(cx / CELLS), gy = Math.floor(cy / CELLS);
       const keys = [];
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { chunk(gx + dx, gy + dy); keys.push(`terrain${gx + dx},${gy + dy}`); }
       const m = new Mesh();
       for (let i = 0; i < n; i++) {
-        const x = xs[i] / 1000, y = ys[i] / 1000, z = heightAt(x, y);
+        const x = xs[i], y = ys[i], z = heightAt(x, y);
         m.box(x - 0.25, y - 0.25, z, x + 0.25, y + 0.25, z + 1.8, 4 + (ph[i] % 6));
       }
       r.upload('soldiers', m.array());

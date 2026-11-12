@@ -73,5 +73,5 @@ fn spawn_points_are_distinct_and_deterministic() {
 fn golden_chunk_hash() {
     let h = chunk_hash(&chunk(7, 0, 3, -2, 16));
     println!("GOLDEN {h}");
-    assert_eq!(h, 15242347213423968789, "golden chunk hash changed");
+    assert_eq!(h, 7773885423361474584, "golden chunk hash changed");
 }
