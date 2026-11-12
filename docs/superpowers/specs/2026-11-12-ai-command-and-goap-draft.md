@@ -1,6 +1,6 @@
 # AI: command hierarchy and GOAP (draft for decision)
 
-Status: **draft**. Written while the project lead was away; nothing here is decided. The open questions are at the end.
+Status: **decided 2026-11-12** (see Decisions below). The options are kept for the record.
 
 ## What the project lead asked for
 
@@ -64,3 +64,13 @@ sight, and would force every soldier to be stored rather than derived. So the qu
 3. How much can players override: order any squad directly, or only their own level of command?
 4. Squad size and the ranks you want (for example: squad 8-12 with a sergeant, platoon of 3-4 squads with a
    lieutenant, company of 3-4 platoons with a captain, then a general).
+
+## Decisions (2026-11-12)
+
+Combat should feel like Company of Heroes 1: soldiers take cover by themselves, each in his own spot.
+
+1. **Planning at the command levels, soldiers react individually.** This is option A, made possible because soldiers are now individual agents (see the navigation design). Squad, platoon, company and general each plan with GOAP. Each soldier claims a cover slot facing the threat, peeks and fires, and goes prone when pinned.
+2. **The player is the general.** Players set objectives and give orders to the levels below the general. AI officers and sergeants carry them out. Players do not click individual squads.
+3. **Realistic sizes.** A squad has 10–12 soldiers under a sergeant. A platoon has 3–4 squads under a lieutenant, a company has 3–4 platoons under a captain, and the general is above them.
+4. **Cover shown as shields.** Hovering over ground shows green, yellow or red shields for heavy, light or no cover. For a general this appears when placing objectives, defensive lines and attack positions, and those officers then use that cover.
+5. **First combat pass:** suppressed and pinned states, garrisoning buildings through window slots, and directional cover so that flanking works. Retreat comes later. Officers may still pull back by their own plan.
