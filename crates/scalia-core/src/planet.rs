@@ -123,8 +123,18 @@ impl Planet {
         self.height_cached(x_mm, y_mm, &mut [None; 8])
     }
 
-    /// `height_mm` with one corner cache per noise layer (4 coarse octaves, then the detail layers).
+    /// Height without the fine detail layers: smooth at map and globe scale, where sampling the
+    /// metre-scale detail would only add noise. Differs from `height_mm` by at most 12.2 m.
+    pub fn coarse_height_mm(&self, x_mm: i64, y_mm: i64) -> i32 {
+        self.height_layers(x_mm, y_mm, &mut [None; 8], false)
+    }
+
     fn height_cached(&self, x_mm: i64, y_mm: i64, cache: &mut [Corners; 8]) -> i32 {
+        self.height_layers(x_mm, y_mm, cache, true)
+    }
+
+    /// `height_mm` with one corner cache per noise layer (4 coarse octaves, then the detail layers).
+    fn height_layers(&self, x_mm: i64, y_mm: i64, cache: &mut [Corners; 8], detail: bool) -> i32 {
         let (seed, w) = (self.seed, self.width_mm);
         let x = x_mm.rem_euclid(w);
         let y = y_mm.clamp(0, self.depth_mm());
@@ -136,7 +146,7 @@ impl Planet {
         let n = Fix((sum / WEIGHT_TOTAL as i128) as i64); // in [0, 1)
         let span = Fix::from_int(TERRAIN_MAX_MM - TERRAIN_MIN_MM);
         let mut h = TERRAIN_MIN_MM as i64 + n.mul(span).floor_to_i64();
-        for (k, &(l, amp)) in DETAIL.iter().enumerate() {
+        for (k, &(l, amp)) in DETAIL.iter().enumerate().filter(|_| detail) {
             // Centred noise in [-amp, amp).
             let v = noise_cached(seed, w, DETAIL_TAG_BASE + k as u64, l, x, y, &mut cache[OCTAVES as usize + k]);
             h += ((v.0 as i128 * 2 * amp as i128) >> 32) as i64 - amp;

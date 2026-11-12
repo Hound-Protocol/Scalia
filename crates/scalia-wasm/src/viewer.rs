@@ -536,7 +536,7 @@ impl Viewer {
             for i in 0..=cols {
                 let x = p.width_mm() / cols as i64 * i as i64;
                 let y = p.depth_mm() / rows as i64 * j as i64;
-                h[j * (cols + 1) + i] = p.height_mm(x, y);
+                h[j * (cols + 1) + i] = p.coarse_height_mm(x, y);
             }
         }
         let vert = |i: usize, j: usize| -> [f32; 3] {

@@ -143,3 +143,15 @@ fn golden_height_hash() {
     }
     assert_eq!(h, 11417373502760628042, "golden height hash changed");
 }
+
+#[test]
+fn coarse_height_is_the_terrain_without_its_fine_detail() {
+    // The detail layers add at most 8 + 3 + 1 + 0.2 = 12.2 m.
+    let p = demo();
+    for k in 0..500i64 {
+        let (x, y) = (k * 7_919_123, p.depth_mm() / 10 + k * 2_900_000);
+        let (fine, coarse) = (p.height_mm(x, y), p.coarse_height_mm(x, y));
+        assert!((fine - coarse).abs() <= 12_200, "{x},{y}: {fine} vs {coarse}");
+    }
+    assert_eq!(p.coarse_height_mm(5, 7), p.coarse_height_mm(5 + p.width_mm(), 7));
+}
