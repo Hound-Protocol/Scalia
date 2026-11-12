@@ -87,12 +87,22 @@ try {
     else if (k === 'h') toggleHelp();
     else if (k === 'o') { outline.checked = !outline.checked; v.set_outline(outline.checked); }
     else if (k === 'r') { fullres.checked = !fullres.checked; v.set_full(fullres.checked); }
+    else if (k === 't') flash(v.cycle_day_speed(performance.now()));
+    else if (k === 'l') { capIndex = (capIndex + 1) % CAPS.length; store.set('scalia.cap', String(capIndex)); flash(`frame cap: ${CAPS[capIndex] || 'off'}`); }
   });
   addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
   addEventListener('blur', () => held.clear());
 
-  let last = performance.now();
+  // Frame pacing: optional cap (60 or 30); everything moves by time, so a lower rate only drops frames.
+  const CAPS = [0, 60, 30];
+  let capIndex = Number(store.get('scalia.cap') || 0) % CAPS.length;
+  let note = '', noteUntil = 0;
+  const flash = (msg) => { note = msg; noteUntil = performance.now() + 2000; };
+  let cpuMs = 0, last = performance.now(), lastDraw = 0;
   function loop(now) {
+    const cap = CAPS[capIndex];
+    if (cap && now - lastDraw < 1000 / cap - 2) { requestAnimationFrame(loop); return; }
+    lastDraw = now;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (!document.hidden) {
@@ -105,7 +115,10 @@ try {
       if (px || py) v.pan(px, py);
       if (held.has('q')) v.rotate(-1.5 * dt);
       if (held.has('e')) v.rotate(1.5 * dt);
-      hud.textContent = v.frame(now);
+      const t0 = performance.now();
+      const line = v.frame(now);
+      cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
+      hud.textContent = `${line} | cpu ${cpuMs.toFixed(1)} ms${cap ? ` | cap ${cap}` : ''}${now < noteUntil ? ` | ${note}` : ''}`;
       $('launch').hidden = scene !== 'system';
       $('launch').disabled = v.flying();
       sel.hidden = scene !== 'ships';

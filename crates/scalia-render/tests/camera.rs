@@ -47,7 +47,7 @@ fn snapped_target_sits_on_the_texel_grid() {
 #[test]
 fn light_matrix_centres_target_and_raises_toward_the_sun() {
     let t = Vec3::new(10.0, 20.0, 5.0);
-    let m = light_matrix(t, 50.0, 200.0, 2048);
+    let m = light_matrix(glam::Vec3::new(0.4, -0.3, 0.85).normalize(), t, 50.0, 200.0, 2048);
     let c = m * t.extend(1.0);
     assert!(c.x.abs() < 0.03 && c.y.abs() < 0.03 && approx(c.z, 0.5, 1e-4), "{c:?}");
     let higher = m * (t + Vec3::Z * 10.0).extend(1.0);

@@ -5,11 +5,6 @@ use glam::{Mat4, Vec3, Vec4};
 /// True isometric elevation, about 35.26 degrees.
 pub const ELEV: f32 = 0.615_479_7;
 
-/// Direction towards the sun (unit length).
-pub fn sun() -> Vec3 {
-    Vec3::new(0.4, -0.3, 0.85).normalize()
-}
-
 /// Builds a matrix from three rows (x, y, depth) that map world points to clip space,
 /// with the target at the centre and at depth 0.5.
 fn from_rows(rows: [Vec3; 3], target: Vec3) -> Mat4 {
@@ -50,9 +45,10 @@ pub fn snap_target(target: Vec3, yaw: f32, texel: f32) -> Snap {
     Snap { target: target - r * er - u * eu, ex: er / texel, ey: -eu / texel }
 }
 
-/// Orthographic sun camera centred on `target`, `half` units each way, snapped to its own texels.
-pub fn light_matrix(target: Vec3, half: f32, range: f32, size: u32) -> Mat4 {
-    let f = -sun();
+/// Orthographic camera for the light coming from `to_light` (unit), centred on `target`, `half` units
+/// each way, snapped to its own texels so shadows do not shimmer.
+pub fn light_matrix(to_light: Vec3, target: Vec3, half: f32, range: f32, size: u32) -> Mat4 {
+    let f = -to_light;
     let r = f.cross(Vec3::Z).normalize();
     let u = r.cross(f);
     let texel = 2.0 * half / size as f32;

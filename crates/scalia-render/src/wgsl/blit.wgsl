@@ -1,4 +1,5 @@
-struct B { off: vec2f, size: vec2f, thresh: f32, outline: f32, pad: vec2f };
+// fog: rgb and on/off; fogp: depth where haze starts, depth where it is strongest, strongest amount, vignette.
+struct B { off: vec2f, size: vec2f, thresh: f32, outline: f32, pad: vec2f, fog: vec4f, fogp: vec4f };
 @group(0) @binding(0) var col: texture_2d<f32>;
 @group(0) @binding(1) var nrm: texture_2d<f32>;
 @group(0) @binding(2) var dep: texture_depth_2d;
@@ -10,13 +11,23 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 }
 fn ld(p: vec2i) -> f32 { return textureLoad(dep, p, 0); }
 fn ln(p: vec2i) -> vec3f { return textureLoad(nrm, p, 0).xyz * 2.0 - 1.0; }
+// Haze towards the fog colour with distance behind the focus, then a soft vignette.
+fn grade(c: vec3f, d: f32, uv: vec2f) -> vec4f {
+  var o = c;
+  if (b.fog.w > 0.5) {
+    let f = select(smoothstep(b.fogp.x, b.fogp.y, d) * b.fogp.z, 1.0, d >= 1.0);
+    o = mix(o, b.fog.rgb, f);
+  }
+  let e = uv - vec2f(0.5);
+  o = o * (1.0 - b.fogp.w * smoothstep(0.25, 0.75, dot(e, e) * 2.0));
+  return vec4f(o, 1.0);
+}
 @fragment fn fs(i: VO) -> @location(0) vec4f {
   let full = vec2i(textureDimensions(col));
   let p = clamp(vec2i(floor(i.uv * b.size + b.off)) + vec2i(1, 1), vec2i(1, 1), full - vec2i(2, 2));
   var c = textureLoad(col, p, 0).rgb;
-  if (b.outline < 0.5) { return vec4f(c, 1.0); }
   let d = ld(p);
-  if (d >= 1.0) { return vec4f(c, 1.0); }
+  if (b.outline < 0.5 || d >= 1.0) { return grade(c, d, i.uv); }
   let n = ln(p);
   var silhouette = false;
   var crease = false;
@@ -29,5 +40,5 @@ fn ln(p: vec2i) -> vec3f { return textureLoad(nrm, p, 0).xyz * 2.0 - 1.0; }
   }
   if (silhouette) { c = c * 0.45; }
   else if (crease) { c = min(c * 1.3 + 0.04, vec3f(1.0)); }
-  return vec4f(c, 1.0);
+  return grade(c, d, i.uv);
 }

@@ -9,7 +9,7 @@ fn validate(name: &str, src: &str) {
 
 #[test]
 fn all_shaders_parse_and_validate() {
-    validate("scene", &SCENE_WGSL);
+    validate("scene", SCENE_WGSL);
     validate("shadow", SHADOW_WGSL);
     validate("blit", BLIT_WGSL);
 }

@@ -8,6 +8,7 @@ use wgpu::util::DeviceExt;
 
 use crate::camera::{iso_view, light_matrix, snap_target};
 use crate::shaders::{BLIT_WGSL, SCENE_WGSL, SHADOW_WGSL};
+use crate::sky::Sky;
 
 pub const SHADOW_SIZE: u32 = 2048;
 
@@ -30,6 +31,9 @@ pub struct FrameDesc<'a> {
     pub range: f32,
     pub internal: (u32, u32),
     pub outline: bool,
+    pub sky: Sky,
+    /// Haze and sky background (ground and ships); off for space.
+    pub atmosphere: bool,
 }
 
 struct Targets {
@@ -111,13 +115,13 @@ impl Gpu {
 
         let uni = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene uniforms"),
-            size: 400,
+            size: 448,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let b_uni = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("upscale uniforms"),
-            size: 32,
+            size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -144,7 +148,7 @@ impl Gpu {
 
         let scene_mod = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("scene"),
-            source: wgpu::ShaderSource::Wgsl(SCENE_WGSL.as_str().into()),
+            source: wgpu::ShaderSource::Wgsl(SCENE_WGSL.into()),
         });
         let shadow_mod = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shadow"),
@@ -307,7 +311,7 @@ impl Gpu {
         self.ensure_targets(w, h);
         let snap = snap_target(f.target, f.yaw, f.view_height / h as f32);
         let (m, vdir) = iso_view(snap.target, f.yaw, f.view_height * (h + 2) as f32 / h as f32, (w + 2) as f32 / (h + 2) as f32, f.range);
-        let lm = light_matrix(snap.target, f.view_height * 1.3, f.range.max(f.view_height * 4.0), SHADOW_SIZE);
+        let lm = light_matrix(f.sky.light_dir, snap.target, f.view_height * 1.3, f.range.max(f.view_height * 4.0), SHADOW_SIZE);
         let mut u = Vec::with_capacity(100);
         u.extend_from_slice(&m.to_cols_array());
         u.extend_from_slice(&lm.to_cols_array());
@@ -315,9 +319,19 @@ impl Gpu {
         for c in PALETTE {
             u.extend_from_slice(&[c[0], c[1], c[2], 1.0]);
         }
+        let (l, lc, am) = (f.sky.light_dir, f.sky.light_col, f.sky.ambient);
+        u.extend_from_slice(&[l.x, l.y, l.z, 0.0, lc[0], lc[1], lc[2], 0.0, am[0], am[1], am[2], 0.0]);
         self.queue.write_buffer(&self.uni, 0, f32_bytes(&u));
         let thresh = (f.view_height / h as f32) * 3.0 / (2.0 * f.range);
-        let b = [snap.ex, snap.ey, w as f32, h as f32, thresh, if f.outline { 1.0 } else { 0.0 }, 0.0, 0.0];
+        // Orthographic depth is linear: 0.5 at the focus, 1/(2 range) per world unit away from the camera.
+        let per_unit = 1.0 / (2.0 * f.range);
+        let (near, far) = (0.5 - 0.3 * f.view_height * per_unit, 0.5 + 1.4 * f.view_height * per_unit);
+        let fog = f.sky.fog;
+        let b = [
+            snap.ex, snap.ey, w as f32, h as f32, thresh, if f.outline { 1.0 } else { 0.0 }, 0.0, 0.0,
+            fog[0], fog[1], fog[2], if f.atmosphere { 1.0 } else { 0.0 },
+            near, far, 0.55, 0.35,
+        ];
         self.queue.write_buffer(&self.b_uni, 0, f32_bytes(&b));
 
         let frame = match self.surface.get_current_texture() {
@@ -329,6 +343,11 @@ impl Gpu {
         };
         let screen = frame.texture.create_view(&Default::default());
         let t = self.targets.as_ref().expect("ensured");
+        let bg = if f.atmosphere {
+            wgpu::Color { r: fog[0] as f64, g: fog[1] as f64, b: fog[2] as f64, a: 1.0 }
+        } else {
+            wgpu::Color { r: 0.02, g: 0.025, b: 0.04, a: 1.0 }
+        };
         let mut enc = self.device.create_command_encoder(&Default::default());
 
         let draw_all = |pass: &mut wgpu::RenderPass<'_>| {
@@ -376,7 +395,7 @@ impl Gpu {
             let mut p = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[
-                    clear(wgpu::Color { r: 0.05, g: 0.06, b: 0.09, a: 1.0 }, &t.color),
+                    clear(bg, &t.color),
                     clear(wgpu::Color { r: 0.5, g: 0.5, b: 1.0, a: 1.0 }, &t.normal),
                 ],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {

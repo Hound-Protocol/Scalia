@@ -14,6 +14,7 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use scalia_render::gpu::{FrameDesc, Gpu};
 use scalia_render::mesh::{figure, MeshBuilder};
+use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
 
 const SOLDIERS: u32 = 2000;
@@ -62,6 +63,10 @@ pub struct Viewer {
     yaw: f32,
     ship_yaw: Option<f32>,
     pixel_scale: u32,
+    /// Time of day (fraction) at sim time 0, and how many game days pass per real millisecond.
+    day_start: f64,
+    day_rate: f64,
+    day_at: f64,
     last_view: (f32, f32),
     fps: f32,
     frames: u32,
@@ -97,6 +102,9 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         yaw: std::f32::consts::FRAC_PI_4,
         ship_yaw: None,
         pixel_scale: 2,
+        day_start: 0.3,
+        day_rate: 1.0 / 360_000.0,
+        day_at: 0.0,
         last_view: (60.0, 1.0),
         fps: 0.0,
         frames: 0,
@@ -170,6 +178,25 @@ impl Viewer {
             Scene::Ships => self.ship_yaw = None,
         }
     }
+    /// Cycles the speed of the day: 6-minute days, 12-second days, paused.
+    pub fn cycle_day_speed(&mut self, now_ms: f64) -> String {
+        let t = self.sim_ms(now_ms);
+        self.day_start = self.time_of_day(t);
+        self.day_at = t;
+        self.day_rate = if self.day_rate == 1.0 / 360_000.0 {
+            1.0 / 12_000.0
+        } else if self.day_rate > 0.0 {
+            0.0
+        } else {
+            1.0 / 360_000.0
+        };
+        match self.day_rate {
+            r if r == 0.0 => "time paused",
+            r if r > 1.0 / 100_000.0 => "fast day",
+            _ => "normal day",
+        }
+        .into()
+    }
     pub fn scene_name(&self) -> String {
         match self.scene {
             Scene::Ships => "ships",
@@ -232,16 +259,26 @@ impl Viewer {
             Scene::System => self.system_scene(t, &mut meshes),
         };
         self.last_view = (view_height, self.size.1 as f32);
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, target, yaw, view_height, range, internal, outline: self.outline };
+        let tod = self.time_of_day(t) as f32;
+        let (sky_now, atmosphere) = match self.scene {
+            Scene::System => (sky(0.5), false),
+            _ => (sky(tod), true),
+        };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
         let gpu = if self.gpu.software { " | SOFTWARE RENDERING: the CPU is drawing" } else { "" };
-        format!("{text} | {}x{} | {:.0} fps{gpu}", internal.0, internal.1, self.fps)
+        let time = if self.scene == Scene::System { String::new() } else { format!(" | {}", clock(tod)) };
+        format!("{text}{time} | {}x{} | {:.0} fps{gpu}", internal.0, internal.1, self.fps)
     }
 }
 
 impl Viewer {
+    fn time_of_day(&self, t: f64) -> f64 {
+        (self.day_start + (t - self.day_at) * self.day_rate).rem_euclid(1.0)
+    }
+
     fn ground_focus(&self) -> Vec3 {
         self.focus
     }
