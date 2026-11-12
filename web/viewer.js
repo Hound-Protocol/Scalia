@@ -179,7 +179,8 @@ export async function startViewer(wasm, ui) {
     ui.launch.hidden = state.scene !== 'system';
     ui.shipSel.hidden = state.scene !== 'ships';
     const shot = pendingShot; pendingShot = null;
-    r.frame({ ...cam, internal, outline: state.outline, capture: shot && ((img) => {
+    r.frame({ ...cam, internal, outline: state.outline, capture: shot && ((img, internalImg) => {
+      window._scaliaInternal = internalImg;
       // Downscale to the internal size (nearest) and return a PNG data URL.
       const big = document.createElement('canvas'); big.width = img.width; big.height = img.height;
       big.getContext('2d').putImageData(img, 0, 0);

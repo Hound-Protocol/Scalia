@@ -304,21 +304,25 @@ export async function createRenderer(canvas) {
     p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end();
     let readback = null;
     if (capture) {
-      // Copy the presented image to a buffer (rows padded to 256 bytes) and hand back RGBA pixels.
-      const cw = screen.width, ch = screen.height, row = Math.ceil((cw * 4) / 256) * 256;
-      readback = device.createBuffer({ size: row * ch, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-      enc.copyTextureToBuffer({ texture: screen }, { buffer: readback, bytesPerRow: row }, [cw, ch]);
+      // Copy a texture to a buffer (rows padded to 256 bytes) and hand back RGBA pixels.
+      const grab = (tex, w, h) => {
+        const row = Math.ceil((w * 4) / 256) * 256;
+        const buf = device.createBuffer({ size: row * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: row }, [w, h]);
+        const bgra = tex.format.startsWith('bgra');
+        return () => buf.mapAsync(GPUMapMode.READ).then(() => {
+          const src = new Uint8Array(buf.getMappedRange()), out = new Uint8ClampedArray(w * h * 4);
+          for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+            const i = y * row + x * 4, o = (y * w + x) * 4;
+            out[o] = src[i + (bgra ? 2 : 0)]; out[o + 1] = src[i + 1]; out[o + 2] = src[i + (bgra ? 0 : 2)]; out[o + 3] = 255;
+          }
+          buf.unmap(); buf.destroy();
+          return new ImageData(out, w, h);
+        });
+      };
+      const a = grab(screen, screen.width, screen.height), b = grab(color, w + 2, h + 2);
       device.queue.submit([enc.finish()]);
-      readback.mapAsync(GPUMapMode.READ).then(() => {
-        const src = new Uint8Array(readback.getMappedRange()), out = new Uint8ClampedArray(cw * ch * 4);
-        const bgra = screen.format.startsWith('bgra');
-        for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
-          const i = y * row + x * 4, o = (y * cw + x) * 4;
-          out[o] = src[i + (bgra ? 2 : 0)]; out[o + 1] = src[i + 1]; out[o + 2] = src[i + (bgra ? 0 : 2)]; out[o + 3] = 255;
-        }
-        readback.unmap(); readback.destroy();
-        capture(new ImageData(out, cw, ch));
-      });
+      Promise.all([a(), b()]).then(([scr, col]) => capture(scr, col));
       return;
     }
     device.queue.submit([enc.finish()]);
