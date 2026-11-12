@@ -148,16 +148,12 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.head = 0.38;
         }
         Pose::Crouch => {
-            p.lean = 0.45;
-            p.hip = [1.4, 1.4];
-            p.knee = [2.4, 2.4];
+            kneel(&mut p);
             carry(&mut p, Carry::LowReady);
             p.head = 0.35;
         }
         Pose::CoverAim => {
-            p.lean = 0.2;
-            p.hip = [1.4, 1.4];
-            p.knee = [2.4, 2.4];
+            kneel(&mut p);
             aim_arms(&mut p);
             p.head = 0.05;
         }
@@ -182,6 +178,14 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
 /// carry), so a soldier can walk while aiming.
 pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
     PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, ..*legs }
+}
+
+/// Kneeling: left thigh level with the foot planted ahead, right thigh down with the knee on the ground and the
+/// shin lying back; torso upright.
+fn kneel(p: &mut PoseParams) {
+    p.hip = [1.45, 0.05];
+    p.knee = [1.45, 1.55];
+    p.lean = 0.08;
 }
 
 /// How the rifle is carried (the reference chart's positions); each sets both arms and the rifle angle so the

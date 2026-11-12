@@ -119,6 +119,11 @@ pub struct Viewer {
     agents: HashMap<u32, AgentGroup>,
     agent_prev: HashMap<u32, Vec<(i64, i64)>>,
     agent_clock: f64,
+    /// Smoothed camera: ground target (absolute metres) and yaw, eased towards where they are aimed each frame.
+    cam_smooth: Option<Vec3>,
+    yaw_smooth: f32,
+    cam_ms: f64,
+    agent_now: f64,
     /// Cross-fade from a previous far level: (level, start of the fade in ms).
     far_fade: Option<(u32, f64)>,
     /// Zoom: the ladder step aimed at and the view height (metres) the camera is gliding through.
@@ -209,6 +214,10 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         agents: HashMap::new(),
         agent_prev: HashMap::new(),
         agent_clock: -1.0,
+        cam_smooth: None,
+        yaw_smooth: 0.0,
+        cam_ms: 0.0,
+        agent_now: 0.0,
         far_fade: None,
         zoom_step: STEP_GROUND,
         zoom_m: LADDER[STEP_GROUND],
@@ -519,8 +528,9 @@ impl Viewer {
                         self.agent_prev.insert(i, a.positions().to_vec());
                         self.agents.insert(i, a);
                         moved += 1;
-                        continue;
                     }
+                    // Inside the base soldiers only ever walk as agents: never a straight line through walls.
+                    continue;
                 }
             }
             if self.world.order_march(GroupId(i), to, speed, now).is_ok() {
@@ -532,8 +542,10 @@ impl Viewer {
             return "those groups cannot move right now".into();
         }
         self.order_dest = Some(p);
-        self.ground_cam = None;
-        self.follow_group = g;
+        // The camera stays where the player left it (F follows again).
+        if self.ground_cam.is_none() {
+            self.ground_cam = Some(self.cam_smooth.unwrap_or(self.focus));
+        }
         let verb = if run { "sprinting" } else { "marching" };
         if groups.len() == 1 { format!("group {g} {verb} to ({:.0}, {:.0})", p.x, p.y) } else { format!("{moved} groups {verb} to ({:.0}, {:.0})", p.x, p.y) }
     }
@@ -657,10 +669,18 @@ impl Viewer {
         let internal = ((self.size.0 / ps).max(1), (self.size.1 / ps).max(1));
         self.glide(now_ms);
         let (mut meshes, mut instanced, mut decor) = (Vec::new(), Vec::new(), Vec::new());
-        let (target, yaw, view_height, range, text) = match self.scene {
+        let (target, yaw_aim, view_height, range, text) = match self.scene {
             Scene::Ships => self.ships_scene(t, &mut meshes, &mut instanced),
             Scene::Ground => self.ground_scene(t, &mut meshes, &mut instanced, &mut decor),
             Scene::System => self.system_scene(t, &mut meshes),
+        };
+        // Rotation eases too (the model viewer turns directly: it is dragged by hand).
+        let yaw = if self.scene == Scene::Ships {
+            yaw_aim
+        } else {
+            let k = 1.0 - (-(16.0f32) / 120.0).exp();
+            self.yaw_smooth += (yaw_aim - self.yaw_smooth) * k;
+            self.yaw_smooth
         };
         self.last_view = (view_height, self.size.1 as f32);
         self.last_cam = (target, yaw, view_height);
@@ -914,6 +934,9 @@ impl Viewer {
             let (ax, ay) = (d.pos.x as f64 / 1000.0, d.pos.y as f64 / 1000.0);
             let z = self.height_at(ax as f32, ay as f32);
             let (x, y) = ((ax - self.origin.0) as f32, (ay - self.origin.1) as f32);
+            if !self.on_screen(x, y, z, 3.0) {
+                continue;
+            }
             // Facing: along the march, else the formation's front with a little personal variation.
             let jitter = (scalia_core::hash::mix64(d.slot as u64 ^ 0x5ca1) % 1000) as f32 / 1000.0;
             let heading = match self.world.groups.process(d.group).kind {
@@ -985,6 +1008,10 @@ impl Viewer {
         for dy in -rad..=rad {
             for dx in -rad..=rad {
                 let key = (gx + dx, gy + dy);
+                let (ccx, ccy) = (((key.0 * CELLS as i64) as f64 + 32.0 - self.origin.0) as f32, ((key.1 * CELLS as i64) as f64 + 32.0 - self.origin.1) as f32);
+                if !self.on_screen(ccx, ccy, self.base_h, 48.0) {
+                    continue; // off screen: neither built nor drawn
+                }
                 let current = self.chunk_lod.get(&key).copied();
                 if current != Some(step) {
                     if budget == 0 && current.is_some() {
@@ -1070,6 +1097,16 @@ impl Viewer {
         let sink = smooth_log(self.ground_view, 400_000.0, 2_400_000.0);
         let ground_z = if self.ground_view <= NEAR_MAX { self.height_at(target.x, target.y) } else { self.surface_m(target.x, target.y) };
         target.z = ground_z + (-PLANET_R - ground_z) * sink;
+        // Ease towards the aimed target: following and panning glide instead of stepping.
+        let dt = (t - self.cam_ms).clamp(0.0, 100.0);
+        self.cam_ms = t;
+        let k = 1.0 - (-dt / 140.0).exp() as f32;
+        let smooth = match self.cam_smooth {
+            Some(c) if (c - target).length() < self.ground_view * 3.0 => c + (target - c) * k,
+            _ => target, // a jump (new army, far pan): cut straight there
+        };
+        self.cam_smooth = Some(smooth);
+        let target = smooth;
         let target = Vec3::new((target.x as f64 - self.origin.0) as f32, (target.y as f64 - self.origin.1) as f32, target.z);
         let mode = if self.ground_cam.is_some() { "free camera (F follows)".to_string() } else { format!("following group {lead}") };
         let sel = match self.selected { Some(g) => format!(", group {g} selected"), None => String::new() };
@@ -1090,6 +1127,7 @@ impl Viewer {
 
     /// Advances the agent squads in fixed 50 ms steps (deterministic, whatever the frame rate).
     fn step_agents(&mut self, t: f64) {
+        self.agent_now = t;
         if self.agent_clock < 0.0 || t - self.agent_clock > 1000.0 {
             self.agent_clock = t;
         }
@@ -1114,6 +1152,8 @@ impl Viewer {
                 (a.positions().to_vec(), a.arrived().to_vec())
             };
             let prev = self.agent_prev.get(&g).cloned().unwrap_or_else(|| pos.clone());
+            // Drawn between the last two 50 ms steps, so movement is smooth at any frame rate.
+            let alpha = ((self.agent_now - self.agent_clock) / 50.0).clamp(0.0, 1.0);
             let stance = self.stance.get(&g).copied().unwrap_or(Pose::Stand);
             let sprint = matches!(self.world.groups.process(GroupId(g)).kind, ProcessKind::March { speed_mm_s, .. } if speed_mm_s >= RUN_SPEED_MM_S);
             for (i, (&(x, y), &(px, py))) in pos.iter().zip(&prev).enumerate() {
@@ -1121,9 +1161,13 @@ impl Viewer {
                 let moving = !arrived[i] && (x != px || y != py);
                 let heading = if x != px || y != py { ((px - x) as f32).atan2((y - py) as f32) } else { (jitter - 0.5) * 0.4 };
                 let (pose, steps) = if moving && sprint { (Pose::Sprint, 1.45 + jitter * 0.1) } else if moving { (Pose::Walk, 0.9 + jitter * 0.1) } else { (stance, 0.0) };
-                let (ax, ay) = (x as f64 / 1000.0, y as f64 / 1000.0);
+                let (ix, iy) = (px as f64 + (x - px) as f64 * alpha, py as f64 + (y - py) as f64 * alpha);
+                let (ax, ay) = (ix / 1000.0, iy / 1000.0);
                 let z = self.height_at(ax as f32, ay as f32);
                 let (rx, ry) = ((ax - self.origin.0) as f32, (ay - self.origin.1) as f32);
+                if !self.on_screen(rx, ry, z, 3.0) {
+                    continue;
+                }
                 let body = if self.selection.contains(&g) { 14.0 } else if moving { 7.0 } else { 6.0 };
                 let key = g * 1000 + i as u32;
                 let entry = self.group_pose.entry(1_000_000 + key).or_insert((pose, pose, -1000.0));
@@ -1136,6 +1180,16 @@ impl Viewer {
                 inst.extend_from_slice(&[rx, ry, z, body, heading, jitter, steps, pose as u32 as f32, prev_pose as u32 as f32, since, upper, 0.0]);
             }
         }
+    }
+
+    /// Whether a point (origin-relative metres) falls on screen, by last frame's camera, with `margin` metres
+    /// to spare. The ground under an isometric screen is a tilted rectangle; anything outside it is skipped.
+    fn on_screen(&self, x: f32, y: f32, z: f32, margin: f32) -> bool {
+        let (target, yaw, view_h) = self.last_cam;
+        let (r, u, _) = scalia_render::camera::basis(yaw);
+        let d = Vec3::new(x, y, z) - target;
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        (d.dot(r)).abs() <= view_h * 0.5 * aspect + margin && (d.dot(u)).abs() <= view_h * 0.5 + margin
     }
 
     /// Instance that places a chunk (built chunk-local) relative to the floating origin.

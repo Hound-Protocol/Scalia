@@ -26,6 +26,8 @@ impl AgentGroup {
     /// Orders soldiers standing at `starts` to `dest`: slots in a square block centred there (open slots only).
     /// `None` when the destination cannot be reached.
     pub fn new(grid: &NavGrid, starts: Vec<(i64, i64)>, dest: (i64, i64), speed_mm_s: i64, radius_mm: i64) -> Option<AgentGroup> {
+        // An order onto an obstacle goes to the nearest open ground (searched ring by ring, up to 20 m out).
+        let dest = nearest_open(grid, dest, radius_mm)?;
         let field = FlowField::new(grid, dest, radius_mm)?;
         let n = starts.len();
         let cols = (n as f64).sqrt().ceil() as i64;
@@ -158,6 +160,32 @@ impl AgentGroup {
             }
         }
     }
+}
+
+fn nearest_open(grid: &NavGrid, p: (i64, i64), radius_mm: i64) -> Option<(i64, i64)> {
+    if grid.walkable_at(p.0, p.1, radius_mm) {
+        return Some(p);
+    }
+    let step = crate::nav::CELL_MM;
+    for ring in 1..=40i64 {
+        let mut best: Option<((i64, i64), i64)> = None;
+        for j in -ring..=ring {
+            for i in -ring..=ring {
+                if i.abs().max(j.abs()) != ring {
+                    continue;
+                }
+                let q = (p.0 + i * step, p.1 + j * step);
+                let d = i * i + j * j;
+                if grid.walkable_at(q.0, q.1, radius_mm) && best.map_or(true, |b| d < b.1) {
+                    best = Some((q, d));
+                }
+            }
+        }
+        if let Some((q, _)) = best {
+            return Some(q);
+        }
+    }
+    None
 }
 
 fn isqrt(n: i64) -> i64 {

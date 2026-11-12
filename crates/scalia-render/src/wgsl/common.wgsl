@@ -74,15 +74,15 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     p.sh = p.sh + vec2f(0.04 * sw);
     p.head = 0.38;
   } else if (pose == 3u) {
-    p.lean = 0.45;
-    p.hip = vec2f(1.4);
-    p.knee = vec2f(2.4);
+    p.hip = vec2f(1.45, 0.05);
+    p.knee = vec2f(1.45, 1.55);
+    p.lean = 0.08;
     carry(&p, 1u);
     p.head = 0.35;
   } else if (pose == 4u) {
-    p.lean = 0.2;
-    p.hip = vec2f(1.4);
-    p.knee = vec2f(2.4);
+    p.hip = vec2f(1.45, 0.05);
+    p.knee = vec2f(1.45, 1.55);
+    p.lean = 0.08;
     carry(&p, 4u);
     p.head = 0.05;
   } else if (pose == 5u) {

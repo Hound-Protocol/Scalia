@@ -58,3 +58,23 @@ fn agents_are_deterministic() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn an_order_onto_an_obstacle_goes_to_the_nearest_open_ground() {
+    let mut g = NavGrid::new(0, 0, 80, 80);
+    g.rebuild(&[Prop { kind: PropKind::Crate { size_mm: 3_000 }, x_mm: 20_000, y_mm: 20_000, quarter_turns: 0 }]);
+    let starts: Vec<(i64, i64)> = (0..9).map(|k| (4_000 + (k % 3) * 1_000, 4_000 + (k / 3) * 1_000)).collect();
+    let mut squad = AgentGroup::new(&g, starts, (20_000, 20_000), 1_500, SOLDIER).expect("an order even onto a crate");
+    for _ in 0..20 * 60 {
+        squad.step(&g, 50);
+        if squad.all_arrived() {
+            break;
+        }
+    }
+    assert!(squad.all_arrived());
+    for &(x, y) in squad.positions() {
+        assert!(g.walkable_at(x, y, SOLDIER), "nobody stands in the crate: ({x}, {y})");
+        let d = (((x - 20_000) as f64).powi(2) + ((y - 20_000) as f64).powi(2)).sqrt();
+        assert!(d < 6_000.0, "they gather round it ({d:.0} mm away)");
+    }
+}

@@ -45,7 +45,7 @@ fn crouching_is_lower_and_prone_is_flat() {
     let crouch = top(&posed(Pose::Crouch, 0.0));
     let prone = posed(Pose::Prone, 0.0);
     assert!((1.7..=1.85).contains(&stand), "stand {stand}");
-    assert!(crouch < 1.35, "crouch {crouch}");
+    assert!(crouch < 1.5, "crouch (kneeling) {crouch}");
     assert!(top(&prone) < 0.5, "prone height {}", top(&prone));
     assert!(bottom(&prone) > -0.05, "prone sinks: {}", bottom(&prone));
     let len = prone.iter().map(|p| p.1.y).fold(f32::MIN, f32::max) - prone.iter().map(|p| p.1.y).fold(f32::MAX, f32::min);
@@ -231,5 +231,21 @@ fn every_carry_holds_the_rifle_in_both_hands() {
             let miss = (l - (r + dir * t)).length();
             assert!(miss < 0.05, "{pose:?}: left hand {miss:.3} m off the rifle");
         }
+    }
+}
+
+#[test]
+fn crouching_is_a_kneel_right_knee_down_left_foot_forward() {
+    for pose in [Pose::Crouch, Pose::CoverAim] {
+        let v = posed(pose, 0.0);
+        let of = |p: Part| v.iter().filter(move |q| q.0 == p).map(|q| q.1).collect::<Vec<Vec3>>();
+        let low = |pts: &[Vec3]| pts.iter().map(|p| p.z).fold(f32::MAX, f32::min);
+        let fwd = |pts: &[Vec3]| pts.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+        // The right knee (top of the shin) rests on the ground; the left shin stands upright with its foot ahead.
+        assert!(low(&of(Part::RightShin)) < 0.08, "{pose:?}: right knee not on the ground");
+        assert!(fwd(&of(Part::LeftShin)) > fwd(&of(Part::RightShin)) + 0.3, "{pose:?}: left foot not forward");
+        let left = of(Part::LeftShin);
+        let top = left.iter().map(|p| p.z).fold(f32::MIN, f32::max);
+        assert!(top > 0.4, "{pose:?}: left shin not upright (top {top})");
     }
 }
