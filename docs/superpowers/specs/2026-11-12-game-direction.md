@@ -21,6 +21,12 @@ This replaces the "player is the general of a whole army" framing; the premise a
 - **Permadeath.** Soldiers can be severely wounded. If you have the equipment, you rescue them and bring them back
   to the ship to be treated. Depending on the wounds, they may need transport to a field hospital, unless the ship
   carries the equipment to treat them on board.
+- **You are on the ground as one soldier**, moved directly with WASD.
+- **Commanding through a tablet.** You pull up a tablet with a map, select a unit and click a target on the map,
+  such as a building. Your character raises a walkie-talkie and radios the order. The fireteam or group then
+  carries it out on its own, led by its AI captain, for example clearing the building.
+- **Orders can carry a manner and specifics.** You can say how: calmly or aggressively. You can leave the details
+  to the AI below you, or give them yourself: use flashbangs, report what you find, and so on.
 - **Light infantry look:** an olive jumpsuit with chest pockets, a dark hood and mask, dark shoulder and elbow pads,
   one rolled sleeve, a pouch belt, a drop-leg holster and a rear back pouch.
 
