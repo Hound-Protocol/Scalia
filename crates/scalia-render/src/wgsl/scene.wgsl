@@ -55,7 +55,10 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   if (u.time.y > 0.5) {
     let cp = i.w.xy * 0.012 + vec2f(u.time.x * 0.036, u.time.x * 0.014);
     let cloud = 0.65 * vnoise(cp) + 0.35 * vnoise(cp * 2.3 + vec2f(17.0, 5.0));
-    shade = shade * (1.0 - 0.55 * smoothstep(0.52, 0.62, cloud));
+    // Faded out as the view widens (shadow texel ~0.4 m at a 300 m view, 1.2 m at 950 m): further out the clouds
+    // are a few pixels across and the noise turns to speckle and streaks.
+    let far = smoothstep(0.4, 1.2, texel_m);
+    shade = shade * (1.0 - 0.55 * smoothstep(0.52, 0.62, cloud) * (1.0 - far));
   }
   let l = max(dot(n, u.light.xyz), 0.0) * shade;
   // Smooth flat shading (the art reference): each facet lit by its own angle, no stepped dither.
