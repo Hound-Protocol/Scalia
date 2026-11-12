@@ -1,0 +1,11 @@
+[package]
+name = "scalia-render"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glam = "0.34"
+wgpu = { version = "30", default-features = false, features = ["webgpu", "wgsl"] }
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] }
