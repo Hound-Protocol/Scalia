@@ -11,7 +11,9 @@ use scalia_core::groups::GroupId;
 use scalia_core::position::{Pos, RegionId};
 use scalia_core::scenario::MARCH_SPEED_MM_S;
 use scalia_core::process::ProcessKind;
-use scalia_core::scenario::build_scenario;
+use scalia_core::derive::{derive_vehicles, DerivedVehicle};
+use scalia_core::groups::GroupSpec;
+use scalia_core::units::{Composition, Needs, UnitType};
 use scalia_core::system::{BodyId, System, PARK_OFFSET};
 use scalia_core::time::WorldMs;
 use scalia_core::world::World;
@@ -113,7 +115,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         outline: true,
         t0: None,
         ships: (0..scalia_blueprint::shipped::SHIPPED_RON.len()).map(|_| None).collect(),
-        world: build_scenario(42, ARMIES[0].0, ARMIES[0].1),
+        world: build_army(ARMIES[0].0, ARMIES[0].1),
         derived: Vec::new(),
         chunks: HashMap::new(),
         chunk_lod: HashMap::new(),
@@ -153,6 +155,22 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
 
 fn wgpu_target(canvas: web_sys::HtmlCanvasElement) -> scalia_render::SurfaceTarget<'static> {
     scalia_render::SurfaceTarget::Canvas(canvas)
+}
+
+/// The viewer's test army: groups 200 m apart, each with infantry, 4 tanks and 3 trucks;
+/// every third group marches 500 m east at walking pace.
+fn build_army(groups: u32, per_group: u32) -> World {
+    let mut w = World::new(42);
+    let side = (groups as f64).sqrt().ceil().max(1.0) as u32;
+    for g in 0..groups {
+        let pos = Pos { region: RegionId(1), x: (g % side) as i64 * 200_000, y: (g / side) as i64 * 200_000, z: 0 };
+        let spec = GroupSpec { pos, composition: Composition([per_group, 0, 4, 3]), needs: Needs::full() };
+        let id = w.groups.spawn(spec, &mut w.roster);
+        if g % 3 == 0 {
+            let _ = w.start_march(id, pos.offset(500_000, 0, 0), MARCH_SPEED_MM_S, WorldMs(0));
+        }
+    }
+    w
 }
 
 fn bytes(v: &[f32]) -> &[u8] {
@@ -248,7 +266,7 @@ impl Viewer {
     pub fn cycle_army(&mut self) -> String {
         self.army = (self.army + 1) % ARMIES.len();
         let (g, n) = ARMIES[self.army];
-        self.world = build_scenario(42, g, n);
+        self.world = build_army(g, n);
         self.derived.clear();
         self.ground_cam = None;
         self.selected = Some(0);
@@ -567,6 +585,29 @@ impl Viewer {
         }
         self.derived = out;
         self.gpu.upload_instances("soldiers", bytes(&inst));
+
+        // Vehicles of groups near the camera, drawn as instances of the shipped tank and truck.
+        let mut vehicles: Vec<DerivedVehicle> = Vec::new();
+        for i in 0..self.world.groups.len() as u32 {
+            let c = self.group_centre(i, tick);
+            if (c.x - look.x).abs() <= self.ground_view * 1.6 + 120.0 && (c.y - look.y).abs() <= self.ground_view * 1.6 + 120.0 {
+                derive_vehicles(&self.world, GroupId(i), tick, &mut vehicles);
+            }
+        }
+        let (mut tanks, mut trucks) = (Vec::new(), Vec::new());
+        for v in &vehicles {
+            let (x, y) = (v.pos.x as f32 / 1000.0, v.pos.y as f32 / 1000.0);
+            let z = self.height_at(x, y);
+            let heading = (-(v.facing.0 as f32)).atan2(v.facing.1 as f32);
+            let rec = [x, y, z, 0.0, heading, 0.0, 0.0, 0.0];
+            if v.kind == UnitType::Tank { tanks.extend_from_slice(&rec) } else { trucks.extend_from_slice(&rec) }
+        }
+        self.ship_info(3);
+        self.ship_info(4);
+        self.gpu.upload_instances("tanks", bytes(&tanks));
+        self.gpu.upload_instances("trucks", bytes(&trucks));
+        instanced.push(("ship3".into(), "tanks".into()));
+        instanced.push(("ship4".into(), "trucks".into()));
         let look = self.ground_cam.map(|c| (c.x as f64, c.y as f64)).unwrap_or((cx, cy));
         let (gx, gy) = ((look.0 / CELLS as f64).floor() as i64, (look.1 / CELLS as f64).floor() as i64);
         // Enough chunks to cover a wide screen at any yaw; at most a few new ones per frame to avoid hitches.

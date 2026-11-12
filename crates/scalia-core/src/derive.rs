@@ -8,7 +8,7 @@ use crate::position::{isqrt, Pos, RegionId};
 use crate::process::{process_pos, Process, ProcessKind};
 use crate::roster::FLAG_PERSISTENT;
 use crate::time::WorldMs;
-use crate::units::Health;
+use crate::units::{Health, UnitType};
 use crate::world::World;
 
 pub const FORMATION_SPACING_MM: i64 = 900;
@@ -205,6 +205,57 @@ pub fn derive_visible(w: &World, t: WorldMs, view: &ViewBox, cap: usize, out: &m
             if let Some(d) = derive_slot(w, gid, slot, t, base, rs, n, &p) {
                 out.push(d);
             }
+        }
+    }
+}
+
+/// Gap between a formation's back edge and its first vehicle, spacing along a column, and half the
+/// distance between the tank column (left) and the truck column (right).
+pub const VEHICLE_GAP_MM: i64 = 8_000;
+pub const VEHICLE_PITCH_MM: i64 = 12_000;
+pub const VEHICLE_COLUMN_HALF_MM: i64 = 3_000;
+
+/// A vehicle of a group at one moment. Vehicles are never stored; they are derived like soldiers.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct DerivedVehicle {
+    pub group: GroupId,
+    pub index: u32,
+    pub kind: UnitType,
+    pub pos: Pos,
+    /// Direction the vehicle faces, as an unnormalised (dx, dy): the group's last march, else +y.
+    pub facing: (i64, i64),
+}
+
+fn scaled(v: (i64, i64), len: u128, dist: i64) -> (i64, i64) {
+    let k = |c: i64| ((c as i128 * dist as i128) / len.max(1) as i128) as i64;
+    (k(v.0), k(v.1))
+}
+
+/// Appends the group's tanks and trucks: two columns behind the formation, tanks on the left.
+pub fn derive_vehicles(w: &World, gid: GroupId, t: WorldMs, out: &mut Vec<DerivedVehicle>) {
+    let c = w.groups.composition(gid).0;
+    let (tanks, trucks) = (c[UnitType::Tank as usize], c[UnitType::Truck as usize]);
+    if tanks == 0 && trucks == 0 {
+        return;
+    }
+    let p = *w.groups.process(gid);
+    let base = anchor(w, gid, &p, t);
+    let facing = match p.kind {
+        ProcessKind::March { from, to, .. } if (to.x, to.y) != (from.x, from.y) => (to.x - from.x, to.y - from.y),
+        _ => (0, 1),
+    };
+    let len = isqrt((facing.0 as i128 * facing.0 as i128 + facing.1 as i128 * facing.1 as i128) as u128);
+    let (_, rows) = grid(w.groups.people(gid));
+    let half_depth = rows as i64 * FORMATION_SPACING_MM / 2;
+    let back = (-facing.0, -facing.1);
+    let right = (facing.1, -facing.0);
+    let mut index = 0;
+    for (kind, count, side) in [(UnitType::Tank, tanks, -1i64), (UnitType::Truck, trucks, 1)] {
+        for k in 0..count as i64 {
+            let b = scaled(back, len, half_depth + VEHICLE_GAP_MM + k * VEHICLE_PITCH_MM);
+            let r = scaled(right, len, side * VEHICLE_COLUMN_HALF_MM);
+            out.push(DerivedVehicle { group: gid, index, kind, pos: base.offset(b.0 + r.0, b.1 + r.1, 0), facing });
+            index += 1;
         }
     }
 }

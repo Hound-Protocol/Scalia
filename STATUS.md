@@ -120,6 +120,9 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
   a truly continuous zoom needs regional terrain levels between them.
 - **Orders:** click selects a group (yellow), right click marches it there; a new order mid-march redirects from
   the current position (`World::order_march`, 4 tests). Picking goes through the orthographic camera onto the terrain.
+- **Vehicles:** `derive_vehicles` (4 tests) places a group's tanks (left) and trucks (right) in columns behind the
+  formation, facing the march; the viewer draws them with the shipped Bulwark and Hauler. Viewer armies: 4 tanks and
+  3 trucks per group, every third group marching.
 - **Frame pacing:** L cycles a frame cap (off, 60, 30); the HUD shows fps and CPU ms per frame. Everything moves by time,
   so a lower frame rate only drops frames.
 
