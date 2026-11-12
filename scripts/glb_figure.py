@@ -72,6 +72,62 @@ def cluster(tris, cell):
     return mean[ids], keep
 
 
+# Our skeleton's bones (skeleton.rs Bone), and which of them each of the model's bones feeds.
+B_ROOT, B_SPINE, B_HEAD, B_UARM_L, B_UARM_R, B_FORE_L, B_FORE_R, B_THIGH_L, B_THIGH_R, B_SHIN_L, B_SHIN_R, B_RIFLE = range(12)
+
+
+def our_bone(name):
+    base = name.split('.')[0].split('_')[0]
+    left = '.L' in name
+    if base in ('hips', 'spine', 'chest', 'neck', 'shoulder'):
+        return B_SPINE
+    if base == 'head':
+        return B_HEAD
+    if base == 'arm':
+        return B_UARM_L if left else B_UARM_R
+    if base in ('forearm', 'hand', 'thumb', 'index', 'middle', 'ring', 'pinky', 'ellbowIK', 'wristIK'):
+        return B_FORE_L if left else B_FORE_R
+    if base == 'upleg':
+        return B_THIGH_L if left else B_THIGH_R
+    if base in ('leg', 'foot', 'toe', 'kneeIK', 'ankleIK'):
+        return B_SHIN_L if left else B_SHIN_R
+    return B_SPINE
+
+
+def rotate_about(v, pivot, axis, angle):
+    """Rodrigues rotation of points `v` about the line through `pivot` along `axis`."""
+    a = axis / np.linalg.norm(axis)
+    d = v - pivot
+    c, s_ = np.cos(angle), np.sin(angle)
+    return pivot + d * c + np.cross(a, d) * s_ + np.outer(d @ a, a) * (1 - c)
+
+
+# The grip the hands are baked into: knuckles, middle joints, thumb tucked in (radians).
+CURL_KNUCKLE, CURL_MIDDLE, CURL_THUMB = np.radians(75), np.radians(70), np.radians(35)
+
+
+def curl(v, we, jo, names, J, side):
+    """Closes one hand into a grip at bind (T-pose, palm down): each finger turns about the knuckle line (y) so the
+    fingertips go down to the palm, the end joints bend further, and the thumb tucks in."""
+    g = -1.0 if side == 'L' else 1.0
+    def w_of(prefixes):
+        ids = [k for k, n in enumerate(names) if any(n.startswith(p) for p in prefixes)]
+        return sum(we[:, i] * np.isin(jo[:, i], ids) for i in range(4))
+    out = v.copy()
+    for f in ('index', 'middle', 'ring', 'pinky'):
+        w1 = w_of([f'{f}.{side}', f'{f}_end.{side}'])
+        w2 = w_of([f'{f}_end.{side}'])
+        base, mid = J[f'{f}.{side}'], J[f'{f}_end.{side}']
+        r1 = rotate_about(out, base, np.array([0.0, 1.0, 0.0]), g * CURL_KNUCKLE)
+        mid1 = rotate_about(mid[None], base, np.array([0.0, 1.0, 0.0]), g * CURL_KNUCKLE)[0]
+        r2 = rotate_about(r1, mid1, np.array([0.0, 1.0, 0.0]), g * CURL_MIDDLE)
+        out = out + (r1 - out) * w1[:, None]
+        out = out + (r2 - r1) * w2[:, None] * (w1[:, None] > 0)
+    wt = w_of([f'thumb.{side}', f'thumb_end.{side}'])
+    rt = rotate_about(out, J[f'thumb.{side}'], np.array([1.0, 0.0, 0.0]), -CURL_THUMB)
+    return out + (rt - out) * wt[:, None]
+
+
 def convert(path):
     j, b = G.load(path)
     sk = j['skins'][0]
@@ -142,11 +198,19 @@ def convert(path):
     a_dst = [WRIST, ELBOW, SHOULDER_Z]
 
     out_tris, out_codes, rifle = [], [], []
+    out_skin = []
     for is_rifle, mat, v, idx, jo, we in prims:
         if is_rifle:
             rifle.append((v[idx], mat))
             continue
         vv = v.copy()
+        for s in 'LR':
+            vv = curl(vv, we, jo, names, J, s)
+        # Our bones' weights per vertex (the model's weights, summed per bone of ours).
+        mapped = np.array([our_bone(n) for n in names])
+        W = np.zeros((len(vv), 12))
+        for i in range(4):
+            np.add.at(W, (np.arange(len(vv)), mapped[jo[:, i]]), we[:, i])
         for s in 'LR':
             w = sum(we[:, i] * np.isin(jo[:, i], arms[s]) for i in range(4))
             vv = swing(vv, w, s)
@@ -183,10 +247,18 @@ def convert(path):
             part[hip_seam] = np.where(cz[hip_seam] < HIP, thigh, TORSO)
             knee_seam = has(thigh) & has(shin)
             part[knee_seam] = np.where(cz[knee_seam] < KNEE, shin, thigh)
+        # Gear on the wrong bone moves with what it sits on (as the rigid parts do below): a holster weighted to the
+        # shin goes with the thigh, hip cloth weighted to the thighs goes with the body.
+        for thigh, shin in ((B_THIGH_L, B_SHIN_L), (B_THIGH_R, B_SHIN_R)):
+            high = out[:, 2] > KNEE + 0.08
+            W[high, thigh] += W[high, shin]; W[high, shin] = 0
+        for thigh in (B_THIGH_L, B_THIGH_R):
+            high = out[:, 2] > HIP + 0.05
+            W[high, B_SPINE] += W[high, thigh]; W[high, thigh] = 0
         for t, pt in zip(idx, part):
             p = out[t]
             pal = palette(mat, pt, p.mean(0))
-            out_tris.append(p); out_codes.append(code(pal, pt))
+            out_tris.append(p); out_codes.append(code(pal, pt)); out_skin.append(W[t])
 
     # Rifle: decimate, lay the long axis along +y (muzzle forward, magazine down), pistol grip at the right hand.
     rv = np.vstack([t.reshape(-1, 3) for t, _ in rifle])
@@ -222,6 +294,8 @@ def convert(path):
         dec, _ = cluster(tt, RIFLE_CELL)
         for p in dec:
             out_tris.append(p); out_codes.append(code(METAL if mat == 0 else UNIFORM_DARK, RIFLE))
+            wr = np.zeros((3, 12)); wr[:, B_RIFLE] = 1.0
+            out_skin.append(wr)
 
     tris = np.array(out_tris)
     codes = np.array(out_codes)
@@ -238,7 +312,24 @@ def convert(path):
     codes = pals + 32.0 * parts
     band = np.isin(parts, [L_ARM, R_ARM]) & (zs.min(1) > 1.17) & (zs.max(1) < 1.33)
     codes[band] = [code(TEAM, p) for p in parts[band]]
+    global LAST_SKIN
+    LAST_SKIN = np.array(out_skin)
     return tris, codes
+
+
+def write_skin(tris, codes, skin, path):
+    """The skinned soldier: per vertex x, y, z, colour code (f32 each), then 4 bone ids (u8) and 4 weights (u8,
+    summing to 255): 24 bytes, three vertices per triangle."""
+    with open(path, 'wb') as f:
+        for t, c, w in zip(tris, codes, skin):
+            for p, wv in zip(t, w):
+                top = np.argsort(-wv)[:4]
+                ws = np.clip(wv[top], 0, None)
+                ws = ws / ws.sum() if ws.sum() > 0 else np.array([1.0, 0, 0, 0])
+                q = np.round(ws * 255).astype(int)
+                q[0] += 255 - q.sum()
+                f.write(struct.pack('<4f', p[0], p[1], p[2], c))
+                f.write(bytes([int(x) for x in top]) + bytes([int(x) for x in q]))
 
 
 def palette(mat, part, centre):
@@ -297,6 +388,8 @@ def preview(tris, codes, path):
 if __name__ == '__main__':
     tris, codes = convert(sys.argv[1])
     write(tris, codes, sys.argv[2])
+    if sys.argv[2].endswith('.fig'):
+        write_skin(tris, codes, LAST_SKIN, sys.argv[2][:-4] + '.skin')
     parts = (codes // 32).astype(int)
     print(len(tris), 'triangles;', {int(p): int((parts == p).sum()) for p in np.unique(parts)})
     print('bounds', tris.reshape(-1, 3).min(0).round(3), tris.reshape(-1, 3).max(0).round(3))

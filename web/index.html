@@ -89,7 +89,10 @@
   #radioLog div { color: #d6f6ff; }
   #radioLog div b { display: block; color: #ff8a7a; font-size: 1vh; letter-spacing: .12em; }
   #radioLog div.unit b { color: #8cff9e; }
-  #radio .wave { height: 3.2vh; display: flex; align-items: center; gap: .35vh; opacity: .45; }
+  #radio .wave { position: relative; height: 3.2vh; display: flex; align-items: center; gap: .35vh; }
+  #radio .wave .scope { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #radio:not(.tx):not(.rx) .wave i { visibility: hidden; }
+  #radio.tx .wave .scope, #radio.rx .wave .scope { visibility: hidden; }
   #radio .wave i { flex: 1; height: 8%; background: #4ad8ff; border-radius: 1px; transition: height 40ms linear; }
   #radio.tx .wave, #radio.rx .wave { opacity: 1; }
   #radio.tx .wave i { background: #ff8a7a; }
@@ -224,7 +227,7 @@
   <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
   <div class="who"><small id="rDir">STANDBY</small><b id="rWho">—</b></div>
   <div id="radioLog"></div>
-  <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><canvas class="scope"></canvas></div>
   <div class="foot"><span id="rState">ONLINE</span><span class="led"></span></div>
 </div></div>
 <div id="tablet">

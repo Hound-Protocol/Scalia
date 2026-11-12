@@ -362,8 +362,32 @@ try {
   // A voice heard over a radio: most energy between 300 Hz and 3 kHz, little below or above.
   const voiceShape = edges.slice(0, BANDS).map((f, k) => { const g = Math.sqrt(f * edges[k + 1]); return Math.exp(-Math.pow(Math.log(g / 1100) / 1.0, 2)); });
   const waveBars = () => [...document.querySelectorAll('#radio .wave i')];
+  // Idle: a green oscilloscope trace, flat with a faint hiss, moving with whatever the analyser hears.
+  let scopeData = null;
+  const drawScope = () => {
+    const cv = document.querySelector('#radio .wave .scope');
+    if (!cv) return;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (!w || !h) return;
+    if (cv.width !== w * 2 || cv.height !== h * 2) { cv.width = w * 2; cv.height = h * 2; }
+    const g = cv.getContext('2d');
+    g.clearRect(0, 0, cv.width, cv.height);
+    if (analyser) { scopeData = scopeData || new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(scopeData); }
+    const t = performance.now() / 1000, n = 96;
+    g.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const x = (i / n) * cv.width;
+      const sig = scopeData ? scopeData[Math.floor((i / n) * (scopeData.length - 1))] : 0;
+      const hiss = 0.04 * Math.sin(i * 0.9 + t * 13) * Math.sin(i * 0.37 - t * 7) + 0.025 * (Math.random() - 0.5);
+      const y = cv.height / 2 - (sig * 3 + hiss) * cv.height * 0.45;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.strokeStyle = '#6dff8f'; g.lineWidth = 2; g.shadowColor = '#3dff6a'; g.shadowBlur = 6;
+    g.stroke();
+  };
   const drawSpectrum = () => {
     const bars = waveBars();
+    if (radio.classList.contains('up') && !radio.classList.contains('tx') && !radio.classList.contains('rx')) drawScope();
     if (radio.classList.contains('up')) {
       let real = null;
       if (analyser) {
