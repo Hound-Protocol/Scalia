@@ -4,7 +4,7 @@ struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: v
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
-struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f };
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32 };
 
 fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
   let s = sin(ang);
@@ -23,6 +23,19 @@ fn arm(q: vec3f, sh: f32, el: f32, reach: f32, sx: f32) -> vec3f {
   let c = cos(a);
   let dx = p.x - sx;
   return vec3f(sx + dx * c - p.y * s, dx * s + p.y * c, p.z);
+}
+
+// The rifle slung on the back (port of pose.rs `slung`): rolled flat, muzzle down, diagonal from the right
+// shoulder blade.
+fn slung(v: vec3f) -> vec3f {
+  let d = v - vec3f(0.238, 0.0, 0.81);
+  let r = vec3f(d.z, d.y, -d.x);
+  let s = sin(-1.5);
+  let c = cos(-1.5);
+  let p = vec3f(r.x, r.y * c - r.z * s, r.y * s + r.z * c);
+  let s2 = sin(0.3);
+  let c2 = cos(0.3);
+  return vec3f(p.x * c2 - p.z * s2, p.y, p.x * s2 + p.z * c2) + vec3f(0.06, -0.27, 1.2);
 }
 
 fn leg(q: vec3f, hip: f32, knee: f32) -> vec3f {
@@ -52,7 +65,7 @@ fn carry(p: ptr<function, PP>, c: u32) {
 
 fn pose_params(pose: u32, phase: f32) -> PP {
   let sw = sin(phase * 6.2831853);
-  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0));
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0);
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
@@ -96,6 +109,12 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     p.head = -0.1;
   } else if (pose == 8u) {
     carry(&p, 3u);
+  } else if (pose == 10u) {
+    p.sh = vec2f(0.35);
+    p.el = vec2f(1.5);
+    p.reach = vec2f(0.27);
+    p.head = -0.45;
+    p.sling = 1.0;
   } else if (pose == 9u) {
     carry(&p, 0u);
     p.sh.x = 1.45;
@@ -121,7 +140,7 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   let w = w0 * w0 * (3.0 - 2.0 * w0);
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0,
-             mix(a.reach, b.reach, w));
+             mix(a.reach, b.reach, w), mix(a.sling, b.sling, w));
   p.drop = select(select(ground_drop(p.hip, p.knee), b.drop, w >= 1.0), a.drop, w <= 0.0);
   return p;
 }
@@ -140,6 +159,7 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   else if (part == 9u) {
     let hand = arm(vec3f(0.238, 0.0, 0.81), p.sh.y, p.el.y, p.reach.y, 0.238);
     q = rot(v, 0.0, 0.81, p.rifle) + vec3f(hand.x - 0.238, hand.y, hand.z - 0.81);
+    if (p.sling > 0.0) { q = mix(q, slung(v), p.sling); }
   }
   if (part != 1u && part != 2u && part != 6u && part != 7u) {
     q = rot(q, 0.0, 0.88, -p.lean);
@@ -167,7 +187,7 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32) -> vec3f {
     // Instance c.z: an upper-body stance (pose id + 1) over these legs, e.g. walking while aiming.
     if (d.z > 0.5) {
       let up = pose_params(u32(d.z - 1.0), phase);
-      pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.head = up.head;
+      pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.head = up.head; pp.sling = up.sling;
     }
     q = pose_vertex(v, part, pp);
   }

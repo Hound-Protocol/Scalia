@@ -1,3 +1,4 @@
 target/
 pkg/
 .superpowers/
+__pycache__/

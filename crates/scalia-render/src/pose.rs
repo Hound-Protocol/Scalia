@@ -33,7 +33,14 @@ pub enum Pose {
     Cover = 8,
     /// Radioing: the left hand holds the handset to the ear, the right keeps the rifle hanging.
     Radio = 9,
+    /// Holding the command tablet in both hands at the chest, looking down at it; the rifle slung on the back.
+    Tablet = 10,
 }
+
+/// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
+pub const TABLET_AT: Vec3 = Vec3::new(0.0, 0.37, 1.19);
+/// How far the tablet's face tilts back towards the face (radians from upright).
+pub const TABLET_TILT: f32 = 0.85;
 
 impl Pose {
     pub fn from_id(id: u32) -> Pose {
@@ -47,6 +54,7 @@ impl Pose {
             7 => Pose::Sprint,
             8 => Pose::Cover,
             9 => Pose::Radio,
+            10 => Pose::Tablet,
             _ => Pose::Stand,
         }
     }
@@ -73,7 +81,23 @@ pub struct PoseParams {
     pub prone: f32,
     /// Vertical shift that keeps the lowest foot point on the ground.
     pub drop: f32,
+    /// 0 rifle in the right hand, 1 slung across the back (hands free).
+    pub sling: f32,
 }
+
+/// The rifle slung on the back: rolled flat (magazine inwards), muzzle down, hung diagonally from the right
+/// shoulder blade.
+pub fn slung(v: Vec3) -> Vec3 {
+    let d = v - Vec3::new(SHOULDER_X, 0.0, GRIP_Z);
+    let r = Vec3::new(d.z, d.y, -d.x);
+    let (s, c) = (-1.5f32).sin_cos();
+    let p = Vec3::new(r.x, r.y * c - r.z * s, r.y * s + r.z * c);
+    let (s2, c2) = 0.3f32.sin_cos();
+    Vec3::new(p.x * c2 - p.z * s2, p.y, p.x * s2 + p.z * c2) + SLING_AT
+}
+
+/// Where the slung rifle's grip hangs (figure frame).
+pub const SLING_AT: Vec3 = Vec3::new(0.06, -0.27, 1.2);
 
 /// Rotates `q` in the y-z plane around (pivot_y, pivot_z).
 pub fn rot(q: Vec3, pivot_y: f32, pivot_z: f32, a: f32) -> Vec3 {
@@ -161,6 +185,13 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.head = 0.05;
         }
         Pose::Cover => carry(&mut p, Carry::HighReady),
+        Pose::Tablet => {
+            p.shoulder = [0.35, 0.35];
+            p.elbow = [1.5, 1.5];
+            p.reach = [0.27, 0.27];
+            p.head = -0.45;
+            p.sling = 1.0;
+        }
         Pose::Radio => {
             carry(&mut p, Carry::SafeHang);
             p.shoulder[0] = 1.45;
@@ -187,7 +218,7 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
 /// Two layers (motion guide rule 1): the legs of one pose (gait, crouch) under the upper body of another (aim,
 /// carry), so a soldier can walk while aiming.
 pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
-    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, ..*legs }
+    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, sling: upper.sling, ..*legs }
 }
 
 /// Kneeling: left thigh level with the foot planted ahead, right thigh down with the knee on the ground and the
@@ -259,7 +290,8 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightForearm => arm(v, p.shoulder[1], p.elbow[1], p.reach[1], SHOULDER_X),
         Part::Rifle => {
             let h = hand(p, Side::Right);
-            rot(v, 0.0, GRIP_Z, p.rifle) + Vec3::new(h.x - SHOULDER_X, h.y, h.z - GRIP_Z)
+            let held = rot(v, 0.0, GRIP_Z, p.rifle) + Vec3::new(h.x - SHOULDER_X, h.y, h.z - GRIP_Z);
+            if p.sling > 0.0 { held.lerp(slung(v), p.sling) } else { held }
         }
         Part::Head => rot(v, 0.0, NECK_Z, p.head),
         Part::Torso => v,
@@ -302,6 +334,7 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         rifle: m(a.rifle, b.rifle),
         prone: m(a.prone, b.prone),
         drop,
+        sling: m(a.sling, b.sling),
     }
 }
 

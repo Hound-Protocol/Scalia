@@ -258,3 +258,29 @@ fn the_radio_pose_holds_the_handset_to_the_ear() {
     assert!(l.z > 1.5 && l.x.abs() < 0.2 && l.y.abs() < 0.15, "left hand at {l:?}");
     assert_eq!(Pose::from_id(9), Pose::Radio);
 }
+
+#[test]
+fn the_tablet_pose_holds_it_in_both_hands_at_the_chest() {
+    use scalia_render::pose::{hand, Side, TABLET_AT};
+    let pp = params(Pose::Tablet, 0.0);
+    assert_eq!(Pose::from_id(10), Pose::Tablet);
+    for side in [Side::Left, Side::Right] {
+        let h = hand(&pp, side);
+        assert!((0.25..0.45).contains(&h.y) && (1.05..1.3).contains(&h.z), "{side:?} hand at {h:?}");
+        assert!((0.08..0.2).contains(&h.x.abs()), "{side:?} hand at {h:?}");
+        // The tablet sits between the hands.
+        assert!((h.y - TABLET_AT.y).abs() < 0.08 && (h.z - TABLET_AT.z).abs() < 0.08, "{side:?} hand {h:?} vs tablet {TABLET_AT:?}");
+    }
+    assert!(pp.head < -0.2, "looking down at the tablet: {}", pp.head);
+}
+
+#[test]
+fn the_tablet_pose_slings_the_rifle_across_the_back() {
+    let v = posed(Pose::Tablet, 0.0);
+    let rifle: Vec<Vec3> = v.iter().filter(|p| p.0 == Part::Rifle).map(|p| p.1).collect();
+    assert!(!rifle.is_empty());
+    let max_y = rifle.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+    assert!(max_y < -0.05, "rifle on the back, behind the body: front edge at y = {max_y}");
+    let low = rifle.iter().map(|p| p.z).fold(f32::MAX, f32::min);
+    assert!(low > 0.3, "slung rifle clear of the ground: {low}");
+}

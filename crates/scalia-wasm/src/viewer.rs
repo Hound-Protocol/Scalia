@@ -23,6 +23,7 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use scalia_render::bend::{globe_point, Bend};
 use scalia_render::gpu::{FrameDesc, Gpu};
+use scalia_render::mesh::pda_held;
 use scalia_render::mesh::{figure, figure_far, figure_lo, grass_tuft, MeshBuilder};
 use scalia_render::pose::Pose;
 use scalia_render::sky::{clock, sky};
@@ -52,6 +53,17 @@ fn pose_of(s: Stance) -> Pose {
         Stance::StandAim => Pose::StandAim,
     }
 }
+
+// The tablet cinematic: rise above the commander, hold, dive onto his hands; closing pulls straight back.
+const CINE_RISE_MS: f64 = 650.0;
+const CINE_HOLD_MS: f64 = 500.0;
+const CINE_OPEN_MS: f64 = 2_050.0;
+const CINE_CLOSE_MS: f64 = 700.0;
+/// Camera height (metres of view) and elevation high above, and close on the hands.
+const CINE_HIGH_H: f32 = 45.0;
+const CINE_HIGH_ELEV: f32 = 1.4;
+const CINE_CLOSE_H: f32 = 0.5;
+const CINE_CLOSE_ELEV: f32 = 0.95;
 
 const ARMIES: [(u32, u32); 5] = [(8, 12), (1, 2000), (10, 2000), (50, 2000), (250, 2000)];
 /// The testing ground: a military base on a levelled pad, (BASE_LO..BASE_HI) metres on both axes.
@@ -172,6 +184,8 @@ pub struct Viewer {
     agent_anim: HashMap<u32, (f32, f64)>,
     /// The stance each unit takes once its soldiers reach the ordered place.
     arrive_stance: HashMap<u32, Pose>,
+    /// The tablet cinematic: opening (true) or closing, when it began (ms), and the camera it started from.
+    cine: Option<(bool, f64, (Vec3, f32, f32, f32))>,
     /// Who answers to whom: squads to captains, or straight to the commander.
     chain: Command,
     /// Each captain's current task, the squads it is waiting on, and when its step began.
@@ -234,6 +248,9 @@ pub struct Viewer {
     fps: f32,
     frames: u32,
     fps_t: f64,
+    /// Time of the last frame (ms) and the cinematic camera it used, if any.
+    frame_ms: f64,
+    last_cine: Option<(Vec3, f32, f32, f32)>,
     size: (u32, u32),
 }
 
@@ -304,6 +321,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_ms: 0.0,
         agent_anim: HashMap::new(),
         arrive_stance: HashMap::new(),
+        cine: None,
         chain: Command::default(),
         tasks: BTreeMap::new(),
         radio_out: Vec::new(),
@@ -349,6 +367,8 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         fps: 0.0,
         frames: 0,
         fps_t: 0.0,
+        frame_ms: 0.0,
+        last_cine: None,
         size,
     };
     v.add_captains();
@@ -742,9 +762,31 @@ impl Viewer {
     /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
     /// starts over the commander.
     pub fn set_tablet(&mut self, up: bool) {
+        if up != self.tablet && self.scene == Scene::Ground {
+            let from = self.last_cine.unwrap_or((self.last_cam.0, self.last_cam.1, self.last_cam.2, scalia_render::camera::ELEV));
+            self.cine = Some((up, self.frame_ms, from));
+        }
         self.tablet = up;
         if up && self.map_cam.ground_cam.is_none() {
             self.map_cam.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
+        }
+    }
+    /// The commander's gait for his footsteps: 0 standing, 1 walking, 2 sprinting.
+    pub fn commander_gait(&self) -> u8 {
+        match (self.cmd_moving, self.cmd_input.2) {
+            (false, _) => 0,
+            (true, false) => 1,
+            (true, true) => 2,
+        }
+    }
+    /// Where the tablet cinematic is: 0 put away, 1 raising it (camera rising and diving), 2 in front of the eyes
+    /// (show the tablet's screen), 3 putting it away.
+    pub fn tablet_view(&self) -> u8 {
+        match self.cine {
+            Some((true, start, _)) if self.frame_ms - start < CINE_OPEN_MS => 1,
+            Some((false, _, _)) => 3,
+            _ if self.tablet => 2,
+            _ => 0,
         }
     }
     /// Attaches the tablet's map canvas: drawn with the map camera while the tablet is up.
@@ -920,6 +962,7 @@ impl Viewer {
             self.frames = 0;
             self.fps_t = now_ms;
         }
+        self.frame_ms = now_ms;
         self.use_map(false);
         let line = self.render(now_ms, false);
         // Picture in picture: the tablet's map, drawn with its own camera onto its own canvas.
@@ -954,6 +997,20 @@ impl Viewer {
             self.yaw_smooth += (yaw_aim - self.yaw_smooth) * k;
             self.yaw_smooth
         };
+        // The tablet cinematic takes the main camera over: up above the commander, then down onto his hands.
+        let (target, yaw, view_height, cine_elev) = match (self.scene, second) {
+            (Scene::Ground, false) => match self.cine_cam(now_ms, (target, yaw, view_height)) {
+                Some(c) => {
+                    self.last_cine = Some(c);
+                    (c.0, c.1, c.2, Some(c.3))
+                }
+                None => {
+                    self.last_cine = None;
+                    (target, yaw, view_height, None)
+                }
+            },
+            _ => (target, yaw, view_height, None),
+        };
         self.last_view = (view_height, self.size.1 as f32);
         self.last_cam = (target, yaw, view_height);
         let tod = self.time_of_day(t) as f32;
@@ -966,7 +1023,7 @@ impl Viewer {
             Scene::Ships => (sky(self.model_light), true),
         };
         let bend = if self.scene == Scene::Ground { self.ground_bend() } else { Bend::FLAT };
-        let elev = if self.scene == Scene::Ships { self.model_elev } else { scalia_render::camera::ELEV };
+        let elev = if self.scene == Scene::Ships { self.model_elev } else { cine_elev.unwrap_or(scalia_render::camera::ELEV) };
         // Outlines on terrain cells only a few pixels wide turn into shimmering stripes: off for far views.
         let far_view = match self.scene {
             Scene::Ground => self.ground_view > 20_000.0,
@@ -1700,7 +1757,8 @@ impl Viewer {
         let (right, fwd) = ((c, s), (-s, c));
         let (mut vx, mut vy) = (right.0 * ix + fwd.0 * iy, right.1 * ix + fwd.1 * iy);
         let len = (vx * vx + vy * vy).sqrt();
-        self.cmd_moving = len > 0.01 && t >= self.radio_until;
+        let holding = self.tablet || self.cine.is_some();
+        self.cmd_moving = len > 0.01 && t >= self.radio_until && !holding;
         if self.cmd_moving {
             let speed = if sprint { CMD_SPRINT } else { CMD_WALK };
             vx = vx / len * speed * dt;
@@ -1721,7 +1779,7 @@ impl Viewer {
             while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
             self.cmd_heading += d.clamp(-8.0 * dt, 8.0 * dt);
         }
-        let pose = if t < self.radio_until { Pose::Radio } else if self.cmd_moving && sprint { Pose::Sprint } else if self.cmd_moving { Pose::Walk } else { Pose::Stand };
+        let pose = if holding { Pose::Tablet } else if t < self.radio_until { Pose::Radio } else if self.cmd_moving && sprint { Pose::Sprint } else if self.cmd_moving { Pose::Walk } else { Pose::Stand };
         if self.cmd_pose.0 != pose {
             self.cmd_pose = (pose, self.cmd_pose.0, ts);
         }
@@ -1731,6 +1789,54 @@ impl Viewer {
         let rec = [rx, ry, z, 9.0, self.cmd_heading, 0.37, steps, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
         self.gpu.upload_instances("commander_at", bytes(&rec));
         instanced.push(("commander".into(), "commander_at".into()));
+        // The tablet appears in his hands once they have come up to hold it.
+        if pose == Pose::Tablet && ts - self.cmd_pose.2 >= scalia_render::pose::BLEND_S {
+            if !self.gpu.has("pda") {
+                self.gpu.upload("pda", pda_held().bytes());
+            }
+            self.gpu.upload_instances("pda_at", bytes(&rec));
+            instanced.push(("pda".into(), "pda_at".into()));
+        }
+    }
+
+    /// The tablet cinematic's camera (target, yaw, view height, elevation) at this moment, or None when it is not
+    /// running. `live` is the camera the game would use: closing returns to it.
+    fn cine_cam(&mut self, now_ms: f64, live: (Vec3, f32, f32)) -> Option<(Vec3, f32, f32, f32)> {
+        let (opening, start, from) = self.cine?;
+        let el = scalia_render::camera::ELEV;
+        let base = Vec3::new((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32, self.height_at(self.cmd.0 as f32, self.cmd.1 as f32));
+        let h = self.cmd_heading;
+        // Over his shoulder: the camera looks the way he faces, at the tablet in his hands.
+        let at = scalia_render::pose::TABLET_AT;
+        let hands = base + Vec3::new(at.x * h.cos() - at.y * h.sin(), at.x * h.sin() + at.y * h.cos(), at.z);
+        let close = (hands, h, CINE_CLOSE_H, CINE_CLOSE_ELEV);
+        let high = (base + Vec3::Z, from.1, (live.2 * 2.2).max(CINE_HIGH_H), CINE_HIGH_ELEV);
+        let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * (3.0 - 2.0 * x) };
+        let mix = |a: (Vec3, f32, f32, f32), b: (Vec3, f32, f32, f32), w: f32| {
+            let mut dy = b.1 - a.1;
+            while dy > std::f32::consts::PI { dy -= std::f32::consts::TAU; }
+            while dy < -std::f32::consts::PI { dy += std::f32::consts::TAU; }
+            // Zoom eases in log space, so the dive keeps an even pace from far to near.
+            let vh = (a.2.ln() + (b.2.ln() - a.2.ln()) * w).exp();
+            (a.0 + (b.0 - a.0) * w, a.1 + dy * w, vh, a.3 + (b.3 - a.3) * w)
+        };
+        let e = now_ms - start;
+        if opening {
+            Some(if e < CINE_RISE_MS {
+                mix(from, high, ease(e / CINE_RISE_MS))
+            } else if e < CINE_RISE_MS + CINE_HOLD_MS {
+                high
+            } else if e < CINE_OPEN_MS {
+                mix(high, close, ease((e - CINE_RISE_MS - CINE_HOLD_MS) / (CINE_OPEN_MS - CINE_RISE_MS - CINE_HOLD_MS)))
+            } else {
+                close
+            })
+        } else if e < CINE_CLOSE_MS {
+            Some(mix(from, (live.0, live.1, live.2, el), ease(e / CINE_CLOSE_MS)))
+        } else {
+            self.cine = None;
+            None
+        }
     }
 
     /// Whether a point (origin-relative metres) falls on screen, by last frame's camera, with `margin` metres

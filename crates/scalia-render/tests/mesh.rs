@@ -90,3 +90,26 @@ fn far_figure_is_a_handful_of_triangles_with_the_same_height() {
     assert!((1.6..=1.8).contains(&top), "height {top}");
     assert!(f.vertices.iter().any(|v| scalia_render::mesh::palette_of(v.color) == scalia_render::mesh::TEAM as u32), "helmet takes the team colour");
 }
+
+#[test]
+fn the_tablet_sits_between_the_hands_facing_the_holder() {
+    use scalia_render::mesh::pda_held;
+    use scalia_render::pose::{hand, params, Pose, Side, TABLET_AT};
+    let m = pda_held();
+    assert!(m.vertices.len() / 3 <= 800);
+    let (mut lo, mut hi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
+    for v in &m.vertices {
+        lo = lo.min(glam::Vec3::from(v.pos));
+        hi = hi.max(glam::Vec3::from(v.pos));
+        assert!(v.color >= 0.0 && v.color < 32.0, "a prop: palette only, no posed part");
+    }
+    let mid = (lo + hi) / 2.0;
+    assert!((mid - TABLET_AT).length() < 0.03, "centred at {mid:?}");
+    let pp = params(Pose::Tablet, 0.0);
+    for side in [Side::Left, Side::Right] {
+        let h = hand(&pp, side);
+        assert!((h.x.abs() - hi.x).abs() < 0.06, "{side:?} hand {h:?} on the edge {}", hi.x);
+    }
+    // Tilted back: its far edge higher than its near edge.
+    assert!(hi.z - lo.z > 0.1 && hi.y - lo.y > 0.1);
+}

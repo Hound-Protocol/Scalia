@@ -182,13 +182,45 @@ try {
     $('comms').hidden = p !== 'comms';
     if (p === 'roster') drawRoster();
   };
+  // Tab: the commander raises the tablet. The camera rises above him, holds, then dives onto his hands (the
+  // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
+  let tabletShown = false;
   const setTablet = (up) => {
+    if (up === tabletUp) return;
     tabletUp = up;
-    tablet.classList.toggle('up', up);
     $('fieldHint').hidden = up;
-    v.set_tablet(up);
-    if (up) setPage(page);
+    if (up) { v.set_tablet(true); return; }
+    tabletShown = false;
+    tablet.classList.remove('up');
+    closeActions();
+    setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 220);
   };
+  // The commander's footsteps on grass: a looped recording, quicker when he sprints, silent when he stops.
+  const steps = new Audio('./sfx/steps-grass.mp3'); steps.loop = true; steps.volume = 0.55; steps.preload = 'auto';
+  let stepGait = 0;
+  const footsteps = () => {
+    const g = v.scene_name && v.scene_name() !== 'ground' ? 0 : v.commander_gait();
+    if (g === stepGait) return;
+    stepGait = g;
+    if (g === 0) { steps.pause(); return; }
+    steps.playbackRate = g === 2 ? 1.55 : 1.0;
+    steps.play().catch(() => { stepGait = 0; }); // browsers allow sound only after the first key or click
+  };
+  // Called every frame: shows the close-up once the camera has reached the tablet.
+  const syncTablet = () => {
+    if (tabletUp && !tabletShown && v.tablet_view() === 2) {
+      tabletShown = true;
+      tablet.classList.add('up');
+      setPage(page);
+      setTimeout(() => { if (tabletShown && page === 'map') sizeMap(); }, 450);
+    }
+  };
+  for (const b of tablet.querySelectorAll('.hw')) b.addEventListener('click', () => {
+    const k = b.dataset.hw;
+    if (k === 'close') setTablet(false);
+    else if (k === 'manner') setManner(manner === 0 ? 1 : 0);
+    else setPage(k);
+  });
   // Home: the overview the tablet opens on.
   const drawHome = () => {
     const units = JSON.parse(v.roster());
@@ -318,7 +350,6 @@ try {
   };
   setInterval(() => { try { for (const ev of JSON.parse(v.radio_events())) hear(ev); } catch (e) { /* viewer busy */ } }, 400);
   // The roster keeps up with the units' status while it is open (not while a picker is in use).
-  setInterval(() => { if (tabletUp && page === 'roster' && !(document.activeElement && document.activeElement.tagName === 'SELECT')) drawRoster(); }, 1000);
   const radioOrder = (id, label, x, y, grid) => {
     const who = v.selection_name(), first = who.split(',')[0];
     const [verb, ing] = VERB[id] || VERB[0];
@@ -365,7 +396,17 @@ try {
   const setManner = (m) => { manner = m; v.set_manner(m); $('mCalm').classList.toggle('on', m === 0); $('mAggr').classList.toggle('on', m === 1); };
   $('mCalm').addEventListener('click', () => setManner(0));
   $('mAggr').addEventListener('click', () => setManner(1));
-  setInterval(() => { if (tabletUp && page === 'roster') drawRoster(); if (tabletUp && page === 'home') drawHome(); }, 1000);
+  // Pages keep up with the units while open: redrawn only when something changed, and never while a picker is open
+  // (a redraw would close it under the mouse).
+  let rosterSeen = '';
+  setInterval(() => {
+    if (!tabletUp) return;
+    if (page === 'home') drawHome();
+    if (page !== 'roster') return;
+    const picking = document.activeElement && document.activeElement.tagName === 'SELECT';
+    const now = v.roster();
+    if (!picking && now !== rosterSeen) { rosterSeen = now; drawRoster(); }
+  }, 1000);
 
   // Keyboard: held keys pan and rotate every frame, others act once.
   const held = new Set();
@@ -476,6 +517,8 @@ try {
       if (held.has('e')) v.rotate(1.5 * dt);
       const t0 = performance.now();
       const line = v.frame(now);
+      syncTablet();
+      footsteps();
       cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
       hud.textContent = `${line}${now < noteUntil ? ` | ${note}` : ''}`;
       perfPanel(v.perf(), cpuMs, now, cap);

@@ -283,6 +283,25 @@ pub fn figure_kit() -> MeshBuilder {
     f
 }
 
+/// The command tablet held in the tablet pose: "Military Rugged PDA / Tactical Tablet" by Snupp (CC-BY-4.0, see
+/// CREDITS.md), converted with `scripts/glb_prop.py`. It sits between the hands at `pose::TABLET_AT`, its face tilted
+/// back towards the holder by `pose::TABLET_TILT`. Drawn as an unposed prop (part 0) with the commander's instance.
+pub fn pda_held() -> MeshBuilder {
+    use crate::pose::{TABLET_AT, TABLET_TILT};
+    const FIG: &[u8] = include_bytes!("../assets/pda.fig");
+    let f = |i: usize| f32::from_le_bytes([FIG[i], FIG[i + 1], FIG[i + 2], FIG[i + 3]]);
+    let (s, c) = TABLET_TILT.sin_cos();
+    // Right, up the face, out of the face (towards the holder's eyes).
+    let (r, u, n) = (glam::Vec3::X, glam::Vec3::new(0.0, s, c), glam::Vec3::new(0.0, -c, s));
+    let vertices = (0..FIG.len() / 16)
+        .map(|k| {
+            let (x, y, z) = (f(k * 16), f(k * 16 + 4), f(k * 16 + 8));
+            Vertex { pos: (TABLET_AT + r * x + u * y + n * z).to_array(), color: f(k * 16 + 12) }
+        })
+        .collect();
+    MeshBuilder { vertices }
+}
+
 /// The lighter figure for 70-250 m: same parts and proportions, a few boxes, the same colours.
 pub fn figure_lo() -> MeshBuilder {
     use kit::*;
