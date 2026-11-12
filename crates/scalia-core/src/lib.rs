@@ -1,8 +1,10 @@
 //! Scalia core: deterministic, integer-only simulation of groups and derived individuals.
 
 pub mod boarding;
+pub mod command;
 pub mod derive;
 pub mod fixed;
+pub mod goap;
 pub mod flight;
 pub mod groups;
 pub mod hash;

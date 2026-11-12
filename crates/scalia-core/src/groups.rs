@@ -5,7 +5,7 @@ use crate::process::Process;
 use crate::roster::Roster;
 use crate::units::{Composition, Needs};
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct GroupId(pub u32);
 
 #[derive(Copy, Clone, Debug)]
