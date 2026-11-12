@@ -103,7 +103,6 @@ pub struct Plan {
 
 struct Node {
     state: State,
-    g: u32,
     depth: u32,
     parent: Option<(usize, usize)>, // (node index, action index)
 }
@@ -114,7 +113,7 @@ pub fn plan(start: State, goal: Goal, actions: &[Action], limits: Limits) -> Opt
     let min_cost = actions.iter().map(|a| a.cost).min().unwrap_or(1);
     let h = |s: State| if goal.met(s) { 0 } else { min_cost };
 
-    let mut nodes = vec![Node { state: start, g: 0, depth: 0, parent: None }];
+    let mut nodes = vec![Node { state: start, depth: 0, parent: None }];
     let mut best: HashMap<State, u32> = HashMap::from([(start, 0)]);
     // Ordered by (f, g, sequence): cheapest estimate first; among equals, the earliest found.
     let mut open = BinaryHeap::from([Reverse((h(start), 0u32, 0usize))]);
@@ -156,7 +155,7 @@ pub fn plan(start: State, goal: Goal, actions: &[Action], limits: Limits) -> Opt
                 continue;
             }
             best.insert(next, ng);
-            nodes.push(Node { state: next, g: ng, depth, parent: Some((id, ai)) });
+            nodes.push(Node { state: next, depth, parent: Some((id, ai)) });
             open.push(Reverse((ng.saturating_add(h(next)), ng, nodes.len() - 1)));
         }
     }
