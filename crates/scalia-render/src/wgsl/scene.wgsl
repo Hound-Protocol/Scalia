@@ -45,7 +45,8 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   // Four light steps with a 4x4 ordered dither between them: the hand-shaded pixel-art look.
   let bayer = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
   let px = vec2u(i.pos.xy) % vec2u(4u, 4u);
-  let q = floor(l * 4.0 + bayer[px.y * 4u + px.x] / 16.0) / 4.0;
+  // Space views (time.w = 1) light smoothly: dithering a faceted globe makes moire rings.
+  let q = select(floor(l * 4.0 + bayer[px.y * 4u + px.x] / 16.0) / 4.0, l, u.time.w > 0.5);
   var o: FO;
   o.c = vec4f(u.pal[i.ci & 15u].rgb * (u.ambient.rgb + u.light_col.rgb * q), 1.0);
   o.n = vec4f(n * 0.5 + 0.5, 1.0);
