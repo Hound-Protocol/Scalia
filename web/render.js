@@ -10,8 +10,12 @@ const SCENE_WGSL = `
 struct U { m: mat4x4f, vdir: vec4f, pal: array<vec4f, 16> };
 @group(0) @binding(0) var<uniform> u: U;
 struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32 };
-@vertex fn vs(@location(0) p: vec3f, @location(1) c: f32) -> VO {
-  var o: VO; o.pos = u.m * vec4f(p, 1.0); o.w = p; o.ci = u32(c); return o;
+// Instance attribute: xyz offset and a palette index in w, used where the mesh colour is negative.
+@vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) inst: vec4f) -> VO {
+  let w = p + inst.xyz;
+  var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
+  o.ci = u32(max(select(c, inst.w, c < 0.0), 0.0));
+  return o;
 }
 struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
 @fragment fn fs(i: VO) -> FO {
@@ -148,7 +152,8 @@ export async function createRenderer(canvas) {
   const scenePipe = device.createRenderPipeline({
     layout: 'auto',
     vertex: { module: sceneMod, entryPoint: 'vs', buffers: [{ arrayStride: 16, attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32' }] }] },
+      { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32' }] },
+      { arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 2, offset: 0, format: 'float32x4' }] }] },
     fragment: { module: sceneMod, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }, { format: 'rgba8unorm' }] },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
@@ -179,6 +184,9 @@ export async function createRenderer(canvas) {
       { binding: 2, resource: depth.createView() }, { binding: 3, resource: { buffer: bUni } }] });
   }
 
+  // One identity instance (no offset, keep colours) for plain meshes.
+  const oneInstance = device.createBuffer({ size: 16, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(oneInstance, 0, new Float32Array([0, 0, 0, -1]));
   const buffers = new Map(); // key -> { buf, count }
   function upload(key, f32) {
     let e = buffers.get(key);
@@ -193,7 +201,8 @@ export async function createRenderer(canvas) {
   function drop(key) { buffers.get(key)?.buf.destroy(); buffers.delete(key); }
 
   /** Draws the named meshes with the given camera at the internal size, then scales up to the canvas. */
-  function frame({ keys, target, yaw, viewHeight, range, internal, outline = true }) {
+  /** `keys` are plain meshes; `instanced` is a list of { mesh, instances } buffer keys. */
+  function frame({ keys, instanced = [], target, yaw, viewHeight, range, internal, outline = true }) {
     const [w, h] = internal;
     setInternalSize(w, h);
     // Snap the camera to the texel grid in its own plane, then shift the upscale by the error:
@@ -213,7 +222,12 @@ export async function createRenderer(canvas) {
       depthStencilAttachment: { view: depth.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
     });
     p1.setPipeline(scenePipe); p1.setBindGroup(0, sceneBind);
+    p1.setVertexBuffer(1, oneInstance);
     for (const k of keys) { const e = buffers.get(k); if (e && e.count) { p1.setVertexBuffer(0, e.buf); p1.draw(e.count); } }
+    for (const { mesh, instances } of instanced) {
+      const m = buffers.get(mesh), ins = buffers.get(instances);
+      if (m && ins && m.count && ins.count) { p1.setVertexBuffer(0, m.buf); p1.setVertexBuffer(1, ins.buf); p1.draw(m.count, ins.count); }
+    }
     p1.end();
     const p2 = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
     p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end();

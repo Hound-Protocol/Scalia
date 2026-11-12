@@ -23,7 +23,20 @@ export async function startViewer(wasm, ui) {
   }
 
   // ---- ground ----
-  const sim = new wasm.Sim(42n, 1, 150);
+  // One company-sized group that marches 500 m; drawn as instances of one low-poly figure.
+  const SOLDIERS = 2000;
+  const sim = new wasm.Sim(42n, 1, SOLDIERS);
+  {
+    const f = new Mesh();
+    f.box(-0.18, -0.12, 0.0, -0.03, 0.12, 0.85, 3); // left leg
+    f.box(0.03, -0.12, 0.0, 0.18, 0.12, 0.85, 3); // right leg
+    f.box(-0.24, -0.15, 0.85, 0.24, 0.15, 1.45, -1); // torso (instance colour)
+    f.box(-0.11, -0.11, 1.48, 0.11, 0.11, 1.75, 8); // head
+    f.box(0.26, 0.05, 1.0, 0.33, 0.85, 1.08, 0); // rifle
+    r.upload('figure', f.array());
+  }
+  let groundView = 24;
+  const inst = new Float32Array(SOLDIERS * 4);
   const CELLS = 64;
   const chunks = new Map(); // "cx,cy" -> heights (metres)
   function chunk(cx, cy) {
@@ -42,6 +55,12 @@ export async function startViewer(wasm, ui) {
       chunks.set(k, hm);
     }
     return chunks.get(k);
+  }
+  function evictChunks(gx, gy, keep) {
+    for (const k of chunks.keys()) {
+      const [x, y] = k.split(',').map(Number);
+      if (Math.abs(x - gx) > keep || Math.abs(y - gy) > keep) { chunks.delete(k); r.drop('terrain' + k); }
+    }
   }
   function heightAt(x, y) {
     const cx = Math.floor(x / CELLS), cy = Math.floor(y / CELLS);
@@ -68,7 +87,9 @@ export async function startViewer(wasm, ui) {
   let sysScale = 260000, yaw = Math.PI / 4;
   ui.canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    sysScale = Math.min(500000, Math.max(30, sysScale * (e.deltaY > 0 ? 1.15 : 1 / 1.15)));
+    const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    if (state.scene === 'system') sysScale = Math.min(500000, Math.max(30, sysScale * k));
+    else if (state.scene === 'ground') groundView = Math.min(90, Math.max(8, groundView * k));
   }, { passive: false });
   ui.launch.addEventListener('click', () => {
     if (flight) return;
@@ -116,23 +137,25 @@ export async function startViewer(wasm, ui) {
       text = `${s.info.name}: ${s.info.triangles} triangles, ${(s.hi[1] - s.lo[1]).toFixed(1)} m long`;
     } else if (state.scene === 'ground') {
       sim.tick(t);
-      const n = sim.derive(t, 1, -1e9, 1e9, -1e9, 1e9, 400);
+      const n = sim.derive(t, 1, -1e9, 1e9, -1e9, 1e9, SOLDIERS);
       const xs = sim.xs(), ys = sim.ys(), ph = sim.phases();
       let cx = 0, cy = 0;
       for (let i = 0; i < n; i++) { cx += xs[i]; cy += ys[i]; }
       if (n) { cx /= n; cy /= n; }
-      const gx = Math.floor(cx / CELLS), gy = Math.floor(cy / CELLS);
-      const keys = [];
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { chunk(gx + dx, gy + dy); keys.push(`terrain${gx + dx},${gy + dy}`); }
-      const m = new Mesh();
       for (let i = 0; i < n; i++) {
-        const x = xs[i], y = ys[i], z = heightAt(x, y);
-        m.box(x - 0.25, y - 0.25, z, x + 0.25, y + 0.25, z + 1.8, 4 + (ph[i] % 6));
+        inst.set([xs[i], ys[i], heightAt(xs[i], ys[i]), 6 + (ph[i] === 1 ? 1 : 0)], i * 4);
       }
-      r.upload('soldiers', m.array());
-      keys.push('soldiers');
-      cam = { keys, target: [cx, cy, heightAt(cx, cy)], yaw: Math.PI / 4, viewHeight: 24, range: 400 };
-      text = `${n} soldiers derived from one group, on terrain chunks from the same seed`;
+      r.upload('soldierInst', inst.subarray(0, n * 4));
+      const gx = Math.floor(cx / CELLS), gy = Math.floor(cy / CELLS);
+      const rad = Math.ceil((groundView * 1.9) / CELLS / 2) + 1;
+      const keys = [];
+      for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
+        chunk(gx + dx, gy + dy); keys.push(`terrain${gx + dx},${gy + dy}`);
+      }
+      evictChunks(gx, gy, rad + 2);
+      cam = { keys, instanced: [{ mesh: 'figure', instances: 'soldierInst' }], target: [cx, cy, heightAt(cx, cy)],
+        yaw: Math.PI / 4, viewHeight: groundView, range: 600 };
+      text = `${n} soldiers (one group, marching) drawn as instances of one figure; wheel zooms (${groundView.toFixed(0)} m tall view)`;
     } else {
       const m = new Mesh();
       const pix = sysScale / internal[1]; // km per internal pixel
