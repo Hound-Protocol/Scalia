@@ -179,11 +179,21 @@ export async function startViewer(wasm, ui) {
     ui.launch.hidden = state.scene !== 'system';
     ui.shipSel.hidden = state.scene !== 'ships';
     r.frame({ ...cam, internal, outline: state.outline });
+    if (pendingShot) {
+      const c2 = document.createElement('canvas');
+      c2.width = internal[0]; c2.height = internal[1];
+      const g = c2.getContext('2d'); g.imageSmoothingEnabled = false;
+      g.drawImage(ui.canvas, 0, 0, c2.width, c2.height);
+      pendingShot(c2.toDataURL('image/png')); pendingShot = null;
+    }
     tickFps(now);
     ui.hud.textContent = r.gpuError
       ? `GPU ERROR: ${r.gpuError.slice(0, 600)}`
       : `${text} | ${internal[0]}x${internal[1]} | ${state.fps.toFixed(0)} fps | ${gpuNote}`;
   }
   requestAnimationFrame(render);
+  // Frame capture for remote checks: returns a PNG data URL of the next frame at the internal size.
+  let pendingShot = null;
+  window.scaliaShot = () => new Promise((res) => { pendingShot = res; });
   window.scaliaViewer = { state, simMs, get flight() { return flight; } };
 }
