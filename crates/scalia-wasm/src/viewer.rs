@@ -47,11 +47,19 @@ pub struct Viewer {
     derived: Vec<Derived>,
     chunks: HashMap<(i64, i64), Vec<f32>>,
     ground_view: f32,
+    focus: Vec3,
     system: System,
     sys_scale: f32,
     docked: u8,
     flight: Option<(FlightPlan, u8)>,
     trail: Vec<(f64, f32, f32)>,
+    /// Free camera per scene: (target offset or free target, yaw).
+    ground_cam: Option<Vec3>,
+    sys_cam: Option<Vec3>,
+    yaw: f32,
+    ship_yaw: Option<f32>,
+    pixel_scale: u32,
+    last_view: (f32, f32),
     fps: f32,
     frames: u32,
     fps_t: f64,
@@ -75,11 +83,18 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         derived: Vec::new(),
         chunks: HashMap::new(),
         ground_view: 60.0,
+        focus: Vec3::ZERO,
         system: System::demo(),
         sys_scale: 260_000.0,
         docked: 0,
         flight: None,
         trail: Vec::new(),
+        ground_cam: None,
+        sys_cam: None,
+        yaw: std::f32::consts::FRAC_PI_4,
+        ship_yaw: None,
+        pixel_scale: 2,
+        last_view: (60.0, 1.0),
         fps: 0.0,
         frames: 0,
         fps_t: 0.0,
@@ -112,6 +127,54 @@ impl Viewer {
     pub fn set_full(&mut self, on: bool) {
         self.full = on;
     }
+    /// Screen pixels per internal pixel (the chunky look); 1 is full resolution.
+    pub fn set_pixel_scale(&mut self, s: u32) {
+        self.pixel_scale = s.clamp(1, 8);
+    }
+    /// Drags the view by screen pixels: pans the ground and the system, turns ships.
+    pub fn pan(&mut self, dx: f64, dy: f64) {
+        let (view_h, screen_h) = self.last_view;
+        let k = view_h / screen_h;
+        let (dx, dy) = (dx as f32 * k, dy as f32 * k);
+        let (s, c) = self.yaw.sin_cos();
+        let right = Vec3::new(c, s, 0.0);
+        let fwd = Vec3::new(-s, c, 0.0) / scalia_render::camera::ELEV.sin();
+        let delta = -right * dx + fwd * dy;
+        match self.scene {
+            Scene::Ground => {
+                let base = self.ground_cam.unwrap_or(self.ground_focus());
+                self.ground_cam = Some(base + delta);
+            }
+            Scene::System => self.sys_cam = Some(self.sys_cam.unwrap_or(Vec3::ZERO) + delta),
+            Scene::Ships => {
+                let y = self.ship_yaw.unwrap_or(0.0);
+                self.ship_yaw = Some(y - dx / view_h * 3.0);
+            }
+        }
+    }
+    /// Turns the camera by `d` radians.
+    pub fn rotate(&mut self, d: f64) {
+        match self.scene {
+            Scene::Ships => self.ship_yaw = Some(self.ship_yaw.unwrap_or(0.0) + d as f32),
+            _ => self.yaw += d as f32,
+        }
+    }
+    /// Camera follows the units (ground) or the ship (system) again.
+    pub fn follow(&mut self) {
+        match self.scene {
+            Scene::Ground => self.ground_cam = None,
+            Scene::System => self.sys_cam = None,
+            Scene::Ships => self.ship_yaw = None,
+        }
+    }
+    pub fn scene_name(&self) -> String {
+        match self.scene {
+            Scene::Ships => "ships",
+            Scene::Ground => "ground",
+            Scene::System => "system",
+        }
+        .into()
+    }
     pub fn set_outline(&mut self, on: bool) {
         self.outline = on;
     }
@@ -124,7 +187,7 @@ impl Viewer {
         let k = if delta > 0.0 { 1.15 } else { 1.0 / 1.15 };
         match self.scene {
             Scene::System => self.sys_scale = (self.sys_scale * k).clamp(30.0, 500_000.0),
-            Scene::Ground => self.ground_view = (self.ground_view * k).clamp(8.0, 90.0),
+            Scene::Ground => self.ground_view = (self.ground_view * k).clamp(8.0, 160.0),
             Scene::Ships => {}
         }
     }
@@ -157,27 +220,29 @@ impl Viewer {
             self.frames = 0;
             self.fps_t = now_ms;
         }
-        let internal = if self.full { self.size } else { ((self.size.0 / 2).max(1), (self.size.1 / 2).max(1)) };
+        let ps = if self.full { 1 } else { self.pixel_scale };
+        let internal = ((self.size.0 / ps).max(1), (self.size.1 / ps).max(1));
         let (mut meshes, mut instanced) = (Vec::new(), Vec::new());
         let (target, yaw, view_height, range, text) = match self.scene {
             Scene::Ships => self.ships_scene(t, &mut meshes),
             Scene::Ground => self.ground_scene(t, &mut meshes, &mut instanced),
             Scene::System => self.system_scene(t, &mut meshes),
         };
+        self.last_view = (view_height, self.size.1 as f32);
         let desc = FrameDesc { meshes: &meshes, instanced: &instanced, target, yaw, view_height, range, internal, outline: self.outline };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
-        let gpu = if self.gpu.software {
-            format!("SOFTWARE RENDERING ({}): the CPU is drawing", self.gpu.adapter_name)
-        } else {
-            self.gpu.adapter_name.clone()
-        };
-        format!("{text} | {}x{} | {:.0} fps | {gpu} | Rust renderer", internal.0, internal.1, self.fps)
+        let gpu = if self.gpu.software { " | SOFTWARE RENDERING: the CPU is drawing" } else { "" };
+        format!("{text} | {}x{} | {:.0} fps{gpu}", internal.0, internal.1, self.fps)
     }
 }
 
 impl Viewer {
+    fn ground_focus(&self) -> Vec3 {
+        self.focus
+    }
+
     fn sim_ms(&mut self, now_ms: f64) -> f64 {
         let t0 = *self.t0.get_or_insert(now_ms);
         (now_ms - t0).max(0.0)
@@ -216,7 +281,8 @@ impl Viewer {
         let text = format!("{}: {} triangles, {:.1} m long", s.name, s.triangles, ext.y);
         let centre = (s.lo + s.hi) / 2.0;
         meshes.push(format!("ship{i}"));
-        (centre, (t / 2500.0) as f32, size, size * 3.0, text)
+        let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
+        (centre, yaw, size, size * 3.0, text)
     }
 
     fn chunk(&mut self, cx: i64, cy: i64) -> &Vec<f32> {
@@ -274,12 +340,22 @@ impl Viewer {
         }
         self.derived = out;
         self.gpu.upload("soldiers", bytes(&inst));
-        let (gx, gy) = ((cx / CELLS as f64).floor() as i64, (cy / CELLS as f64).floor() as i64);
-        let rad = ((self.ground_view * 1.9) / CELLS as f32 / 2.0).ceil() as i64 + 1;
+        let look = self.ground_cam.map(|c| (c.x as f64, c.y as f64)).unwrap_or((cx, cy));
+        let (gx, gy) = ((look.0 / CELLS as f64).floor() as i64, (look.1 / CELLS as f64).floor() as i64);
+        // Enough chunks to cover a wide screen at any yaw; at most a few new ones per frame to avoid hitches.
+        let rad = (self.ground_view * 1.3 / CELLS as f32).ceil() as i64 + 1;
+        let mut budget = 6;
         for dy in -rad..=rad {
             for dx in -rad..=rad {
-                self.chunk(gx + dx, gy + dy);
-                meshes.push(format!("terrain{},{}", gx + dx, gy + dy));
+                let key = (gx + dx, gy + dy);
+                if !self.chunks.contains_key(&key) {
+                    if budget == 0 {
+                        continue;
+                    }
+                    budget -= 1;
+                    self.chunk(key.0, key.1);
+                }
+                meshes.push(format!("terrain{},{}", key.0, key.1));
             }
         }
         let keep = rad + 2;
@@ -289,9 +365,12 @@ impl Viewer {
             self.gpu.drop_buffer(&format!("terrain{},{}", k.0, k.1));
         }
         instanced.push(("figure".into(), "soldiers".into()));
-        let z = self.height_at(cx as f32, cy as f32);
-        let text = format!("{n} soldiers (one group, marching) as instances of one figure; wheel zooms ({:.0} m view)", self.ground_view);
-        (Vec3::new(cx as f32, cy as f32, z), std::f32::consts::FRAC_PI_4, self.ground_view, 600.0, text)
+        self.focus = Vec3::new(cx as f32, cy as f32, 0.0);
+        let mut target = self.ground_cam.unwrap_or(self.focus);
+        target.z = self.height_at(target.x, target.y);
+        let mode = if self.ground_cam.is_some() { "free camera (F follows)" } else { "following the group" };
+        let text = format!("Ground: {n} soldiers, {mode}, {:.0} m view", self.ground_view);
+        (target, self.yaw, self.ground_view, 600.0, text)
     }
 
     fn system_scene(&mut self, t: f64, meshes: &mut Vec<String>) -> (Vec3, f32, f32, f32, String) {
@@ -338,6 +417,7 @@ impl Viewer {
         if self.flight.is_some() {
             text.push_str(" (in flight)");
         }
-        (Vec3::ZERO, std::f32::consts::FRAC_PI_4, self.sys_scale, self.sys_scale * 4.0, text)
+        let target = self.sys_cam.unwrap_or(Vec3::ZERO);
+        (target, self.yaw, self.sys_scale, self.sys_scale * 4.0, text)
     }
 }

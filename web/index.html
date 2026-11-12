@@ -3,48 +3,58 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scalia: blueprints and planet</title>
+<title>Scalia</title>
 <style>
-  body { font: 15px/1.4 system-ui, sans-serif; margin: 0; background: #12151a; color: #d8dde6; }
-  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
-  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 32px; }
-  #blueprints { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-  .card { background: #1b2028; border: 1px solid #2b3340; border-radius: 6px; padding: 12px; }
-  .card svg { width: 100%; height: 200px; background: #0e1116; }
-  .card svg .hull { stroke: #6a7a90; stroke-width: 20; } .card svg .room { stroke-width: 14; }
-  .meta { font-size: 13px; color: #98a3b3; margin-top: 6px; word-break: break-all; }
-  label { margin-right: 12px; } input, select { background: #0e1116; color: inherit; border: 1px solid #2b3340; padding: 3px 6px; width: 90px; }
-  canvas { image-rendering: pixelated; border: 1px solid #2b3340; margin-top: 12px; width: 520px; height: 520px; max-width: 100%; }
-  #view { width: 960px; height: 540px; max-width: 100%; image-rendering: pixelated; margin-top: 8px; }
-  .bar button, .bar select { margin-right: 8px; background: #1b2028; color: inherit; border: 1px solid #2b3340; padding: 4px 10px; }
-  #status { color: #98a3b3; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07080b; color: #d8dde6;
+    font: 13px/1.4 ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace; }
+  #view { position: fixed; inset: 0; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: grab; touch-action: none; }
+  #view.dragging { cursor: grabbing; }
+  .panel { position: fixed; background: rgba(10, 12, 16, 0.78); border: 1px solid #2a313c; padding: 6px 8px; }
+  #bar { top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  #bar button, #bar select { background: #161b22; color: inherit; border: 1px solid #2f3845; padding: 4px 10px; font: inherit; cursor: pointer; }
+  #bar button.on { background: #2b3a4f; border-color: #5d7fa6; }
+  #bar button:disabled { opacity: 0.4; cursor: default; }
+  #bar label { display: flex; gap: 4px; align-items: center; }
+  #hud { bottom: 8px; left: 8px; max-width: calc(100vw - 32px); }
+  #help { top: 8px; right: 8px; max-width: 320px; }
+  #help h3 { margin: 0 0 4px; font-size: 13px; }
+  #help table { border-collapse: collapse; }
+  #help td { padding: 1px 6px 1px 0; vertical-align: top; }
+  #help td:first-child { color: #e9c46a; white-space: nowrap; }
+  #help.hidden { display: none; }
+  #error { inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+  a { color: #9cc4ff; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Scalia: blueprints and planet</h1>
-  <p id="status">Loading WebAssembly...</p>
-  <h2>Viewer (WebGPU)</h2>
-  <div class="bar">
-    <button data-scene="ships">Ships</button><button data-scene="ground">Ground</button><button data-scene="system">System</button>
-    <select id="shipSel"></select><button id="launch" hidden>Launch to the other planet</button>
-    <label><input type="checkbox" id="fullres" style="width:auto"> full resolution</label>
-    <label><input type="checkbox" id="outline" style="width:auto" checked> outlines</label>
-  </div>
-  <canvas id="view" width="960" height="540"></canvas>
-  <p id="hud" class="meta">Starting...</p>
-  <h2>Shipped blueprints</h2>
-  <div id="blueprints"></div>
-  <h2>Planet chunk</h2>
-  <p>
-    <label>seed <input id="seed" type="number" value="42" min="0"></label>
-    <label>face <select id="face"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
-    <label>chunk x <input id="cx" type="number" value="0"></label>
-    <label>chunk y <input id="cy" type="number" value="0"></label>
-  </p>
-  <canvas id="map" width="65" height="65"></canvas>
-  <p id="mapinfo" class="meta"></p>
-</main>
-<script type="module" src="./main.js"></script>
+<canvas id="view"></canvas>
+<div id="bar" class="panel">
+  <button data-scene="ships">1 Ships</button>
+  <button data-scene="ground">2 Ground</button>
+  <button data-scene="system">3 System</button>
+  <select id="shipSel" title="Blueprint"></select>
+  <button id="launch" title="Space">Launch</button>
+  <button id="follow" title="F">Follow</button>
+  <label title="R"><input type="checkbox" id="fullres"> full resolution</label>
+  <label title="O"><input type="checkbox" id="outline" checked> outlines</label>
+  <button id="helpBtn" title="H">? Help</button>
+</div>
+<div id="help" class="panel">
+  <h3>Controls</h3>
+  <table>
+    <tr><td>1 2 3</td><td>Ships, ground, star system</td></tr>
+    <tr><td>Wheel</td><td>Zoom</td></tr>
+    <tr><td>Drag / WASD</td><td>Pan (turn the ship in Ships)</td></tr>
+    <tr><td>Q / E</td><td>Rotate the camera</td></tr>
+    <tr><td>F</td><td>Follow the units again</td></tr>
+    <tr><td>Space</td><td>Launch to the other planet (System)</td></tr>
+    <tr><td>O / R</td><td>Outlines / full resolution</td></tr>
+    <tr><td>H</td><td>Hide this help</td></tr>
+  </table>
+  <p style="margin:6px 0 0"><a href="./debug.html">Debug page</a> (blueprints, terrain chunks)</p>
+</div>
+<div id="hud" class="panel">Loading WebAssembly...</div>
+<div id="error" class="panel"></div>
+<script type="module" src="./game.js"></script>
 </body>
 </html>
