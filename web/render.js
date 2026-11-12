@@ -13,23 +13,54 @@ struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @
 @vertex fn vs(@location(0) p: vec3f, @location(1) c: f32) -> VO {
   var o: VO; o.pos = u.m * vec4f(p, 1.0); o.w = p; o.ci = u32(c); return o;
 }
-@fragment fn fs(i: VO) -> @location(0) vec4f {
+struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
+@fragment fn fs(i: VO) -> FO {
   var n = normalize(cross(dpdx(i.w), dpdy(i.w)));
   if (dot(n, u.vdir.xyz) < 0.0) { n = -n; }
   let l = max(dot(n, normalize(vec3f(0.4, -0.3, 0.85))), 0.0);
   let q = floor(l * 4.0 + 0.5) / 4.0;
-  return vec4f(u.pal[i.ci & 15u].rgb * (0.45 + 0.55 * q), 1.0);
+  var o: FO;
+  o.c = vec4f(u.pal[i.ci & 15u].rgb * (0.45 + 0.55 * q), 1.0);
+  o.n = vec4f(n * 0.5 + 0.5, 1.0);
+  return o;
 }`;
 
+// Upscale pass: fetches the low-resolution texel under each screen pixel (shifted by the camera
+// snap error), darkens object silhouettes from depth and lightens convex edges from normals.
 const BLIT_WGSL = `
-@group(0) @binding(0) var t: texture_2d<f32>;
-@group(0) @binding(1) var s: sampler;
+struct B { off: vec2f, size: vec2f, thresh: f32, outline: f32, pad: vec2f };
+@group(0) @binding(0) var col: texture_2d<f32>;
+@group(0) @binding(1) var nrm: texture_2d<f32>;
+@group(0) @binding(2) var dep: texture_depth_2d;
+@group(0) @binding(3) var<uniform> b: B;
 struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
   var o: VO; o.pos = vec4f(p[i], 0.0, 1.0); o.uv = vec2f((p[i].x + 1.0) / 2.0, (1.0 - p[i].y) / 2.0); return o;
 }
-@fragment fn fs(i: VO) -> @location(0) vec4f { return textureSample(t, s, i.uv); }`;
+fn ld(p: vec2i) -> f32 { return textureLoad(dep, p, 0); }
+fn ln(p: vec2i) -> vec3f { return textureLoad(nrm, p, 0).xyz * 2.0 - 1.0; }
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let full = vec2i(textureDimensions(col));
+  let p = clamp(vec2i(floor(i.uv * b.size + b.off)) + vec2i(1, 1), vec2i(1, 1), full - vec2i(2, 2));
+  var c = textureLoad(col, p, 0).rgb;
+  if (b.outline < 0.5) { return vec4f(c, 1.0); }
+  let d = ld(p);
+  if (d >= 1.0) { return vec4f(c, 1.0); }
+  let n = ln(p);
+  var silhouette = false;
+  var crease = false;
+  let dirs = array<vec2i, 4>(vec2i(1, 0), vec2i(-1, 0), vec2i(0, 1), vec2i(0, -1));
+  for (var k = 0; k < 4; k++) {
+    let q = p + dirs[k];
+    let dq = ld(q);
+    if (dq - d > b.thresh) { silhouette = true; }
+    else if (abs(dq - d) <= b.thresh && dq >= d && dot(n, ln(q)) < 0.85) { crease = true; }
+  }
+  if (silhouette) { c = c * 0.45; }
+  else if (crease) { c = min(c * 1.3 + 0.04, vec3f(1.0)); }
+  return vec4f(c, 1.0);
+}`;
 
 const ELEV = Math.atan(1 / Math.SQRT2); // 35.264 degrees: true isometric
 
@@ -51,6 +82,20 @@ export function isoMatrix(target, yaw, viewHeight, aspect, range) {
   m[15] = 1;
   // direction from the scene towards the camera, in world space (the camera looks along +y', down)
   return { m, vdir: [s * ce, -c * ce, se] };
+}
+
+/**
+ * Moves `target` onto the camera-plane texel grid. Returns the snapped target and the error in
+ * texels (ex to the right, ey down the screen) by which the upscale must sample to undo the snap.
+ */
+export function snapTarget(target, yaw, texel) {
+  const c = Math.cos(yaw), s = Math.sin(yaw), se = Math.sin(ELEV), ce = Math.cos(ELEV);
+  const R = [c, s, 0], U = [-s * se, c * se, ce];
+  const tr = R[0] * target[0] + R[1] * target[1];
+  const tu = U[0] * target[0] + U[1] * target[1] + U[2] * target[2];
+  const er = tr - Math.round(tr / texel) * texel, eu = tu - Math.round(tu / texel) * texel;
+  const t = [0, 1, 2].map((k) => target[k] - R[k] * er - U[k] * eu);
+  return { target: t, ex: er / texel, ey: -eu / texel };
 }
 
 export class Mesh {
@@ -101,7 +146,7 @@ export async function createRenderer(canvas) {
     layout: 'auto',
     vertex: { module: sceneMod, entryPoint: 'vs', buffers: [{ arrayStride: 16, attributes: [
       { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32' }] }] },
-    fragment: { module: sceneMod, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+    fragment: { module: sceneMod, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }, { format: 'rgba8unorm' }] },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
   });
@@ -113,17 +158,22 @@ export async function createRenderer(canvas) {
     vertex: { module: blitMod, entryPoint: 'vs' },
     fragment: { module: blitMod, entryPoint: 'fs', targets: [{ format }] },
   });
-  const sampler = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
+  const bUni = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-  let color, depth, blitBind, size = [0, 0];
+  // Internal targets carry a one-texel margin on every side so the sub-texel shift never shows an edge.
+  let color, normal, depth, blitBind, size = [0, 0];
   function setInternalSize(w, h) {
     if (size[0] === w && size[1] === h) return;
     size = [w, h];
-    color?.destroy(); depth?.destroy();
-    color = device.createTexture({ size: [w, h], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
-    depth = device.createTexture({ size: [w, h], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    color?.destroy(); normal?.destroy(); depth?.destroy();
+    const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
+    const sz = [w + 2, h + 2];
+    color = device.createTexture({ size: sz, format: 'rgba8unorm', usage });
+    normal = device.createTexture({ size: sz, format: 'rgba8unorm', usage });
+    depth = device.createTexture({ size: sz, format: 'depth24plus', usage });
     blitBind = device.createBindGroup({ layout: blitPipe.getBindGroupLayout(0), entries: [
-      { binding: 0, resource: color.createView() }, { binding: 1, resource: sampler }] });
+      { binding: 0, resource: color.createView() }, { binding: 1, resource: normal.createView() },
+      { binding: 2, resource: depth.createView() }, { binding: 3, resource: { buffer: bUni } }] });
   }
 
   const buffers = new Map(); // key -> { buf, count }
@@ -140,14 +190,23 @@ export async function createRenderer(canvas) {
   function drop(key) { buffers.get(key)?.buf.destroy(); buffers.delete(key); }
 
   /** Draws the named meshes with the given camera at the internal size, then scales up to the canvas. */
-  function frame({ keys, target, yaw, viewHeight, range, internal }) {
-    setInternalSize(internal[0], internal[1]);
-    const { m, vdir } = isoMatrix(target, yaw, viewHeight, internal[0] / internal[1], range);
+  function frame({ keys, target, yaw, viewHeight, range, internal, outline = true }) {
+    const [w, h] = internal;
+    setInternalSize(w, h);
+    // Snap the camera to the texel grid in its own plane, then shift the upscale by the error:
+    // stable pixels with smooth motion.
+    const snap = snapTarget(target, yaw, viewHeight / h);
+    const { m, vdir } = isoMatrix(snap.target, yaw, (viewHeight * (h + 2)) / h, (w + 2) / (h + 2), range);
     udata.set(m, 0); udata.set([vdir[0], vdir[1], vdir[2], 0], 16);
     device.queue.writeBuffer(uni, 0, udata);
+    // Depth is linear in an orthographic view: about three texels of world distance counts as an edge.
+    const thresh = ((viewHeight / h) * 3) / (2 * range);
+    device.queue.writeBuffer(bUni, 0, new Float32Array([snap.ex, snap.ey, w, h, thresh, outline ? 1 : 0, 0, 0]));
     const enc = device.createCommandEncoder();
     const p1 = enc.beginRenderPass({
-      colorAttachments: [{ view: color.createView(), clearValue: { r: 0.05, g: 0.06, b: 0.09, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
+      colorAttachments: [
+        { view: color.createView(), clearValue: { r: 0.05, g: 0.06, b: 0.09, a: 1 }, loadOp: 'clear', storeOp: 'store' },
+        { view: normal.createView(), clearValue: { r: 0.5, g: 0.5, b: 1, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
       depthStencilAttachment: { view: depth.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
     });
     p1.setPipeline(scenePipe); p1.setBindGroup(0, sceneBind);

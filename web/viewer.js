@@ -79,6 +79,9 @@ export async function startViewer(wasm, ui) {
 
   for (const b of document.querySelectorAll('[data-scene]')) b.addEventListener('click', () => { state.scene = b.dataset.scene; });
   ui.fullres.addEventListener('change', () => { state.full = ui.fullres.checked; });
+  const outlineBox = document.getElementById('outline');
+  state.outline = outlineBox ? outlineBox.checked : true;
+  outlineBox?.addEventListener('change', () => { state.outline = outlineBox.checked; });
   ui.shipSel.addEventListener('change', () => { state.shipIndex = Number(ui.shipSel.value); });
 
   function tickFps(now) {
@@ -143,7 +146,7 @@ export async function startViewer(wasm, ui) {
     }
     ui.launch.hidden = state.scene !== 'system';
     ui.shipSel.hidden = state.scene !== 'ships';
-    r.frame({ ...cam, internal });
+    r.frame({ ...cam, internal, outline: state.outline });
     tickFps(now);
     ui.hud.textContent = `${text} | ${internal[0]}x${internal[1]} | ${state.fps.toFixed(0)} fps`;
   }
