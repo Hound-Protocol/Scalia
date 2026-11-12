@@ -7,6 +7,7 @@ pub mod flight;
 pub mod groups;
 pub mod hash;
 pub mod nav;
+pub mod nav_agents;
 pub mod planet;
 pub mod position;
 pub mod process;

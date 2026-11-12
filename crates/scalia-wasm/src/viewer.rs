@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use glam::Vec3;
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
+use scalia_core::nav::{NavGrid, Prop, PropKind};
+use scalia_core::nav_agents::AgentGroup;
 use scalia_core::planet::Planet;
 use scalia_core::groups::GroupId;
 use scalia_core::position::{Pos, RegionId};
@@ -25,7 +27,11 @@ use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
 
 /// Army sizes the N key cycles through, as (groups, soldiers per group).
-const ARMIES: [(u32, u32); 4] = [(1, 2000), (10, 2000), (50, 2000), (250, 2000)];
+/// Army sizes (groups, soldiers each). The first is the testing ground's: eight squads of twelve in the base.
+const ARMIES: [(u32, u32); 5] = [(8, 12), (1, 2000), (10, 2000), (50, 2000), (250, 2000)];
+/// The testing ground: a military base on a levelled pad, (BASE_LO..BASE_HI) metres on both axes.
+const BASE_LO: f32 = -20.0;
+const BASE_HI: f32 = 220.0;
 /// Most soldiers drawn in one frame.
 const MAX_DRAWN: usize = 60_000;
 const CELLS: u32 = 64;
@@ -105,6 +111,14 @@ pub struct Viewer {
     /// Floating origin (metres): the ground scene draws everything relative to this point near the camera, so the
     /// f32 positions sent to the GPU stay small (and precise) anywhere on the planet.
     origin: (f64, f64),
+    /// The testing ground: its props, nav grid, level height (metres), and the squads walking as agents in it.
+    base_props: Vec<Prop>,
+    base_grid: NavGrid,
+    base_h: f32,
+    base_built: bool,
+    agents: HashMap<u32, AgentGroup>,
+    agent_prev: HashMap<u32, Vec<(i64, i64)>>,
+    agent_clock: f64,
     /// Cross-fade from a previous far level: (level, start of the fade in ms).
     far_fade: Option<(u32, f64)>,
     /// Zoom: the ladder step aimed at and the view height (metres) the camera is gliding through.
@@ -188,6 +202,13 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         far_tiles: std::collections::HashSet::new(),
         far_level: None,
         origin: (0.0, 0.0),
+        base_props: base_props(),
+        base_grid: NavGrid::new((BASE_LO * 1000.0) as i64, (BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 2.0) as usize, ((BASE_HI - BASE_LO) * 2.0) as usize),
+        base_h: 0.0,
+        base_built: false,
+        agents: HashMap::new(),
+        agent_prev: HashMap::new(),
+        agent_clock: -1.0,
         far_fade: None,
         zoom_step: STEP_GROUND,
         zoom_m: LADDER[STEP_GROUND],
@@ -244,11 +265,17 @@ fn wgpu_target(canvas: web_sys::HtmlCanvasElement) -> scalia_render::SurfaceTarg
 fn build_army(groups: u32, per_group: u32) -> World {
     let mut w = World::new(42);
     let side = (groups as f64).sqrt().ceil().max(1.0) as u32;
+    let testing = per_group <= 20;
     for g in 0..groups {
-        let pos = Pos { region: RegionId(1), x: (g % side) as i64 * 200_000, y: (g / side) as i64 * 200_000, z: 0 };
+        // Testing squads stand on the base's parade ground; big armies spread over the plain.
+        let pos = if testing {
+            Pos { region: RegionId(1), x: 60_000 + (g % 4) as i64 * 14_000, y: 40_000 + (g / 4) as i64 * 14_000, z: 0 }
+        } else {
+            Pos { region: RegionId(1), x: (g % side) as i64 * 200_000, y: (g / side) as i64 * 200_000, z: 0 }
+        };
         let spec = GroupSpec { pos, composition: Composition([per_group, 0, 0, 0]), needs: Needs::full() }; // soldiers only for now; vehicles return one by one, each with a defined purpose
         let id = w.groups.spawn(spec, &mut w.roster);
-        if g % 3 == 0 {
+        if g % 3 == 0 && !testing {
             let _ = w.start_march(id, pos.offset(500_000, 0, 0), MARCH_SPEED_MM_S, WorldMs(0));
         }
     }
@@ -400,6 +427,8 @@ impl Viewer {
         self.group_pose.clear();
         self.stance.clear();
         self.order_dest = None;
+        self.agents.clear();
+        self.agent_prev.clear();
         format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
     }
     /// Left click on the ground: selects the group under the cursor (or clears the selection).
@@ -475,7 +504,27 @@ impl Viewer {
         for (&i, c) in groups.iter().zip(&centres) {
             let d = p + (*c - mid);
             let to = Pos { region: RegionId(1), x: (d.x as f64 * 1000.0) as i64, y: (d.y as f64 * 1000.0) as i64, z: 0 };
+            // Inside the testing ground the soldiers walk as agents round the obstacles.
+            if in_base(d.x, d.y) {
+                let starts: Vec<(i64, i64)> = match self.agents.get(&i) {
+                    Some(a) => a.positions().to_vec(),
+                    None => {
+                        let mut mine: Vec<&Derived> = self.derived.iter().filter(|s| s.group.0 == i).collect();
+                        mine.sort_by_key(|s| s.slot);
+                        mine.iter().map(|s| (s.pos.x, s.pos.y)).collect()
+                    }
+                };
+                if !starts.is_empty() && starts.iter().all(|s| in_base(s.0 as f32 / 1000.0, s.1 as f32 / 1000.0)) {
+                    if let Some(a) = AgentGroup::new(&self.base_grid, starts, (to.x, to.y), speed as i64, 300) {
+                        self.agent_prev.insert(i, a.positions().to_vec());
+                        self.agents.insert(i, a);
+                        moved += 1;
+                        continue;
+                    }
+                }
+            }
             if self.world.order_march(GroupId(i), to, speed, now).is_ok() {
+                self.agents.remove(&i);
                 moved += 1;
             }
         }
@@ -666,6 +715,11 @@ impl Viewer {
 
     /// Where a group's formation is centred at time t (render metres).
     fn group_centre(&self, g: u32, t: WorldMs) -> Vec3 {
+        if let Some(a) = self.agents.get(&g) {
+            let p = a.positions();
+            let (sx, sy) = p.iter().fold((0i64, 0i64), |s, q| (s.0 + q.0, s.1 + q.1));
+            return Vec3::new(sx as f32 / p.len() as f32 / 1000.0, sy as f32 / p.len() as f32 / 1000.0, 0.0);
+        }
         let id = GroupId(g);
         let p = scalia_core::process::process_pos(self.world.groups.process(id), t).unwrap_or(self.world.groups.pos(id));
         Vec3::new(p.x as f32 / 1000.0, p.y as f32 / 1000.0, 0.0)
@@ -768,7 +822,11 @@ impl Viewer {
     fn chunk(&mut self, cx: i64, cy: i64) -> &Vec<f32> {
         self.chunks
             .entry((cx, cy))
-            .or_insert_with(|| Planet::demo(42).chunk(cx, cy + EQUATOR_CHUNK, CELLS).heights.iter().map(|&h| h as f32 / 1000.0).collect())
+            .or_insert_with(|| {
+                let mut h: Vec<f32> = Planet::demo(42).chunk(cx, cy + EQUATOR_CHUNK, CELLS).heights.iter().map(|&h| h as f32 / 1000.0).collect();
+                level_base(&mut h, cx, cy);
+                h
+            })
     }
 
     /// Builds (or rebuilds) a chunk's mesh with every `step`-th sample: 1 close up, 2 or 4 zoomed out.
@@ -848,7 +906,11 @@ impl Viewer {
         let (cx, cy) = (c0.x as f64, c0.y as f64);
         let ts = ((t / 1000.0) % 86_400.0) as f32;
         let mut inst = Vec::with_capacity(n * 12);
+        self.step_agents(t);
         for d in &out {
+            if self.agents.contains_key(&d.group.0) {
+                continue; // drawn from their agents below
+            }
             let (ax, ay) = (d.pos.x as f64 / 1000.0, d.pos.y as f64 / 1000.0);
             let z = self.height_at(ax as f32, ay as f32);
             let (x, y) = ((ax - self.origin.0) as f32, (ay - self.origin.1) as f32);
@@ -880,6 +942,9 @@ impl Viewer {
             inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, pose as u32 as f32, prev as u32 as f32, since, upper, 0.0]);
         }
         self.derived = out;
+        if self.ground_view <= UNITS_MAX {
+            self.agent_instances(ts, &mut inst);
+        }
         self.gpu.upload_instances("soldiers", bytes(&inst));
 
         // Vehicles of groups near the camera, drawn as instances of the shipped tank and truck.
@@ -970,6 +1035,12 @@ impl Viewer {
             meshes.push("markers".into());
         }
         // Full figure close up, the lighter one when zoomed out.
+        if !self.base_built {
+            self.build_base();
+        }
+        instanced.push(("base".into(), "base_at".into()));
+        let (bx, by) = ((-self.origin.0) as f32, (-self.origin.1) as f32);
+        self.gpu.upload_instances("base_at", bytes(&[bx, by, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
         // Three levels of detail. Past 250 m a soldier is a few pixels tall: the 24-triangle figure, and no
         // shadow pass for it (its shadow would be smaller than a pixel).
         if self.ground_view <= 70.0 {
@@ -1006,6 +1077,65 @@ impl Viewer {
         let text = format!("Ground: {n} of {total} soldiers drawn, {mode}{sel}, {:.0} m view", self.ground_view);
         let range = 600f32.max(self.ground_view * 2.0 + PLANET_R * 2.0 * self.ground_bend().t);
         (target, self.yaw, self.ground_view, range, text)
+    }
+
+    /// The testing ground: rasterise the base's props into its nav grid and build their mesh (once).
+    fn build_base(&mut self) {
+        self.base_h = self.planet.height_mm(100_000, (100_000.0 + HALF_DEPTH as f64 * 1000.0) as i64) as f32 / 1000.0;
+        self.base_grid.rebuild(&self.base_props);
+        let m = base_mesh(&self.base_props, self.base_h);
+        self.gpu.upload("base", m.bytes());
+        self.base_built = true;
+    }
+
+    /// Advances the agent squads in fixed 50 ms steps (deterministic, whatever the frame rate).
+    fn step_agents(&mut self, t: f64) {
+        if self.agent_clock < 0.0 || t - self.agent_clock > 1000.0 {
+            self.agent_clock = t;
+        }
+        while t - self.agent_clock >= 50.0 {
+            self.agent_clock += 50.0;
+            let keys: Vec<u32> = self.agents.keys().copied().collect();
+            for g in keys {
+                let a = self.agents.get_mut(&g).expect("present");
+                self.agent_prev.insert(g, a.positions().to_vec());
+                a.step(&self.base_grid, 50);
+            }
+        }
+    }
+
+    /// Instances for every agent soldier, posed like the derived ones.
+    fn agent_instances(&mut self, ts: f32, inst: &mut Vec<f32>) {
+        let mut keys: Vec<u32> = self.agents.keys().copied().collect();
+        keys.sort();
+        for g in keys {
+            let (pos, arrived) = {
+                let a = &self.agents[&g];
+                (a.positions().to_vec(), a.arrived().to_vec())
+            };
+            let prev = self.agent_prev.get(&g).cloned().unwrap_or_else(|| pos.clone());
+            let stance = self.stance.get(&g).copied().unwrap_or(Pose::Stand);
+            let sprint = matches!(self.world.groups.process(GroupId(g)).kind, ProcessKind::March { speed_mm_s, .. } if speed_mm_s >= RUN_SPEED_MM_S);
+            for (i, (&(x, y), &(px, py))) in pos.iter().zip(&prev).enumerate() {
+                let jitter = (scalia_core::hash::mix64(((g as u64) << 20) ^ i as u64 ^ 0x5ca1) % 1000) as f32 / 1000.0;
+                let moving = !arrived[i] && (x != px || y != py);
+                let heading = if x != px || y != py { ((px - x) as f32).atan2((y - py) as f32) } else { (jitter - 0.5) * 0.4 };
+                let (pose, steps) = if moving && sprint { (Pose::Sprint, 1.45 + jitter * 0.1) } else if moving { (Pose::Walk, 0.9 + jitter * 0.1) } else { (stance, 0.0) };
+                let (ax, ay) = (x as f64 / 1000.0, y as f64 / 1000.0);
+                let z = self.height_at(ax as f32, ay as f32);
+                let (rx, ry) = ((ax - self.origin.0) as f32, (ay - self.origin.1) as f32);
+                let body = if self.selection.contains(&g) { 14.0 } else if moving { 7.0 } else { 6.0 };
+                let key = g * 1000 + i as u32;
+                let entry = self.group_pose.entry(1_000_000 + key).or_insert((pose, pose, -1000.0));
+                if entry.0 != pose {
+                    *entry = (pose, entry.0, ts);
+                }
+                let (prev_pose, since) = (entry.1, entry.2);
+                let aiming = matches!(stance, Pose::StandAim | Pose::CoverAim);
+                let upper = if moving && pose == Pose::Walk && aiming { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 };
+                inst.extend_from_slice(&[rx, ry, z, body, heading, jitter, steps, pose as u32 as f32, prev_pose as u32 as f32, since, upper, 0.0]);
+            }
+        }
     }
 
     /// Instance that places a chunk (built chunk-local) relative to the floating origin.
@@ -1402,3 +1532,119 @@ fn oriented_globe(planet: &Planet, tx: f32, ty: f32, cols: usize, rows: usize) -
 
 /// Uniform colour variants for the model viewer: (name, palette index of the body).
 const VARIANTS: [(&str, f32); 6] = [("blue", 6.0), ("green", 7.0), ("red", 9.0), ("ochre", 4.0), ("grey", 1.0), ("khaki", 13.0)];
+
+/// Whether a point (metres) is inside the testing ground.
+fn in_base(x: f32, y: f32) -> bool {
+    (BASE_LO + 2.0..BASE_HI - 2.0).contains(&x) && (BASE_LO + 2.0..BASE_HI - 2.0).contains(&y)
+}
+
+/// Levels the testing ground: inside the base the ground is flat at the base's height, blending back to the
+/// natural terrain over 30 m around it.
+fn level_base(h: &mut [f32], cx: i64, cy: i64) {
+    let n = CELLS as usize + 1;
+    let planet = Planet::demo(42);
+    let base_h = planet.height_mm(100_000, (100_000.0 + HALF_DEPTH as f64 * 1000.0) as i64) as f32 / 1000.0;
+    for j in 0..n {
+        for i in 0..n {
+            let (x, y) = ((cx * CELLS as i64 + i as i64) as f32, (cy * CELLS as i64 + j as i64) as f32);
+            let out = (BASE_LO - x).max(x - BASE_HI).max(BASE_LO - y).max(y - BASE_HI).max(0.0);
+            if out < 30.0 {
+                let k = out / 30.0;
+                let k = k * k * (3.0 - 2.0 * k);
+                h[j * n + i] = base_h + (h[j * n + i] - base_h) * k;
+            }
+        }
+    }
+}
+
+/// The testing ground's military base (positions in millimetres). A walled compound with a gate, barracks,
+/// guard towers, sandbag lines and containers, and outside it an obstacle lane: a rock field and a narrow gap.
+fn base_props() -> Vec<Prop> {
+    let mut p = Vec::new();
+    let wall = |x: i64, y: i64, len: i64, thick: i64, turns: u8| Prop { kind: PropKind::Wall { length_mm: len, thickness_mm: thick }, x_mm: x, y_mm: y, quarter_turns: turns };
+    // Perimeter: a 140 m square from (20, 0) to (160, 140) m, 0.6 m concrete, with a 12 m gate in the south wall.
+    p.push(wall(20_000 + 32_000, 0, 64_000, 600, 0));
+    p.push(wall(160_000 - 32_000, 0, 64_000, 600, 0));
+    p.push(wall(90_000, 140_000, 140_000, 600, 0));
+    p.push(wall(20_000, 70_000, 140_000, 600, 1));
+    p.push(wall(160_000, 70_000, 140_000, 600, 1));
+    // Barracks: three 24 x 8 m blocks along the north.
+    for k in 0..3 {
+        p.push(wall(45_000 + k * 40_000, 118_000, 24_000, 8_000, 0));
+    }
+    // Guard towers in the corners and by the gate (3 m footprints).
+    for (x, y) in [(24_000, 4_000), (156_000, 4_000), (24_000, 136_000), (156_000, 136_000), (79_000, 5_000), (101_000, 5_000)] {
+        p.push(Prop { kind: PropKind::Crate { size_mm: 3_000 }, x_mm: x, y_mm: y, quarter_turns: 0 });
+    }
+    // Sandbag lines behind the gate, staggered so the way in zig-zags.
+    p.push(wall(78_000, 14_000, 10_000, 700, 0));
+    p.push(wall(102_000, 22_000, 10_000, 700, 0));
+    p.push(wall(68_000, 30_000, 8_000, 700, 1));
+    // Container stacks (2.5 x 12 m) in the depot corner.
+    for k in 0..4 {
+        p.push(wall(140_000, 30_000 + k * 6_000, 12_000, 2_500, 0));
+    }
+    // Crates scattered by the depot.
+    for k in 0..8i64 {
+        p.push(Prop { kind: PropKind::Crate { size_mm: 1_200 }, x_mm: 120_000 + (k % 4) * 3_000, y_mm: 60_000 + (k / 4) * 4_000, quarter_turns: 0 });
+    }
+    // Outside, west: a rock field and a wall with a 2 m gap (soldiers squeeze through one at a time).
+    for k in 0..24i64 {
+        let h = scalia_core::hash::mix64(k as u64 ^ 0x70c4);
+        p.push(Prop { kind: PropKind::Rock { radius_mm: 700 + (h % 1_400) as i64 }, x_mm: -10_000 + (h >> 16) as i64 % 24_000, y_mm: 20_000 + (h >> 32) as i64 % 90_000, quarter_turns: 0 });
+    }
+    p.push(wall(-2_500, 150_000, 31_000, 600, 0));
+    p.push(wall(32_000 - 1_000, 150_000, 34_000, 600, 0));
+    p
+}
+
+/// Low-poly mesh for the base's props, standing on the levelled pad at height `h` (same style as the soldiers).
+fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
+    use scalia_render::mesh::kit;
+    let mut m = MeshBuilder::default();
+    let c = |p: u8| scalia_render::mesh::code(p, scalia_render::mesh::Part::Body);
+    for p in props {
+        let (x, y) = (p.x_mm as f32 / 1000.0, p.y_mm as f32 / 1000.0);
+        match p.kind {
+            PropKind::Rock { radius_mm } => {
+                let r = radius_mm as f32 / 1000.0;
+                m.prism([x, y, h - 0.2], [r, r * 0.9], [x + r * 0.1, y, h + r * 0.9], [r * 0.6, r * 0.55], 7, c(1));
+            }
+            PropKind::Wall { length_mm, thickness_mm } => {
+                let (l, t) = (length_mm as f32 / 1000.0, thickness_mm as f32 / 1000.0);
+                let (hx, hy) = if p.quarter_turns % 2 == 0 { (l / 2.0, t / 2.0) } else { (t / 2.0, l / 2.0) };
+                if t <= 0.65 {
+                    // Concrete wall with a cap.
+                    m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + 2.6], c(2));
+                    m.cuboid([x - hx - 0.05, y - hy - 0.05, h + 2.6], [x + hx + 0.05, y + hy + 0.05, h + 2.75], c(1));
+                } else if t <= 0.8 {
+                    // Sandbags, two courses.
+                    m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + 0.55], c(kit::STRAP));
+                    m.cuboid([x - hx + 0.1, y - hy + 0.05, h + 0.55], [x + hx - 0.1, y + hy - 0.05, h + 1.0], c(kit::PACK));
+                } else if t <= 3.0 {
+                    // Shipping container.
+                    m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + 2.6], c(9));
+                } else {
+                    // Barracks block with a flat roof.
+                    m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + 3.6], c(kit::UNIFORM));
+                    m.cuboid([x - hx - 0.3, y - hy - 0.3, h + 3.6], [x + hx + 0.3, y + hy + 0.3, h + 3.9], c(kit::UNIFORM_DARK));
+                }
+            }
+            PropKind::Crate { size_mm } => {
+                let s = size_mm as f32 / 2000.0;
+                if size_mm >= 2_500 {
+                    // Guard tower: four legs, a platform and a roof.
+                    for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                        m.cuboid([x + dx * s - 0.15 * (dx + 1.0), y + dy * s - 0.15 * (dy + 1.0), h], [x + dx * s - 0.15 * (dx - 1.0) - 0.3, y + dy * s - 0.15 * (dy - 1.0) - 0.3, h + 4.5], c(kit::COYOTE_DARK));
+                    }
+                    m.cuboid([x - s, y - s, h + 4.5], [x + s, y + s, h + 4.8], c(kit::PACK));
+                    m.cuboid([x - s, y - s, h + 4.8], [x + s, y + s, h + 5.7], c(kit::STRAP));
+                    m.cuboid([x - s - 0.3, y - s - 0.3, h + 6.4], [x + s + 0.3, y + s + 0.3, h + 6.6], c(kit::UNIFORM_DARK));
+                } else {
+                    m.cuboid([x - s, y - s, h], [x + s, y + s, h + s * 2.0], c(kit::PACK));
+                }
+            }
+        }
+    }
+    m
+}

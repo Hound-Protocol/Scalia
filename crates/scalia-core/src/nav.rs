@@ -338,3 +338,90 @@ pub fn clear_line(grid: &NavGrid, a: (i64, i64), b: (i64, i64), radius_mm: i64) 
     let steps = ((dx.abs().max(dy.abs())) / (CELL_MM / 4)).max(1);
     (0..=steps).all(|k| grid.walkable_at(a.0 + dx * k / steps, a.1 + dy * k / steps, radius_mm))
 }
+
+/// Cost-to-goal over the whole grid for movers of one size: every cell knows how far it is from the goal along
+/// the open ground, so any number of soldiers sent to the same place share one field. Integer Dijkstra
+/// (straight steps 10, diagonals 14, no corner cutting); ties by cell index, so it is deterministic.
+pub struct FlowField {
+    x_mm: i64,
+    y_mm: i64,
+    w: usize,
+    h: usize,
+    cost: Vec<u32>,
+}
+
+const NEIGHBOURS: [(i64, i64, u32); 8] = [(1, 0, 10), (-1, 0, 10), (0, 1, 10), (0, -1, 10), (1, 1, 14), (1, -1, 14), (-1, 1, 14), (-1, -1, 14)];
+
+impl FlowField {
+    pub fn new(grid: &NavGrid, goal: (i64, i64), radius_mm: i64) -> Option<FlowField> {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        let (w, h) = (grid.w, grid.h);
+        let fits = |i: i64, j: i64| i >= 0 && j >= 0 && i < w as i64 && j < h as i64 && !grid.blocked(i as usize, j as usize) && grid.clearance(i as usize, j as usize) >= radius_mm;
+        let (gi, gj) = grid.cell_of(goal.0, goal.1)?;
+        if !fits(gi as i64, gj as i64) {
+            return None;
+        }
+        let mut cost = vec![u32::MAX; w * h];
+        let mut open = BinaryHeap::new();
+        cost[gj * w + gi] = 0;
+        open.push(Reverse((0u32, gj * w + gi)));
+        while let Some(Reverse((c, cur))) = open.pop() {
+            if c > cost[cur] {
+                continue;
+            }
+            let (ci, cj) = ((cur % w) as i64, (cur / w) as i64);
+            for (dx, dy, step) in NEIGHBOURS {
+                let (ni, nj) = (ci + dx, cj + dy);
+                if !fits(ni, nj) || (dx != 0 && dy != 0 && (!fits(ci + dx, cj) || !fits(ci, cj + dy))) {
+                    continue;
+                }
+                let n = nj as usize * w + ni as usize;
+                if c + step < cost[n] {
+                    cost[n] = c + step;
+                    open.push(Reverse((c + step, n)));
+                }
+            }
+        }
+        Some(FlowField { x_mm: grid.x_mm, y_mm: grid.y_mm, w, h, cost })
+    }
+
+    fn cell(&self, x: i64, y: i64) -> Option<(i64, i64)> {
+        let (i, j) = ((x - self.x_mm).div_euclid(CELL_MM), (y - self.y_mm).div_euclid(CELL_MM));
+        (i >= 0 && j >= 0 && i < self.w as i64 && j < self.h as i64).then_some((i, j))
+    }
+
+    /// Cost from a point to the goal (tenths of a cell), or `None` where the goal cannot be reached.
+    pub fn cost_at(&self, x_mm: i64, y_mm: i64) -> Option<u32> {
+        let (i, j) = self.cell(x_mm, y_mm)?;
+        let c = self.cost[j as usize * self.w + i as usize];
+        (c != u32::MAX).then_some(c)
+    }
+
+    /// The neighbouring cell (as a step of -1, 0 or 1 on each axis) that is closest to the goal; (0, 0) at it.
+    pub fn direction_at(&self, x_mm: i64, y_mm: i64) -> Option<(i64, i64)> {
+        let (i, j) = self.cell(x_mm, y_mm)?;
+        let here = self.cost[j as usize * self.w + i as usize];
+        if here == u32::MAX {
+            return None;
+        }
+        let mut best = (here, (0, 0));
+        for (dx, dy, _) in NEIGHBOURS {
+            let (ni, nj) = (i + dx, j + dy);
+            if ni < 0 || nj < 0 || ni >= self.w as i64 || nj >= self.h as i64 {
+                continue;
+            }
+            let c = self.cost[nj as usize * self.w + ni as usize];
+            if c < best.0 {
+                best = (c, (dx, dy));
+            }
+        }
+        Some(best.1)
+    }
+
+    /// Centre of a point's cell (millimetres).
+    pub fn cell_centre(&self, x_mm: i64, y_mm: i64) -> (i64, i64) {
+        let (i, j) = ((x_mm - self.x_mm).div_euclid(CELL_MM), (y_mm - self.y_mm).div_euclid(CELL_MM));
+        (self.x_mm + i * CELL_MM + CELL_MM / 2, self.y_mm + j * CELL_MM + CELL_MM / 2)
+    }
+}
