@@ -94,6 +94,7 @@ pub struct Viewer {
     day_rate: f64,
     day_at: f64,
     last_view: (f32, f32),
+    last_internal: (u32, u32),
     /// Camera of the last frame: target, yaw, view height (for picking).
     last_cam: (Vec3, f32, f32),
     selected: Option<u32>,
@@ -149,6 +150,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         day_rate: 1.0 / 360_000.0,
         day_at: 0.0,
         last_view: (60.0, 1.0),
+        last_internal: (1, 1),
         last_cam: (Vec3::ZERO, 0.0, 60.0),
         selected: Some(0),
         follow_group: 0,
@@ -394,6 +396,13 @@ impl Viewer {
         format!("group {g} stance: {next:?}")
     }
 
+    /// Numbers for the performance panel: [fps, internal width, internal height,
+    /// gpu shadow ms, gpu scene ms, gpu upscale ms] (gpu values are -1 when the browser gives no timestamps).
+    pub fn perf(&self) -> Vec<f32> {
+        let g = self.gpu.gpu_ms().unwrap_or([-1.0; 3]);
+        vec![self.fps, self.last_internal.0 as f32, self.last_internal.1 as f32, g[0], g[1], g[2]]
+    }
+
     pub fn scene_name(&self) -> String {
         match self.scene {
             Scene::Ships => "ships",
@@ -490,13 +499,9 @@ impl Viewer {
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
-        let gpu = if self.gpu.software { " | SOFTWARE RENDERING: the CPU is drawing" } else { "" };
+        self.last_internal = internal;
         let time = if matches!(self.scene, Scene::System | Scene::Planet) { String::new() } else { format!(" | {}", clock(tod)) };
-        let gpu_ms = match self.gpu.gpu_ms() {
-            Some([sh, sc, up]) => format!(" | gpu {:.1} ms (shadow {sh:.1}, scene {sc:.1}, upscale {up:.1})", sh + sc + up),
-            None => String::new(),
-        };
-        format!("{text}{time} | {}x{} | {:.0} fps{gpu_ms}{gpu}", internal.0, internal.1, self.fps)
+        format!("{text}{time}")
     }
 }
 

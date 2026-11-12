@@ -15,13 +15,26 @@
   #bar button.on { background: #2b3a4f; border-color: #5d7fa6; }
   #bar button:disabled { opacity: 0.4; cursor: default; }
   #bar label { display: flex; gap: 4px; align-items: center; }
-  #hud { bottom: 8px; left: 8px; max-width: calc(100vw - 32px); }
+  #hud { bottom: 8px; left: 8px; max-width: calc(100vw - 340px); }
   #help { top: 8px; right: 8px; max-width: 320px; }
   #help h3 { margin: 0 0 4px; font-size: 13px; }
   #help table { border-collapse: collapse; }
   #help td { padding: 1px 6px 1px 0; vertical-align: top; }
   #help td:first-child { color: #e9c46a; white-space: nowrap; }
   #help.hidden { display: none; }
+  #perf { bottom: 8px; right: 8px; width: 300px; font-size: 12px; }
+  #perf .row { display: grid; grid-template-columns: 34px 1fr 62px; gap: 6px; align-items: center; margin: 3px 0; }
+  #perf .label { color: #9aa4b2; }
+  #perf .val { text-align: right; font-variant-numeric: tabular-nums; }
+  #perf .track { position: relative; height: 10px; background: #12161c; border: 1px solid #2a313c; overflow: hidden; }
+  #perf .seg { position: absolute; top: 0; bottom: 0; transition: width 0.25s linear, left 0.25s linear; }
+  #perf .budget { position: absolute; top: -2px; bottom: -2px; width: 1px; background: #e9c46a; opacity: 0.8; }
+  #perf .legend { display: flex; gap: 10px; color: #9aa4b2; margin: 2px 0 4px 40px; }
+  #perf .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; vertical-align: middle; }
+  #perf canvas { width: 100%; height: 34px; display: block; margin-top: 4px; background: #0b0e12; border: 1px solid #2a313c; image-rendering: pixelated; }
+  #perf .top { display: flex; justify-content: space-between; color: #d8dde6; margin-bottom: 2px; }
+  #perf .top b { font-size: 14px; }
+  #perf .warn { color: #ff8a65; margin-top: 4px; }
   #error { inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; }
   a { color: #9cc4ff; }
 </style>
@@ -61,6 +74,14 @@
   <p style="margin:6px 0 0"><a href="./debug.html">Debug page</a> (blueprints, terrain chunks)</p>
 </div>
 <div id="hud" class="panel">Loading WebAssembly...</div>
+<div id="perf" class="panel">
+  <div class="top"><span><b id="pFps">--</b> fps</span><span id="pInfo"></span></div>
+  <div class="row"><span class="label">CPU</span><div class="track" id="tCpu"><div class="seg" id="sCpu"></div><div class="budget"></div></div><span class="val" id="vCpu">--</span></div>
+  <div class="row"><span class="label">GPU</span><div class="track" id="tGpu"><div class="seg" id="sSh"></div><div class="seg" id="sSc"></div><div class="seg" id="sUp"></div><div class="budget"></div></div><span class="val" id="vGpu">--</span></div>
+  <div class="legend"><span><i style="background:#5b8fd9"></i>shadow</span><span><i style="background:#7fb069"></i>scene</span><span><i style="background:#c08bd9"></i>upscale</span></div>
+  <canvas id="pGraph" width="300" height="34" title="Frame time, last 300 frames; the line is the 60 fps budget"></canvas>
+  <div class="warn" id="pWarn" hidden></div>
+</div>
 <div id="error" class="panel"></div>
 <script type="module" src="./game.js"></script>
 </body>
