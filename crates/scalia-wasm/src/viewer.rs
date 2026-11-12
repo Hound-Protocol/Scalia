@@ -71,6 +71,8 @@ pub struct Viewer {
     derived: Vec<Derived>,
     chunks: HashMap<(i64, i64), Vec<f32>>,
     chunk_lod: HashMap<(i64, i64), usize>,
+    /// Sample step the terrain is drawn with this frame (1, 2 or 4).
+    terrain_step: usize,
     army: usize,
     ground_view: f32,
     focus: Vec3,
@@ -129,6 +131,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         derived: Vec::new(),
         chunks: HashMap::new(),
         chunk_lod: HashMap::new(),
+        terrain_step: 1,
         army: 0,
         ground_view: 60.0,
         focus: Vec3::ZERO,
@@ -640,14 +643,20 @@ impl Viewer {
         }
     }
 
+    /// Ground height under (x, y), on the same triangles the terrain is drawn with (coarser when zoomed out),
+    /// so nothing floats above or sinks into the drawn ground.
     fn height_at(&mut self, x: f32, y: f32) -> f32 {
+        let step = self.terrain_step.max(1);
         let (cx, cy) = ((x / CELLS as f32).floor() as i64, (y / CELLS as f32).floor() as i64);
         let n = CELLS as usize + 1;
         let (lx, ly) = (x - cx as f32 * CELLS as f32, y - cy as f32 * CELLS as f32);
-        let (i, j) = ((lx.floor() as usize).min(CELLS as usize - 1), (ly.floor() as usize).min(CELLS as usize - 1));
-        let (fx, fy) = ((lx - i as f32).clamp(0.0, 1.0), (ly - j as f32).clamp(0.0, 1.0));
+        let cell = |v: f32| (((v / step as f32).floor() as usize) * step).min(CELLS as usize - step);
+        let (i, j) = (cell(lx), cell(ly));
+        let (fx, fy) = (((lx - i as f32) / step as f32).clamp(0.0, 1.0), ((ly - j as f32) / step as f32).clamp(0.0, 1.0));
         let hm = self.chunk(cx, cy);
-        bilinear(hm, n, i, j, fx, fy)
+        let h = |a: usize, b: usize| hm[b * n + a];
+        let (a, b, c, d) = (h(i, j), h(i + step, j), h(i + step, j + step), h(i, j + step));
+        if fx >= fy { a + (b - a) * fx + (c - b) * fy } else { a + (d - a) * fy + (c - d) * fx }
     }
 
     fn ground_scene(
@@ -733,6 +742,7 @@ impl Viewer {
         let rad = (self.ground_view * 1.3 / CELLS as f32).ceil() as i64 + 1;
         // Coarser terrain when zoomed out; all chunks share one step, so neighbours always match.
         let step = if self.ground_view <= 70.0 { 1 } else if self.ground_view <= 130.0 { 2 } else { 4 };
+        self.terrain_step = step;
         let mut budget = 6;
         for dy in -rad..=rad {
             for dx in -rad..=rad {
