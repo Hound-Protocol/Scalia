@@ -1931,10 +1931,20 @@ impl Viewer {
         let view = self.ground_view;
         let needed = |level: u32| -> Vec<(u32, i64, i64)> {
             let ts = 64.0 * (1u64 << level) as f32;
-            let cov = (1.6 * view).min(PLANET_R * std::f32::consts::PI);
-            let (x0, x1) = (((tg.x - cov) / ts).floor() as i64, ((tg.x + cov) / ts).floor() as i64);
+            let half_lon = PLANET_R * std::f32::consts::PI;
+            let cov = (1.6 * view).min(half_lon);
             let (y0, y1) = (((tg.y - cov).max(-HALF_DEPTH) / ts).floor() as i64, ((tg.y + cov).min(HALF_DEPTH - 1.0) / ts).floor() as i64);
-            (y0..=y1).flat_map(|y| (x0..=x1).map(move |x| (level, x, y))).collect()
+            // Towards a pole the same ground spans more longitude (1 / cos latitude), and at the pole all of it
+            // meets: each row of tiles covers what its poleward edge needs, up to the whole way round.
+            (y0..=y1)
+                .flat_map(|y| {
+                    let edge = ((y as f32 * ts).abs()).max(((y + 1) as f32 * ts).abs()).min(HALF_DEPTH);
+                    let lat = edge / PLANET_R;
+                    let span = (cov / lat.cos().max(1e-3)).min(half_lon);
+                    let (x0, x1) = (((tg.x - span) / ts).floor() as i64, ((tg.x + span) / ts).floor() as i64);
+                    (x0..=x1).map(move |x| (level, x, y))
+                })
+                .collect()
         };
         let tiles = needed(want);
         let mut budget = 6;
