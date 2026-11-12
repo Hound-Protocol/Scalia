@@ -528,7 +528,8 @@ impl Viewer {
         let Some(g) = self.selected else { return "select a group first".into() };
         let next = match self.stance.get(&g).copied().unwrap_or(Pose::Stand) {
             Pose::Stand => Pose::Crouch,
-            Pose::Crouch => Pose::CoverAim,
+            Pose::Crouch => Pose::Cover,
+            Pose::Cover => Pose::CoverAim,
             Pose::CoverAim => Pose::Prone,
             Pose::Prone => Pose::StandAim,
             _ => Pose::Stand,
@@ -724,12 +725,13 @@ impl Viewer {
             plinth.cuboid([-1.0, -1.0, -0.1], [1.0, 1.0, 0.0], 12.0);
             self.gpu.upload("plinth", plinth.bytes());
             // Every 3 seconds the next pose: walk, run, stand, crouch, cover aim, prone, standing aim.
-            const SHOW: [(Pose, f32); 8] = [
+            const SHOW: [(Pose, f32); 9] = [
                 (Pose::Walk, 0.9), (Pose::Run, 1.35), (Pose::Stand, 0.0), (Pose::Crouch, 0.0),
                 (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0), (Pose::Sprint, 1.45),
+                (Pose::Cover, 0.0),
             ];
-            // Entry 8 is "walk while aiming": the walk with an aiming upper body layered on top.
-            let walk_aim = self.preview_pose == Some(8);
+            // Entry 9 is "walk while aiming": the walk with an aiming upper body layered on top.
+            let walk_aim = self.preview_pose == Some(9);
             let (pose, steps) = if walk_aim { (Pose::Walk, 0.9) } else { SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()] };
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };

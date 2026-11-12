@@ -29,6 +29,8 @@ pub enum Pose {
     StandAim = 6,
     /// Flat-out sprint, rifle angled down across the body.
     Sprint = 7,
+    /// Standing behind a wall, rifle at high ready (muzzle up), not shooting.
+    Cover = 8,
 }
 
 impl Pose {
@@ -41,6 +43,7 @@ impl Pose {
             5 => Pose::Prone,
             6 => Pose::StandAim,
             7 => Pose::Sprint,
+            8 => Pose::Cover,
             _ => Pose::Stand,
         }
     }
@@ -123,37 +126,32 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
     let sw = (phase * std::f32::consts::TAU).sin();
     let mut p = PoseParams::default();
     match pose {
-        Pose::Stand => {}
+        Pose::Stand => carry(&mut p, Carry::SafeHang),
         Pose::Walk => {
             (p.hip, p.knee) = gait(phase, 0.34, 0.0, 0.85, 0.06);
             p.lean = 0.05;
-            p.shoulder = [0.45 - 0.08 * sw, 0.35];
-            p.elbow = [0.9, 1.0];
-            p.rifle = -0.35;
+            carry(&mut p, Carry::LowReady);
         }
         Pose::Run => {
             (p.hip, p.knee) = gait(phase, 0.48, 0.08, 1.45, 0.2);
             p.lean = 0.25;
-            p.shoulder = [0.75 - 0.12 * sw, 0.7];
-            p.elbow = [1.55, 1.5];
-            p.rifle = 0.7;
+            carry(&mut p, Carry::Collapsed);
             p.head = 0.2;
         }
         Pose::Sprint => {
             (p.hip, p.knee) = gait(phase, 0.58, 0.1, 1.9, 0.26);
             p.lean = 0.42;
-            p.shoulder = [0.9 - 0.45 * sw, 0.35 + 0.1 * sw];
-            p.elbow = [1.5, 1.3];
-            p.rifle = -0.6;
+            carry(&mut p, Carry::Collapsed);
+            // The rifle bobs with the stride.
+            p.shoulder[1] += 0.04 * sw;
+            p.shoulder[0] += 0.04 * sw;
             p.head = 0.38;
         }
         Pose::Crouch => {
             p.lean = 0.45;
             p.hip = [1.4, 1.4];
             p.knee = [2.4, 2.4];
-            p.shoulder = [0.3, 0.3];
-            p.elbow = [0.9, 0.9];
-            p.rifle = 0.5;
+            carry(&mut p, Carry::LowReady);
             p.head = 0.35;
         }
         Pose::CoverAim => {
@@ -163,6 +161,7 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             aim_arms(&mut p);
             p.head = 0.05;
         }
+        Pose::Cover => carry(&mut p, Carry::HighReady),
         Pose::Prone => {
             p.prone = 1.0;
             p.shoulder = [2.8, 2.8];
@@ -185,13 +184,40 @@ pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
     PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, ..*legs }
 }
 
+/// How the rifle is carried (the reference chart's positions); each sets both arms and the rifle angle so the
+/// right hand holds the grip and the left the handguard. Angles found by search; tests check both hands.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Carry {
+    /// Standing at ease: rifle hanging muzzle down in front of the body.
+    SafeHang,
+    /// Walking: stock in the shoulder, muzzle 30 degrees down.
+    LowReady,
+    /// Running: rifle pulled in close, muzzle down.
+    Collapsed,
+    /// Behind cover: muzzle up, ready to bring down onto a target.
+    HighReady,
+    /// Shooting: shouldered and level.
+    ReadyUp,
+}
+
+pub fn carry(p: &mut PoseParams, c: Carry) {
+    let (shoulder, elbow, reach, rifle) = match c {
+        Carry::SafeHang => ([0.65, -0.05], [0.05, 1.5], [0.85, 0.75], -1.2),
+        Carry::LowReady => ([1.1, 0.2], [0.05, 1.9], [0.65, 0.5], -0.5),
+        Carry::Collapsed => ([0.8, 0.0], [0.05, 1.7], [0.75, 0.6], -1.0),
+        Carry::HighReady => ([1.0, 0.0], [0.95, 1.9], [0.75, 0.45], 0.85),
+        Carry::ReadyUp => ([1.45, 0.5], [-0.05, 1.95], [0.6, 0.4], 0.0),
+    };
+    p.shoulder = shoulder;
+    p.elbow = elbow;
+    p.reach = reach;
+    p.rifle = rifle;
+}
+
 /// Shouldered rifle: right elbow low with the grip by the chest, left arm reaching across to hold the rifle in
 /// front of the magazine (angles found by search; `both_hands_hold_the_rifle_when_aiming` checks them).
 fn aim_arms(p: &mut PoseParams) {
-    p.shoulder = [1.45, 0.5];
-    p.elbow = [-0.05, 1.95];
-    p.reach = [0.6, 0.4];
-    p.rifle = 0.0;
+    carry(p, Carry::ReadyUp);
 }
 
 /// Vertical shift that puts the lowest heel or toe of either leg on the ground.
@@ -238,7 +264,13 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
 
 /// Linear blend between two poses (`w` 0 gives `a`, 1 gives `b`); the shader blends over `BLEND_S` after a change.
 pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
-    // Eased: pose changes start and settle gently (motion guide rule 5).
+    // Eased: pose changes start and settle gently (motion guide rule 5). The ends are exact.
+    if w <= 0.0 {
+        return *a;
+    }
+    if w >= 1.0 {
+        return *b;
+    }
     let w = w.clamp(0.0, 1.0);
     let w = w * w * (3.0 - 2.0 * w);
     let m = |x: f32, y: f32| x + (y - x) * w;

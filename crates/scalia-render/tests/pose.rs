@@ -16,17 +16,21 @@ fn bottom(v: &[(Part, Vec3)]) -> f32 {
 }
 
 #[test]
-fn standing_is_the_mesh_itself() {
+fn standing_legs_and_body_are_the_mesh_itself() {
+    // Standing changes only the arms and rifle (safe hang); legs, torso and head stay as modelled.
     let pp = params(Pose::Stand, 0.0);
     for v in figure().vertices {
-        let p = Vec3::from(v.pos);
-        assert!((pose_vertex(p, part_of(v.color), &pp) - p).length() < 1e-5);
+        let part = part_of(v.color);
+        if matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::Torso | Part::Head) {
+            let p = Vec3::from(v.pos);
+            assert!((pose_vertex(p, part, &pp) - p).length() < 1e-5, "{part:?} moved");
+        }
     }
 }
 
 #[test]
 fn feet_stay_on_the_ground_in_every_pose_and_phase() {
-    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::StandAim] {
+    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::Cover, Pose::CoverAim, Pose::StandAim] {
         for k in 0..16 {
             let v = posed(pose, k as f32 / 16.0);
             let b = bottom(&v);
@@ -73,7 +77,7 @@ fn walking_swings_the_legs_and_running_leans_forward() {
 
 #[test]
 fn pose_ids_round_trip() {
-    for p in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Prone, Pose::StandAim] {
+    for p in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::Cover, Pose::CoverAim, Pose::Prone, Pose::StandAim] {
         assert_eq!(Pose::from_id(p as u32), p);
     }
     assert_eq!(Pose::from_id(99), Pose::Stand);
@@ -157,7 +161,7 @@ fn sprinting_leans_further_and_carries_the_rifle_muzzle_down() {
     assert!(sprint.rifle < 0.0, "rifle angled down across the body");
     let walk = params(Pose::Walk, 0.0);
     assert!(walk.rifle < 0.0, "walking carries the rifle at low ready");
-    assert!(run.rifle > 0.3, "running holds it at high port");
+    assert!(run.rifle < -0.7, "running holds it in collapsed low ready, muzzle down");
 }
 
 #[test]
@@ -199,5 +203,33 @@ fn soldiers_can_walk_while_aiming() {
         assert!((l - (r + Vec3::new(0.0, 0.21, 0.0))).length() < 0.06, "both hands stay on the rifle");
         let low = figure().vertices.iter().map(|v| pose_vertex(Vec3::from(v.pos), part_of(v.color), &pp).z).fold(f32::MAX, f32::min);
         assert!((-0.04..=0.06).contains(&low), "feet on the ground at phase {phase}: {low}");
+    }
+}
+
+#[test]
+fn every_carry_holds_the_rifle_in_both_hands() {
+    use scalia_render::pose::{hand, Side};
+    // The carrying positions from the reference chart: safe hang (stand), low ready (walk, crouch), collapsed
+    // low ready (run, sprint), high ready (cover), ready up (aim).
+    for (pose, rifle_lo, rifle_hi) in [
+        (Pose::Stand, -1.4, -1.0),
+        (Pose::Walk, -0.7, -0.3),
+        (Pose::Crouch, -0.7, -0.3),
+        (Pose::Run, -1.2, -0.8),
+        (Pose::Sprint, -1.2, -0.8),
+        (Pose::Cover, 0.6, 1.1),
+        (Pose::StandAim, -0.1, 0.1),
+        (Pose::CoverAim, -0.1, 0.1),
+    ] {
+        for k in 0..4 {
+            let pp = params(pose, k as f32 / 4.0);
+            assert!((rifle_lo..=rifle_hi).contains(&pp.rifle), "{pose:?}: rifle angle {}", pp.rifle);
+            let (l, r) = (hand(&pp, Side::Left), hand(&pp, Side::Right));
+            // The left hand lies on the rifle: near the line from the grip forward along the barrel.
+            let dir = Vec3::new(0.0, pp.rifle.cos(), pp.rifle.sin());
+            let t = (l - r).dot(dir).clamp(0.1, 0.35);
+            let miss = (l - (r + dir * t)).length();
+            assert!(miss < 0.05, "{pose:?}: left hand {miss:.3} m off the rifle");
+        }
     }
 }

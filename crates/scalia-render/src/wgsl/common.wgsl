@@ -40,47 +40,50 @@ fn gait_knee(phase: f32, lift: f32, base: f32) -> vec2f {
                base + lift * pow(max(cr, 0.0), 1.5) + 0.22 * max(-cr, 0.0));
 }
 
+// Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
+// 4 ready up. Sets both arms and the rifle angle.
+fn carry(p: ptr<function, PP>, c: u32) {
+  if (c == 0u) { (*p).sh = vec2f(0.65, -0.05); (*p).el = vec2f(0.05, 1.5); (*p).reach = vec2f(0.85, 0.75); (*p).rifle = -1.2; }
+  else if (c == 1u) { (*p).sh = vec2f(1.1, 0.2); (*p).el = vec2f(0.05, 1.9); (*p).reach = vec2f(0.65, 0.5); (*p).rifle = -0.5; }
+  else if (c == 2u) { (*p).sh = vec2f(0.8, 0.0); (*p).el = vec2f(0.05, 1.7); (*p).reach = vec2f(0.75, 0.6); (*p).rifle = -1.0; }
+  else if (c == 3u) { (*p).sh = vec2f(1.0, 0.0); (*p).el = vec2f(0.95, 1.9); (*p).reach = vec2f(0.75, 0.45); (*p).rifle = 0.85; }
+  else { (*p).sh = vec2f(1.45, 0.5); (*p).el = vec2f(-0.05, 1.95); (*p).reach = vec2f(0.6, 0.4); (*p).rifle = 0.0; }
+}
+
 fn pose_params(pose: u32, phase: f32) -> PP {
   let sw = sin(phase * 6.2831853);
   var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0));
-  if (pose == 1u) {
+  if (pose == 0u) {
+    carry(&p, 0u);
+  } else if (pose == 1u) {
     p.hip = gait_hip(phase, 0.34, 0.0);
     p.knee = gait_knee(phase, 0.85, 0.06);
     p.lean = 0.05;
-    p.sh = vec2f(0.45 - 0.08 * sw, 0.35);
-    p.el = vec2f(0.9, 1.0);
-    p.rifle = -0.35;
+    carry(&p, 1u);
   } else if (pose == 2u) {
     p.hip = gait_hip(phase, 0.48, 0.08);
     p.knee = gait_knee(phase, 1.45, 0.2);
     p.lean = 0.25;
-    p.sh = vec2f(0.75 - 0.12 * sw, 0.7);
-    p.el = vec2f(1.55, 1.5);
-    p.rifle = 0.7;
+    carry(&p, 2u);
     p.head = 0.2;
   } else if (pose == 7u) {
     p.hip = gait_hip(phase, 0.58, 0.1);
     p.knee = gait_knee(phase, 1.9, 0.26);
     p.lean = 0.42;
-    p.sh = vec2f(0.9 - 0.45 * sw, 0.35 + 0.1 * sw);
-    p.el = vec2f(1.5, 1.3);
-    p.rifle = -0.6;
+    carry(&p, 2u);
+    p.sh = p.sh + vec2f(0.04 * sw);
     p.head = 0.38;
   } else if (pose == 3u) {
     p.lean = 0.45;
     p.hip = vec2f(1.4);
     p.knee = vec2f(2.4);
-    p.sh = vec2f(0.3);
-    p.el = vec2f(0.9);
-    p.rifle = 0.5;
+    carry(&p, 1u);
     p.head = 0.35;
   } else if (pose == 4u) {
     p.lean = 0.2;
     p.hip = vec2f(1.4);
     p.knee = vec2f(2.4);
-    p.sh = vec2f(1.45, 0.5);
-    p.el = vec2f(-0.05, 1.95);
-    p.reach = vec2f(0.6, 0.4);
+    carry(&p, 4u);
     p.head = 0.05;
   } else if (pose == 5u) {
     p.prone = 1.0;
@@ -89,10 +92,10 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 6u) {
-    p.sh = vec2f(1.45, 0.5);
-    p.el = vec2f(-0.05, 1.95);
-    p.reach = vec2f(0.6, 0.4);
+    carry(&p, 4u);
     p.head = -0.1;
+  } else if (pose == 8u) {
+    carry(&p, 3u);
   }
   p.drop = ground_drop(p.hip, p.knee);
   return p;

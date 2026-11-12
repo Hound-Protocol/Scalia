@@ -29,7 +29,7 @@ try {
   const soldier = () => model.value === String(model.options.length - 1);
   const pose = $('pose'), detail = $('detail'), variant = $('variant');
   pose.append(new Option('all poses', -1));
-  ['walk', 'run', 'stand', 'crouch', 'cover aim', 'prone', 'standing aim', 'sprint', 'walk while aiming'].forEach((n, i) => pose.append(new Option(n, i)));
+  ['walk (low ready)', 'run (collapsed low ready)', 'stand (safe hang)', 'crouch', 'cover aim (ready up)', 'prone', 'standing aim (ready up)', 'sprint', 'cover (high ready)', 'walk while aiming'].forEach((n, i) => pose.append(new Option(n, i)));
   for (let i = 0; v.variant_name(i) !== undefined; i++) variant.append(new Option(v.variant_name(i), i));
   const pick = () => { v.set_ship(Number(model.value)); $('soldierOpts').hidden = !soldier(); location.hash = model.value; };
   model.addEventListener('change', pick);
