@@ -236,7 +236,7 @@ export async function createRenderer(canvas) {
     if (size[0] === w && size[1] === h) return;
     size = [w, h];
     color?.destroy(); normal?.destroy(); depth?.destroy();
-    const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
+    const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
     const sz = [w + 2, h + 2];
     color = device.createTexture({ size: sz, format: 'rgba8unorm', usage });
     normal = device.createTexture({ size: sz, format: 'rgba8unorm', usage });
