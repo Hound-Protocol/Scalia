@@ -105,12 +105,13 @@
   /* The commander's tablet: the rugged PDA in his hands. The game's camera dives onto it (see the viewer), then
      this close-up takes over: the device render as the frame, our UI inside its screen, its side buttons live. */
   #tablet { position: fixed; left: 50%; top: 50%; width: min(80vw, calc(84vh * 2164 / 1139)); aspect-ratio: 2164 / 1139;
-    z-index: 30; pointer-events: none; opacity: 0; transform: translate(-50%, -46%) scale(0.72) rotateX(28deg);
-    transition: opacity 0.3s ease, transform 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    z-index: 30; pointer-events: none; opacity: 0; transform: translate(-50%, -50%);
+    /* No scale or tilt: the game's camera already frames the tablet exactly here, so the close-up only fades in. */
+    transition: opacity 0.22s ease; }
   /* Put away, nothing of it may catch the mouse: it would eat the field's zoom and clicks. */
   #tablet:not(.up), #tablet:not(.up) * { pointer-events: none !important; }
   #tablet:not(.up) .display { visibility: hidden; }
-  #tablet.up { opacity: 1; transform: translate(-50%, -50%) scale(1) rotateX(0deg); }
+  #tablet.up { opacity: 1; }
   /* What the commander sees around the tablet: his arms and body behind it, his fingers over its frame. Rendered
      from his eyes (scripts/first_person.py), placed so the tablet in that view lands exactly on this box. */
   #tablet .fp { position: absolute; width: 238.232%; height: 273.386%; left: -69.116%; top: -84.139%; max-width: none;

@@ -60,8 +60,9 @@ const CINE_TURN_MS: f64 = 250.0;
 const CINE_HOLD_MS: f64 = 300.0;
 const CINE_OPEN_MS: f64 = 950.0;
 const CINE_CLOSE_MS: f64 = 500.0;
-/// View height (metres) close on the hands.
-const CINE_CLOSE_H: f32 = 0.5;
+/// The tablet close-up image's real height (metres, the device plus its margins): the dive ends with the camera
+/// face-on to the tablet, framing it so it covers exactly the close-up's box, so the close-up fades in seamlessly.
+const TABLET_IMG_H: f32 = 0.2182;
 
 const ARMIES: [(u32, u32); 5] = [(8, 12), (1, 2000), (10, 2000), (50, 2000), (250, 2000)];
 /// The testing ground: a military base on a levelled pad, (BASE_LO..BASE_HI) metres on both axes.
@@ -184,6 +185,8 @@ pub struct Viewer {
     arrive_stance: HashMap<u32, Pose>,
     /// The commander's gait phase (0..1; -1 standing).
     cmd_phase: f32,
+    /// How much of the screen's height the tablet close-up covers (set by the page).
+    tablet_fit: f32,
     /// The tablet cinematic: opening (true) or closing, when it began (ms), and the camera it started from.
     cine: Option<(bool, f64, (Vec3, f32, f32, f32))>,
     /// Who answers to whom: squads to captains, or straight to the commander.
@@ -322,6 +325,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         agent_anim: HashMap::new(),
         arrive_stance: HashMap::new(),
         cmd_phase: -1.0,
+        tablet_fit: 0.6,
         cine: None,
         chain: Command::default(),
         tasks: BTreeMap::new(),
@@ -783,6 +787,10 @@ impl Viewer {
             (true, false) => 1,
             (true, true) => 2,
         }
+    }
+    /// The fraction of the screen's height the tablet close-up's box covers: the dive frames the tablet to match.
+    pub fn set_tablet_fit(&mut self, f: f32) {
+        self.tablet_fit = f.clamp(0.05, 1.0);
     }
     /// Where the tablet cinematic is: 0 put away, 1 raising it (camera rising and diving), 2 in front of the eyes
     /// (show the tablet's screen), 3 putting it away.
@@ -1831,7 +1839,8 @@ impl Viewer {
         let hands = base + Vec3::new(at.x * h.cos() - at.y * h.sin(), at.x * h.sin() + at.y * h.cos(), at.z);
         // Behind him, looking the way he faces: first the camera swings round at the player's zoom, then dives.
         let behind = (base + Vec3::Z, h, from.2, from.3);
-        let close = (hands, h, CINE_CLOSE_H, from.3);
+        // Face-on to the tablet (the camera's elevation is the tablet's tilt), sized like the close-up on screen.
+        let close = (hands, h, TABLET_IMG_H / self.tablet_fit.max(0.05), scalia_render::pose::TABLET_TILT);
         let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * (3.0 - 2.0 * x) };
         let mix = |a: (Vec3, f32, f32, f32), b: (Vec3, f32, f32, f32), w: f32| {
             let mut dy = b.1 - a.1;

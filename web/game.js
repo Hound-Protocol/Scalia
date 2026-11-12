@@ -200,6 +200,10 @@ try {
     tabletUp = up;
     $('fieldHint').hidden = up;
     if (up) {
+      // The close-up's box (CSS: 80% of the width, at most 84% of the height, 2164:1139): the dive frames the
+      // tablet to cover exactly that much of the screen.
+      const w = Math.min(innerWidth * 0.8, innerHeight * 0.84 * 2164 / 1139);
+      v.set_tablet_fit((w * 1139 / 2164) / innerHeight);
       v.set_tablet(true);
       // The swoosh as the camera starts its dive (after the rise and the half-second hold).
       clearTimeout(diveSound);
