@@ -140,49 +140,10 @@
     pointer-events: none; user-select: none; }
   #tablet .device { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
     filter: drop-shadow(0 18px 40px rgba(0,0,0,0.65)); }
-  #tablet .display { position: absolute; left: 10.492%; top: 11.94%; width: 79.297%; height: 75.77%; overflow: hidden;
-    border-radius: 3px; background: #0b0f13; box-shadow: inset 0 0 18px rgba(120, 200, 140, 0.08); opacity: 0; transition: opacity 0.25s ease 0.25s; }
-  #tablet.up .display { opacity: 1; pointer-events: auto; }
   #tablet .hw { z-index: 3; position: absolute; left: 91.78%; width: 3.83%; height: 7.2%; border: 0; border-radius: 22%; background: transparent; cursor: pointer; pointer-events: auto; }
   #tablet .hw:hover { box-shadow: 0 0 0 2px rgba(150, 220, 160, 0.55); }
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
-  #tablet .menu button { display: none; }
-  #tablet .menu .status { color: #9fb3c8; letter-spacing: 0.12em; }
-  #tablet .menu .status b { color: #e2b84a; font-weight: normal; }
-  #tablet .menu { position: absolute; left: 8px; right: 8px; top: 4px; height: 22px; display: flex; gap: 6px; align-items: center; pointer-events: auto; }
-  #tablet .menu button { background: #262b31; color: #c9d1db; border: 1px solid #39414b; border-radius: 4px; padding: 4px 14px; font: inherit; cursor: pointer; letter-spacing: 0.06em; }
-  #tablet .menu button.on { background: #3b4a5c; color: #fff; border-color: #6d8fb3; }
-  #tablet .menu .spacer { flex: 1; }
-  #tablet .menu .brand { color: #c0392b; font-weight: bold; letter-spacing: 0.15em; margin-right: 8px; }
-  #tablet .screen { position: absolute; left: 6px; right: 6px; top: 28px; bottom: 6px; border-radius: 3px; overflow: hidden; }
-  #tablet .screen.map { pointer-events: auto; background: #05070a; }
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
-  #home h2 { margin: 0 0 14px; font-size: 18px; letter-spacing: 0.08em; }
-  #home .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
-  #home .tile { border: 1px solid #263039; border-radius: 6px; padding: 12px 14px; background: #121820; }
-  #home .tile .big { font-size: 26px; color: #e8eef5; margin: 4px 0; }
-  #home .tile .sub { color: #7f8b98; }
-  #home .apps { display: flex; gap: 14px; }
-  #home .apps button { flex: 1; padding: 22px 10px; background: #18212b; color: #dfe7f0; border: 1px solid #34414f; border-radius: 8px; font: inherit; font-size: 15px; letter-spacing: 0.1em; cursor: pointer; }
-  #home .apps button:hover { background: #22303f; }
-  #tablet .set-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #1f2830; font: 13px/1 ui-monospace, monospace; letter-spacing: .06em; color: #c9d3dc; }
-  #tablet .set-row span { width: 160px; text-transform: uppercase; color: #7f8b98; }
-  #tablet .set-row input[type=range] { width: 260px; accent-color: #d4a72c; }
-  #tablet .set-row b { width: 48px; color: #d4a72c; }
-  #tablet .toggle { background: #1a2129; color: #7f8b98; border: 1px solid #2c3742; padding: 6px 16px; font: 12px ui-monospace, monospace; letter-spacing: .1em; cursor: pointer; }
-  #tablet .toggle.on { color: #0f1317; background: #d4a72c; border-color: #d4a72c; }
-  #tablet .set-note { color: #56616c; font-size: 12px; margin-top: 18px; }
-  #tablet .screen.page { background: #0f1317; pointer-events: auto; padding: 16px 20px; overflow: hidden auto; box-sizing: border-box; }
-  #tablet .hint { position: absolute; right: 10px; bottom: 8px; color: #9fb3c8; background: rgba(8, 12, 16, 0.7); padding: 4px 8px; border-radius: 4px; }
-  #roster table { border-collapse: collapse; width: 100%; }
-  #roster th, #roster td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #222a33; }
-  #roster tr.unit { cursor: pointer; }
-  #roster tr.unit:hover { background: #18212b; }
-  #roster tr.sel { background: #2b3a4f; }
-  #comms .channels { display: flex; gap: 18px; flex-wrap: wrap; }
-  #comms .channels .box { flex: 1 1 200px; min-width: 0; }
-  #comms .box { border: 1px solid #263039; padding: 10px; border-radius: 4px; min-width: 220px; }
-  #comms button { background: #1d242c; color: #7f8b98; border: 1px solid #2f3845; padding: 4px 10px; margin: 3px 0; font: inherit; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: #9aa6b4; background: rgba(10,12,16,0.7); padding: 4px 10px; border: 1px solid #2a313c; }
   /* Actions window for an order, and the commander's walkie-talkie. */
   #actions { position: fixed; z-index: 40; background: #12171c; border: 1px solid #3d4752; border-radius: 6px; padding: 6px; min-width: 170px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
@@ -192,9 +153,138 @@
   #actions button:disabled { color: #6c7682; cursor: not-allowed; }
   #actions button small { color: #b5654f; }
   #actions .cancel { color: #9aa5b1; }
-  #roster tr.capt td:first-child { color: #e2b84a; font-weight: bold; }
-  #roster .rank { color: #e2b84a; }
-  #roster select.boss { background: #1b2026; color: #dfe6ee; border: 1px solid #3a434d; border-radius: 3px; font: inherit; padding: 1px 4px; }
+
+  /* ---- The tablet's screen: a field-case display. Olive-black glass, sand text (the kit's tan), drab lines,
+     amber for what is live or chosen, the commander's armband red for "you". ---- */
+  @font-face { font-family: 'Saira Condensed'; src: url(./fonts/saira-condensed-latin-400-normal.woff2) format('woff2'); font-weight: 400; font-display: swap; }
+  @font-face { font-family: 'Saira Condensed'; src: url(./fonts/saira-condensed-latin-500-normal.woff2) format('woff2'); font-weight: 500; font-display: swap; }
+  @font-face { font-family: 'Saira Condensed'; src: url(./fonts/saira-condensed-latin-700-normal.woff2) format('woff2'); font-weight: 700; font-display: swap; }
+  @font-face { font-family: 'Saira Stencil One'; src: url(./fonts/saira-stencil-one-latin-400-normal.woff2) format('woff2'); font-display: swap; }
+  #tablet .display { --glass: #10140d; --glass2: #161b12; --sand: #cdbf94; --dim: #8b8a6c; --drab: #4c5440; --line: #2a3123;
+    --amber: #e0a526; --red: #c23b2b;
+    position: absolute; left: 10.492%; top: 11.94%; width: 79.297%; height: 75.77%; overflow: hidden; border-radius: 3px;
+    background: radial-gradient(120% 90% at 50% 40%, var(--glass2), var(--glass) 70%);
+    color: var(--sand); font: 500 14px/1.35 'Saira Condensed', 'Arial Narrow', sans-serif; letter-spacing: 0.02em;
+    opacity: 0; transition: opacity 0.25s ease 0.25s; container-type: size; }
+  #tablet.up .display { opacity: 1; pointer-events: auto; }
+  /* Fine scanlines and an edge falloff, like a rugged LCD under a protector. */
+  #tablet .display::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 5;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0 1px, transparent 1px 3px),
+      radial-gradient(130% 110% at 50% 50%, transparent 60%, rgba(0,0,0,0.45)); }
+  #tablet button, #tablet input, #tablet select { font-family: inherit; }
+  /* Corner brackets: the frame of a panel, drawn only at its corners. */
+  #tablet .bk { --k: var(--drab); --s: 9px; background:
+    linear-gradient(var(--k), var(--k)) top left / var(--s) 1px no-repeat, linear-gradient(var(--k), var(--k)) top left / 1px var(--s) no-repeat,
+    linear-gradient(var(--k), var(--k)) top right / var(--s) 1px no-repeat, linear-gradient(var(--k), var(--k)) top right / 1px var(--s) no-repeat,
+    linear-gradient(var(--k), var(--k)) bottom left / var(--s) 1px no-repeat, linear-gradient(var(--k), var(--k)) bottom left / 1px var(--s) no-repeat,
+    linear-gradient(var(--k), var(--k)) bottom right / var(--s) 1px no-repeat, linear-gradient(var(--k), var(--k)) bottom right / 1px var(--s) no-repeat; }
+
+  /* The header: battalion, commander and strength, centred; the open page on the left, clock and signal right. */
+  #tablet .pda-head { position: absolute; left: 0; right: 0; top: 0; height: 54px; display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: center; padding: 0 16px; z-index: 2; pointer-events: auto;
+    background: linear-gradient(180deg, rgba(205,191,148,0.07), transparent); border-bottom: 1px solid var(--line); }
+  #tablet .pda-head::after { content: ''; position: absolute; left: 50%; bottom: -1px; width: 220px; height: 1px; transform: translateX(-50%);
+    background: linear-gradient(90deg, transparent, var(--amber), transparent); }
+  #tablet .ph-page { justify-self: start; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 14px; letter-spacing: 0.06em; }
+  #tablet .ph-page::before { content: ''; width: 6px; height: 6px; background: var(--amber); transform: rotate(45deg); }
+  #tablet .ph-id { text-align: center; line-height: 1; }
+  #tablet .ph-batt { font: 400 23px/1 'Saira Stencil One', 'Saira Condensed', sans-serif; letter-spacing: 0.08em; color: #e3d6aa;
+    text-shadow: 0 0 14px rgba(224,165,38,0.18); white-space: nowrap; }
+  #tablet .ph-meta { margin-top: 5px; display: flex; justify-content: center; align-items: center; gap: 12px; font-size: 12.5px; color: var(--dim); letter-spacing: 0.06em; }
+  #tablet .ph-meta b { color: var(--sand); font-weight: 700; font-variant-numeric: tabular-nums; }
+  #tablet .ph-cmdr { display: inline-flex; align-items: center; gap: 6px; color: var(--sand); }
+  #tablet .band { width: 4px; height: 11px; background: var(--red); box-shadow: 0 0 6px rgba(194,59,43,0.6); }
+  #tablet .ph-sep { width: 1px; height: 11px; background: var(--drab); }
+  #tablet .ph-right { justify-self: end; display: flex; align-items: center; gap: 12px; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: 0.08em; }
+  #tablet .sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+  #tablet .sig i { width: 3px; background: var(--sand); opacity: 0.85; }
+  #tablet .sig i:nth-child(1) { height: 4px; } #tablet .sig i:nth-child(2) { height: 7px; } #tablet .sig i:nth-child(3) { height: 10px; }
+  #tablet .sig i:nth-child(4) { height: 12px; opacity: 0.25; }
+
+  #tablet .screen { position: absolute; left: 0; right: 0; top: 55px; bottom: 0; overflow: hidden; }
+  #tablet .screen.map { pointer-events: auto; background: #070906; }
+  #tablet .screen.page { pointer-events: auto; padding: 18px 22px; overflow: hidden auto; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--drab) transparent; }
+  #tablet .screen.enter { animation: pda-wipe 0.26s cubic-bezier(.2,.7,.2,1); }
+  @keyframes pda-wipe { from { clip-path: inset(0 0 0 100%); filter: brightness(1.6); } to { clip-path: inset(0); filter: none; } }
+  #tablet .hint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); white-space: nowrap; color: var(--dim);
+    background: rgba(16,20,13,0.82); padding: 4px 12px; font-size: 12.5px; letter-spacing: 0.04em; border: 1px solid var(--line); }
+  #tablet h3 { margin: 0 0 12px; font: 700 13px/1 'Saira Condensed', sans-serif; letter-spacing: 0.16em; color: var(--dim); }
+  #tablet .note { color: var(--dim); font-size: 13px; }
+
+  /* Home: four readouts, then the chain of command and the radio traffic side by side. */
+  #home .readouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  #home .ro { padding: 10px 14px 12px; }
+  #home .ro .k { color: var(--dim); font-size: 12.5px; letter-spacing: 0.1em; }
+  #home .ro .v { font-size: 30px; font-weight: 700; line-height: 1.1; color: #e3d6aa; font-variant-numeric: tabular-nums; }
+  #home .ro .v.none { color: var(--drab); }
+  #home .ro .s { color: var(--dim); font-size: 12px; }
+  #home .ro .bar { height: 3px; margin-top: 7px; background: var(--line); }
+  #home .ro .bar i { display: block; height: 100%; background: var(--amber); }
+  #home .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  #home .col { padding: 12px 14px; min-height: 120px; }
+  #home .cap { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  #home .cap:last-child { border-bottom: 0; }
+  #home .cap .n { color: var(--amber); font-weight: 700; }
+  #home .cap .t { color: var(--sand); text-align: right; }
+  #home .cap .d { grid-column: 1 / -1; color: var(--dim); font-size: 12.5px; }
+  #home .rx { display: grid; grid-template-columns: 54px 1fr; gap: 8px; padding: 4px 0; font-size: 13px; }
+  #home .rx .when { color: var(--drab); font-variant-numeric: tabular-nums; }
+  #home .rx .who { color: var(--amber); }
+  #home .rx.me .who { color: #e07a6c; }
+
+  /* Roster. */
+  #roster table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  #roster th { text-align: left; padding: 0 10px 6px; color: var(--dim); font-weight: 500; font-size: 12px; letter-spacing: 0.12em; border-bottom: 1px solid var(--drab); }
+  #roster td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  #roster td.num { font-variant-numeric: tabular-nums; }
+  #roster tr.unit { cursor: pointer; box-shadow: inset 0 0 0 transparent; transition: box-shadow 0.12s, background 0.12s; }
+  #roster tr.unit:hover { background: rgba(205,191,148,0.05); box-shadow: inset 3px 0 0 var(--drab); }
+  #roster tr.sel { background: rgba(224,165,38,0.09); box-shadow: inset 3px 0 0 var(--amber); }
+  #roster tr.capt td:first-child, #roster .rank { color: var(--amber); font-weight: 700; }
+  #roster select.boss { background: var(--glass); color: var(--sand); border: 1px solid var(--drab); padding: 1px 4px; font-size: 13px; }
+  #roster .st-moving, #roster .st-marching { color: var(--amber); }
+  #roster .note { margin-top: 12px; }
+
+  /* Comms. */
+  #comms .channels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  #comms .box { padding: 12px 14px; }
+  #comms .box ul { list-style: none; margin: 0; padding: 0; }
+  #comms .box li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+  #comms .box li:last-child { border-bottom: 0; }
+  #comms .box li.on { color: var(--amber); }
+  #comms button { display: block; width: 100%; text-align: left; margin: 0 0 6px; background: transparent; color: var(--drab);
+    border: 1px solid var(--line); padding: 5px 10px; font-size: 13px; }
+  #comms .note { margin-top: 14px; }
+
+  /* Settings. */
+  #settings .group { padding: 6px 16px; margin-bottom: 14px; max-width: 560px; }
+  #tablet .set-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  #tablet .set-row:last-child { border-bottom: 0; }
+  #tablet .set-row > span { color: var(--dim); font-size: 13px; letter-spacing: 0.06em; }
+  #tablet .set-row .ctl { display: flex; align-items: center; gap: 12px; }
+  #tablet .set-row input[type=text] { background: var(--glass); color: #e3d6aa; border: 1px solid var(--drab); padding: 5px 9px; font-size: 14px; width: 100%; max-width: 300px; }
+  #tablet .set-row input[type=text]:focus { outline: none; border-color: var(--amber); }
+  #tablet .set-row input[type=range] { width: 240px; accent-color: var(--amber); }
+  #tablet .set-row b { color: var(--amber); font-variant-numeric: tabular-nums; min-width: 40px; }
+  #tablet .toggle { background: transparent; color: var(--dim); border: 1px solid var(--drab); padding: 4px 18px; font-size: 13px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer; }
+  #tablet .toggle.on { color: var(--glass); background: var(--amber); border-color: var(--amber); }
+  #tablet :focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
+
+  /* Power-on, each time the tablet comes up: a scan bar sweeps the glass, the header settles, the page follows. */
+  #tablet .scan { position: absolute; left: 0; right: 0; top: -12%; height: 12%; z-index: 6; pointer-events: none; opacity: 0;
+    background: linear-gradient(180deg, transparent, rgba(224,165,38,0.10) 70%, rgba(240,220,160,0.55) 98%, transparent); }
+  #tablet .display.boot .scan { animation: pda-scan 0.55s cubic-bezier(.4,0,.2,1) 0.2s; }
+  #tablet .display.boot .ph-batt { animation: pda-batt 0.5s cubic-bezier(.2,.7,.2,1) 0.45s both; }
+  #tablet .display.boot .ph-meta, #tablet .display.boot .ph-page, #tablet .display.boot .ph-right { animation: pda-fade 0.35s ease 0.7s both; }
+  #tablet .display.boot .pda-head::after { animation: pda-rule 0.6s cubic-bezier(.2,.7,.2,1) 0.45s both; }
+  #tablet .display.boot .screen:not([hidden]) { animation: pda-fade 0.35s ease 0.65s both; }
+  @keyframes pda-scan { 0% { opacity: 1; top: -12%; } 100% { opacity: 1; top: 100%; } }
+  @keyframes pda-batt { from { clip-path: inset(0 50%); letter-spacing: 0.3em; opacity: 0.3; } to { clip-path: inset(0 0); letter-spacing: 0.08em; opacity: 1; } }
+  @keyframes pda-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pda-rule { from { width: 0; } to { width: 220px; } }
+  @media (prefers-reduced-motion: reduce) {
+    #tablet .display.boot *, #tablet .screen.enter { animation: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -268,33 +358,38 @@
   <button class="hw" data-hw="comms" style="top:50.90%" title="Comms hub"></button>
   <button class="hw" data-hw="settings" style="top:59.35%" title="Settings"></button>
   <div class="display">
-  <div class="menu">
-    <span class="brand">COMMAND</span>
-    <button data-page="home" class="on">HOME</button>
-    <button data-page="map">MAP</button>
-    <button data-page="roster">ROSTER</button>
-    <button data-page="comms">COMMS HUB</button>
-    <span class="status" id="pdaStatus"></span>
-    <span class="spacer"></span>
-    <button id="tabletClose" title="Tab">CLOSE ✕</button>
-  </div>
+  <div class="scan"></div>
+  <header class="pda-head">
+    <span class="ph-page" id="pdaStatus">HOME</span>
+    <div class="ph-id">
+      <div class="ph-batt" id="pdaBatt">1st Battalion</div>
+      <div class="ph-meta"><span class="ph-cmdr"><i class="band"></i><span id="pdaCmdr">Commander</span></span><i class="ph-sep"></i><span><b id="pdaSoldiers">0</b> soldiers</span></div>
+    </div>
+    <div class="ph-right"><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
+  </header>
   <div class="screen page" id="home"></div>
   <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div class="hint">click a unit, then click a place to give it an order · Shift + drag: box · drag/WASD: pan · wheel: zoom</div></div>
   <div class="screen page" id="roster" hidden></div>
   <div class="screen page" id="settings" hidden>
-    <h3>Settings</h3>
-    <div class="set-row"><span>Music</span><button id="musicOn" class="toggle on">ON</button></div>
-    <div class="set-row"><span>Music volume</span><input id="musicVol" type="range" min="0" max="100" value="50"><b id="musicVolTxt">50%</b></div>
-    <p class="set-note">Placeholder track: Operation Vance.</p>
+    <h3>Identity</h3>
+    <div class="group bk">
+      <label class="set-row"><span>Commander</span><span class="ctl"><input id="setCmdr" type="text" maxlength="24" spellcheck="false"></span></label>
+      <label class="set-row"><span>Battalion</span><span class="ctl"><input id="setBatt" type="text" maxlength="28" spellcheck="false"></span></label>
+    </div>
+    <h3>Sound</h3>
+    <div class="group bk">
+      <div class="set-row"><span>Music</span><span class="ctl"><button id="musicOn" class="toggle on">ON</button></span></div>
+      <label class="set-row"><span>Music volume</span><span class="ctl"><input id="musicVol" type="range" min="0" max="100" value="50"><b id="musicVolTxt">50%</b></span></label>
+    </div>
+    <p class="note">The music is a placeholder track.</p>
   </div>
   <div class="screen page" id="comms" hidden>
-    <h3>Communications Hub</h3>
     <div class="channels">
-      <div class="box"><b>Channels</b><br><br>Battalion net<br>Allied commanders<br>Theatre command</div>
-      <div class="box"><b>Requests</b><br><br><button disabled>Request resources</button><br><button disabled>Request fire support</button><br><button disabled>Request reinforcements</button><br><button disabled>Request assault</button></div>
-      <div class="box"><b>Messages</b><br><br><i>No contact with other commanders yet.</i></div>
+      <div class="box bk"><h3>Channels</h3><ul><li class="on">Battalion net</li><li>Allied commanders</li><li>Theatre command</li></ul></div>
+      <div class="box bk"><h3>Requests</h3><button disabled>Resources</button><button disabled>Fire support</button><button disabled>Reinforcements</button><button disabled>Assault</button></div>
+      <div class="box bk"><h3>Messages</h3><p class="note">No contact with other commanders yet.</p></div>
     </div>
-    <p style="color:#7f8b98">Coming once the basic systems are in.</p>
+    <p class="note">Requests and other commanders arrive once the basic systems are in.</p>
   </div>
 </div>
 </div>

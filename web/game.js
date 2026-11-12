@@ -193,9 +193,42 @@ try {
   // the roster lists the units, the comms hub is a placeholder for talking to other commanders.
   let tabletUp = false, page = 'home';
   const tablet = $('tablet');
-  const PAGE_NAME = { home: 'HOME', map: 'MAP', roster: 'ROSTER', comms: 'COMMS HUB', settings: 'SETTINGS' };
-  const pdaStatus = () => { $('pdaStatus').innerHTML = PAGE_NAME[page] || ''; };
+  const PAGE_NAME = { home: 'Home', map: 'Map', roster: 'Roster', comms: 'Comms hub', settings: 'Settings' };
+  // The header: who you are and how many you lead (the name and battalion are yours to set in Settings).
+  const ident = { cmdr: store.get('cmdr.name') || 'Commander', batt: store.get('batt.name') || '1st Battalion' };
+  const showIdent = () => { $('pdaCmdr').textContent = ident.cmdr; $('pdaBatt').textContent = ident.batt; };
+  showIdent();
+  // The strength figure counts to its new value instead of jumping.
+  let shownSoldiers = 0, soldierAnim = 0;
+  const showSoldiers = (n) => {
+    if (n === shownSoldiers) return;
+    const from = shownSoldiers, t0 = performance.now();
+    shownSoldiers = n;
+    cancelAnimationFrame(soldierAnim);
+    const step = (t) => {
+      const k = Math.min((t - t0) / 650, 1), e = 1 - (1 - k) ** 3;
+      $('pdaSoldiers').textContent = Math.round(from + (n - from) * e).toLocaleString('en-GB');
+      if (k < 1) soldierAnim = requestAnimationFrame(step);
+    };
+    soldierAnim = requestAnimationFrame(step);
+  };
+  const soldierCount = () => { try { return JSON.parse(v.roster()).reduce((a, u) => a + u.soldiers, 0); } catch { return shownSoldiers; } };
+  // Mission clock: time since the commander entered the field.
+  const t0Mission = performance.now();
+  const showClock = () => {
+    const s = Math.floor((performance.now() - t0Mission) / 1000);
+    $('pdaClock').textContent = [s / 3600, (s / 60) % 60, s % 60].map((x) => String(Math.floor(x)).padStart(2, '0')).join(':');
+  };
+  $('pdaClock').title = 'Mission time';
+  // Radio traffic heard and sent, newest first, for the home page.
+  const traffic = [];
+  const pdaStatus = () => { $('pdaStatus').textContent = PAGE_NAME[page] || ''; };
   const setPage = (p) => {
+    // The page that comes in wipes across the glass (only when the page changes, not on a redraw).
+    if (p !== page) {
+      const el = { map: $('pageMap') }[p] || $(p);
+      if (el) { el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter'); }
+    }
     page = p;
     for (const b of tablet.querySelectorAll('[data-page]')) b.classList.toggle('on', b.dataset.page === p);
     $('pageMap').hidden = p !== 'map';
@@ -264,6 +297,9 @@ try {
       pdaOpen();
       document.body.classList.add('pda');
       tablet.classList.add('up');
+      const disp = tablet.querySelector('.display');
+      disp.classList.remove('boot'); void disp.offsetWidth; disp.classList.add('boot');
+      showSoldiers(soldierCount()); showClock();
       setPage(page);
       setTimeout(() => { if (tabletShown && page === 'map') sizeMap(); }, 450);
     }
@@ -278,17 +314,24 @@ try {
     const units = JSON.parse(v.roster());
     const soldiers = units.reduce((n, u) => n + u.soldiers, 0);
     const moving = units.filter((u) => u.status !== 'holding').length;
-    $('home').innerHTML = `<h2>BATTALION OVERVIEW</h2>
-      <div class="tiles">
-        <div class="tile">Soldiers<div class="big">${soldiers}</div><div class="sub">${units.length} units · ${moving} on the move</div></div>
-        <div class="tile">Casualties<div class="big">0</div><div class="sub">wounded · evacuating · lost</div></div>
-        <div class="tile">Supplies<div class="big">—</div><div class="sub">rations · ammunition · medical · fuel</div></div>
-        <div class="tile">Morale<div class="big">—</div><div class="sub">rest · food · combat stress</div></div>
+    const captains = units.filter((u) => u.captain);
+    const squadsOf = (c) => units.filter((u) => u.boss === c.id).length;
+    const ro = (k, val, sub, bar) => `<div class="ro bk"><div class="k">${k}</div><div class="v${val === '—' ? ' none' : ''}">${val}</div>${
+      bar === undefined ? '' : `<div class="bar"><i style="width:${Math.round(bar * 100)}%"></i></div>`}<div class="s">${sub}</div></div>`;
+    const capRows = captains.length ? captains.map((c) => `<div class="cap"><span class="n">${c.name}</span><span class="t">${squadsOf(c)} squad${squadsOf(c) === 1 ? '' : 's'}</span><span class="d">${c.task || 'Awaiting a goal'}</span></div>`).join('')
+      : '<p class="note">No captains in the battalion.</p>';
+    const rx = traffic.length ? traffic.slice(0, 6).map((m) => `<div class="rx${m.me ? ' me' : ''}"><span class="when">${m.when}</span><span><span class="who">${m.name}</span> ${m.text}</span></div>`).join('')
+      : '<p class="note">The net is quiet. Orders you give and reports from the field appear here.</p>';
+    $('home').innerHTML = `<div class="readouts">
+        ${ro('Strength', soldiers.toLocaleString('en-GB'), `${units.length} units, ${moving} on the move`, moving / Math.max(units.length, 1))}
+        ${ro('Casualties', '0', 'None wounded or lost')}
+        ${ro('Supplies', '—', 'Not tracked yet')}
+        ${ro('Morale', '—', 'Not tracked yet')}
       </div>
-      <div class="apps">
-        <button data-go="map">MAP</button><button data-go="roster">ROSTER</button><button data-go="comms">COMMS HUB</button>
+      <div class="cols">
+        <div class="col bk"><h3>Chain of command</h3>${capRows}</div>
+        <div class="col bk"><h3>Radio traffic</h3>${rx}</div>
       </div>`;
-    for (const b of $('home').querySelectorAll('[data-go]')) b.addEventListener('click', () => setPage(b.dataset.go));
   };
   // The map: its own canvas, drawn by the viewer with the map's camera (picture in picture).
   const mapCanvas = $('mapCanvas');
@@ -467,6 +510,8 @@ try {
   const keyUp = async () => { radio.classList.add('up'); await new Promise((r) => setTimeout(r, 450)); };
   const transmit = async (cls, who, name, text, voice) => {
     await click(); radio.classList.add(cls); radioState(cls === 'tx' ? 'TRANSMITTING' : 'RECEIVING'); line(who, name, text);
+    traffic.unshift({ when: $('pdaClock').textContent.slice(0, 5), name: cls === 'tx' ? ident.cmdr : name, text, me: cls === 'tx' });
+    traffic.length = Math.min(traffic.length, 20);
     await say(text.replace(/(\d)/g, '$1 '), voice.pitch, voice.rate);
     await click(); radio.classList.remove(cls); radioState('ONLINE');
   };
@@ -519,10 +564,11 @@ try {
     const boss = (u) => u.captain ? '<span class="rank">Captain</span>' :
       `<select class="boss" data-id="${u.id}"><option value="-1"${u.boss < 0 ? ' selected' : ''}>You</option>${
         captains.map((c) => `<option value="${c.id}"${u.boss === c.id ? ' selected' : ''}>${c.name}</option>`).join('')}</select>`;
-    const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td>${u.soldiers}</td><td>${u.task || u.status}</td><td>${u.stance}</td></tr>`;
-    $('roster').innerHTML = `<h3>Battalion roster</h3><table><tr><th>Unit</th><th>Answers to</th><th>Soldiers</th><th>Status</th><th>Stance</th></tr>${
+    const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td class="num">${u.soldiers}</td><td class="st-${u.status}">${u.task || cap(u.status)}</td><td>${cap(u.stance)}</td></tr>`;
+    $('roster').innerHTML = `<table><tr><th>Unit</th><th>Answers to</th><th>Soldiers</th><th>Status</th><th>Stance</th></tr>${
       captains.map(row).join('')}${units.filter((u) => !u.captain).map(row).join('')
-    }</table><p style="color:#7f8b98">Click a unit to select it on the map. Attach squads to a captain and give him a goal: he plans the rest and leads them.</p>`;
+    }</table><p class="note">Click a unit to find it on the map. Attach squads to a captain and give him a goal: he plans the rest and leads them.</p>`;
     for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', (e) => {
       if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
       onMap(() => v.select_unit(Number(r.dataset.id))); setPage('map');
@@ -532,13 +578,17 @@ try {
     });
   };
   for (const b of tablet.querySelectorAll('[data-page]')) b.addEventListener('click', () => setPage(b.dataset.page));
-  $('tabletClose').addEventListener('click', () => setTablet(false));
   // Settings: music on/off and volume, kept between visits.
   const musicOn = $('musicOn'), musicVol = $('musicVol');
   const showMusic = () => {
     musicOn.classList.toggle('on', music.on); musicOn.textContent = music.on ? 'ON' : 'OFF';
     musicVol.value = Math.round(music.vol * 100); $('musicVolTxt').textContent = `${musicVol.value}%`;
   };
+  for (const [id, key] of [['setCmdr', 'cmdr'], ['setBatt', 'batt']]) {
+    const el = $(id);
+    el.value = ident[key];
+    el.addEventListener('input', () => { ident[key] = el.value.trim() || (key === 'cmdr' ? 'Commander' : '1st Battalion'); store.set(`${key}.name`, el.value.trim()); showIdent(); });
+  }
   musicOn.addEventListener('click', () => { music.set(!music.on, music.vol); showMusic(); });
   musicVol.addEventListener('input', () => { music.set(music.on, musicVol.value / 100); showMusic(); });
   showMusic();
@@ -547,6 +597,7 @@ try {
   let rosterSeen = '';
   setInterval(() => {
     if (!tabletUp) return;
+    showClock(); showSoldiers(soldierCount());
     if (page === 'home') drawHome();
     if (page !== 'roster') return;
     const picking = document.activeElement && document.activeElement.tagName === 'SELECT';
@@ -690,7 +741,7 @@ const UPDATE = '__UPDATE__';
 (function prototypeNotice() {
   const box = document.getElementById('proto');
   if (!box) return;
-  document.getElementById('protoVer').textContent = UPDATE.startsWith('__') ? 'LOCAL BUILD' : `UPDATE ${UPDATE}`;
+  document.getElementById('protoVer').textContent = UPDATE.startsWith('__') ? 'Local build' : UPDATE;
   const go = () => { box.hidden = true; removeEventListener('keydown', key, true); music.start(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
   const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };
@@ -711,8 +762,8 @@ const UPDATE = '__UPDATE__';
       const live = info.v;
       if (live && live !== mine && live !== dismissed) {
         bar.dataset.v = live;
-        document.querySelector('#update .ttl').textContent = `UPDATE ${info.n || ''} RECEIVED`;
-        document.getElementById('update-sub').textContent = `${info.title ? info.title[0].toUpperCase() + info.title.slice(1) : 'A new build is ready.'} · you run ${UPDATE.startsWith('__') ? mine.slice(0, 7) : UPDATE}`;
+        document.querySelector('#update .ttl').textContent = `${info.n || 'Update'} received`;
+        document.getElementById('update-sub').textContent = `You run ${UPDATE.startsWith('__') ? mine.slice(0, 7) : UPDATE}`;
         if (bar.hidden) { bar.hidden = false; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
       }
     } catch (_) { /* offline: try again later */ }
