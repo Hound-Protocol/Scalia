@@ -251,3 +251,90 @@ fn isqrt(n: i64) -> i64 {
     }
     x
 }
+
+/// Finds a route for a mover of `radius_mm` from `from` to `to` (millimetres), as straight legs between
+/// waypoints: A* over the cells it fits in (8 neighbours, no cutting corners), then smoothed by dropping every
+/// waypoint the leg before it can see past. `None` when either end is blocked or no route exists.
+/// Deterministic: ties are broken by cell index, so every machine finds the same route.
+pub fn find_path(grid: &NavGrid, from: (i64, i64), to: (i64, i64), radius_mm: i64) -> Option<Vec<(i64, i64)>> {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let start = grid.cell_of(from.0, from.1)?;
+    let goal = grid.cell_of(to.0, to.1)?;
+    let fits = |i: usize, j: usize| !grid.blocked(i, j) && grid.clearance(i, j) >= radius_mm;
+    if !fits(start.0, start.1) || !fits(goal.0, goal.1) {
+        return None;
+    }
+    let (w, h) = (grid.w, grid.h);
+    let idx = |i: usize, j: usize| j * w + i;
+    let heuristic = |i: usize, j: usize| {
+        let (dx, dy) = ((i as i64 - goal.0 as i64).abs(), (j as i64 - goal.1 as i64).abs());
+        10 * (dx + dy) - 6 * dx.min(dy)
+    };
+    let mut cost = vec![i64::MAX; w * h];
+    let mut came = vec![usize::MAX; w * h];
+    let mut open = BinaryHeap::new();
+    cost[idx(start.0, start.1)] = 0;
+    open.push(Reverse((heuristic(start.0, start.1), 0i64, idx(start.0, start.1))));
+    let target = idx(goal.0, goal.1);
+    while let Some(Reverse((_, g, cur))) = open.pop() {
+        if cur == target {
+            break;
+        }
+        if g > cost[cur] {
+            continue;
+        }
+        let (ci, cj) = ((cur % w) as i64, (cur / w) as i64);
+        for (dx, dy, step) in [(1, 0, 10), (-1, 0, 10), (0, 1, 10), (0, -1, 10), (1, 1, 14), (1, -1, 14), (-1, 1, 14), (-1, -1, 14)] {
+            let (ni, nj) = (ci + dx, cj + dy);
+            if ni < 0 || nj < 0 || ni >= w as i64 || nj >= h as i64 || !fits(ni as usize, nj as usize) {
+                continue;
+            }
+            // Diagonals only where both sides are open, so routes never clip a corner.
+            if dx != 0 && dy != 0 && (!fits((ci + dx) as usize, cj as usize) || !fits(ci as usize, (cj + dy) as usize)) {
+                continue;
+            }
+            let n = idx(ni as usize, nj as usize);
+            let ng = g + step;
+            if ng < cost[n] {
+                cost[n] = ng;
+                came[n] = cur;
+                open.push(Reverse((ng + heuristic(ni as usize, nj as usize), ng, n)));
+            }
+        }
+    }
+    if cost[target] == i64::MAX {
+        return None;
+    }
+    // Walk back to the start, then string-pull.
+    let mut cells = vec![target];
+    while *cells.last().unwrap() != idx(start.0, start.1) {
+        cells.push(came[*cells.last().unwrap()]);
+    }
+    cells.reverse();
+    let mut points: Vec<(i64, i64)> = vec![from];
+    points.extend(cells[1..cells.len().saturating_sub(1)].iter().map(|&c| grid.centre(c % w, c / w)));
+    points.push(to);
+    let mut out = vec![points[0]];
+    let mut k = 0;
+    while k + 1 < points.len() {
+        // The furthest point still visible from the current one.
+        let mut next = k + 1;
+        for m in (k + 2..points.len()).rev() {
+            if clear_line(grid, points[k], points[m], radius_mm) {
+                next = m;
+                break;
+            }
+        }
+        out.push(points[next]);
+        k = next;
+    }
+    Some(out)
+}
+
+/// Whether a mover of `radius_mm` can walk the straight line between two points (sampled every quarter cell).
+pub fn clear_line(grid: &NavGrid, a: (i64, i64), b: (i64, i64), radius_mm: i64) -> bool {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let steps = ((dx.abs().max(dy.abs())) / (CELL_MM / 4)).max(1);
+    (0..=steps).all(|k| grid.walkable_at(a.0 + dx * k / steps, a.1 + dy * k / steps, radius_mm))
+}

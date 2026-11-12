@@ -102,6 +102,16 @@ fn main() {
         navs.push(s.elapsed().as_secs_f64() * 1000.0);
     }
     let nav_tile_ms = median_ms(navs) / (800.0 * 800.0 / (64.0 * 64.0));
+    // Route-finding: corner to corner across the 400 m ground (one group's route; soldiers share it).
+    let mut routes = Vec::new();
+    let mut legs = 0usize;
+    for k in 0..10i64 {
+        let s = Instant::now();
+        let r = scalia_core::nav::find_path(&grid, (2_000 + k * 500, 2_000), (397_000, 396_000 - k * 700), 300);
+        routes.push(s.elapsed().as_secs_f64() * 1000.0);
+        legs += r.map_or(0, |r| r.len());
+    }
+    let route_ms = median_ms(routes);
 
     // Printing real state keeps the work observable and sanity-checks that ticks drained needs.
     let food: f64 = w.groups.needs(scalia_core::groups::GroupId(5)).food.to_f32() as f64;
@@ -111,12 +121,14 @@ fn main() {
     let v3 = verdict(chunk_ms, CHUNK_BUDGET_MS);
     let v4 = verdict(plan_ms, PLAN_BUDGET_MS);
     let v5 = verdict(nav_tile_ms, 1.0);
+    let v6 = verdict(route_ms, 20.0);
     println!("tick_1m_soldiers_ms={tick_ms:.3} budget=5 {v1}");
     println!("derive_20k_ms={derive_ms:.3} budget=2 {v2}");
     println!("chunk_64_ms={chunk_ms:.3} budget=1 {v3} (check {guard})");
     println!("goap_squad_plan_ms={plan_ms:.4} worst={plan_worst_ms:.4} budget={PLAN_BUDGET_MS} {v4} ({steps} steps over 4096 plans)");
     println!("nav_grid_per_tile_ms={nav_tile_ms:.4} budget=1 {v5} (fingerprint {:x})", grid.fingerprint());
-    if !report_only && (v1 == "FAIL" || v2 == "FAIL" || v3 == "FAIL" || v4 == "FAIL" || v5 == "FAIL") {
+    println!("route_400m_ms={route_ms:.3} budget=20 {v6} ({legs} waypoints over 10 routes)");
+    if !report_only && (v1 == "FAIL" || v2 == "FAIL" || v3 == "FAIL" || v4 == "FAIL" || v5 == "FAIL" || v6 == "FAIL") {
         std::process::exit(1);
     }
 }
