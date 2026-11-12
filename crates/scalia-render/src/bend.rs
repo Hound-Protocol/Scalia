@@ -2,8 +2,8 @@
 //! The reference for the vertex shader's `bend` (`wgsl/common.wgsl`), which must match it.
 //!
 //! The map's x runs east and wraps every 2πR; its y runs north with the equator at y = 0, so latitude is y / R.
-//! Bending wraps every point onto a sphere of radius R (plus its height) and places that sphere so the camera
-//! target stays where it is: the target's surface point does not move, and the planet's centre ends up R below it.
+//! Bending wraps the map onto a sphere of radius R / t (plus each point's height), placed so the camera target
+//! stays where it is: the target's surface point does not move, and the sphere's centre is R / t below it.
 
 use glam::Vec3;
 
@@ -16,10 +16,13 @@ pub struct Bend {
     pub radius: f32,
     /// 0 is the flat map, 1 the full globe.
     pub t: f32,
+    /// The target's own map y (metres north of the equator), which sets its latitude. With a floating origin
+    /// `ty` is relative to the origin, so the latitude needs the absolute value.
+    pub lat_y: f32,
 }
 
 impl Bend {
-    pub const FLAT: Bend = Bend { tx: 0.0, ty: 0.0, radius: 1.0, t: 0.0 };
+    pub const FLAT: Bend = Bend { tx: 0.0, ty: 0.0, radius: 1.0, t: 0.0, lat_y: 0.0 };
 }
 
 /// Where a flat-map point (x, y, height) is drawn.
@@ -27,8 +30,10 @@ pub fn bend(p: Vec3, b: &Bend) -> Vec3 {
     if b.t <= 0.0 {
         return p;
     }
-    let curved = globe_point(p.x - b.tx, p.y - b.ty, p.z, b.ty / b.radius, b.radius) + Vec3::new(b.tx, b.ty, 0.0);
-    p + (curved - p) * b.t.min(1.0)
+    // The map lies on a sphere of radius R / t touching the target: almost flat at first, the planet itself at
+    // t = 1. A true sphere at every step, so nothing folds the way a straight blend of positions would near the poles.
+    let r = b.radius / b.t.min(1.0);
+    globe_point(p.x - b.tx, p.y - b.ty, p.z, b.lat_y / r, r) + Vec3::new(b.tx, b.ty, 0.0)
 }
 
 /// A point `dx` metres east and `dy` metres north of the target (whose latitude is `lat0`), at height `h`, in the

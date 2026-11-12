@@ -9,14 +9,14 @@ fn close(a: Vec3, b: Vec3, tol: f32) -> bool {
 
 #[test]
 fn flat_when_not_bending() {
-    let b = Bend { tx: 1234.0, ty: -50.0, radius: R, t: 0.0 };
+    let b = Bend { tx: 1234.0, ty: -50.0, radius: R, t: 0.0, lat_y: -50.0 };
     let p = Vec3::new(5000.0, 300.0, 12.0);
     assert_eq!(bend(p, &b), p);
 }
 
 #[test]
 fn the_target_and_its_surroundings_barely_move() {
-    let b = Bend { tx: 100.0, ty: 20_000.0, radius: R, t: 1.0 };
+    let b = Bend { tx: 100.0, ty: 20_000.0, radius: R, t: 1.0, lat_y: 20_000.0 };
     let p = Vec3::new(100.0, 20_000.0, 7.0);
     assert!(close(bend(p, &b), p, 0.05), "{:?}", bend(p, &b));
     // 100 m away the curvature drops the ground by only about d^2 / 2R (under 1 cm).
@@ -26,7 +26,7 @@ fn the_target_and_its_surroundings_barely_move() {
 
 #[test]
 fn going_all_the_way_round_east_returns_to_the_same_point() {
-    let b = Bend { tx: 0.0, ty: 0.0, radius: R, t: 1.0 };
+    let b = Bend { tx: 0.0, ty: 0.0, radius: R, t: 1.0, lat_y: 0.0 };
     let w = std::f32::consts::TAU * R;
     let a = bend(Vec3::new(1000.0, 5000.0, 3.0), &b);
     let c = bend(Vec3::new(1000.0 + w, 5000.0, 3.0), &b);
@@ -35,7 +35,7 @@ fn going_all_the_way_round_east_returns_to_the_same_point() {
 
 #[test]
 fn fully_bent_map_is_a_sphere_hanging_below_the_target() {
-    let b = Bend { tx: 0.0, ty: 300_000.0, radius: R, t: 1.0 };
+    let b = Bend { tx: 0.0, ty: 300_000.0, radius: R, t: 1.0, lat_y: 300_000.0 };
     let centre = Vec3::new(0.0, 300_000.0, -R);
     for (x, y) in [(0.0, 0.0), (500_000.0, -600_000.0), (-1_900_000.0, 900_000.0), (1_000_000.0, 300_000.0)] {
         let p = bend(Vec3::new(x, y, 0.0), &b);
@@ -51,8 +51,35 @@ fn fully_bent_map_is_a_sphere_hanging_below_the_target() {
 
 #[test]
 fn height_raises_points_away_from_the_centre() {
-    let b = Bend { tx: 0.0, ty: 0.0, radius: R, t: 1.0 };
+    let b = Bend { tx: 0.0, ty: 0.0, radius: R, t: 1.0, lat_y: 0.0 };
     let centre = Vec3::new(0.0, 0.0, -R);
     let p = bend(Vec3::new(400_000.0, 100_000.0, 5_000.0), &b);
     assert!(((p - centre).length() - (R + 5_000.0)).abs() < 2.0);
+}
+
+#[test]
+fn half_bent_map_is_a_sphere_of_twice_the_radius_and_never_folds() {
+    // Halfway, the map lies on a sphere twice the planet's size, touching the target: a smooth cap, no folds.
+    let b = Bend { tx: 0.0, ty: 700_000.0, radius: R, t: 0.5, lat_y: 700_000.0 };
+    let centre = Vec3::new(0.0, 700_000.0, -2.0 * R);
+    let mut last_y = f32::MIN;
+    for k in 0..=40 {
+        let y = -1_000_000.0 + k as f32 * 50_000.0;
+        let p = bend(Vec3::new(300_000.0, y, 0.0), &b);
+        assert!(((p - centre).length() - 2.0 * R).abs() < 2.0 * R * 1e-4, "y {y}: off the sphere");
+        // Walking north along the map keeps moving the same way on the sphere (in its own frame).
+        let ang = (p.y - centre.y).atan2(p.z - centre.z);
+        assert!(ang > last_y, "folds back at y {y}");
+        last_y = ang;
+    }
+}
+
+#[test]
+fn floating_origin_draws_the_same_shape() {
+    // The same target expressed relative to an origin 1,500 km east: identical shape, shifted.
+    let a = Bend { tx: 1_500_000.0, ty: 400_000.0, radius: R, t: 0.7, lat_y: 400_000.0 };
+    let b = Bend { tx: 0.0, ty: 400_000.0, radius: R, t: 0.7, lat_y: 400_000.0 };
+    let p = bend(Vec3::new(1_520_000.0, 380_000.0, 10.0), &a) - Vec3::new(1_500_000.0, 0.0, 0.0);
+    let q = bend(Vec3::new(20_000.0, 380_000.0, 10.0), &b);
+    assert!(close(p, q, 1.0), "{p:?} vs {q:?}");
 }

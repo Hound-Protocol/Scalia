@@ -102,6 +102,9 @@ pub struct Viewer {
     far_tiles: std::collections::HashSet<(u32, i64, i64)>,
     /// Level of far tiles being drawn.
     far_level: Option<u32>,
+    /// Floating origin (metres): the ground scene draws everything relative to this point near the camera, so the
+    /// f32 positions sent to the GPU stay small (and precise) anywhere on the planet.
+    origin: (f64, f64),
     /// Cross-fade from a previous far level: (level, start of the fade in ms).
     far_fade: Option<(u32, f64)>,
     /// Zoom: the ladder step aimed at and the view height (metres) the camera is gliding through.
@@ -176,6 +179,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         sys_now: WorldMs(0),
         far_tiles: std::collections::HashSet::new(),
         far_level: None,
+        origin: (0.0, 0.0),
         far_fade: None,
         zoom_step: STEP_GROUND,
         zoom_m: LADDER[STEP_GROUND],
@@ -240,7 +244,7 @@ fn build_army(groups: u32, per_group: u32) -> World {
 
 /// Grass tufts for one chunk: about one per 2 m^2 on green bands, none on bare (brown) ground.
 /// Deterministic per chunk, so the same field grows back in the same places.
-fn grass_for(hm: &[f32], cx: i64, cy: i64) -> Vec<f32> {
+fn grass_for(hm: &[f32], cx: i64, cy: i64, origin: (f64, f64)) -> Vec<f32> {
     let n = CELLS as usize + 1;
     let mut out = Vec::new();
     for j in 0..CELLS as usize {
@@ -257,8 +261,8 @@ fn grass_for(hm: &[f32], cx: i64, cy: i64) -> Vec<f32> {
             let fy = ((h >> 16) & 0xff) as f32 / 255.0;
             let colour = [7.0, 12.0, 11.0, 12.0][((h >> 24) % 4) as usize];
             let z0 = bilinear(hm, n, i, j, fx, fy);
-            let x = cx as f32 * CELLS as f32 + i as f32 + fx;
-            let y = cy as f32 * CELLS as f32 + j as f32 + fy;
+            let x = ((cx * CELLS as i64 + i as i64) as f64 + fx as f64 - origin.0) as f32;
+            let y = ((cy * CELLS as i64 + j as i64) as f64 + fy as f64 - origin.1) as f32;
             let heading = ((h >> 32) & 0xffff) as f32 / 65535.0 * std::f32::consts::TAU;
             let phase = ((h >> 48) & 0xff) as f32 / 255.0;
             out.extend_from_slice(&[x, y, z0, colour, heading, phase, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]);
@@ -562,13 +566,15 @@ impl Viewer {
         let (r, u, to_cam) = scalia_render::camera::basis(yaw);
         let on_plane = target + r * (nx * view_h / 2.0 * w / h) + u * (ny * view_h / 2.0);
         // Slide along the view ray until it meets the ground (a few refinements over the heightfield).
+        // The camera target is relative to the floating origin; heights and the answer are absolute.
+        let o = Vec3::new(self.origin.0 as f32, self.origin.1 as f32, 0.0);
         let mut q = on_plane;
         for _ in 0..5 {
-            let ground = self.height_at(q.x, q.y);
+            let ground = self.height_at(q.x + o.x, q.y + o.y);
             let s = (on_plane.z - ground) / to_cam.z;
             q = on_plane - to_cam * s;
         }
-        q
+        q + o
     }
 
     /// Where a group's formation is centred at time t (render metres).
@@ -678,7 +684,7 @@ impl Viewer {
         let n = CELLS as usize + 1;
         let hm = self.chunk(cx, cy).clone();
         let mut m = MeshBuilder::default();
-        let base = (cx as f32 * CELLS as f32, cy as f32 * CELLS as f32);
+        let base = (0.0f32, 0.0f32); // chunk-local; an instance offset places it relative to the origin
         let p = |i: usize, j: usize| [base.0 + i as f32, base.1 + j as f32, hm[j * n + i]];
         for j in (0..CELLS as usize).step_by(step) {
             for i in (0..CELLS as usize).step_by(step) {
@@ -692,8 +698,9 @@ impl Viewer {
         }
         self.gpu.upload(&format!("terrain{cx},{cy}"), m.bytes());
         self.chunk_lod.insert((cx, cy), step);
+        self.place_chunk(cx, cy);
         if !self.gpu.has(&format!("grass{cx},{cy}")) {
-            self.gpu.upload_instances(&format!("grass{cx},{cy}"), bytes(&grass_for(&hm, cx, cy)));
+            self.gpu.upload_instances(&format!("grass{cx},{cy}"), bytes(&grass_for(&hm, cx, cy, self.origin)));
         }
     }
 
@@ -723,6 +730,13 @@ impl Viewer {
         let now = WorldMs(t as u64);
         let tick = WorldMs(now.0.max(self.world.now.0));
         let _ = self.world.tick(tick);
+        // Keep the floating origin within half a kilometre of the camera.
+        let tg = self.ground_cam.unwrap_or(self.focus);
+        let o = ((tg.x as f64 / 1024.0).round() * 1024.0, (tg.y as f64 / 1024.0).round() * 1024.0);
+        if o != self.origin {
+            self.origin = o;
+            self.reorigin();
+        }
         // Only soldiers near the camera are derived; everyone else stays an aggregate.
         let look = self.ground_cam.unwrap_or(self.focus);
         let r = (self.ground_view as f64 * 1.6 * 1000.0) as i64;
@@ -743,8 +757,9 @@ impl Viewer {
         let ts = ((t / 1000.0) % 86_400.0) as f32;
         let mut inst = Vec::with_capacity(n * 12);
         for d in &out {
-            let (x, y) = (d.pos.x as f32 / 1000.0, d.pos.y as f32 / 1000.0);
-            let z = self.height_at(x, y);
+            let (ax, ay) = (d.pos.x as f64 / 1000.0, d.pos.y as f64 / 1000.0);
+            let z = self.height_at(ax as f32, ay as f32);
+            let (x, y) = ((ax - self.origin.0) as f32, (ay - self.origin.1) as f32);
             // Facing: along the march, else the formation's front with a little personal variation.
             let jitter = (scalia_core::hash::mix64(d.slot as u64 ^ 0x5ca1) % 1000) as f32 / 1000.0;
             let heading = match self.world.groups.process(d.group).kind {
@@ -782,8 +797,9 @@ impl Viewer {
         }
         let (mut tanks, mut trucks) = (Vec::new(), Vec::new());
         for v in &vehicles {
-            let (x, y) = (v.pos.x as f32 / 1000.0, v.pos.y as f32 / 1000.0);
-            let z = self.height_at(x, y);
+            let (ax, ay) = (v.pos.x as f64 / 1000.0, v.pos.y as f64 / 1000.0);
+            let z = self.height_at(ax as f32, ay as f32);
+            let (x, y) = ((ax - self.origin.0) as f32, (ay - self.origin.1) as f32);
             let heading = (-(v.facing.0 as f32)).atan2(v.facing.1 as f32);
             let rec = [x, y, z, 0.0, heading, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0];
             if v.kind == UnitType::Tank { tanks.extend_from_slice(&rec) } else { trucks.extend_from_slice(&rec) }
@@ -811,7 +827,7 @@ impl Viewer {
                 let current = self.chunk_lod.get(&key).copied();
                 if current != Some(step) {
                     if budget == 0 && current.is_some() {
-                        meshes.push(format!("terrain{},{}", key.0, key.1));
+                        instanced.push((format!("terrain{},{}", key.0, key.1), format!("ot{},{}", key.0, key.1)));
                         continue; // keep the old mesh until there is time to rebuild it
                     }
                     if budget == 0 {
@@ -820,7 +836,7 @@ impl Viewer {
                     budget -= 1;
                     self.chunk_mesh(key.0, key.1, step);
                 }
-                meshes.push(format!("terrain{},{}", key.0, key.1));
+                instanced.push((format!("terrain{},{}", key.0, key.1), format!("ot{},{}", key.0, key.1)));
             }
         }
         // Grass only close up: within two chunks of the camera and below a 90 m view.
@@ -841,6 +857,7 @@ impl Viewer {
             self.chunk_lod.remove(&k);
             self.gpu.drop_buffer(&format!("grass{},{}", k.0, k.1));
             self.gpu.drop_buffer(&format!("terrain{},{}", k.0, k.1));
+            self.gpu.drop_buffer(&format!("ot{},{}", k.0, k.1));
         }
         }
         if self.ground_view > UNITS_MAX {
@@ -850,7 +867,8 @@ impl Viewer {
             for i in 0..self.world.groups.len() as u32 {
                 let c = self.group_centre(i, tick);
                 let h = self.surface_m(c.x, c.y);
-                m.diamond([c.x, c.y, h + pix * 3.0], pix * 2.0, if self.selected == Some(i) { 14.0 } else { 9.0 });
+                let (rx, ry) = ((c.x as f64 - self.origin.0) as f32, (c.y as f64 - self.origin.1) as f32);
+                m.diamond([rx, ry, h + pix * 3.0], pix * 2.0, if self.selected == Some(i) { 14.0 } else { 9.0 });
             }
             self.gpu.upload("markers", m.bytes());
             meshes.push("markers".into());
@@ -872,8 +890,9 @@ impl Viewer {
             } else {
                 let mut m = MeshBuilder::default();
                 let z = self.height_at(d.x, d.y);
-                m.diamond([d.x, d.y, z + 2.0], 1.2, 9.0);
-                m.cuboid([d.x - 0.1, d.y - 0.1, z], [d.x + 0.1, d.y + 0.1, z + 2.0], 9.0);
+                let (dx, dy) = ((d.x as f64 - self.origin.0) as f32, (d.y as f64 - self.origin.1) as f32);
+                m.diamond([dx, dy, z + 2.0], 1.2, 9.0);
+                m.cuboid([dx - 0.1, dy - 0.1, z], [dx + 0.1, dy + 0.1, z + 2.0], 9.0);
                 self.gpu.upload("order", m.bytes());
                 meshes.push("order".into());
             }
@@ -884,6 +903,7 @@ impl Viewer {
         let sink = smooth_log(self.ground_view, 400_000.0, 2_400_000.0);
         let ground_z = if self.ground_view <= NEAR_MAX { self.height_at(target.x, target.y) } else { self.surface_m(target.x, target.y) };
         target.z = ground_z + (-PLANET_R - ground_z) * sink;
+        let target = Vec3::new((target.x as f64 - self.origin.0) as f32, (target.y as f64 - self.origin.1) as f32, target.z);
         let mode = if self.ground_cam.is_some() { "free camera (F follows)".to_string() } else { format!("following group {lead}") };
         let sel = match self.selected { Some(g) => format!(", group {g} selected"), None => String::new() };
         let total: u64 = (0..self.world.groups.len()).map(|i| self.world.groups.people(scalia_core::groups::GroupId(i as u32)) as u64).sum();
@@ -892,10 +912,41 @@ impl Viewer {
         (target, self.yaw, self.ground_view, range, text)
     }
 
+    /// Instance that places a chunk (built chunk-local) relative to the floating origin.
+    fn place_chunk(&mut self, cx: i64, cy: i64) {
+        let (dx, dy) = ((cx * CELLS as i64) as f64 - self.origin.0, (cy * CELLS as i64) as f64 - self.origin.1);
+        self.gpu.upload_instances(&format!("ot{cx},{cy}"), bytes(&[dx as f32, dy as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
+    }
+
+    /// Instance that places a far tile relative to the floating origin, with a fade (0 solid).
+    fn place_far(&mut self, key: (u32, i64, i64), fade: f32, prefix: &str) {
+        let size = 64.0 * (1u64 << key.0) as f64;
+        let (dx, dy) = (key.1 as f64 * size - self.origin.0, key.2 as f64 * size - self.origin.1);
+        let rec = [dx as f32, dy as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, fade];
+        self.gpu.upload_instances(&format!("{prefix}{},{},{}", key.0, key.1, key.2), bytes(&rec));
+    }
+
+    /// The floating origin moved: re-place every chunk, far tile and grass patch (meshes stay as built).
+    fn reorigin(&mut self) {
+        let chunks: Vec<_> = self.chunk_lod.keys().copied().collect();
+        for (cx, cy) in chunks {
+            self.place_chunk(cx, cy);
+            if self.gpu.has(&format!("grass{cx},{cy}")) {
+                let hm = self.chunk(cx, cy).clone();
+                self.gpu.upload_instances(&format!("grass{cx},{cy}"), bytes(&grass_for(&hm, cx, cy, self.origin)));
+            }
+        }
+        let tiles: Vec<_> = self.far_tiles.iter().copied().collect();
+        for key in tiles {
+            self.place_far(key, 0.0, "of");
+        }
+    }
+
     /// How far the map is bent into a globe at the current zoom: flat below 30 km, a full globe from 1,500 km.
     fn ground_bend(&self) -> Bend {
         let tg = self.ground_cam.unwrap_or(self.focus);
-        Bend { tx: tg.x, ty: tg.y, radius: PLANET_R, t: smooth_log(self.ground_view, 30_000.0, 1_500_000.0) }
+        let (tx, ty) = ((tg.x as f64 - self.origin.0) as f32, (tg.y as f64 - self.origin.1) as f32);
+        Bend { tx, ty, radius: PLANET_R, t: smooth_log(self.ground_view, 30_000.0, 1_500_000.0), lat_y: tg.y }
     }
 
     /// Planet surface height in metres at a ground-scene point (sea level where the ground is under water).
@@ -931,6 +982,7 @@ impl Viewer {
                 let m = far_tile_mesh(&self.planet, key.0, key.1, key.2);
                 self.gpu.upload(&format!("far{},{},{}", key.0, key.1, key.2), m.bytes());
                 self.far_tiles.insert(key);
+                self.place_far(key, 0.0, "of");
             }
         }
         // A new level takes over only when complete, dissolving in over the old one.
@@ -949,22 +1001,20 @@ impl Viewer {
             self.far_fade = None;
         }
         let p = fade.map_or(1.0, |f| f.1);
-        let inst = |w: f32| bytes(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, w]).to_vec();
         // The new level is solid at once; the old one lies over it at half strength and thins out to nothing,
         // a gentle blend rather than a flicker between the two.
-        self.gpu.upload_instances("fade_in", &inst(0.0));
-        self.gpu.upload_instances("fade_out", &inst(0.5 + 0.5 * p));
         let new_tiles = if shown == want { tiles.clone() } else { needed(shown) };
         for key in &new_tiles {
             if self.far_tiles.contains(key) {
-                instanced.push((format!("far{},{},{}", key.0, key.1, key.2), "fade_in".into()));
+                instanced.push((format!("far{},{},{}", key.0, key.1, key.2), format!("of{},{},{}", key.0, key.1, key.2)));
             }
         }
         let mut keep: std::collections::HashSet<_> = new_tiles.iter().copied().chain(tiles).collect();
         if let Some((old, _)) = fade {
             for key in needed(old) {
                 if self.far_tiles.contains(&key) {
-                    instanced.push((format!("far{},{},{}", key.0, key.1, key.2), "fade_out".into()));
+                    self.place_far(key, 0.5 + 0.5 * p, "off");
+                    instanced.push((format!("far{},{},{}", key.0, key.1, key.2), format!("off{},{},{}", key.0, key.1, key.2)));
                 }
                 keep.insert(key);
             }
@@ -974,6 +1024,8 @@ impl Viewer {
         for k in stale {
             self.far_tiles.remove(&k);
             self.gpu.drop_buffer(&format!("far{},{},{}", k.0, k.1, k.2));
+            self.gpu.drop_buffer(&format!("of{},{},{}", k.0, k.1, k.2));
+            self.gpu.drop_buffer(&format!("off{},{},{}", k.0, k.1, k.2));
         }
     }
 
@@ -1200,9 +1252,10 @@ fn far_tile_mesh(planet: &Planet, level: u32, ix: i64, iy: i64) -> MeshBuilder {
         }
     }
     let mut m = MeshBuilder::default();
+    // Tile-local positions: an instance offset places the tile relative to the floating origin.
     let p = |i: usize, j: usize| {
-        let y = (y0 + j as f64 * cell as f64).clamp(-HALF_DEPTH as f64, HALF_DEPTH as f64);
-        [(x0 + i as f64 * cell as f64) as f32, y as f32, h[j * (N + 1) + i].max(0.0)]
+        let y = (y0 + j as f64 * cell as f64).clamp(-HALF_DEPTH as f64, HALF_DEPTH as f64) - y0;
+        [(i as f64 * cell as f64) as f32, y as f32, h[j * (N + 1) + i].max(0.0)]
     };
     for j in 0..N {
         for i in 0..N {
