@@ -33,7 +33,7 @@ export async function startViewer(wasm, ui) {
       const n = CELLS + 1, m = new Mesh(), hm = new Float32Array(h.length);
       for (let i = 0; i < h.length; i++) hm[i] = h[i] / 1000;
       const P = (i, j) => [cx * CELLS + i, cy * CELLS + j, hm[j * n + i]];
-      const col = (z) => 10 + (((Math.floor(z * 2) % 4) + 4) % 4);
+      const col = (z) => 10 + (((Math.floor(z * 8) % 4) + 4) % 4);
       for (let j = 0; j < CELLS; j++) for (let i = 0; i < CELLS; i++) {
         const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
         m.tri(a, b, c, col(a[2])); m.tri(a, c, d, col(a[2]));
@@ -119,7 +119,7 @@ export async function startViewer(wasm, ui) {
       }
       r.upload('soldiers', m.array());
       keys.push('soldiers');
-      cam = { keys, target: [cx, cy, heightAt(cx, cy)], yaw: Math.PI / 4, viewHeight: 50, range: 400 };
+      cam = { keys, target: [cx, cy, heightAt(cx, cy)], yaw: Math.PI / 4, viewHeight: 24, range: 400 };
       text = `${n} soldiers derived from one group, on terrain chunks from the same seed`;
     } else {
       const m = new Mesh();
