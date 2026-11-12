@@ -1,5 +1,22 @@
 # Game direction: PvE war, real logistics, cooperation
 
+## Reform (2026-11-12, evening): the player is a battalion commander
+
+This replaces the "player is the general of a whole army" framing; the premise and the threat below stay.
+
+- **You are one commander** in humanity's imperium, deployed in the field. You command your **battalion**,
+  thousands of troops as one force, with F.E.A.R.-style GOAP AI below you.
+- **Budget: about 1,000 units per player for now.** Every soldier can be a full agent with real AI, at full detail.
+- **You build your battalion:** its composition, its structure and its specialism. Some battalions are diplomatic,
+  some assault, some defence, some balanced.
+- **Forward operating bases:** commanders build them on the front.
+- **A huge multiplayer PvE world:** players together reclaim the universe and make contact with other
+  civilisations. Cooperation at large scale is the point.
+- **Later:** players request resources, assaults and reinforcements from one another.
+- **Light infantry look:** an olive jumpsuit with chest pockets, a dark hood and mask, dark shoulder and elbow pads,
+  one rolled sleeve, a pouch belt, a drop-leg holster and a rear back pouch.
+
+
 Status: direction decided 2026-11-12. Lore and system details are proposals, marked as such.
 
 ## Decisions from the project lead
