@@ -9,7 +9,9 @@ use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_M
 use scalia_core::nav::{NavGrid, Prop, PropKind};
 use scalia_core::nav_agents::AgentGroup;
 use scalia_core::planet::Planet;
+use scalia_core::command::{self as chain_of, Command, Kind, Stance, Step, Task};
 use scalia_core::groups::GroupId;
+use std::collections::BTreeMap;
 use scalia_core::position::{Pos, RegionId};
 use scalia_core::scenario::MARCH_SPEED_MM_S;
 use scalia_core::process::ProcessKind;
@@ -28,6 +30,29 @@ use wasm_bindgen::prelude::*;
 
 /// Army sizes the N key cycles through, as (groups, soldiers per group).
 /// Army sizes (groups, soldiers each). The first is the testing ground's: eight squads of twelve in the base.
+/// Squad call signs, in group order.
+const SQUADS: [&str; 10] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett"];
+/// The testing ground's captains.
+const CAPTAINS: [&str; 2] = ["Reyes", "Okafor"];
+/// A captain's step lasts at least this long (ms), so covering fire and reports have time to happen.
+const STEP_MIN_MS: f64 = 2_500.0;
+
+/// A four-figure-each grid reference (10 m squares) for a point in metres, as the tablet shows it.
+fn grid(x: f64, y: f64) -> String {
+    let g = |m: f64| (((m / 10.0).round() as i64 % 10_000) + 10_000) % 10_000;
+    format!("{:04} {:04}", g(x), g(y))
+}
+
+fn pose_of(s: Stance) -> Pose {
+    match s {
+        Stance::Stand => Pose::Stand,
+        Stance::Crouch => Pose::Crouch,
+        Stance::Cover => Pose::Cover,
+        Stance::CoverAim => Pose::CoverAim,
+        Stance::StandAim => Pose::StandAim,
+    }
+}
+
 const ARMIES: [(u32, u32); 5] = [(8, 12), (1, 2000), (10, 2000), (50, 2000), (250, 2000)];
 /// The testing ground: a military base on a levelled pad, (BASE_LO..BASE_HI) metres on both axes.
 const BASE_LO: f32 = -20.0;
@@ -147,6 +172,12 @@ pub struct Viewer {
     agent_anim: HashMap<u32, (f32, f64)>,
     /// The stance each unit takes once its soldiers reach the ordered place.
     arrive_stance: HashMap<u32, Pose>,
+    /// Who answers to whom: squads to captains, or straight to the commander.
+    chain: Command,
+    /// Each captain's current task, the squads it is waiting on, and when its step began.
+    tasks: BTreeMap<u32, (Task, Vec<u32>, f64)>,
+    /// Radio traffic from the units for the tablet, as JSON objects (taken by `radio_events`).
+    radio_out: Vec<String>,
     cam_smooth: Option<Vec3>,
     yaw_smooth: f32,
     cam_ms: f64,
@@ -273,6 +304,9 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_ms: 0.0,
         agent_anim: HashMap::new(),
         arrive_stance: HashMap::new(),
+        chain: Command::default(),
+        tasks: BTreeMap::new(),
+        radio_out: Vec::new(),
         cam_smooth: None,
         yaw_smooth: 0.0,
         cam_ms: 0.0,
@@ -317,6 +351,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         fps_t: 0.0,
         size,
     };
+    v.add_captains();
     v.gpu.upload("figure", figure().bytes());
     v.gpu.upload("figure_lo", figure_lo().bytes());
     v.gpu.upload("figure_far", figure_far().bytes());
@@ -488,6 +523,7 @@ impl Viewer {
         self.army = (self.army + 1) % ARMIES.len();
         let (g, n) = ARMIES[self.army];
         self.world = build_army(g, n);
+        self.add_captains();
         self.derived.clear();
         self.ground_cam = None;
         self.selected = Some(0);
@@ -497,6 +533,7 @@ impl Viewer {
         self.order_dest = None;
         self.agents.clear();
         self.agent_prev.clear();
+        self.arrive_stance.clear();
         format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
     }
     /// Left click on the ground: selects the group under the cursor (or clears the selection).
@@ -609,7 +646,10 @@ impl Viewer {
             true
         };
         let why = if reach { "" } else { "no way through to there" };
-        let list = [(0, "Move"), (1, "Defend"), (2, "Assault"), (3, "Support")];
+        // A captain takes goals and plans the rest himself; squads take direct orders.
+        let captain = self.chain.is_captain(GroupId(groups[0]));
+        let (reach, why) = if captain && self.chain.squads_of(GroupId(groups[0])).is_empty() { (false, "no squads attached") } else { (reach, why) };
+        let list: &[(u8, &str)] = if captain { &[(10, "Take"), (11, "Hold")] } else { &[(0, "Move"), (1, "Defend"), (2, "Assault"), (3, "Support")] };
         let items: Vec<String> = list.iter().map(|(id, label)| format!("{{\"id\":{id},\"label\":\"{label}\",\"ok\":{reach},\"reason\":\"{why}\"}}")).collect();
         format!("[{}]", items.join(","))
     }
@@ -617,6 +657,11 @@ impl Viewer {
     /// Carries out an order at a map point (after the radio exchange): 0 move, 1 defend, 2 assault, 3 support.
     /// Assaults go at a sprint; on arrival a unit takes the stance that fits the order.
     pub fn issue_at(&mut self, action: u8, x: f64, y: f64, now_ms: f64) -> String {
+        if action >= 10 {
+            let Some(c) = self.selected.filter(|&c| self.chain.is_captain(GroupId(c))) else { return "select a captain first".into() };
+            let kind = if action == 10 { Kind::Take } else { Kind::Hold };
+            return self.assign_task(c, kind, (x, y), now_ms);
+        }
         let run = action == 2;
         let stance = match action {
             1 => Pose::Cover,
@@ -633,10 +678,26 @@ impl Viewer {
 
     /// Names of the selected units (for the radio).
     pub fn selection_name(&self) -> String {
-        let names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett"];
         let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
-        let n: Vec<String> = groups.iter().map(|&g| names.get(g as usize).map_or(format!("Group {g}"), |n| n.to_string())).collect();
+        let n: Vec<String> = groups.iter().map(|&g| self.call_sign(g)).collect();
         n.join(", ")
+    }
+
+    /// Puts a squad under a captain (captain -1: it answers to the commander again).
+    pub fn attach(&mut self, squad: u32, captain: i32) -> String {
+        if captain < 0 {
+            self.chain.detach(GroupId(squad));
+            return format!("{} answers to you", self.unit_name(squad));
+        }
+        match self.chain.attach(GroupId(squad), GroupId(captain as u32)) {
+            Ok(()) => format!("{} attached to {}", self.unit_name(squad), self.unit_name(captain as u32)),
+            Err(e) => format!("{e:?}"),
+        }
+    }
+
+    /// Radio traffic from the units since the last call, as a JSON array of {from, text, urgent}.
+    pub fn radio_events(&mut self) -> String {
+        format!("[{}]", std::mem::take(&mut self.radio_out).join(","))
     }
 
     /// The commander holds the radio to his ear (true) or lets it go.
@@ -656,30 +717,7 @@ impl Viewer {
         let mid = centres.iter().fold(Vec3::ZERO, |a, c| a + *c) / centres.len() as f32;
         let mut moved = 0;
         for (&i, c) in groups.iter().zip(&centres) {
-            let d = p + (*c - mid);
-            let to = Pos { region: RegionId(1), x: (d.x as f64 * 1000.0) as i64, y: (d.y as f64 * 1000.0) as i64, z: 0 };
-            // Inside the testing ground the soldiers walk as agents round the obstacles.
-            if in_base(d.x, d.y) {
-                let starts: Vec<(i64, i64)> = match self.agents.get(&i) {
-                    Some(a) => a.positions().to_vec(),
-                    None => {
-                        let mut mine: Vec<&Derived> = self.derived.iter().filter(|s| s.group.0 == i).collect();
-                        mine.sort_by_key(|s| s.slot);
-                        mine.iter().map(|s| (s.pos.x, s.pos.y)).collect()
-                    }
-                };
-                if !starts.is_empty() && starts.iter().all(|s| in_base(s.0 as f32 / 1000.0, s.1 as f32 / 1000.0)) {
-                    if let Some(a) = AgentGroup::new(&self.base_grid, starts, (to.x, to.y), speed as i64, 300) {
-                        self.agent_prev.insert(i, a.positions().to_vec());
-                        self.agents.insert(i, a);
-                        moved += 1;
-                    }
-                    // Inside the base soldiers only ever walk as agents: never a straight line through walls.
-                    continue;
-                }
-            }
-            if self.world.order_march(GroupId(i), to, speed, now).is_ok() {
-                self.agents.remove(&i);
+            if self.move_group(i, p + (*c - mid), speed, now) {
                 moved += 1;
             }
         }
@@ -735,10 +773,15 @@ impl Viewer {
     }
     /// The units under command, as JSON: [{id, name, soldiers, status, stance, selected}].
     pub fn roster(&self) -> String {
-        let names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett"];
         let mut out = Vec::new();
         for i in 0..self.world.groups.len() as u32 {
-            let name = match names.get(i as usize) { Some(n) => format!("{n} squad"), None => format!("Group {i}") };
+            let name = self.unit_name(i);
+            let captain = self.chain.is_captain(GroupId(i));
+            let boss = self.chain.superior(GroupId(i)).map_or(-1, |c| c.0 as i64);
+            let task = match self.tasks.get(&i) {
+                Some((t, _, _)) => format!("{:?} grid {}: {}", t.kind, grid(t.objective.0 as f64 / 1000.0, t.objective.1 as f64 / 1000.0), t.current().map_or("done".into(), |s| format!("{s:?}"))),
+                None => String::new(),
+            };
             let soldiers = self.world.groups.people(GroupId(i));
             let status = match self.agents.get(&i) {
                 Some(a) if !a.all_arrived() => "moving",
@@ -746,7 +789,10 @@ impl Viewer {
                 _ => "holding",
             };
             let stance = format!("{:?}", self.stance.get(&i).copied().unwrap_or(Pose::Stand)).to_lowercase();
-            out.push(format!("{{\"id\":{i},\"name\":\"{name}\",\"soldiers\":{soldiers},\"status\":\"{status}\",\"stance\":\"{stance}\",\"selected\":{}}}", self.selection.contains(&i)));
+            out.push(format!(
+                "{{\"id\":{i},\"name\":\"{name}\",\"captain\":{captain},\"boss\":{boss},\"task\":\"{task}\",\"soldiers\":{soldiers},\"status\":\"{status}\",\"stance\":\"{stance}\",\"selected\":{}}}",
+                self.selection.contains(&i)
+            ));
         }
         format!("[{}]", out.join(","))
     }
@@ -961,6 +1007,187 @@ impl Viewer {
     }
 
     /// Where a group's formation is centred at time t (render metres).
+    /// The testing ground's captains: two officers, each his own unit, answering to the commander.
+    fn add_captains(&mut self) {
+        self.chain = Command::default();
+        self.tasks.clear();
+        if self.world.groups.len() > 20 || self.world.groups.is_empty() {
+            return;
+        }
+        for k in 0..CAPTAINS.len() as i64 {
+            let pos = Pos { region: RegionId(1), x: 52_000 + k * 28_000, y: 30_000, z: 0 };
+            let spec = GroupSpec { pos, composition: Composition([1, 0, 0, 0]), needs: Needs::full() };
+            let id = self.world.groups.spawn(spec, &mut self.world.roster);
+            self.chain.add_captain(id);
+        }
+    }
+
+    /// The unit's name on the roster.
+    fn unit_name(&self, g: u32) -> String {
+        let caps = self.chain.captains();
+        if let Some(k) = caps.iter().position(|c| c.0 == g) {
+            return format!("Capt. {}", CAPTAINS[k % CAPTAINS.len()]);
+        }
+        match SQUADS.get(g as usize) { Some(n) => format!("{n} squad"), None => format!("Group {g}") }
+    }
+
+    /// The unit's call sign on the radio.
+    fn call_sign(&self, g: u32) -> String {
+        let caps = self.chain.captains();
+        if let Some(k) = caps.iter().position(|c| c.0 == g) {
+            return CAPTAINS[k % CAPTAINS.len()].to_string();
+        }
+        SQUADS.get(g as usize).map_or(format!("Group {g}"), |n| n.to_string())
+    }
+
+    fn radio(&mut self, from: u32, text: String, urgent: bool) {
+        let from = self.call_sign(from);
+        self.radio_out.push(format!("{{\"from\":\"{from}\",\"text\":\"{}\",\"urgent\":{urgent}}}", text.replace('"', "'")));
+    }
+
+    /// Sends one group to a point (metres), as agents inside the testing ground, marching outside it.
+    fn move_group(&mut self, i: u32, d: Vec3, speed: u32, now: WorldMs) -> bool {
+        let to = Pos { region: RegionId(1), x: (d.x as f64 * 1000.0) as i64, y: (d.y as f64 * 1000.0) as i64, z: 0 };
+        // Inside the testing ground the soldiers walk as agents round the obstacles.
+        if in_base(d.x, d.y) {
+            let starts: Vec<(i64, i64)> = match self.agents.get(&i) {
+                Some(a) => a.positions().to_vec(),
+                None => {
+                    let mut mine: Vec<&Derived> = self.derived.iter().filter(|s| s.group.0 == i).collect();
+                    mine.sort_by_key(|s| s.slot);
+                    let v: Vec<(i64, i64)> = mine.iter().map(|s| (s.pos.x, s.pos.y)).collect();
+                    if v.is_empty() {
+                        let p = self.world.groups.pos(GroupId(i));
+                        vec![(p.x, p.y)]
+                    } else {
+                        v
+                    }
+                }
+            };
+            if starts.iter().all(|s| in_base(s.0 as f32 / 1000.0, s.1 as f32 / 1000.0)) {
+                if let Some(a) = AgentGroup::new(&self.base_grid, starts, (to.x, to.y), speed as i64, 300) {
+                    self.agent_prev.insert(i, a.positions().to_vec());
+                    self.agents.insert(i, a);
+                    return true;
+                }
+                // Inside the base soldiers only ever walk as agents: never a straight line through walls.
+                return false;
+            }
+        }
+        if self.world.order_march(GroupId(i), to, speed, now).is_ok() {
+            self.agents.remove(&i);
+            return true;
+        }
+        false
+    }
+
+    /// Where a group is now (mm).
+    fn group_mm(&self, g: u32) -> (i64, i64) {
+        match self.agents.get(&g) {
+            Some(a) => a.centre(),
+            None => {
+                let c = self.group_centre(g, self.world.now);
+                ((c.x as f64 * 1000.0) as i64, (c.y as f64 * 1000.0) as i64)
+            }
+        }
+    }
+
+    /// Hands a captain a goal: he plans it (GOAP), acknowledges, and starts the first step.
+    fn assign_task(&mut self, c: u32, kind: Kind, at: (f64, f64), now_ms: f64) -> String {
+        let squads = self.chain.squads_of(GroupId(c));
+        if squads.is_empty() {
+            return "that captain has no squads attached".into();
+        }
+        let objective = ((at.0 * 1000.0) as i64, (at.1 * 1000.0) as i64);
+        // No enemy forces exist yet, so the radar shows none.
+        let Some(task) = Task::new(kind, objective, false) else { return "the captain sees no way to do that".into() };
+        let plan: Vec<String> = task.plan.iter().map(|s| format!("{s:?}")).collect();
+        self.tasks.insert(c, (task, Vec::new(), now_ms));
+        self.start_step(c, now_ms);
+        format!("{} plans: {}", self.unit_name(c), plan.join(" > "))
+    }
+
+    /// Gives the captain's squads their orders for the current step, and moves the captain to his post behind them.
+    fn start_step(&mut self, c: u32, now_ms: f64) {
+        let Some((task, _, _)) = self.tasks.get(&c).cloned() else { return };
+        let Some(step) = task.current() else { return };
+        let squads: Vec<(GroupId, (i64, i64))> = self.chain.squads_of(GroupId(c)).into_iter().map(|g| (g, self.group_mm(g.0))).collect();
+        let orders = chain_of::step_orders(step, task.objective, &squads);
+        let now = self.world.now;
+        let mut waiting = Vec::new();
+        let mut targets = Vec::new();
+        for o in &orders {
+            targets.push(o.to);
+            let here = self.group_mm(o.squad.0);
+            let pose = pose_of(o.stance);
+            if (o.to.0 - here.0).abs() + (o.to.1 - here.1).abs() > 2_000 {
+                let speed = if o.run { RUN_SPEED_MM_S } else { MARCH_SPEED_MM_S };
+                let d = Vec3::new(o.to.0 as f32 / 1000.0, o.to.1 as f32 / 1000.0, 0.0);
+                if self.move_group(o.squad.0, d, speed, now) {
+                    self.arrive_stance.insert(o.squad.0, pose);
+                    waiting.push(o.squad.0);
+                    continue;
+                }
+            }
+            self.stance.insert(o.squad.0, pose);
+        }
+        // Squads that did not move (support, dig in) keep their place; the captain watches from behind.
+        let post = chain_of::captain_post(task.objective, &targets);
+        let here = self.group_mm(c);
+        if (post.0 - here.0).abs() + (post.1 - here.1).abs() > 3_000 && self.move_group(c, Vec3::new(post.0 as f32 / 1000.0, post.1 as f32 / 1000.0, 0.0), MARCH_SPEED_MM_S, now) {
+            self.arrive_stance.insert(c, Pose::Crouch);
+        }
+        let names: Vec<String> = self.chain.squads_of(GroupId(c)).iter().map(|g| self.call_sign(g.0)).collect();
+        let g = grid(task.objective.0 as f64 / 1000.0, task.objective.1 as f64 / 1000.0);
+        let support = names.first().cloned().unwrap_or_default();
+        let report = match (step, task.at) {
+            (Step::Approach, 0) | (Step::Occupy, 0) => None, // the acknowledgement covers it
+            (Step::Advance, _) => Some((format!("Actual, {{me}}. At the line of departure, no contact. Advancing on grid {g}. Out."), false)),
+            (Step::Suppress, _) => Some((format!("Actual, {{me}}. Contact at grid {g}. {support} laying down fire, assault going in. Out."), true)),
+            (Step::Assault, _) => Some(("Assaulting now!".to_string(), true)),
+            (Step::DigIn, _) => Some((format!("Actual, {{me}}. On the objective. Digging in at grid {g}. Out."), false)),
+            _ => None,
+        };
+        if let Some((text, urgent)) = report {
+            let me = self.call_sign(c);
+            self.radio(c, text.replace("{me}", &me), urgent);
+        }
+        if let Some(entry) = self.tasks.get_mut(&c) {
+            entry.1 = waiting;
+            entry.2 = now_ms;
+        }
+    }
+
+    /// Each captain checks on his squads: once they are all where the step sent them (and a moment has passed),
+    /// the step is done and the next begins; at the end he reports to the commander.
+    fn run_captains(&mut self, now_ms: f64) {
+        let caps: Vec<u32> = self.tasks.keys().copied().collect();
+        for c in caps {
+            let (ready, done_after) = {
+                let (task, waiting, since) = &self.tasks[&c];
+                let arrived = waiting.iter().all(|g| self.agents.get(g).is_none_or(|a| a.all_arrived()) && !self.world.groups.process(GroupId(*g)).is_running_at(self.world.now));
+                (arrived && now_ms - since >= STEP_MIN_MS, task.at + 1 >= task.plan.len())
+            };
+            if !ready {
+                continue;
+            }
+            let entry = self.tasks.get_mut(&c).expect("present");
+            entry.0.advance();
+            if done_after {
+                let (task, _, _) = self.tasks.remove(&c).expect("present");
+                let g = grid(task.objective.0 as f64 / 1000.0, task.objective.1 as f64 / 1000.0);
+                let me = self.call_sign(c);
+                let text = match task.kind {
+                    Kind::Take => format!("Actual, {me}. Grid {g} taken, no casualties. Squads holding. Over."),
+                    Kind::Hold => format!("Actual, {me}. In position, holding grid {g}. Out."),
+                };
+                self.radio(c, text, false);
+            } else {
+                self.start_step(c, now_ms);
+            }
+        }
+    }
+
     fn group_centre(&self, g: u32, t: WorldMs) -> Vec3 {
         if let Some(a) = self.agents.get(&g) {
             let p = a.positions();
@@ -1179,7 +1406,7 @@ impl Viewer {
             } else {
                 (self.stance.get(&d.group.0).copied().unwrap_or(Pose::Stand), 0.0)
             };
-            let body = if self.selection.contains(&d.group.0) { 14.0 } else if walking { 7.0 } else { 6.0 };
+            let body = if self.selection.contains(&d.group.0) { 14.0 } else if self.chain.is_captain(d.group) { 4.0 } else if walking { 7.0 } else { 6.0 };
             // Pose changes are tracked per group and ripple through it: each soldier starts up to 0.4 s late.
             let entry = self.group_pose.entry(d.group.0).or_insert((pose, pose, -1000.0));
             if entry.0 != pose {
@@ -1385,6 +1612,7 @@ impl Viewer {
                 self.world.groups.set_pos(GroupId(g), Pos { region: RegionId(1), x: cx, y: cy, z: 0 });
             }
         }
+        self.run_captains(t);
     }
 
     /// Instances for every agent soldier, posed like the derived ones.
@@ -1426,7 +1654,7 @@ impl Viewer {
                 if !self.on_screen(rx, ry, z, 3.0) {
                     continue;
                 }
-                let body = if self.selection.contains(&g) { 14.0 } else if moving { 7.0 } else { 6.0 };
+                let body = if self.selection.contains(&g) { 14.0 } else if self.chain.is_captain(GroupId(g)) { 4.0 } else if moving { 7.0 } else { 6.0 };
                 let entry = self.group_pose.entry(1_000_000 + key).or_insert((pose, pose, -1000.0));
                 if entry.0 != pose {
                     *entry = (pose, entry.0, ts);

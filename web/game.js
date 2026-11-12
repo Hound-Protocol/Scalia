@@ -266,7 +266,7 @@ try {
   };
   // The walkie-talkie: comes up on screen, the commander speaks the order, waits for the unit, then it moves.
   const radio = $('radio');
-  const VERB = { 0: ['move to', 'moving'], 1: ['defend', 'defending'], 2: ['assault', 'assaulting'], 3: ['support at', 'supporting'] };
+  const VERB = { 0: ['move to', 'moving'], 1: ['defend', 'defending'], 2: ['assault', 'assaulting'], 3: ['support at', 'supporting'], 10: ['take', 'taking'], 11: ['hold', 'holding'] };
   const say = (text, pitch, rate) => new Promise((done) => {
     if (!('speechSynthesis' in window)) { setTimeout(done, 400 + text.length * 45); return; }
     const u = new SpeechSynthesisUtterance(text); u.pitch = pitch; u.rate = rate;
@@ -276,7 +276,11 @@ try {
     u.onend = end; u.onerror = end; setTimeout(end, 1500 + text.length * 90);
     speechSynthesis.speak(u);
   });
-  const line = (who, text) => { const d = document.createElement('div'); d.className = who; d.innerHTML = `<b>${who === 'cmd' ? 'Commander' : who === 'unit' ? 'Unit' : ''}</b> ${text}`; $('radioLog').appendChild(d); d.scrollIntoView({ block: 'end' }); };
+  const line = (who, name, text) => {
+    const d = document.createElement('div'); d.className = who; d.innerHTML = `<b>${name}</b> ${text}`;
+    const log = $('radioLog'); log.appendChild(d); while (log.children.length > 4) log.firstChild.remove();
+  };
+
   // The talkie button: a click as the button is pressed and another as it is let go.
   const keyClick = new Audio('./sfx/radio-key.mp3'); keyClick.preload = 'auto';
   const click = () => new Promise((done) => {
@@ -284,37 +288,76 @@ try {
     a.onended = done; a.onerror = done; setTimeout(done, 450);
     a.play().catch(done);
   });
+  // One net, one speaker at a time: the commander's orders and the units' own calls queue up; urgent calls go first.
   let onAir = false;
-  const radioOrder = async (id, label, x, y, grid) => {
-    if (onAir) { flash('radio busy, wait for the answer'); return; }
+  const net = [];
+  const voiceOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return { pitch: 0.6 + (h % 50) / 100, rate: 1.0 + (h % 7) / 40 }; };
+  const keyUp = async () => { radio.classList.add('up'); await new Promise((r) => setTimeout(r, 450)); };
+  const transmit = async (cls, who, name, text, voice) => {
+    await click(); radio.classList.add(cls); line(who, name, text);
+    await say(text.replace(/(\d)/g, '$1 '), voice.pitch, voice.rate);
+    await click(); radio.classList.remove(cls);
+  };
+  const pump = async () => {
+    if (onAir || !net.length) return;
     onAir = true;
+    const job = net.shift();
+    try { await job(); } finally {
+      onAir = false;
+      if (net.length) pump(); else setTimeout(() => { if (!onAir && !net.length) radio.classList.remove('up'); }, 1500);
+    }
+  };
+  // Calls from the units (captains' reports): the commander listens without stopping.
+  const hear = (ev) => {
+    const job = async () => {
+      if (!radio.classList.contains('up')) { $('radioLog').innerHTML = ''; await keyUp(); }
+      await transmit('rx', 'unit', ev.from, ev.text, voiceOf(ev.from));
+    };
+    if (ev.urgent) net.unshift(job); else net.push(job);
+    pump();
+  };
+  setInterval(() => { try { for (const ev of JSON.parse(v.radio_events())) hear(ev); } catch (e) { /* viewer busy */ } }, 400);
+  // The roster keeps up with the units' status while it is open (not while a picker is in use).
+  setInterval(() => { if (tabletUp && page === 'roster' && !(document.activeElement && document.activeElement.tagName === 'SELECT')) drawRoster(); }, 1000);
+  const radioOrder = (id, label, x, y, grid) => {
     const who = v.selection_name(), first = who.split(',')[0];
     const [verb, ing] = VERB[id] || VERB[0];
     const how = manner === 1 ? ', aggressive' : ', calm';
-    $('radioLog').innerHTML = '';
-    radio.classList.add('up'); v.set_radio(true);
-    await new Promise((r) => setTimeout(r, 450)); // the radio comes up to the ear
-    const order = `${who}, ${verb} grid ${grid}${id === 0 ? '' : how}. Over.`;
-    radio.classList.add('tx'); await click(); line('cmd', order);
-    await say(order.replace(/(\d)/g, '$1 '), 1.0, 1.05);
-    await click(); radio.classList.remove('tx');
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 700)); // the unit keys up
-    const reply = `${first} copies, ${ing} grid ${grid}. Out.`;
-    await click(); radio.classList.add('rx'); line('unit', reply);
-    await say(reply.replace(/(\d)/g, '$1 '), 0.7, 1.1);
-    await click(); radio.classList.remove('rx');
-    const msg = v.issue_at(id, x, y, performance.now()); if (msg) flash(msg);
-    await new Promise((r) => setTimeout(r, 600));
-    v.set_radio(false); radio.classList.remove('up'); onAir = false;
+    if (onAir) flash('net busy: your order goes out next');
+    net.push(async () => {
+      $('radioLog').innerHTML = '';
+      v.set_radio(true); await keyUp();
+      const order = `${who}, ${verb} grid ${grid}${id === 0 ? '' : how}. Over.`;
+      await transmit('tx', 'cmd', 'Commander', order, { pitch: 1.0, rate: 1.05 });
+      await new Promise((r) => setTimeout(r, 500 + Math.random() * 700)); // the unit keys up
+      const reply = `${first} copies, ${ing} grid ${grid}. Out.`;
+      await transmit('rx', 'unit', first, reply, voiceOf(first));
+      const msg = v.issue_at(id, x, y, performance.now()); if (msg) flash(msg);
+      if (page === 'roster') drawRoster();
+      await new Promise((r) => setTimeout(r, 400));
+      v.set_radio(false);
+    });
+    pump();
   };
   mapCanvas.addEventListener('wheel', (e) => { e.preventDefault(); onMap(() => v.wheel(Math.sign(e.deltaY))); }, { passive: false });
 
   const drawRoster = () => {
     const units = JSON.parse(v.roster());
-    $('roster').innerHTML = `<h3>Battalion roster</h3><table><tr><th>Unit</th><th>Soldiers</th><th>Status</th><th>Stance</th></tr>${
-      units.map((u) => `<tr class="unit${u.selected ? ' sel' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${u.soldiers}</td><td>${u.status}</td><td>${u.stance}</td></tr>`).join('')
-    }</table><p style="color:#7f8b98">Click a unit to select it on the map.</p>`;
-    for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', () => { onMap(() => v.select_unit(Number(r.dataset.id))); setPage('map'); });
+    const captains = units.filter((u) => u.captain);
+    const boss = (u) => u.captain ? '<span class="rank">Captain</span>' :
+      `<select class="boss" data-id="${u.id}"><option value="-1"${u.boss < 0 ? ' selected' : ''}>You</option>${
+        captains.map((c) => `<option value="${c.id}"${u.boss === c.id ? ' selected' : ''}>${c.name}</option>`).join('')}</select>`;
+    const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td>${u.soldiers}</td><td>${u.task || u.status}</td><td>${u.stance}</td></tr>`;
+    $('roster').innerHTML = `<h3>Battalion roster</h3><table><tr><th>Unit</th><th>Answers to</th><th>Soldiers</th><th>Status</th><th>Stance</th></tr>${
+      captains.map(row).join('')}${units.filter((u) => !u.captain).map(row).join('')
+    }</table><p style="color:#7f8b98">Click a unit to select it on the map. Attach squads to a captain and give him a goal: he plans the rest and leads them.</p>`;
+    for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', (e) => {
+      if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
+      onMap(() => v.select_unit(Number(r.dataset.id))); setPage('map');
+    });
+    for (const sel of $('roster').querySelectorAll('select.boss')) sel.addEventListener('change', () => {
+      flash(v.attach(Number(sel.dataset.id), Number(sel.value))); drawRoster();
+    });
   };
   for (const b of tablet.querySelectorAll('[data-page]')) b.addEventListener('click', () => setPage(b.dataset.page));
   $('tabletClose').addEventListener('click', () => setTablet(false));
