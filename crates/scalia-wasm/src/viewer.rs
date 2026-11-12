@@ -586,7 +586,8 @@ impl Viewer {
             Scene::System if self.sys_follow == Some(HOME_BODY) && self.sys_scale < 50.0 => (sky(tod), false),
             Scene::System => (sky(0.5), false),
             Scene::Ground => (sky(tod), self.ground_view < 40_000.0),
-            Scene::Ships => (sky(tod), true),
+            // The model viewer always shows late-morning light, whatever the time of day outside.
+            Scene::Ships => (sky(0.42), true),
         };
         let bend = if self.scene == Scene::Ground { self.ground_bend() } else { Bend::FLAT };
         // Outlines on terrain cells only a few pixels wide turn into shimmering stripes: off for far views.
@@ -1272,9 +1273,14 @@ fn far_colour(planet: &Planet, mean_m: f32, y_planet_mm: i64, cell_m: f32) -> f3
         15.0
     } else if mean_m < 0.0 {
         6.0
-    } else if cell_m < 256.0 {
-        // The same contour bands as the close-up chunks.
+    } else if cell_m < 16.0 {
+        // The same contour bands as the close-up chunks (4 m and finer), so the hand-over at 160 m is seamless.
         10.0 + (mean_m * 8.0 / cell_m).floor().rem_euclid(4.0)
+    } else if mean_m < 150.0 {
+        // Broad height zones further out: bands every few metres turned into stripes on every slope.
+        10.0
+    } else if mean_m < 450.0 {
+        11.0
     } else if mean_m < 1200.0 {
         11.0
     } else if mean_m < 2500.0 {
