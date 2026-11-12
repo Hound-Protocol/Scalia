@@ -220,6 +220,54 @@ try {
     $('pdaClock').textContent = [s / 3600, (s / 60) % 60, s % 60].map((x) => String(Math.floor(x)).padStart(2, '0')).join(':');
   };
   $('pdaClock').title = 'Mission time';
+  // Each time it comes up the tablet boots: about a second of Linux kernel and systemd lines, a login, then the
+  // command UI starts. Timestamps and a few figures differ every time.
+  const term = $('pdaTerm');
+  let bootRun = 0;
+  const bootTerminal = () => {
+    const run = ++bootRun;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+    const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const ts = (sec) => `<span class="ts">[${sec.toFixed(6).padStart(12)}]</span> `;
+    const ok = (t) => `[<span class="ok">  OK  </span>] ${esc(t)}`;
+    const r = (a, b) => a + Math.random() * (b - a);
+    const mem = 3900000 + Math.floor(r(0, 90000));
+    const lines = [
+      ts(0) + 'Linux version 6.8.12-scalia-rt (build@fob-forge) (gcc 13.2.0) #1 SMP PREEMPT_RT',
+      ts(r(0.001, 0.003)) + 'Machine model: Hound Protocol CMD-7 rugged field tablet',
+      ts(r(0.01, 0.02)) + `Memory: ${mem}K/4194304K available`,
+      ts(r(0.2, 0.3)) + 'mmcblk0: p1 p2 p3',
+      ts(r(0.5, 0.6)) + 'EXT4-fs (mmcblk0p2): mounted filesystem, read-only',
+      ts(r(0.9, 1.1)) + 'radio-mesh: battalion net transceiver on wlan1, 16 channels',
+      ts(r(1.2, 1.4)) + 'gps0: fix acquired, 9 satellites',
+      ok('Started Journal Service.'),
+      ok('Mounted /var/field.'),
+      ok('Started Battalion net (radio-mesh.service).'),
+      ok('Started Position service (gpsd.service).'),
+      ok('Reached target Graphical Interface.'),
+      '',
+      `<span class="hi">CMD-OS 4.2 LTS</span>  (GNU/Linux 6.8.12-scalia-rt aarch64)`,
+      `<span class="pr">${esc(ident.cmdr.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'commander')}@cmd7:~$</span> `,
+    ];
+    term.className = 'term on';
+    term.innerHTML = '';
+    return new Promise((done) => {
+      const t0 = performance.now();
+      const tick = (t) => {
+        if (run !== bootRun || !tabletShown) { term.className = 'term'; done(); return; }
+        const k = (t - t0) / 1000;
+        // Lines arrive over 0.7 s (the kernel's in a rush, systemd a touch slower); the command is typed after.
+        const n = Math.min(lines.length, Math.floor(lines.length * Math.min(k / 0.7, 1) ** 0.8) + 1);
+        const cmd = 'startx cmdui'.slice(0, Math.max(0, Math.floor((k - 0.72) / 0.016)));
+        term.innerHTML = lines.slice(0, n).join('\n') + (n === lines.length ? esc(cmd) : '') + '<span class="cur"></span>';
+        if (k < 1.0) { requestAnimationFrame(tick); return; }
+        term.className = 'term off';
+        setTimeout(() => { if (run === bootRun) term.className = 'term'; }, 170);
+        done();
+      };
+      requestAnimationFrame(tick);
+    });
+  };
   // Radio traffic heard and sent, newest first, for the home page.
   const traffic = [];
   const pdaStatus = () => { $('pdaStatus').textContent = PAGE_NAME[page] || ''; };
@@ -298,7 +346,8 @@ try {
       document.body.classList.add('pda');
       tablet.classList.add('up');
       const disp = tablet.querySelector('.display');
-      disp.classList.remove('boot'); void disp.offsetWidth; disp.classList.add('boot');
+      disp.classList.remove('boot');
+      bootTerminal().then(() => { if (tabletShown) { void disp.offsetWidth; disp.classList.add('boot'); } });
       showSoldiers(soldierCount()); showClock();
       setPage(page);
       setTimeout(() => { if (tabletShown && page === 'map') sizeMap(); }, 450);
@@ -349,6 +398,7 @@ try {
   // map stretches and clicks and zooms land in the wrong place.
   new ResizeObserver(() => { if (tabletUp && page === 'map') sizeMap(); }).observe(mapCanvas);
   const onMap = (fn) => { v.use_map(true); try { return fn(); } finally { v.use_map(false); } };
+  $('mapHome').addEventListener('click', () => v.map_center_commander());
   let mDrag = null, mMoved = 0, mBox = null;
   mapCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
   mapCanvas.addEventListener('pointerdown', (e) => {
@@ -617,6 +667,7 @@ try {
     else if (k === '3') setScene('planet');
     else if (k === '4') setScene('system');
     else if (k === ' ') { e.preventDefault(); v.launch(performance.now()); }
+    else if (k === 'c' && tabletUp && page === 'map') { v.map_center_commander(); pdaTap(); }
     else if (k === 'f') v.follow();
     else if (k === 'h') toggleHelp();
     else if (k === 'o') { outline.checked = !outline.checked; v.set_outline(outline.checked); }

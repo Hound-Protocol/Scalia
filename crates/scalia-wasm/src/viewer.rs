@@ -856,6 +856,16 @@ impl Viewer {
         }
         format!("[{}]", out.join(","))
     }
+    /// The tablet map glides back over the commander at the zoom it opens at (from wherever it was, the planet or
+    /// the star system included).
+    pub fn map_center_commander(&mut self) {
+        let was = self.map_active;
+        self.use_map(true);
+        self.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
+        self.sys_follow = Some(HOME_BODY);
+        self.zoom_step = 6;
+        self.use_map(was);
+    }
     /// Selects one unit (from the roster) and centres the tablet's map on it.
     pub fn select_unit(&mut self, id: u32) {
         if id < self.world.groups.len() as u32 {

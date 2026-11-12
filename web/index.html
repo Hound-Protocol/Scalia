@@ -180,7 +180,7 @@
     linear-gradient(var(--k), var(--k)) bottom right / var(--s) 1px no-repeat, linear-gradient(var(--k), var(--k)) bottom right / 1px var(--s) no-repeat; }
 
   /* The header: battalion, commander and strength, centred; the open page on the left, clock and signal right. */
-  #tablet .pda-head { position: absolute; left: 0; right: 0; top: 0; height: 54px; display: grid; grid-template-columns: 1fr auto 1fr;
+  #tablet .pda-head { position: absolute; left: 0; right: 0; top: 0; height: 58px; display: grid; grid-template-columns: 1fr auto 1fr;
     align-items: center; padding: 0 16px; z-index: 2; pointer-events: auto;
     background: linear-gradient(180deg, rgba(205,191,148,0.07), transparent); border-bottom: 1px solid var(--line); }
   #tablet .pda-head::after { content: ''; position: absolute; left: 50%; bottom: -1px; width: 220px; height: 1px; transform: translateX(-50%);
@@ -188,9 +188,9 @@
   #tablet .ph-page { justify-self: start; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 14px; letter-spacing: 0.06em; }
   #tablet .ph-page::before { content: ''; width: 6px; height: 6px; background: var(--amber); transform: rotate(45deg); }
   #tablet .ph-id { text-align: center; line-height: 1; }
-  #tablet .ph-batt { font: 400 23px/1 'Saira Stencil One', 'Saira Condensed', sans-serif; letter-spacing: 0.08em; color: #e3d6aa;
+  #tablet .ph-batt { font: 400 26px/1 'Saira Stencil One', 'Saira Condensed', sans-serif; letter-spacing: 0.08em; color: #e3d6aa;
     text-shadow: 0 0 14px rgba(224,165,38,0.18); white-space: nowrap; }
-  #tablet .ph-meta { margin-top: 5px; display: flex; justify-content: center; align-items: center; gap: 12px; font-size: 12.5px; color: var(--dim); letter-spacing: 0.06em; }
+  #tablet .ph-meta { margin-top: 5px; display: flex; justify-content: center; align-items: center; gap: 12px; font-size: 13.5px; color: var(--dim); letter-spacing: 0.06em; }
   #tablet .ph-meta b { color: var(--sand); font-weight: 700; font-variant-numeric: tabular-nums; }
   #tablet .ph-cmdr { display: inline-flex; align-items: center; gap: 6px; color: var(--sand); }
   #tablet .band { width: 4px; height: 11px; background: var(--red); box-shadow: 0 0 6px rgba(194,59,43,0.6); }
@@ -201,17 +201,23 @@
   #tablet .sig i:nth-child(1) { height: 4px; } #tablet .sig i:nth-child(2) { height: 7px; } #tablet .sig i:nth-child(3) { height: 10px; }
   #tablet .sig i:nth-child(4) { height: 12px; opacity: 0.25; }
 
-  #tablet .screen { position: absolute; left: 0; right: 0; top: 55px; bottom: 0; overflow: hidden; }
+  #tablet .screen { position: absolute; left: 0; right: 0; top: 59px; bottom: 0; overflow: hidden; }
   #tablet .screen.map { pointer-events: auto; background: #070906; }
   #tablet .screen.page { pointer-events: auto; padding: 18px 22px; overflow: hidden auto; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--drab) transparent; }
   #tablet .screen.enter { animation: pda-wipe 0.26s cubic-bezier(.2,.7,.2,1); }
   @keyframes pda-wipe { from { clip-path: inset(0 0 0 100%); filter: brightness(1.6); } to { clip-path: inset(0); filter: none; } }
-  #tablet .hint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); white-space: nowrap; color: var(--dim);
+  #tablet .hint { position: absolute; right: 10px; bottom: 10px; white-space: nowrap; color: var(--dim);
     background: rgba(16,20,13,0.82); padding: 4px 12px; font-size: 12.5px; letter-spacing: 0.04em; border: 1px solid var(--line); }
+  #tablet .map-home { position: absolute; left: 10px; bottom: 10px; z-index: 2; display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(16,20,13,0.88); color: var(--sand); border: 1px solid var(--drab); padding: 6px 12px; font-size: 13.5px;
+    font-weight: 700; letter-spacing: 0.04em; cursor: pointer; transition: border-color 0.12s, color 0.12s; }
+  #tablet .map-home:hover { border-color: var(--amber); color: #f0e2b4; }
+  #tablet .map-home:active { background: rgba(224,165,38,0.18); }
   #tablet h3 { margin: 0 0 12px; font: 700 13px/1 'Saira Condensed', sans-serif; letter-spacing: 0.16em; color: var(--dim); }
   #tablet .note { color: var(--dim); font-size: 13px; }
 
   /* Home: four readouts, then the chain of command and the radio traffic side by side. */
+  #home:not([hidden]) { display: flex; flex-direction: column; }
   #home .readouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
   #home .ro { padding: 10px 14px 12px; }
   #home .ro .k { color: var(--dim); font-size: 12.5px; letter-spacing: 0.1em; }
@@ -220,8 +226,8 @@
   #home .ro .s { color: var(--dim); font-size: 12px; }
   #home .ro .bar { height: 3px; margin-top: 7px; background: var(--line); }
   #home .ro .bar i { display: block; height: 100%; background: var(--amber); }
-  #home .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  #home .col { padding: 12px 14px; min-height: 120px; }
+  #home .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; flex: 1; min-height: 0; }
+  #home .col { padding: 12px 14px; min-height: 120px; overflow: hidden; }
   #home .cap { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
   #home .cap:last-child { border-bottom: 0; }
   #home .cap .n { color: var(--amber); font-weight: 700; }
@@ -273,16 +279,26 @@
   /* Power-on, each time the tablet comes up: a scan bar sweeps the glass, the header settles, the page follows. */
   #tablet .scan { position: absolute; left: 0; right: 0; top: -12%; height: 12%; z-index: 6; pointer-events: none; opacity: 0;
     background: linear-gradient(180deg, transparent, rgba(224,165,38,0.10) 70%, rgba(240,220,160,0.55) 98%, transparent); }
-  #tablet .display.boot .scan { animation: pda-scan 0.55s cubic-bezier(.4,0,.2,1) 0.2s; }
-  #tablet .display.boot .ph-batt { animation: pda-batt 0.5s cubic-bezier(.2,.7,.2,1) 0.45s both; }
-  #tablet .display.boot .ph-meta, #tablet .display.boot .ph-page, #tablet .display.boot .ph-right { animation: pda-fade 0.35s ease 0.7s both; }
-  #tablet .display.boot .pda-head::after { animation: pda-rule 0.6s cubic-bezier(.2,.7,.2,1) 0.45s both; }
-  #tablet .display.boot .screen:not([hidden]) { animation: pda-fade 0.35s ease 0.65s both; }
+  #tablet .display.boot .scan { animation: pda-scan 0.45s cubic-bezier(.4,0,.2,1); }
+  #tablet .display.boot .ph-batt { animation: pda-batt 0.45s cubic-bezier(.2,.7,.2,1) 0.12s both; }
+  #tablet .display.boot .ph-meta, #tablet .display.boot .ph-page, #tablet .display.boot .ph-right { animation: pda-fade 0.3s ease 0.3s both; }
+  #tablet .display.boot .pda-head::after { animation: pda-rule 0.5s cubic-bezier(.2,.7,.2,1) 0.12s both; }
+  #tablet .display.boot .screen:not([hidden]) { animation: pda-fade 0.3s ease 0.2s both; }
   @keyframes pda-scan { 0% { opacity: 1; top: -12%; } 100% { opacity: 1; top: 100%; } }
   @keyframes pda-batt { from { clip-path: inset(0 50%); letter-spacing: 0.3em; opacity: 0.3; } to { clip-path: inset(0 0); letter-spacing: 0.08em; opacity: 1; } }
   @keyframes pda-fade { from { opacity: 0; } to { opacity: 1; } }
   @keyframes pda-rule { from { width: 0; } to { width: 220px; } }
+  /* The boot terminal: about a second of Linux coming up before the command UI starts. */
+  #tablet .term { position: absolute; inset: 0; z-index: 8; margin: 0; padding: 12px 16px; overflow: hidden; display: none;
+    background: #050604; color: #b9bcb0; font: 12px/1.42 'DejaVu Sans Mono', 'Liberation Mono', Consolas, monospace; white-space: pre; }
+  #tablet .term.on { display: block; }
+  #tablet .term.off { display: block; animation: term-off 0.16s ease-in forwards; }
+  #tablet .term .ok { color: #6fcf5a; } #tablet .term .ts { color: #6d7166; } #tablet .term .hi { color: #e3d6aa; font-weight: bold; }
+  #tablet .term .pr { color: #e0a526; } #tablet .term .cur { display: inline-block; width: 7px; height: 13px; background: #b9bcb0; vertical-align: -2px; animation: term-cur 0.5s steps(1) infinite; }
+  @keyframes term-cur { 50% { opacity: 0; } }
+  @keyframes term-off { to { opacity: 0; transform: scaleY(0.02); filter: brightness(2); } }
   @media (prefers-reduced-motion: reduce) {
+    #tablet .term { display: none !important; }
     #tablet .display.boot *, #tablet .screen.enter { animation: none !important; }
   }
 </style>
@@ -359,6 +375,7 @@
   <button class="hw" data-hw="settings" style="top:59.35%" title="Settings"></button>
   <div class="display">
   <div class="scan"></div>
+  <pre class="term" id="pdaTerm" aria-hidden="true"></pre>
   <header class="pda-head">
     <span class="ph-page" id="pdaStatus">HOME</span>
     <div class="ph-id">
@@ -368,7 +385,7 @@
     <div class="ph-right"><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
   </header>
   <div class="screen page" id="home"></div>
-  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div class="hint">click a unit, then click a place to give it an order · Shift + drag: box · drag/WASD: pan · wheel: zoom</div></div>
+  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">click a unit, then click a place to give it an order · Shift + drag: box · drag/WASD: pan · wheel: zoom</div></div>
   <div class="screen page" id="roster" hidden></div>
   <div class="screen page" id="settings" hidden>
     <h3>Identity</h3>
