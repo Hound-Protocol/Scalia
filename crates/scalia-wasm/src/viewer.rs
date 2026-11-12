@@ -8,6 +8,7 @@ use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
 use scalia_core::planet::Planet;
 use scalia_core::position::RegionId;
+use scalia_core::process::ProcessKind;
 use scalia_core::scenario::build_scenario;
 use scalia_core::system::{BodyId, System, PARK_OFFSET};
 use scalia_core::time::WorldMs;
@@ -133,7 +134,8 @@ impl Viewer {
         };
     }
     pub fn set_ship(&mut self, i: u32) {
-        self.ship = (i as usize).min(self.ships.len() - 1);
+        // The last entry (one past the blueprints) is the soldier figure.
+        self.ship = (i as usize).min(self.ships.len());
     }
     pub fn set_full(&mut self, on: bool) {
         self.full = on;
@@ -254,7 +256,7 @@ impl Viewer {
         let internal = ((self.size.0 / ps).max(1), (self.size.1 / ps).max(1));
         let (mut meshes, mut instanced) = (Vec::new(), Vec::new());
         let (target, yaw, view_height, range, text) = match self.scene {
-            Scene::Ships => self.ships_scene(t, &mut meshes),
+            Scene::Ships => self.ships_scene(t, &mut meshes, &mut instanced),
             Scene::Ground => self.ground_scene(t, &mut meshes, &mut instanced),
             Scene::System => self.system_scene(t, &mut meshes),
         };
@@ -264,7 +266,8 @@ impl Viewer {
             Scene::System => (sky(0.5), false),
             _ => (sky(tod), true),
         };
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere };
+        let time_s = ((t / 1000.0) % 3600.0) as f32;
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere, time_s };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
@@ -313,8 +316,20 @@ impl Viewer {
         self.ships[i].as_ref().expect("filled")
     }
 
-    fn ships_scene(&mut self, t: f64, meshes: &mut Vec<String>) -> (Vec3, f32, f32, f32, String) {
+    fn ships_scene(&mut self, t: f64, meshes: &mut Vec<String>, instanced: &mut Vec<(String, String)>) -> (Vec3, f32, f32, f32, String) {
         let i = self.ship;
+        if i == self.ships.len() {
+            // Soldier figure walking in place, on a small plinth.
+            let mut plinth = MeshBuilder::default();
+            plinth.cuboid([-1.0, -1.0, -0.1], [1.0, 1.0, 0.0], 12.0);
+            self.gpu.upload("plinth", plinth.bytes());
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.9, 0.0]));
+            meshes.push("plinth".into());
+            instanced.push(("figure".into(), "figure1".into()));
+            let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
+            let tris = figure().vertices.len() / 3;
+            return (Vec3::new(0.0, 0.0, 0.9), yaw, 2.6, 10.0, format!("Soldier: {tris} triangles, walk cycle on the GPU"));
+        }
         let s = self.ship_info(i);
         let ext = s.hi - s.lo;
         let size = ext.max_element();
@@ -372,14 +387,22 @@ impl Viewer {
             cx /= n as f64;
             cy /= n as f64;
         }
-        let mut inst = Vec::with_capacity(n * 4);
+        let mut inst = Vec::with_capacity(n * 8);
         for d in &out {
             let (x, y) = (d.pos.x as f32 / 1000.0, d.pos.y as f32 / 1000.0);
             let z = self.height_at(x, y);
-            inst.extend_from_slice(&[x, y, z, if d.phase == Phase::Marching { 7.0 } else { 6.0 }]);
+            // Facing: along the march, else the formation's front with a little personal variation.
+            let jitter = (scalia_core::hash::mix64(d.slot as u64 ^ 0x5ca1) % 1000) as f32 / 1000.0;
+            let heading = match self.world.groups.process(d.group).kind {
+                ProcessKind::March { from, to, .. } => ((from.x - to.x) as f32).atan2((to.y - from.y) as f32),
+                _ => (jitter - 0.5) * 0.4,
+            };
+            let walking = d.phase == Phase::Marching || d.phase == Phase::Walking || d.phase == Phase::Climbing;
+            let steps = if walking { 0.9 + jitter * 0.1 } else { 0.0 };
+            inst.extend_from_slice(&[x, y, z, if walking { 7.0 } else { 6.0 }, heading, jitter, steps, 0.0]);
         }
         self.derived = out;
-        self.gpu.upload("soldiers", bytes(&inst));
+        self.gpu.upload_instances("soldiers", bytes(&inst));
         let look = self.ground_cam.map(|c| (c.x as f64, c.y as f64)).unwrap_or((cx, cy));
         let (gx, gy) = ((look.0 / CELLS as f64).floor() as i64, (look.1 / CELLS as f64).floor() as i64);
         // Enough chunks to cover a wide screen at any yaw; at most a few new ones per frame to avoid hitches.

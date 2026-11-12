@@ -11,6 +11,8 @@ use crate::shaders::{BLIT_WGSL, SCENE_WGSL, SHADOW_WGSL};
 use crate::sky::Sky;
 
 pub const SHADOW_SIZE: u32 = 2048;
+/// Bytes per instance: (x, y, z, body palette) and (heading, phase offset, steps per second, 0).
+pub const INSTANCE_BYTES: usize = 32;
 
 /// Sixteen-colour palette.
 pub const PALETTE: [[f32; 3]; 16] = [
@@ -34,6 +36,8 @@ pub struct FrameDesc<'a> {
     pub sky: Sky,
     /// Haze and sky background (ground and ships); off for space.
     pub atmosphere: bool,
+    /// Seconds for animation; keep it small (wrap it) so f32 stays precise.
+    pub time_s: f32,
 }
 
 struct Targets {
@@ -73,10 +77,10 @@ pub struct Gpu {
 
 fn vertex_layouts() -> [Option<wgpu::VertexBufferLayout<'static>>; 2] {
     const MESH: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32];
-    const INST: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![2 => Float32x4];
+    const INST: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![2 => Float32x4, 3 => Float32x4];
     [
         Some(wgpu::VertexBufferLayout { array_stride: 16, step_mode: wgpu::VertexStepMode::Vertex, attributes: &MESH }),
-        Some(wgpu::VertexBufferLayout { array_stride: 16, step_mode: wgpu::VertexStepMode::Instance, attributes: &INST }),
+        Some(wgpu::VertexBufferLayout { array_stride: INSTANCE_BYTES as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &INST }),
     ]
 }
 
@@ -115,7 +119,7 @@ impl Gpu {
 
         let uni = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene uniforms"),
-            size: 448,
+            size: 464,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -127,7 +131,7 @@ impl Gpu {
         });
         let one_instance = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("identity instance"),
-            contents: f32_bytes(&[0.0, 0.0, 0.0, -1.0]),
+            contents: f32_bytes(&[0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0]),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
@@ -241,8 +245,17 @@ impl Gpu {
         self.surface.configure(&self.device, &self.config);
     }
 
-    /// Stores (or replaces) a buffer of 16-byte records: mesh vertices or instances.
+    /// Stores (or replaces) mesh vertices (16-byte records).
     pub fn upload(&mut self, key: &str, bytes: &[u8]) {
+        self.upload_records(key, bytes, 16);
+    }
+
+    /// Stores (or replaces) instances (`INSTANCE_BYTES` each).
+    pub fn upload_instances(&mut self, key: &str, bytes: &[u8]) {
+        self.upload_records(key, bytes, INSTANCE_BYTES);
+    }
+
+    fn upload_records(&mut self, key: &str, bytes: &[u8], record: usize) {
         let need = bytes.len().max(16) as u64;
         let fresh = match self.buffers.get(key) {
             Some(b) => b.buf.size() < need,
@@ -261,7 +274,7 @@ impl Gpu {
         if !bytes.is_empty() {
             self.queue.write_buffer(&b.buf, 0, bytes);
         }
-        b.count = (bytes.len() / 16) as u32;
+        b.count = (bytes.len() / record) as u32;
     }
 
     pub fn has(&self, key: &str) -> bool {
@@ -321,6 +334,7 @@ impl Gpu {
         }
         let (l, lc, am) = (f.sky.light_dir, f.sky.light_col, f.sky.ambient);
         u.extend_from_slice(&[l.x, l.y, l.z, 0.0, lc[0], lc[1], lc[2], 0.0, am[0], am[1], am[2], 0.0]);
+        u.extend_from_slice(&[f.time_s, 0.0, 0.0, 0.0]);
         self.queue.write_buffer(&self.uni, 0, f32_bytes(&u));
         let thresh = (f.view_height / h as f32) * 3.0 / (2.0 * f.range);
         // Orthographic depth is linear: 0.5 at the focus, 1/(2 range) per world unit away from the camera.

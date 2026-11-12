@@ -36,6 +36,7 @@ try {
   // Ship list.
   const sel = $('shipSel');
   for (let i = 0; wasm.shipped_ron(i) !== undefined; i++) sel.append(new Option(JSON.parse(wasm.blueprint_info(wasm.shipped_ron(i))).name, i));
+  sel.append(new Option('Soldier', sel.options.length));
   sel.value = '5';
   sel.addEventListener('change', () => v.set_ship(Number(sel.value)));
 

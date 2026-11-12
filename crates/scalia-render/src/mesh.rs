@@ -1,5 +1,35 @@
-//! Flat-shaded triangle lists: 3 floats of position and 1 palette index per vertex.
-//! A negative palette index means "use the instance colour".
+//! Flat-shaded triangle lists: 3 floats of position and 1 colour code per vertex.
+//! The colour code is `palette + 16 * part`; a negative code means "body, in the instance colour".
+//! Parts are the limbs the vertex shader swings for the walk cycle.
+
+/// Animated parts of a figure.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Part {
+    Body = 0,
+    LeftLeg = 1,
+    RightLeg = 2,
+    LeftArm = 3,
+    RightArm = 4,
+}
+
+/// Colour code for a palette index on a part.
+pub fn code(palette: u8, part: Part) -> f32 {
+    (palette as u32 + 16 * part as u32) as f32
+}
+
+/// The part a colour code belongs to.
+pub fn part_of(code: f32) -> Part {
+    if code < 0.0 {
+        return Part::Body;
+    }
+    match (code / 16.0).floor() as u32 {
+        1 => Part::LeftLeg,
+        2 => Part::RightLeg,
+        3 => Part::LeftArm,
+        4 => Part::RightArm,
+        _ => Part::Body,
+    }
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -67,13 +97,19 @@ impl MeshBuilder {
     }
 }
 
-/// Low-poly soldier, 1.75 m tall; the torso takes the instance colour.
+/// Low-poly soldier facing +y, about 1.78 m tall: legs from the hips (0.88 m), arms from the shoulders
+/// (1.42 m), a rifle on the right arm, a backpack. The torso takes the instance colour.
 pub fn figure() -> MeshBuilder {
     let mut f = MeshBuilder::default();
-    f.cuboid([-0.18, -0.12, 0.0], [-0.03, 0.12, 0.85], 3.0);
-    f.cuboid([0.03, -0.12, 0.0], [0.18, 0.12, 0.85], 3.0);
-    f.cuboid([-0.24, -0.15, 0.85], [0.24, 0.15, 1.45], -1.0);
-    f.cuboid([-0.11, -0.11, 1.48], [0.11, 0.11, 1.75], 8.0);
-    f.cuboid([0.26, 0.05, 1.0], [0.33, 0.85, 1.08], 0.0);
+    let (dark, skin, helmet, rifle, pack) = (3, 8, 10, 0, 13);
+    f.cuboid([-0.17, -0.10, 0.0], [-0.03, 0.10, 0.88], code(dark, Part::LeftLeg));
+    f.cuboid([0.03, -0.10, 0.0], [0.17, 0.10, 0.88], code(dark, Part::RightLeg));
+    f.cuboid([-0.22, -0.13, 0.85], [0.22, 0.13, 1.45], -1.0);
+    f.cuboid([-0.16, -0.24, 1.0], [0.16, -0.13, 1.35], code(pack, Part::Body));
+    f.cuboid([-0.10, -0.10, 1.48], [0.10, 0.12, 1.70], code(skin, Part::Body));
+    f.cuboid([-0.12, -0.12, 1.62], [0.12, 0.14, 1.78], code(helmet, Part::Body));
+    f.cuboid([-0.31, -0.07, 0.90], [-0.23, 0.07, 1.42], code(dark, Part::LeftArm));
+    f.cuboid([0.23, -0.07, 0.90], [0.31, 0.07, 1.42], code(dark, Part::RightArm));
+    f.cuboid([0.27, 0.0, 1.0], [0.32, 0.75, 1.07], code(rifle, Part::RightArm));
     f
 }

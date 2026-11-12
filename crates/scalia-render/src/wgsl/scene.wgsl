@@ -1,13 +1,11 @@
-struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16>, light: vec4f, light_col: vec4f, ambient: vec4f };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var sm: texture_depth_2d;
 @group(0) @binding(2) var smp: sampler_comparison;
 struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32 };
-// Instance attribute: xyz offset and a palette index in w, used where the mesh colour is negative.
-@vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) inst: vec4f) -> VO {
-  let w = p + inst.xyz;
+@vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) ia: vec4f, @location(3) ib: vec4f) -> VO {
+  let w = animate(p, c, ia, ib, u.time.x);
   var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
-  o.ci = u32(max(select(c, inst.w, c < 0.0), 0.0));
+  o.ci = palette_index(c, ia);
   return o;
 }
 struct FO { @location(0) c: vec4f, @location(1) n: vec4f };

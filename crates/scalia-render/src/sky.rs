@@ -41,8 +41,8 @@ pub fn sky(t: f32) -> Sky {
     let e = sa.max(0.0);
     let d = smoothstep(-0.1, 0.1, sa);
     let sun_col = scale(mix([1.0, 0.55, 0.3], [1.0, 0.97, 0.9], smoothstep(0.0, 0.5, e)), 0.45 + 0.55 * smoothstep(0.0, 0.3, e));
-    let moon_col = [0.15, 0.19, 0.3];
-    let ambient = mix([0.06, 0.08, 0.16], scale([0.38, 0.42, 0.5], 0.6 + 0.4 * e), d);
+    let moon_col = [0.22, 0.27, 0.42];
+    let ambient = mix([0.10, 0.12, 0.22], scale([0.38, 0.42, 0.5], 0.6 + 0.4 * e), d);
     let fog = mix([0.04, 0.05, 0.10], mix([0.75, 0.5, 0.4], [0.62, 0.70, 0.78], smoothstep(0.0, 0.4, e)), d);
     Sky { light_dir, light_col: mix(moon_col, sun_col, d), ambient, fog, is_day }
 }
