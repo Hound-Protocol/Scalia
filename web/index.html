@@ -66,6 +66,37 @@
   #update-reload:active { transform: translateY(2px); box-shadow: 0 0 0 #6b4f10, inset 0 1px 0 rgba(255,255,255,.45); }
   #update-close { background: none; border: 0; color: #7c8670; font-size: 16px; padding: 4px 6px; }
   #update-close:hover { color: #e4e8dc; }
+  /* The walkie-talkie: an M-8 HIVE handset (render of the model) with a live screen: the net and channel, who we
+     are talking to, what is said, and a voice trace while someone transmits. */
+  #radio { position: fixed; right: 2.5vw; bottom: -60vh; z-index: 45; height: 54vh; aspect-ratio: 760 / 1572;
+    transition: bottom .4s cubic-bezier(.2,.8,.2,1); pointer-events: none; filter: drop-shadow(0 14px 30px rgba(0,0,0,.6)); }
+  #radio.up { bottom: 2vh; }
+  #radio .body { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #radio .scr { position: absolute; left: 12.63%; top: 24.43%; width: 75%; height: 53.5%; overflow: hidden; border-radius: 4px;
+    display: flex; flex-direction: column; gap: 0.6vh; padding: 1.1vh 1vh; box-sizing: border-box;
+    background: linear-gradient(180deg, rgba(40, 110, 150, 0.16), rgba(6, 16, 24, 0) 40%);
+    color: #8fe6ff; font: 1.25vh/1.3 ui-monospace, monospace; text-shadow: 0 0 6px rgba(80, 210, 255, 0.45); }
+  #radio .top { display: flex; justify-content: space-between; color: #6fc8e8; letter-spacing: .08em; }
+  #radio .bars i { display: inline-block; width: .45vh; margin-left: .2vh; background: #4ad8ff; vertical-align: bottom; }
+  #radio .bars i:nth-child(1) { height: .5vh } #radio .bars i:nth-child(2) { height: .8vh } #radio .bars i:nth-child(3) { height: 1.1vh }
+  #radio .bars i:nth-child(4) { height: 1.4vh; opacity: .35 }
+  #radio .who { border-top: 1px solid rgba(110, 210, 255, .25); border-bottom: 1px solid rgba(110, 210, 255, .25); padding: .5vh 0; }
+  #radio .who small { display: block; color: #6fa9bf; font-size: 1vh; letter-spacing: .14em; }
+  #radio .who b { display: block; color: #e9fbff; font-size: 2.1vh; letter-spacing: .06em; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #radioLog { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: .5vh; overflow: hidden; }
+  #radioLog div { color: #d6f6ff; }
+  #radioLog div b { display: block; color: #ff8a7a; font-size: 1vh; letter-spacing: .12em; }
+  #radioLog div.unit b { color: #8cff9e; }
+  #radio .wave { height: 3.2vh; display: flex; align-items: center; gap: .25vh; opacity: .25; }
+  #radio .wave i { flex: 1; height: 15%; background: #4ad8ff; border-radius: 1px; }
+  #radio.tx .wave, #radio.rx .wave { opacity: 1; }
+  #radio.tx .wave i, #radio.rx .wave i { animation: wt-voice .5s ease-in-out infinite alternate; }
+  #radio.tx .wave i { background: #ff8a7a; }
+  #radio .foot { display: flex; justify-content: space-between; align-items: center; color: #6fc8e8; letter-spacing: .12em; }
+  #radio .foot .led { width: 1vh; height: 1vh; border-radius: 50%; background: #20323c; }
+  #radio.tx .foot .led { background: #ff3b30; box-shadow: 0 0 8px #ff3b30; }
+  #radio.rx .foot .led { background: #38d16a; box-shadow: 0 0 8px #38d16a; }
+  @keyframes wt-voice { from { height: 12%; } to { height: 95%; } }
   @keyframes upd-drop { from { transform: translate(-50%, -140%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
   @keyframes upd-ping { 0% { box-shadow: 0 0 0 0 rgba(224,165,38,.7); } 70% { box-shadow: 0 0 0 10px rgba(224,165,38,0); } 100% { box-shadow: 0 0 0 0 rgba(224,165,38,0); } }
   @keyframes upd-sweep { 0%, 55% { left: -60%; } 100% { left: 130%; } }
@@ -129,24 +160,9 @@
   #actions button:disabled { color: #6c7682; cursor: not-allowed; }
   #actions button small { color: #b5654f; }
   #actions .cancel { color: #9aa5b1; }
-  #radio { position: fixed; right: 3vw; bottom: -340px; z-index: 45; width: 300px; transition: bottom .4s cubic-bezier(.2,.8,.2,1); pointer-events: none; }
-  #radio.up { bottom: 3vh; }
-  #radio .set { position: relative; margin-left: 30px; width: 120px; height: 250px; background: linear-gradient(#2c3027, #1d2019); border-radius: 18px 18px 14px 14px; border: 2px solid #0e0f0c; box-shadow: inset 0 0 0 3px #3a3f33, 0 8px 20px rgba(0,0,0,.6); }
-  #radio .set::before { content: ''; position: absolute; left: 18px; top: -70px; width: 12px; height: 76px; background: #15170f; border-radius: 6px 6px 2px 2px; }
-  #radio .set .grille { position: absolute; left: 16px; right: 16px; top: 120px; height: 100px; background: repeating-linear-gradient(#161812 0 4px, #2b2f25 4px 8px); border-radius: 6px; }
-  #radio .set .lcd { position: absolute; left: 16px; right: 16px; top: 22px; height: 40px; background: #3d4a2e; color: #b6d17f; font: 13px monospace; border-radius: 4px; padding: 4px 6px; box-sizing: border-box; }
-  #radio .set .led { position: absolute; right: 18px; top: 74px; width: 12px; height: 12px; border-radius: 50%; background: #3a1010; }
-  #radio.tx .set .led { background: #ff3b30; box-shadow: 0 0 10px #ff3b30; }
-  #radio.rx .set .led { background: #38d16a; box-shadow: 0 0 10px #38d16a; }
-  #radio .set .ptt { position: absolute; left: -12px; top: 70px; width: 12px; height: 56px; background: #111309; border-radius: 4px 0 0 4px; transition: transform .08s; }
-  #radio.tx .set .ptt { transform: translateX(5px); background: #2a2d22; }
   #roster tr.capt td:first-child { color: #e2b84a; font-weight: bold; }
   #roster .rank { color: #e2b84a; }
   #roster select.boss { background: #1b2026; color: #dfe6ee; border: 1px solid #3a434d; border-radius: 3px; font: inherit; padding: 1px 4px; }
-  #radioLog { position: absolute; right: 0; bottom: 270px; width: 300px; color: #e8edf2; font-size: 13px; z-index: 2; }
-  #radio .set { z-index: 1; }
-  #radioLog div { background: rgba(10,14,18,.85); border-left: 3px solid #c0392b; padding: 6px 8px; margin-top: 4px; border-radius: 3px; }
-  #radioLog div.unit { border-left-color: #38d16a; }
 </style>
 </head>
 <body>
@@ -203,7 +219,13 @@
 <div id="error" class="panel"></div>
 <div id="fieldHint">WASD move · Shift sprint · Q/E turn · <b>Tab</b> tablet</div>
 <div id="actions" hidden></div>
-<div id="radio"><div id="radioLog"></div><div class="set"><div class="lcd">CH 04 · BN NET</div><div class="led"></div><div class="grille"></div><div class="ptt"></div></div></div>
+<div id="radio"><img class="body" src="./img/walkie.webp" alt="" draggable="false"><div class="scr">
+  <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
+  <div class="who"><small id="rDir">STANDBY</small><b id="rWho">—</b></div>
+  <div id="radioLog"></div>
+  <div class="wave"><i style="animation-delay:-0.00s"></i><i style="animation-delay:-0.14s"></i><i style="animation-delay:-0.27s"></i><i style="animation-delay:-0.41s"></i><i style="animation-delay:-0.05s"></i><i style="animation-delay:-0.19s"></i><i style="animation-delay:-0.32s"></i><i style="animation-delay:-0.46s"></i><i style="animation-delay:-0.10s"></i><i style="animation-delay:-0.23s"></i><i style="animation-delay:-0.37s"></i><i style="animation-delay:-0.01s"></i><i style="animation-delay:-0.14s"></i><i style="animation-delay:-0.28s"></i><i style="animation-delay:-0.42s"></i><i style="animation-delay:-0.06s"></i><i style="animation-delay:-0.19s"></i><i style="animation-delay:-0.33s"></i><i style="animation-delay:-0.47s"></i><i style="animation-delay:-0.10s"></i><i style="animation-delay:-0.24s"></i><i style="animation-delay:-0.38s"></i><i style="animation-delay:-0.01s"></i><i style="animation-delay:-0.15s"></i><i style="animation-delay:-0.29s"></i><i style="animation-delay:-0.43s"></i><i style="animation-delay:-0.06s"></i><i style="animation-delay:-0.20s"></i></div>
+  <div class="foot"><span id="rState">ONLINE</span><span class="led"></span></div>
+</div></div>
 <div id="tablet">
   <img class="fp" src="./img/fp_back.webp" alt="" draggable="false">
   <img class="device" src="./img/pda_front.webp" alt="" draggable="false">

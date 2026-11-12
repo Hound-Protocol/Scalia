@@ -339,9 +339,12 @@ try {
     speechSynthesis.speak(u);
   });
   const line = (who, name, text) => {
-    const d = document.createElement('div'); d.className = who; d.innerHTML = `<b>${name}</b> ${text}`;
-    const log = $('radioLog'); log.appendChild(d); while (log.children.length > 4) log.firstChild.remove();
+    const d = document.createElement('div'); d.className = who; d.innerHTML = `<b>${name.toUpperCase()}</b>${text}`;
+    const log = $('radioLog'); log.appendChild(d); while (log.children.length > 3) log.firstChild.remove();
   };
+  // The handset's header: who we are talking to (or who is calling), and what the set is doing.
+  const talkingTo = (dir, who) => { $('rDir').textContent = dir; $('rWho').textContent = who; };
+  const radioState = (s) => { $('rState').textContent = s; };
 
   // The talkie button: a click as the button is pressed and another as it is let go.
   const keyClick = new Audio('./sfx/radio-key.mp3'); keyClick.preload = 'auto';
@@ -356,9 +359,9 @@ try {
   const voiceOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return { pitch: 0.6 + (h % 50) / 100, rate: 1.0 + (h % 7) / 40 }; };
   const keyUp = async () => { radio.classList.add('up'); await new Promise((r) => setTimeout(r, 450)); };
   const transmit = async (cls, who, name, text, voice) => {
-    await click(); radio.classList.add(cls); line(who, name, text);
+    await click(); radio.classList.add(cls); radioState(cls === 'tx' ? 'TRANSMITTING' : 'RECEIVING'); line(who, name, text);
     await say(text.replace(/(\d)/g, '$1 '), voice.pitch, voice.rate);
-    await click(); radio.classList.remove(cls);
+    await click(); radio.classList.remove(cls); radioState('ONLINE');
   };
   const pump = async () => {
     if (onAir || !net.length) return;
@@ -373,6 +376,7 @@ try {
   const hear = (ev) => {
     const job = async () => {
       if (!radio.classList.contains('up')) { $('radioLog').innerHTML = ''; await keyUp(); }
+      talkingTo('INCOMING FROM', ev.from);
       await transmit('rx', 'unit', ev.from, ev.text, voiceOf(ev.from));
     };
     if (ev.urgent) net.unshift(job); else net.push(job);
@@ -387,6 +391,7 @@ try {
     if (onAir) flash('net busy: your order goes out next');
     net.push(async () => {
       $('radioLog').innerHTML = '';
+      talkingTo('TALKING TO', who);
       v.set_radio(true); await keyUp();
       const order = `${who}, ${verb} grid ${grid}${id === 0 ? '' : how}. Over.`;
       await transmit('tx', 'cmd', 'Commander', order, { pitch: 1.0, rate: 1.05 });

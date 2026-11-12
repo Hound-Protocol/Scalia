@@ -38,6 +38,10 @@ This replaces the "player is the general of a whole army" framing; the premise a
   Voices carry the speaker's state (calm, stressed, exhausted); a fallen captain's second takes over with his own
   voice. Accent mix across the cast. Voice clips are generated once with ElevenLabs and shipped with the game,
   stitched at play time and run through a radio filter in the browser.
+- **Radio range and relays (decided 2026-11-12, to build later):** the walkie-talkie's screen shows which local
+  station or net it is on. Walkie-talkies have a limited range; beyond it an order needs a tower or signal relay,
+  or a stationary set (a laptop or similar) to get through. Researched technology later gives long-range sets, and
+  PDAs can be researched for planet-wide communication. Signals can be jammed (detail later).
 - **Light infantry look:** an olive jumpsuit with chest pockets, a dark hood and mask, dark shoulder and elbow pads,
   one rolled sleeve, a pouch belt, a drop-leg holster and a rear back pouch.
 

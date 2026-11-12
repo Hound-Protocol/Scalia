@@ -3,8 +3,9 @@ a sub-rectangle of its texture (the screen) lands in the image. Software rasteri
 
 Usage: python3 -I scripts/glb_render_front.py model.glb out.png width side(+1|-1) [u0 v0 u1 v1]
 """
-import io, json, struct, sys
+import io, json, os, struct, sys
 import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PIL import Image
 
 
@@ -39,12 +40,23 @@ def main():
     path, out, width, side = sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4])
     rect_uv = [float(x) for x in sys.argv[5:9]] if len(sys.argv) > 8 else None
     j, bin_ = load(path)
-    base = image(j, bin_, 0)
-    occ = image(j, bin_, 1)[:, :, 0]
+    mat = j['materials'][0]
+    pbr = mat.get('pbrMetallicRoughness', {})
+    tex = lambda t: image(j, bin_, j['textures'][t['index']]['source'])
+    base = tex(pbr['baseColorTexture'])
+    occ = tex(mat['occlusionTexture'])[:, :, 0] if 'occlusionTexture' in mat else np.ones(base.shape[:2])
+    emis = tex(mat['emissiveTexture']) if 'emissiveTexture' in mat else np.zeros(base.shape)
+    # Place every mesh by its node's transform (models whose parts sit at node offsets).
+    import glb_inspect as G
+    g = G.globals_(j)
     tris_p, tris_uv = [], []
-    for m in j['meshes']:
+    for ni, node in enumerate(j['nodes']):
+        if 'mesh' not in node:
+            continue
+        m = j['meshes'][node['mesh']]
         for p in m['primitives']:
             pos = acc(j, bin_, p['attributes']['POSITION'])
+            pos = (np.c_[pos, np.ones(len(pos))] @ g[ni].T)[:, :3]
             uv = acc(j, bin_, p['attributes']['TEXCOORD_0'])
             idx = acc(j, bin_, p['indices']).astype(int).reshape(-1, 3)
             tris_p.append(pos[idx]); tris_uv.append(uv[idx])
@@ -52,8 +64,9 @@ def main():
     lo, hi = P.reshape(-1, 3).min(0), P.reshape(-1, 3).max(0)
     thin = int(np.argmin(hi - lo))
     axes = [a for a in range(3) if a != thin]
-    # Landscape: the longer remaining axis runs across.
-    if (hi - lo)[axes[0]] < (hi - lo)[axes[1]]:
+    # Landscape (default): the longer remaining axis runs across; ORIENT=portrait stands it up.
+    portrait = os.environ.get('ORIENT') == 'portrait'
+    if ((hi - lo)[axes[0]] < (hi - lo)[axes[1]]) != portrait:
         axes = axes[::-1]
     ax_u, ax_v = axes
     ss = 2
@@ -68,7 +81,7 @@ def main():
             x = W - x
         y = (hi[ax_v] - p[..., ax_v]) * scale + pad
         return x, y
-    rgb = np.zeros((H, W, 3)); alpha = np.zeros((H, W)); depth = np.full((H, W), -np.inf)
+    rgb = np.zeros((H, W, 3)); alpha = np.zeros((H, W)); depth = np.full((H, W), -np.inf); glow = np.zeros((H, W))
     light = np.array([0.35, 0.55, 0.75]); light /= np.linalg.norm(light)
     for t, uv in zip(P, UV):
         x, y = proj(t)
@@ -99,13 +112,21 @@ def main():
         n = np.cross(t[1] - t[0], t[2] - t[0]); n /= np.linalg.norm(n) + 1e-12
         nv = np.zeros(3); nv[thin] = n[thin] * side; nv[ax_u] = n[ax_u] * (1 if side > 0 else -1); nv[ax_v] = n[ax_v]
         shade = 0.55 + 0.45 * abs(float(np.dot(np.array([nv[ax_u], nv[ax_v], nv[thin]]), light)))
-        col = base[ty, tx] * occ[ty, tx][..., None] * shade
+        e = emis[ty, tx]
+        col = base[ty, tx] * occ[ty, tx][..., None] * shade + e * 0.8
         sub[win] = zz[win]
         rgb[y0:y1 + 1, x0:x1 + 1][win] = col[win]
+        glow[y0:y1 + 1, x0:x1 + 1][win] = e.max(-1)[win]
         alpha[y0:y1 + 1, x0:x1 + 1][win] = 1.0
     img = np.dstack([rgb, alpha])
     img = img.reshape(H // ss, ss, W // ss, ss, 4).mean((1, 3)) if H % ss == 0 else img[:H - H % ss].reshape(H // ss, ss, W // ss, ss, 4).mean((1, 3))
     Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), 'RGBA').save(out)
+    # Where the glowing display landed (emissive texels), in image fractions.
+    gm = glow[:H - H % ss].reshape(H // ss, ss, W // ss, ss).max((1, 3)) > 0.08
+    if gm.any():
+        ys, xs = np.nonzero(gm)
+        h2, w2 = gm.shape
+        print(f'glow box {xs.min() / w2:.4f} {ys.min() / h2:.4f} {(xs.max() + 1) / w2:.4f} {(ys.max() + 1) / h2:.4f}')
     print('image', img.shape[1], img.shape[0], 'thin axis', thin, 'across', ax_u, 'up', ax_v)
     if rect_uv:
         # Where the screen's texture rectangle lands: the bounding box of every triangle point inside it.

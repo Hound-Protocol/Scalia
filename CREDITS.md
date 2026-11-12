@@ -20,3 +20,7 @@
 - **UI sounds** (`web/sfx/pda-open.mp3`, `pda-close.mp3` reversed from it, `pda-tap.mp3`): "juniorsoundays ui sound 10
   527836" and "ui sound 39 527833"; **dive swoosh** (`web/sfx/dive-whoosh.mp3`): "stereogenicstudio swish swoosh woosh
   sfx 25 357177"; all supplied by the project lead (Pixabay sound library naming).
+- **"walkie talkie"** by [FayBall](https://sketchfab.com/FayBall), licensed under
+  [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
+  Source: https://sketchfab.com/3d-models/walkie-talkie-88d0177b7801448397b69fcd81220c3a
+  Changes: rendered face-on with its display blanked for the game's live radio screen (`web/img/walkie.webp`).
