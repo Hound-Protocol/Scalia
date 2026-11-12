@@ -9,6 +9,8 @@ use std::time::Instant;
 const TICK_BUDGET_MS: f64 = 5.0;
 const DERIVE_BUDGET_MS: f64 = 2.0;
 const CHUNK_BUDGET_MS: f64 = 1.0;
+/// One squad-level GOAP plan (about 14 actions, 12 facts).
+const PLAN_BUDGET_MS: f64 = 0.05;
 
 fn median_ms(mut v: Vec<f64>) -> f64 {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -65,16 +67,31 @@ fn main() {
     }
     let chunk_ms = median_ms(chunks);
 
+    // GOAP: 4,096 squad plans from every start state; median per plan.
+    let squad = scalia_ai::squad::actions();
+    let mut plans = Vec::new();
+    let mut steps = 0usize;
+    for start in 0..4096u64 {
+        let s = Instant::now();
+        let p = scalia_ai::goap::plan(scalia_ai::goap::State(start), scalia_ai::squad::take_objective(), &squad, Default::default());
+        plans.push(s.elapsed().as_secs_f64() * 1000.0);
+        steps += p.map_or(0, |p| p.actions.len());
+    }
+    let plan_worst_ms = plans.iter().cloned().fold(0.0, f64::max);
+    let plan_ms = median_ms(plans);
+
     // Printing real state keeps the work observable and sanity-checks that ticks drained needs.
     let food: f64 = w.groups.needs(scalia_core::groups::GroupId(5)).food.to_f32() as f64;
     println!("sanity_group5_food={food:.4} after {} ticks", t / 1000);
     let verdict = |ms: f64, budget: f64| if ms <= budget { "PASS" } else { "FAIL" };
     let (v1, v2) = (verdict(tick_ms, TICK_BUDGET_MS), verdict(derive_ms, DERIVE_BUDGET_MS));
     let v3 = verdict(chunk_ms, CHUNK_BUDGET_MS);
+    let v4 = verdict(plan_ms, PLAN_BUDGET_MS);
     println!("tick_1m_soldiers_ms={tick_ms:.3} budget=5 {v1}");
     println!("derive_20k_ms={derive_ms:.3} budget=2 {v2}");
     println!("chunk_64_ms={chunk_ms:.3} budget=1 {v3} (check {guard})");
-    if !report_only && (v1 == "FAIL" || v2 == "FAIL" || v3 == "FAIL") {
+    println!("goap_squad_plan_ms={plan_ms:.4} worst={plan_worst_ms:.4} budget={PLAN_BUDGET_MS} {v4} ({steps} steps over 4096 plans)");
+    if !report_only && (v1 == "FAIL" || v2 == "FAIL" || v3 == "FAIL" || v4 == "FAIL") {
         std::process::exit(1);
     }
 }

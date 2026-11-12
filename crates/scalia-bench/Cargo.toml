@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 scalia-core = { path = "../scalia-core" }
+scalia-ai = { path = "../scalia-ai" }
