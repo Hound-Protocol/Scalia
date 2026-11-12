@@ -189,7 +189,7 @@ export async function createRenderer(canvas) {
   const adapterName = info.description || [info.vendor, info.architecture].filter(Boolean).join(' ') || 'unknown GPU';
   const ctx = canvas.getContext('webgpu');
   const format = navigator.gpu.getPreferredCanvasFormat();
-  ctx.configure({ device, format, alphaMode: 'opaque' });
+  ctx.configure({ device, format, alphaMode: 'opaque', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
 
   const uni = device.createBuffer({ size: 64 + 64 + 16 + 16 * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const pal = new Float32Array(64);
@@ -264,7 +264,7 @@ export async function createRenderer(canvas) {
 
   /** Draws the named meshes with the given camera at the internal size, then scales up to the canvas. */
   /** `keys` are plain meshes; `instanced` is a list of { mesh, instances } buffer keys. */
-  function frame({ keys, instanced = [], target, yaw, viewHeight, range, internal, outline = true }) {
+  function frame({ keys, instanced = [], target, yaw, viewHeight, range, internal, outline = true, capture = null }) {
     const [w, h] = internal;
     setInternalSize(w, h);
     // Snap the camera to the texel grid in its own plane, then shift the upscale by the error:
@@ -299,8 +299,28 @@ export async function createRenderer(canvas) {
     p1.setPipeline(scenePipe); p1.setBindGroup(0, sceneBind);
     drawAll(p1);
     p1.end();
-    const p2 = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
+    const screen = ctx.getCurrentTexture();
+    const p2 = enc.beginRenderPass({ colorAttachments: [{ view: screen.createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
     p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end();
+    let readback = null;
+    if (capture) {
+      // Copy the presented image to a buffer (rows padded to 256 bytes) and hand back RGBA pixels.
+      const cw = screen.width, ch = screen.height, row = Math.ceil((cw * 4) / 256) * 256;
+      readback = device.createBuffer({ size: row * ch, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      enc.copyTextureToBuffer({ texture: screen }, { buffer: readback, bytesPerRow: row }, [cw, ch]);
+      device.queue.submit([enc.finish()]);
+      readback.mapAsync(GPUMapMode.READ).then(() => {
+        const src = new Uint8Array(readback.getMappedRange()), out = new Uint8ClampedArray(cw * ch * 4);
+        const bgra = screen.format.startsWith('bgra');
+        for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+          const i = y * row + x * 4, o = (y * cw + x) * 4;
+          out[o] = src[i + (bgra ? 2 : 0)]; out[o + 1] = src[i + 1]; out[o + 2] = src[i + (bgra ? 0 : 2)]; out[o + 3] = 255;
+        }
+        readback.unmap(); readback.destroy();
+        capture(new ImageData(out, cw, ch));
+      });
+      return;
+    }
     device.queue.submit([enc.finish()]);
   }
   return { upload, drop, frame, device, software, adapterName, get gpuError() { return gpuError; } };

@@ -178,14 +178,16 @@ export async function startViewer(wasm, ui) {
     }
     ui.launch.hidden = state.scene !== 'system';
     ui.shipSel.hidden = state.scene !== 'ships';
-    r.frame({ ...cam, internal, outline: state.outline });
-    if (pendingShot) {
-      const c2 = document.createElement('canvas');
-      c2.width = internal[0]; c2.height = internal[1];
+    const shot = pendingShot; pendingShot = null;
+    r.frame({ ...cam, internal, outline: state.outline, capture: shot && ((img) => {
+      // Downscale to the internal size (nearest) and return a PNG data URL.
+      const big = document.createElement('canvas'); big.width = img.width; big.height = img.height;
+      big.getContext('2d').putImageData(img, 0, 0);
+      const c2 = document.createElement('canvas'); c2.width = internal[0]; c2.height = internal[1];
       const g = c2.getContext('2d'); g.imageSmoothingEnabled = false;
-      g.drawImage(ui.canvas, 0, 0, c2.width, c2.height);
-      pendingShot(c2.toDataURL('image/png')); pendingShot = null;
-    }
+      g.drawImage(big, 0, 0, c2.width, c2.height);
+      shot(c2.toDataURL('image/png'));
+    }) });
     tickFps(now);
     ui.hud.textContent = r.gpuError
       ? `GPU ERROR: ${r.gpuError.slice(0, 600)}`
