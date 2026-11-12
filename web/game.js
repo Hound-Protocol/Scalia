@@ -33,6 +33,9 @@ try {
   addEventListener('resize', resize);
   resize();
 
+  let note = '', noteUntil = 0;
+  const flash = (msg) => { note = msg; noteUntil = performance.now() + 2500; };
+
   // Ship list.
   const sel = $('shipSel');
   for (let i = 0; wasm.shipped_ron(i) !== undefined; i++) sel.append(new Option(JSON.parse(wasm.blueprint_info(wasm.shipped_ron(i))).name, i));
@@ -63,14 +66,35 @@ try {
 
   // Mouse: wheel zooms, drag pans.
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); v.wheel(e.deltaY); }, { passive: false });
-  let drag = null;
-  canvas.addEventListener('pointerdown', (e) => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); canvas.classList.add('dragging'); });
+  // Left button: drag pans, a click without movement selects. Right button: order the selected group.
+  let drag = null, moved = 0;
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button === 2) {
+      const msg = v.command(e.offsetX * dpr(), e.offsetY * dpr(), performance.now());
+      if (msg) flash(msg);
+      return;
+    }
+    if (e.button !== 0) return;
+    drag = [e.clientX, e.clientY]; moved = 0;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('dragging');
+  });
   canvas.addEventListener('pointermove', (e) => {
     if (!drag) return;
-    v.pan((e.clientX - drag[0]) * dpr(), (e.clientY - drag[1]) * dpr());
+    const dx = e.clientX - drag[0], dy = e.clientY - drag[1];
+    moved += Math.abs(dx) + Math.abs(dy);
+    if (moved > 4) v.pan(dx * dpr(), dy * dpr());
     drag = [e.clientX, e.clientY];
   });
-  const endDrag = () => { drag = null; canvas.classList.remove('dragging'); };
+  const endDrag = (e) => {
+    if (drag && moved <= 4 && e.type === 'pointerup') {
+      const msg = v.click(e.offsetX * dpr(), e.offsetY * dpr(), performance.now());
+      if (msg) flash(msg);
+    }
+    drag = null;
+    canvas.classList.remove('dragging');
+  };
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
@@ -99,8 +123,6 @@ try {
   // Frame pacing: optional cap (60 or 30); everything moves by time, so a lower rate only drops frames.
   const CAPS = [0, 60, 30];
   let capIndex = Number(store.get('scalia.cap') || 0) % CAPS.length;
-  let note = '', noteUntil = 0;
-  const flash = (msg) => { note = msg; noteUntil = performance.now() + 2000; };
   let cpuMs = 0, last = performance.now(), lastDraw = 0;
   function loop(now) {
     const cap = CAPS[capIndex];

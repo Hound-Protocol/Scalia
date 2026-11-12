@@ -5,7 +5,7 @@ use crate::fixed::Fix;
 use crate::flight::plan_flight;
 use crate::groups::{GroupId, Groups};
 use crate::position::Pos;
-use crate::process::{Process, ProcessError, ProcessKind};
+use crate::process::{march_pos, Process, ProcessError, ProcessKind};
 use crate::roster::Roster;
 use crate::system::{BodyId, System};
 use crate::time::WorldMs;
@@ -80,6 +80,22 @@ impl World {
         }
         let p = Process::march(self.groups.pos(id), to, speed_mm_s, start)?;
         self.groups.set_process(id, p);
+        Ok(())
+    }
+
+    /// A player's march order. From rest it is an ordinary march; while marching it redirects from
+    /// wherever the group is at `now` (no teleport). Boarding or flying groups are `Busy`.
+    pub fn order_march(&mut self, id: GroupId, to: Pos, speed_mm_s: u32, now: WorldMs) -> Result<(), ProcessError> {
+        let p = *self.groups.process(id);
+        let from = match p.kind {
+            ProcessKind::March { .. } if p.is_running_at(now) => march_pos(&p, now).unwrap_or(self.groups.pos(id)),
+            ProcessKind::March { to, .. } => to,
+            _ if p.is_running_at(now) => return Err(ProcessError::Busy),
+            _ => self.groups.pos(id),
+        };
+        let next = Process::march(from, to, speed_mm_s, now)?;
+        self.groups.set_pos(id, from);
+        self.groups.set_process(id, next);
         Ok(())
     }
 

@@ -7,7 +7,9 @@ use glam::Vec3;
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
 use scalia_core::planet::Planet;
-use scalia_core::position::RegionId;
+use scalia_core::groups::GroupId;
+use scalia_core::position::{Pos, RegionId};
+use scalia_core::scenario::MARCH_SPEED_MM_S;
 use scalia_core::process::ProcessKind;
 use scalia_core::scenario::build_scenario;
 use scalia_core::system::{BodyId, System, PARK_OFFSET};
@@ -87,6 +89,11 @@ pub struct Viewer {
     day_rate: f64,
     day_at: f64,
     last_view: (f32, f32),
+    /// Camera of the last frame: target, yaw, view height (for picking).
+    last_cam: (Vec3, f32, f32),
+    selected: Option<u32>,
+    follow_group: u32,
+    order_dest: Option<Vec3>,
     fps: f32,
     frames: u32,
     fps_t: f64,
@@ -131,6 +138,10 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         day_rate: 1.0 / 360_000.0,
         day_at: 0.0,
         last_view: (60.0, 1.0),
+        last_cam: (Vec3::ZERO, 0.0, 60.0),
+        selected: Some(0),
+        follow_group: 0,
+        order_dest: None,
         fps: 0.0,
         frames: 0,
         fps_t: 0.0,
@@ -240,8 +251,55 @@ impl Viewer {
         self.world = build_scenario(42, g, n);
         self.derived.clear();
         self.ground_cam = None;
+        self.selected = Some(0);
+        self.follow_group = 0;
+        self.order_dest = None;
         format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
     }
+    /// Left click on the ground: selects the group under the cursor (or clears the selection).
+    pub fn click(&mut self, px: f64, py: f64, now_ms: f64) -> String {
+        if self.scene != Scene::Ground {
+            return String::new();
+        }
+        let t = WorldMs(self.sim_ms(now_ms) as u64);
+        let p = self.pick(px, py);
+        let mut best: Option<(u32, f32)> = None;
+        for i in 0..self.world.groups.len() as u32 {
+            let c = self.group_centre(i, t);
+            let reach = (self.world.groups.people(GroupId(i)) as f32).sqrt() * 0.9 * 0.75 + 4.0;
+            let d = (Vec3::new(c.x - p.x, c.y - p.y, 0.0)).length();
+            if d <= reach && best.map_or(true, |b| d < b.1) {
+                best = Some((i, d));
+            }
+        }
+        self.selected = best.map(|b| b.0);
+        match self.selected {
+            Some(g) => format!("selected group {} ({} soldiers)", g, self.world.groups.people(GroupId(g))),
+            None => "nothing selected".into(),
+        }
+    }
+
+    /// Right click on the ground: the selected group marches there (redirecting if already marching).
+    pub fn command(&mut self, px: f64, py: f64, now_ms: f64) -> String {
+        if self.scene != Scene::Ground {
+            return String::new();
+        }
+        let Some(g) = self.selected else { return "select a group first (left click)".into() };
+        let t = WorldMs(self.sim_ms(now_ms) as u64);
+        let _ = self.world.tick(WorldMs(t.0.max(self.world.now.0)));
+        let p = self.pick(px, py);
+        let to = Pos { region: RegionId(1), x: (p.x as f64 * 1000.0) as i64, y: (p.y as f64 * 1000.0) as i64, z: 0 };
+        match self.world.order_march(GroupId(g), to, MARCH_SPEED_MM_S, WorldMs(t.0.max(self.world.now.0))) {
+            Ok(()) => {
+                self.order_dest = Some(p);
+                self.ground_cam = None;
+                self.follow_group = g;
+                format!("group {g} marching to ({:.0}, {:.0})", p.x, p.y)
+            }
+            Err(e) => format!("cannot order group {g}: {e:?}"),
+        }
+    }
+
     pub fn scene_name(&self) -> String {
         match self.scene {
             Scene::Ships => "ships",
@@ -326,6 +384,7 @@ impl Viewer {
             Scene::System => self.system_scene(t, &mut meshes),
         };
         self.last_view = (view_height, self.size.1 as f32);
+        self.last_cam = (target, yaw, view_height);
         let tod = self.time_of_day(t) as f32;
         let (sky_now, atmosphere) = match self.scene {
             Scene::System | Scene::Planet => (sky(0.5), false),
@@ -343,6 +402,30 @@ impl Viewer {
 }
 
 impl Viewer {
+    /// The ground point under a screen pixel: through the orthographic camera, onto the terrain.
+    fn pick(&mut self, px: f64, py: f64) -> Vec3 {
+        let (target, yaw, view_h) = self.last_cam;
+        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+        let (nx, ny) = (2.0 * px as f32 / w - 1.0, 1.0 - 2.0 * py as f32 / h);
+        let (r, u, to_cam) = scalia_render::camera::basis(yaw);
+        let on_plane = target + r * (nx * view_h / 2.0 * w / h) + u * (ny * view_h / 2.0);
+        // Slide along the view ray until it meets the ground (a few refinements over the heightfield).
+        let mut q = on_plane;
+        for _ in 0..5 {
+            let ground = self.height_at(q.x, q.y);
+            let s = (on_plane.z - ground) / to_cam.z;
+            q = on_plane - to_cam * s;
+        }
+        q
+    }
+
+    /// Where a group's formation is centred at time t (render metres).
+    fn group_centre(&self, g: u32, t: WorldMs) -> Vec3 {
+        let id = GroupId(g);
+        let p = scalia_core::process::process_pos(self.world.groups.process(id), t).unwrap_or(self.world.groups.pos(id));
+        Vec3::new(p.x as f32 / 1000.0, p.y as f32 / 1000.0, 0.0)
+    }
+
     /// Position (thousand km) of the followed body, or the star.
     fn sys_follow_pos(&self) -> Vec3 {
         match self.sys_follow.and_then(|b| self.system.body_pos(BodyId(b), self.sys_now)) {
@@ -462,13 +545,10 @@ impl Viewer {
         derive_visible(&self.world, tick, &view, MAX_DRAWN, &mut out);
         let n = out.len();
         // Follow the first group: its formation centre at this moment.
-        let lead = scalia_core::groups::GroupId(0);
-        let p0 = match self.world.groups.process(lead).kind {
-            ProcessKind::March { .. } => scalia_core::process::process_pos(self.world.groups.process(lead), tick).unwrap_or(self.world.groups.pos(lead)),
-            _ => self.world.groups.pos(lead),
-        };
-        // Formations are centred on the group position.
-        let (cx, cy) = (p0.x as f64 / 1000.0, p0.y as f64 / 1000.0);
+        // Follow the chosen group: its formation centre at this moment.
+        let lead = self.follow_group.min(self.world.groups.len().saturating_sub(1) as u32);
+        let c0 = self.group_centre(lead, tick);
+        let (cx, cy) = (c0.x as f64, c0.y as f64);
         let mut inst = Vec::with_capacity(n * 8);
         for d in &out {
             let (x, y) = (d.pos.x as f32 / 1000.0, d.pos.y as f32 / 1000.0);
@@ -481,7 +561,8 @@ impl Viewer {
             };
             let walking = d.phase == Phase::Marching || d.phase == Phase::Walking || d.phase == Phase::Climbing;
             let steps = if walking { 0.9 + jitter * 0.1 } else { 0.0 };
-            inst.extend_from_slice(&[x, y, z, if walking { 7.0 } else { 6.0 }, heading, jitter, steps, 0.0]);
+            let body = if self.selected == Some(d.group.0) { 14.0 } else if walking { 7.0 } else { 6.0 };
+            inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, 0.0]);
         }
         self.derived = out;
         self.gpu.upload_instances("soldiers", bytes(&inst));
@@ -518,12 +599,26 @@ impl Viewer {
             self.gpu.drop_buffer(&format!("terrain{},{}", k.0, k.1));
         }
         instanced.push(("figure".into(), "soldiers".into()));
+        if let Some(d) = self.order_dest {
+            let arrived = self.selected.map_or(true, |g| !self.world.groups.process(GroupId(g)).is_running_at(tick));
+            if arrived {
+                self.order_dest = None;
+            } else {
+                let mut m = MeshBuilder::default();
+                let z = self.height_at(d.x, d.y);
+                m.diamond([d.x, d.y, z + 2.0], 1.2, 9.0);
+                m.cuboid([d.x - 0.1, d.y - 0.1, z], [d.x + 0.1, d.y + 0.1, z + 2.0], 9.0);
+                self.gpu.upload("order", m.bytes());
+                meshes.push("order".into());
+            }
+        }
         self.focus = Vec3::new(cx as f32, cy as f32, 0.0);
         let mut target = self.ground_cam.unwrap_or(self.focus);
         target.z = self.height_at(target.x, target.y);
-        let mode = if self.ground_cam.is_some() { "free camera (F follows)" } else { "following the group" };
+        let mode = if self.ground_cam.is_some() { "free camera (F follows)".to_string() } else { format!("following group {lead}") };
+        let sel = match self.selected { Some(g) => format!(", group {g} selected"), None => String::new() };
         let total: u64 = (0..self.world.groups.len()).map(|i| self.world.groups.people(scalia_core::groups::GroupId(i as u32)) as u64).sum();
-        let text = format!("Ground: {n} of {total} soldiers drawn, {mode}, {:.0} m view", self.ground_view);
+        let text = format!("Ground: {n} of {total} soldiers drawn, {mode}{sel}, {:.0} m view", self.ground_view);
         (target, self.yaw, self.ground_view, 600.0, text)
     }
 
