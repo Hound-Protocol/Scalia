@@ -89,4 +89,6 @@ Decisions: orbit radius error is under 1e-6 of the radius (about 27 m on the 90,
 Verified in a real Chrome on GitHub Pages (software WebGPU adapter, so frame rates are low-end numbers): ships, ground and system scenes draw; the Aster-to-Brine flight runs for about 97 s with a trail.
 
 - Renderer: `web/render.js` (WebGPU only, flat-shaded, 16-colour palette, 480x270 target scaled with nearest-neighbour, "full resolution" toggle), scenes in `web/viewer.js`. Camera and meshes are built in JavaScript; the core stays integer-only and exports `blueprint_mesh`.
+- Pixel-art pass: one-pixel silhouettes from depth, convex-edge highlights from normals, camera snapped to the texel grid with the snap error shifted out in the upscale (toggle "outlines").
+- Verified again after the Pages fix: ground shows 150 soldiers in formation on terrain with relief; a full Aster-to-Brine flight (99 s) ends docked at Brine.
 - Not built: shader validation outside a browser, instanced figures (soldiers are rebuilt each frame, capped at 400), a continuous zoom from galaxy to one soldier, marching in the viewer, textures.
