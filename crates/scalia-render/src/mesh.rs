@@ -18,6 +18,11 @@ pub enum Part {
     Torso = 8,
     /// Held in the right hand; follows the hand and keeps its own pitch.
     Rifle = 9,
+    /// Neck, head and helmet: leans with the torso and nods around the neck.
+    Head = 10,
+    /// Forearms and hands: bend at the elbows.
+    LeftForearm = 11,
+    RightForearm = 12,
 }
 
 /// Colour code for a palette index on a part.
@@ -40,6 +45,9 @@ pub fn part_of(code: f32) -> Part {
         7 => Part::RightShin,
         8 => Part::Torso,
         9 => Part::Rifle,
+        10 => Part::Head,
+        11 => Part::LeftForearm,
+        12 => Part::RightForearm,
         _ => Part::Body,
     }
 }
@@ -110,46 +118,70 @@ impl MeshBuilder {
     }
 }
 
-/// Low-poly soldier facing +y, 1.74 m to the top of the helmet: thighs from the hips (0.88 m), shins with boots
-/// from the knees (0.46 m), arms with hands from the shoulders (1.40 m), torso in the instance colour with belt and
-/// pack, head and helmet with a rim, and a rifle (stock, body, magazine, barrel) gripped at the right hand.
+/// Low-poly soldier facing +y, 1.74 m to the top of the helmet. Thighs hang from the hips (0.88 m), shins with
+/// boots from the knees (0.46 m), upper arms from the shoulders (1.40 m), forearms with hands from the elbows
+/// (1.14 m), and the head nods around the neck (1.46 m). The torso is in the instance colour with webbing, belt,
+/// pouches, canteen, pack and bedroll; the helmet has a rim and a strap; the rifle has stock, body, magazine,
+/// barrel and sight and is gripped in the right hand.
 pub fn figure() -> MeshBuilder {
     let mut f = MeshBuilder::default();
-    let (dark, skin, helmet, gun, kit, boot) = (3, 8, 10, 0, 13, 0);
+    let (dark, skin, helmet, gun, kit, boot, strap) = (3, 8, 10, 0, 13, 0, 13);
     for (side, thigh, shin) in [(-1.0f32, Part::LeftThigh, Part::LeftShin), (1.0, Part::RightThigh, Part::RightShin)] {
         let (x0, x1) = if side < 0.0 { (-0.17, -0.03) } else { (0.03, 0.17) };
         f.cuboid([x0, -0.09, 0.46], [x1, 0.09, 0.90], code(dark, thigh));
         f.cuboid([x0 + 0.01, -0.08, 0.07], [x1 - 0.01, 0.08, 0.48], code(dark, shin));
         f.cuboid([x0, -0.10, 0.0], [x1, 0.14, 0.08], code(boot, shin));
+        // Gaiters above the boots.
+        f.cuboid([x0 + 0.005, -0.085, 0.08], [x1 - 0.005, 0.085, 0.17], code(kit, shin));
     }
+    // Torso, belt with two front pouches, canteen, webbing straps.
     f.cuboid([-0.22, -0.13, 0.92], [0.22, 0.13, 1.42], -1.0);
     f.cuboid([-0.23, -0.14, 0.86], [0.23, 0.14, 0.94], code(kit, Part::Torso));
-    f.cuboid([-0.16, -0.25, 0.98], [0.16, -0.13, 1.36], code(kit, Part::Torso));
-    f.cuboid([-0.09, -0.09, 1.42], [0.09, 0.11, 1.62], code(skin, Part::Torso));
-    f.cuboid([-0.12, -0.13, 1.56], [0.12, 0.14, 1.74], code(helmet, Part::Torso));
-    f.cuboid([-0.14, -0.15, 1.56], [0.14, 0.16, 1.60], code(helmet, Part::Torso));
-    for (x0, x1, arm) in [(-0.31f32, -0.23f32, Part::LeftArm), (0.23, 0.31, Part::RightArm)] {
-        f.cuboid([x0, -0.065, 0.98], [x1, 0.065, 1.42], code(dark, arm));
-        f.cuboid([x0 + 0.005, -0.05, 0.90], [x1 - 0.005, 0.06, 0.98], code(skin, arm));
+    for x in [-0.15f32, 0.06] {
+        f.cuboid([x, 0.13, 0.88], [x + 0.09, 0.18, 1.01], code(kit, Part::Torso));
     }
+    f.cuboid([-0.26, -0.06, 0.80], [-0.21, 0.05, 0.94], code(dark, Part::Torso));
+    for x in [-0.14f32, 0.10] {
+        f.cuboid([x, -0.145, 0.94], [x + 0.04, 0.145, 1.42], code(strap, Part::Torso));
+    }
+    // Pack with a rolled bedroll on top.
+    f.cuboid([-0.16, -0.25, 0.98], [0.16, -0.13, 1.36], code(kit, Part::Torso));
+    f.cuboid([-0.19, -0.26, 1.36], [0.19, -0.14, 1.45], code(dark, Part::Torso));
+    // Neck, head, helmet with rim and strap.
+    f.cuboid([-0.06, -0.06, 1.40], [0.06, 0.07, 1.50], code(skin, Part::Head));
+    f.cuboid([-0.09, -0.09, 1.48], [0.09, 0.11, 1.64], code(skin, Part::Head));
+    f.cuboid([-0.12, -0.13, 1.58], [0.12, 0.14, 1.74], code(helmet, Part::Head));
+    f.cuboid([-0.145, -0.155, 1.58], [0.145, 0.165, 1.615], code(helmet, Part::Head));
+    f.cuboid([-0.095, 0.02, 1.49], [0.095, 0.05, 1.52], code(dark, Part::Head));
+    // Upper arms with shoulder pads, forearms with hands.
+    for (x0, x1, arm, fore) in [(-0.31f32, -0.23f32, Part::LeftArm, Part::LeftForearm), (0.23, 0.31, Part::RightArm, Part::RightForearm)] {
+        f.cuboid([x0, -0.065, 1.12], [x1, 0.065, 1.42], code(dark, arm));
+        f.cuboid([x0 - 0.01, -0.075, 1.34], [x1 + 0.01, 0.075, 1.44], code(kit, arm));
+        f.cuboid([x0 + 0.005, -0.06, 0.98], [x1 - 0.005, 0.06, 1.16], code(dark, fore));
+        f.cuboid([x0 + 0.01, -0.05, 0.90], [x1 - 0.01, 0.06, 0.98], code(skin, fore));
+    }
+    // Rifle: stock, body, magazine, barrel, rear sight.
     f.cuboid([0.25, -0.18, 0.92], [0.29, 0.02, 1.00], code(gun, Part::Rifle));
     f.cuboid([0.25, 0.02, 0.93], [0.30, 0.42, 1.01], code(gun, Part::Rifle));
     f.cuboid([0.26, 0.12, 0.85], [0.29, 0.20, 0.93], code(dark, Part::Rifle));
     f.cuboid([0.265, 0.42, 0.96], [0.285, 0.72, 0.98], code(gun, Part::Rifle));
+    f.cuboid([0.268, 0.04, 1.01], [0.282, 0.09, 1.04], code(dark, Part::Rifle));
     f
 }
 
-/// The 108-triangle figure for distant views: same proportions and parts, fewer pieces.
+/// The lighter figure for distant views: same proportions and parts, fewer pieces.
 pub fn figure_lo() -> MeshBuilder {
     let mut f = MeshBuilder::default();
     f.cuboid([-0.17, -0.10, 0.0], [-0.03, 0.10, 0.88], code(3, Part::LeftThigh));
     f.cuboid([0.03, -0.10, 0.0], [0.17, 0.10, 0.88], code(3, Part::RightThigh));
     f.cuboid([-0.22, -0.13, 0.85], [0.22, 0.13, 1.45], -1.0);
     f.cuboid([-0.16, -0.24, 1.0], [0.16, -0.13, 1.35], code(13, Part::Torso));
-    f.cuboid([-0.10, -0.10, 1.45], [0.10, 0.12, 1.62], code(8, Part::Torso));
-    f.cuboid([-0.12, -0.12, 1.56], [0.12, 0.14, 1.74], code(10, Part::Torso));
-    f.cuboid([-0.31, -0.07, 0.90], [-0.23, 0.07, 1.42], code(3, Part::LeftArm));
-    f.cuboid([0.23, -0.07, 0.90], [0.31, 0.07, 1.42], code(3, Part::RightArm));
+    f.cuboid([-0.10, -0.10, 1.45], [0.10, 0.12, 1.62], code(8, Part::Head));
+    f.cuboid([-0.12, -0.12, 1.56], [0.12, 0.14, 1.74], code(10, Part::Head));
+    f.cuboid([-0.31, -0.07, 1.12], [-0.23, 0.07, 1.42], code(3, Part::LeftArm));
+    f.cuboid([0.23, -0.07, 1.12], [0.31, 0.07, 1.42], code(3, Part::RightArm));
+    f.cuboid([-0.31, -0.07, 0.90], [-0.23, 0.07, 1.16], code(3, Part::LeftForearm));
+    f.cuboid([0.23, -0.07, 0.90], [0.31, 0.07, 1.16], code(3, Part::RightForearm));
     f.cuboid([0.25, -0.1, 0.92], [0.30, 0.72, 1.0], code(0, Part::Rifle));
     f
 }

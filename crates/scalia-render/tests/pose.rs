@@ -67,7 +67,7 @@ fn walking_swings_the_legs_and_running_leans_forward() {
     let b = posed(Pose::Walk, 0.75);
     let foot = |v: &[(Part, Vec3)]| v.iter().filter(|p| p.0 == Part::LeftShin).map(|p| p.1.y).fold(f32::MIN, f32::max);
     assert!((foot(&a) - foot(&b)).abs() > 0.3, "left foot barely moves: {} vs {}", foot(&a), foot(&b));
-    let head_y = |v: &[(Part, Vec3)]| v.iter().filter(|p| p.0 == Part::Torso && p.1.z > 1.3).map(|p| p.1.y).fold(f32::MIN, f32::max);
+    let head_y = |v: &[(Part, Vec3)]| v.iter().filter(|p| p.0 == Part::Head).map(|p| p.1.y).fold(f32::MIN, f32::max);
     assert!(head_y(&posed(Pose::Run, 0.0)) > head_y(&posed(Pose::Stand, 0.0)) + 0.15);
 }
 
@@ -99,3 +99,32 @@ fn going_prone_never_sinks_into_the_ground() {
         }
     }
 }
+
+#[test]
+fn prone_soldier_lifts_his_head_rests_on_his_elbows_and_shoulders_the_rifle() {
+    let v = posed(Pose::Prone, 0.0);
+    let of = |part: Part| v.iter().filter(move |p| p.0 == part).map(|p| p.1).collect::<Vec<Vec3>>();
+    let max = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
+    let min = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MAX), |a, b| a.min(*b));
+    let (head, rifle) = (of(Part::Head), of(Part::Rifle));
+    // Head up and looking forward, not face down in the dirt.
+    assert!(max(&head).z > 0.38, "head top only {}", max(&head).z);
+    assert!(min(&head).z > 0.03, "face in the ground: {}", min(&head).z);
+    // Elbows on the ground, forearms raised to the rifle.
+    for arm in [Part::LeftArm, Part::RightArm] {
+        assert!(min(&of(arm)).z < 0.1, "{arm:?} elbow floats at {}", min(&of(arm)).z);
+    }
+    for fore in [Part::LeftForearm, Part::RightForearm] {
+        assert!(max(&of(fore)).z > 0.2, "{fore:?} lies flat");
+    }
+    // Rifle out in front of the head, at head height, butt near the shoulder.
+    assert!(max(&rifle).y > max(&head).y + 0.2, "rifle tip {} behind head {}", max(&rifle).y, max(&head).y);
+    assert!(min(&rifle).y < max(&head).y, "rifle butt not at the shoulder");
+}
+
+#[test]
+fn aiming_raises_the_rifle_with_bent_elbows() {
+    let pp = params(Pose::StandAim, 0.0);
+    assert!(pp.elbow[0] > 0.2 && pp.elbow[1] > 0.2, "elbows straight: {:?}", pp.elbow);
+}
+

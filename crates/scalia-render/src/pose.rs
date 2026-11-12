@@ -8,6 +8,8 @@ use crate::mesh::Part;
 pub const HIP_Z: f32 = 0.88;
 pub const KNEE_Z: f32 = 0.46;
 pub const SHOULDER_Z: f32 = 1.40;
+pub const ELBOW_Z: f32 = 1.14;
+pub const NECK_Z: f32 = 1.46;
 /// Where the right hand grips the rifle in the rest pose.
 pub const GRIP_Z: f32 = 0.95;
 /// How far the lying body is lifted so the chest rests on the ground.
@@ -47,6 +49,10 @@ pub struct PoseParams {
     pub hip: [f32; 2],
     pub knee: [f32; 2],
     pub shoulder: [f32; 2],
+    /// Elbow bend, left then right (positive swings the forearm forward).
+    pub elbow: [f32; 2],
+    /// Head nod around the neck (positive tilts the face up).
+    pub head: f32,
     /// Rifle pitch around the grip (positive points the muzzle up).
     pub rifle: f32,
     /// 0 upright, 1 lying flat; fractions only while blending.
@@ -60,6 +66,10 @@ pub fn rot(q: Vec3, pivot_y: f32, pivot_z: f32, a: f32) -> Vec3 {
     let (s, c) = a.sin_cos();
     let (dy, dz) = (q.y - pivot_y, q.z - pivot_z);
     Vec3::new(q.x, pivot_y + dy * c - dz * s, pivot_z + dy * s + dz * c)
+}
+
+fn arm(q: Vec3, shoulder: f32, elbow: f32) -> Vec3 {
+    rot(rot(q, 0.0, ELBOW_Z, elbow), 0.0, SHOULDER_Z, shoulder)
 }
 
 fn leg(q: Vec3, hip: f32, knee: f32) -> Vec3 {
@@ -77,31 +87,46 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.hip = [0.45 * l, 0.45 * r];
             p.knee = [0.8 * l.max(0.0) + 0.05, 0.8 * r.max(0.0) + 0.05];
             p.shoulder = [-0.4 * l, 0.2 - 0.08 * r];
+            p.elbow = [0.25 + 0.15 * l.max(0.0), 0.6];
+            p.rifle = 0.25;
         }
         Pose::Run => {
             p.lean = 0.3;
             p.hip = [0.75 * l + 0.1, 0.75 * r + 0.1];
             p.knee = [1.3 * l.max(0.0) + 0.3, 1.3 * r.max(0.0) + 0.3];
-            p.shoulder = [0.6 - 0.35 * l, 0.9 - 0.1 * r];
+            p.shoulder = [0.5 - 0.3 * l, 0.6 - 0.1 * r];
+            p.elbow = [1.3, 1.1];
+            p.rifle = 0.6;
+            p.head = 0.25;
         }
         Pose::Crouch => {
             p.lean = 0.45;
             p.hip = [1.4, 1.4];
             p.knee = [2.4, 2.4];
             p.shoulder = [0.3, 0.3];
+            p.elbow = [0.9, 0.9];
+            p.rifle = 0.5;
+            p.head = 0.35;
         }
         Pose::CoverAim => {
             p.lean = 0.2;
             p.hip = [1.4, 1.4];
             p.knee = [2.4, 2.4];
-            p.shoulder = [1.3, 1.45];
+            p.shoulder = [1.1, 1.2];
+            p.elbow = [0.4, 0.6];
+            p.head = 0.15;
         }
         Pose::Prone => {
             p.prone = 1.0;
-            p.shoulder = [3.05, 3.05];
+            p.shoulder = [2.8, 2.8];
+            p.elbow = [1.3, 1.35];
             p.rifle = std::f32::consts::FRAC_PI_2;
+            p.head = 1.0;
         }
-        Pose::StandAim => p.shoulder = [1.3, 1.45],
+        Pose::StandAim => {
+            p.shoulder = [1.1, 1.2];
+            p.elbow = [0.4, 0.6];
+        }
     }
     p.drop = ground_drop(p.hip, p.knee);
     p
@@ -128,13 +153,16 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightShin => leg(v, p.hip[1], p.knee[1]),
         Part::LeftArm => rot(v, 0.0, SHOULDER_Z, p.shoulder[0]),
         Part::RightArm => rot(v, 0.0, SHOULDER_Z, p.shoulder[1]),
+        Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0]),
+        Part::RightForearm => arm(v, p.shoulder[1], p.elbow[1]),
         Part::Rifle => {
-            let hand = rot(Vec3::new(0.0, 0.0, GRIP_Z), 0.0, SHOULDER_Z, p.shoulder[1]);
+            let hand = arm(Vec3::new(0.0, 0.0, GRIP_Z), p.shoulder[1], p.elbow[1]);
             rot(v, 0.0, GRIP_Z, p.rifle) + Vec3::new(0.0, hand.y, hand.z - GRIP_Z)
         }
+        Part::Head => rot(v, 0.0, NECK_Z, p.head),
         Part::Torso => v,
     };
-    if matches!(part, Part::Torso | Part::LeftArm | Part::RightArm | Part::Rifle) {
+    if part != Part::LeftThigh && part != Part::RightThigh && part != Part::LeftShin && part != Part::RightShin {
         q = rot(q, 0.0, HIP_Z, -p.lean);
     }
     q.z += p.drop;
@@ -158,6 +186,8 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         hip,
         knee,
         shoulder: m2(a.shoulder, b.shoulder),
+        elbow: m2(a.elbow, b.elbow),
+        head: m(a.head, b.head),
         rifle: m(a.rifle, b.rifle),
         prone: m(a.prone, b.prone),
         drop,
