@@ -12,8 +12,20 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 fn ld(p: vec2i) -> f32 { return textureLoad(dep, p, 0); }
 fn ln(p: vec2i) -> vec3f { return textureLoad(nrm, p, 0).xyz * 2.0 - 1.0; }
 // Haze towards the fog colour with distance behind the focus, then a soft vignette.
+// Stars for the void around planets: sparse hashed points on the internal pixel grid, a few brighter and coloured.
+fn star(p: vec2i) -> vec3f {
+  let h = fract(sin(dot(vec2f(p), vec2f(12.9898, 78.233))) * 43758.5453);
+  if (h < 0.9935) { return vec3f(0.0); }
+  let k = (h - 0.9935) / 0.0065;
+  let tint = select(vec3f(0.75, 0.82, 1.0), vec3f(1.0, 0.85, 0.65), fract(h * 977.0) > 0.7);
+  return tint * (0.35 + 0.65 * k * k);
+}
 fn grade(c: vec3f, d: f32, uv: vec2f) -> vec4f {
   var o = c;
+  if (b.fog.w < 0.5 && d >= 1.0) {
+    let p = vec2i(floor(uv * b.size));
+    o = o + star(p);
+  }
   if (b.fog.w > 0.5) {
     let f = select(smoothstep(b.fogp.x, b.fogp.y, d) * b.fogp.z, 1.0, d >= 1.0);
     o = mix(o, b.fog.rgb, f);
