@@ -143,24 +143,27 @@ try {
     lastFrameAt = now;
     if (now - panelAt < 200) return; // numbers 5 times a second, so they can be read
     panelAt = now;
-    const budget = 1000 / (cap || 60);
-    const scale = budget * 1.25; // the bar shows 125% of the budget; the yellow line is 100%
-    for (const b of document.querySelectorAll('#perf .budget')) b.style.left = `${100 / 1.25}%`;
-    const pct = (ms) => `${Math.min(100, (ms / scale) * 100)}%`;
-    P('sCpu').style.width = pct(cpu);
-    P('sCpu').style.background = level(cpu / budget);
-    P('vCpu').textContent = `${cpu.toFixed(1)} ms`;
+    // Utilisation: the share of each second spent on the game = ms per frame x frames per second / 1000.
     const [fps, iw, ih, sh, sc, up] = p;
+    const perSecond = (ms) => (ms * fps) / 1000;
+    for (const b of document.querySelectorAll('#perf .budget')) b.style.left = '80%';
+    const pct = (f) => `${Math.min(100, f * 100)}%`;
+    const cpuUse = perSecond(cpu);
+    P('sCpu').style.width = pct(cpuUse);
+    P('sCpu').style.background = level(cpuUse);
+    P('vCpu').textContent = `${(cpuUse * 100).toFixed(0)}%`;
+    P('tCpu').title = `${cpu.toFixed(2)} ms per frame`;
     if (sh >= 0) {
       let x = 0;
       for (const [id, ms, col] of [['sSh', sh, '#5b8fd9'], ['sSc', sc, '#7fb069'], ['sUp', up, '#c08bd9']]) {
-        const w = Math.min(100 - x, (ms / scale) * 100);
+        const w = Math.min(100 - x, perSecond(ms) * 100);
         P(id).style.left = `${x}%`; P(id).style.width = `${w}%`; P(id).style.background = col;
         x += w;
       }
-      const g = sh + sc + up;
-      P('vGpu').textContent = `${g.toFixed(1)} ms`;
-      P('vGpu').style.color = level(g / budget);
+      const g = perSecond(sh + sc + up);
+      P('vGpu').textContent = `${(g * 100).toFixed(0)}%`;
+      P('vGpu').style.color = level(g);
+      P('tGpu').title = `${(sh + sc + up).toFixed(2)} ms per frame (shadow ${sh.toFixed(2)}, scene ${sc.toFixed(2)}, upscale ${up.toFixed(2)})`;
     } else {
       P('vGpu').textContent = 'n/a';
     }

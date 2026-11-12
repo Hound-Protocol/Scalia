@@ -79,7 +79,8 @@
   <div class="row"><span class="label">CPU</span><div class="track" id="tCpu"><div class="seg" id="sCpu"></div><div class="budget"></div></div><span class="val" id="vCpu">--</span></div>
   <div class="row"><span class="label">GPU</span><div class="track" id="tGpu"><div class="seg" id="sSh"></div><div class="seg" id="sSc"></div><div class="seg" id="sUp"></div><div class="budget"></div></div><span class="val" id="vGpu">--</span></div>
   <div class="legend"><span><i style="background:#5b8fd9"></i>shadow</span><span><i style="background:#7fb069"></i>scene</span><span><i style="background:#c08bd9"></i>upscale</span></div>
-  <canvas id="pGraph" width="300" height="34" title="Frame time, last 300 frames; the line is the 60 fps budget"></canvas>
+  <canvas id="pGraph" width="300" height="34" title="Frame time, last 300 frames; the line is 16.7 ms (60 fps)"></canvas>
+  <div class="legend" style="margin-left:0">bars: share of each second used; hover for ms per frame; line at 80%</div>
   <div class="warn" id="pWarn" hidden></div>
 </div>
 <div id="error" class="panel"></div>
