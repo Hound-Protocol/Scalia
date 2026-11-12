@@ -913,7 +913,7 @@ impl Viewer {
         let names: Vec<&str> = self.system.bodies.iter().map(|b| b.name).collect();
         for (i, b) in self.system.bodies.iter().enumerate() {
             let p = self.system.body_pos(BodyId(i as u8), now).expect("known body");
-            m.ring([0.0, 0.0], (b.orbit_radius_mm as f64 / KM) as f32, (pix * 0.6).max(20.0), 128, 3.0);
+            m.ring([0.0, 0.0], (b.orbit_radius_mm as f64 / KM) as f32, pix * 0.6, 128, 3.0);
             let c = Vec3::new((p.x as f64 / KM) as f32, (p.y as f64 / KM) as f32, 0.0);
             let r = pix * 5.0;
             let globe = if i == HOME_BODY as usize && !self.home_globe.is_empty() { &self.home_globe } else { &self.body_globes[i] };
@@ -941,7 +941,7 @@ impl Viewer {
                     self.flight = None;
                 }
                 let b = self.system.body_pos(BodyId(self.docked), now).expect("known body");
-                text = format!("Docked at {}. Wheel zooms ({:.0} thousand km across).", names[self.docked as usize], self.sys_scale / 1000.0);
+                text = format!("Docked at {}. Wheel zooms ({:.0} km across).", names[self.docked as usize], self.sys_scale * 1000.0);
                 ((b.x as f64 / KM) as f32, ((b.y + PARK_OFFSET.1) as f64 / KM) as f32)
             }
         };
@@ -952,7 +952,7 @@ impl Viewer {
             self.trail.clear();
         }
         for &(_, x, y) in &self.trail {
-            m.diamond([x, y, 0.0], (pix * 1.2).max(120.0), 8.0);
+            m.diamond([x, y, 0.0], pix * 1.2, 8.0);
         }
         m.cuboid([sx - pix * 2.5, sy - pix * 2.5, 0.0], [sx + pix * 2.5, sy + pix * 2.5, pix * 5.0], 15.0);
         self.gpu.upload("system", m.bytes());
