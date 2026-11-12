@@ -112,6 +112,13 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
   drifting cloud shadows by day; instanced grass tufts that sway in travelling gusts (scene pass only, no shadow cost). T cycles the day speed (6-minute day, 12-second day, paused).
 - **Soldier model:** 108 triangles: legs, arms, torso in the unit colour, helmet, pack, rifle. Walk cycle on the GPU
   (legs and free arm swing, rifle arm sways); soldiers face their march; shadows animate too. Ships > "Soldier".
+- **Poses (reference in `scalia-render::pose`, tested; ported to WGSL):** 240-triangle soldier with knees, hands,
+  boots, helmet rim and a detailed rifle; walk, run, crouch, cover aim, prone, standing aim. Feet stay on the ground in
+  every pose, phase and transition. Changes blend over 0.35 s and ripple through a group. Shift + right click runs;
+  P cycles the selected group's stance; Ships > Soldier shows every pose. 108-triangle figure beyond 70 m.
+- **GOAP planner (`crates/scalia-ai`):** deterministic F.E.A.R.-style planning, 7 tests; a squad plan costs about 1 us
+  (worst about 50 us). Design options for the command hierarchy are in
+  `docs/superpowers/specs/2026-11-12-ai-command-and-goap-draft.md` (decisions open).
 - **Scale:** soldiers are derived only near the camera; terrain uses coarser meshes when zoomed out; N cycles the army
   (2k, 20k, 100k, 500k). Measured in Chrome on the RTX 3050 Ti: 500,000 simulated, 4,000 drawn at 60 m: 60 fps, 1.0 ms
   CPU per frame; 12,000 drawn at 160 m: 60 fps, 2.4 ms.
