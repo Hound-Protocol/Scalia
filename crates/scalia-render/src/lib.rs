@@ -5,6 +5,7 @@ pub mod camera;
 pub mod mesh;
 pub mod pose;
 pub mod shaders;
+pub mod skeleton;
 pub mod sky;
 pub mod gpu;
 
