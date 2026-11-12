@@ -47,3 +47,12 @@ fn part_encoding_round_trips() {
     assert_eq!(part_of(3.0 + 16.0 * 2.0), Part::RightLeg);
     assert_eq!(part_of(5.0 + 16.0 * 4.0), Part::RightArm);
 }
+
+#[test]
+fn grass_tuft_is_tiny_and_sways() {
+    let g = scalia_render::mesh::grass_tuft();
+    assert!(g.vertices.len() / 3 <= 6);
+    assert!(g.vertices.iter().all(|v| part_of(v.color) == Part::Sway));
+    let top = g.vertices.iter().map(|v| v.pos[2]).fold(0.0, f32::max);
+    assert!((0.2..=0.5).contains(&top));
+}

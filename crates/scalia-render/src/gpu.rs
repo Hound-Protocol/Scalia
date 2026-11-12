@@ -28,6 +28,8 @@ pub struct FrameDesc<'a> {
     pub meshes: &'a [String],
     /// (mesh key, instance buffer key) pairs.
     pub instanced: &'a [(String, String)],
+    /// Instanced decoration drawn in the scene but casting no shadow (grass).
+    pub decor: &'a [(String, String)],
     pub target: Vec3,
     pub yaw: f32,
     pub view_height: f32,
@@ -434,6 +436,17 @@ impl Gpu {
         };
         let mut enc = self.device.create_command_encoder(&Default::default());
 
+        let draw_list = |pass: &mut wgpu::RenderPass<'_>, list: &[(String, String)]| {
+            for (mk, ik) in list {
+                if let (Some(mb), Some(ib)) = (self.buffers.get(mk), self.buffers.get(ik)) {
+                    if mb.count > 0 && ib.count > 0 {
+                        pass.set_vertex_buffer(0, mb.buf.slice(..));
+                        pass.set_vertex_buffer(1, ib.buf.slice(..));
+                        pass.draw(0..mb.count, 0..ib.count);
+                    }
+                }
+            }
+        };
         let draw_all = |pass: &mut wgpu::RenderPass<'_>| {
             pass.set_vertex_buffer(1, self.one_instance.slice(..));
             for k in f.meshes {
@@ -494,6 +507,7 @@ impl Gpu {
             p.set_pipeline(&self.scene_pipe);
             p.set_bind_group(0, &self.scene_bind, &[]);
             draw_all(&mut p);
+            draw_list(&mut p, f.decor);
         }
         {
             let mut p = enc.begin_render_pass(&wgpu::RenderPassDescriptor {

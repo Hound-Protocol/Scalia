@@ -10,6 +10,8 @@ pub enum Part {
     RightLeg = 2,
     LeftArm = 3,
     RightArm = 4,
+    /// Bends with the wind (grass): higher vertices move more.
+    Sway = 5,
 }
 
 /// Colour code for a palette index on a part.
@@ -27,6 +29,7 @@ pub fn part_of(code: f32) -> Part {
         2 => Part::RightLeg,
         3 => Part::LeftArm,
         4 => Part::RightArm,
+        5 => Part::Sway,
         _ => Part::Body,
     }
 }
@@ -112,4 +115,17 @@ pub fn figure() -> MeshBuilder {
     f.cuboid([0.23, -0.07, 0.90], [0.31, 0.07, 1.42], code(dark, Part::RightArm));
     f.cuboid([0.27, 0.0, 1.0], [0.32, 0.75, 1.07], code(rifle, Part::RightArm));
     f
+}
+
+/// A grass tuft: five thin blades fanning out, 0.25-0.4 m tall, all swaying. The instance picks the colour.
+pub fn grass_tuft() -> MeshBuilder {
+    let mut g = MeshBuilder::default();
+    let blades = [(0.0f32, 0.38f32), (1.3, 0.3), (2.5, 0.34), (3.8, 0.27), (5.0, 0.32)];
+    for (a, h) in blades {
+        let (s, c) = a.sin_cos();
+        let (dx, dy) = (c * 0.03, s * 0.03);
+        let tip = [s * 0.08, -c * 0.08, h];
+        g.tri([-dx, -dy, 0.0], [dx, dy, 0.0], tip, code(0, Part::Sway));
+    }
+    g
 }

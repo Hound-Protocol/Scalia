@@ -18,7 +18,7 @@ use scalia_core::system::{BodyId, System, PARK_OFFSET};
 use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use scalia_render::gpu::{FrameDesc, Gpu};
-use scalia_render::mesh::{figure, MeshBuilder};
+use scalia_render::mesh::{figure, grass_tuft, MeshBuilder};
 use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
 
@@ -150,6 +150,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         size,
     };
     v.gpu.upload("figure", figure().bytes());
+    v.gpu.upload("tuft", grass_tuft().bytes());
     Ok(v)
 }
 
@@ -171,6 +172,46 @@ fn build_army(groups: u32, per_group: u32) -> World {
         }
     }
     w
+}
+
+/// Grass tufts for one chunk: about one per 2 m^2 on green bands, none on bare (brown) ground.
+/// Deterministic per chunk, so the same field grows back in the same places.
+fn grass_for(hm: &[f32], cx: i64, cy: i64) -> Vec<f32> {
+    let n = CELLS as usize + 1;
+    let mut out = Vec::new();
+    for j in 0..CELLS as usize {
+        for i in 0..CELLS as usize {
+            let h = scalia_core::hash::mix64(((cx as u64) << 40) ^ ((cy as u64) << 20) ^ ((j as u64) << 8) ^ i as u64 ^ 0x9a55);
+            if h % 100 >= 55 {
+                continue;
+            }
+            let band = ((hm[j * n + i] + hm[j * n + i + 1] + hm[(j + 1) * n + i] + hm[(j + 1) * n + i + 1]) / 4.0 * 8.0).floor().rem_euclid(4.0);
+            if band == 3.0 {
+                continue; // bare ground
+            }
+            let fx = ((h >> 8) & 0xff) as f32 / 255.0;
+            let fy = ((h >> 16) & 0xff) as f32 / 255.0;
+            let colour = [10.0, 11.0, 12.0][((h >> 24) % 3) as usize];
+            let z0 = bilinear(hm, n, i, j, fx, fy);
+            let x = cx as f32 * CELLS as f32 + i as f32 + fx;
+            let y = cy as f32 * CELLS as f32 + j as f32 + fy;
+            let heading = ((h >> 32) & 0xffff) as f32 / 65535.0 * std::f32::consts::TAU;
+            let phase = ((h >> 48) & 0xff) as f32 / 255.0;
+            out.extend_from_slice(&[x, y, z0, colour, heading, phase, 0.0, 0.0]);
+        }
+    }
+    out
+}
+
+/// Height inside cell (i, j) of a chunk at fractions (fx, fy), matching the drawn triangles
+/// (each cell is split along its a-c diagonal).
+fn bilinear(hm: &[f32], n: usize, i: usize, j: usize, fx: f32, fy: f32) -> f32 {
+    let (a, b, c, d) = (hm[j * n + i], hm[j * n + i + 1], hm[(j + 1) * n + i + 1], hm[(j + 1) * n + i]);
+    if fx >= fy {
+        a + (b - a) * fx + (c - b) * fy
+    } else {
+        a + (d - a) * fy + (c - d) * fx
+    }
 }
 
 fn bytes(v: &[f32]) -> &[u8] {
@@ -394,10 +435,10 @@ impl Viewer {
         }
         let ps = if self.full { 1 } else { self.pixel_scale };
         let internal = ((self.size.0 / ps).max(1), (self.size.1 / ps).max(1));
-        let (mut meshes, mut instanced) = (Vec::new(), Vec::new());
+        let (mut meshes, mut instanced, mut decor) = (Vec::new(), Vec::new(), Vec::new());
         let (target, yaw, view_height, range, text) = match self.scene {
             Scene::Ships => self.ships_scene(t, &mut meshes, &mut instanced),
-            Scene::Ground => self.ground_scene(t, &mut meshes, &mut instanced),
+            Scene::Ground => self.ground_scene(t, &mut meshes, &mut instanced, &mut decor),
             Scene::Planet => self.planet_scene(t, &mut meshes),
             Scene::System => self.system_scene(t, &mut meshes),
         };
@@ -410,7 +451,7 @@ impl Viewer {
         };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere, time_s };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere, time_s };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
@@ -545,17 +586,28 @@ impl Viewer {
         }
         self.gpu.upload(&format!("terrain{cx},{cy}"), m.bytes());
         self.chunk_lod.insert((cx, cy), step);
+        if !self.gpu.has(&format!("grass{cx},{cy}")) {
+            self.gpu.upload_instances(&format!("grass{cx},{cy}"), bytes(&grass_for(&hm, cx, cy)));
+        }
     }
 
     fn height_at(&mut self, x: f32, y: f32) -> f32 {
         let (cx, cy) = ((x / CELLS as f32).floor() as i64, (y / CELLS as f32).floor() as i64);
         let n = CELLS as usize + 1;
-        let i = (x - cx as f32 * CELLS as f32).round().clamp(0.0, CELLS as f32) as usize;
-        let j = (y - cy as f32 * CELLS as f32).round().clamp(0.0, CELLS as f32) as usize;
-        self.chunk(cx, cy)[j * n + i]
+        let (lx, ly) = (x - cx as f32 * CELLS as f32, y - cy as f32 * CELLS as f32);
+        let (i, j) = ((lx.floor() as usize).min(CELLS as usize - 1), (ly.floor() as usize).min(CELLS as usize - 1));
+        let (fx, fy) = ((lx - i as f32).clamp(0.0, 1.0), (ly - j as f32).clamp(0.0, 1.0));
+        let hm = self.chunk(cx, cy);
+        bilinear(hm, n, i, j, fx, fy)
     }
 
-    fn ground_scene(&mut self, t: f64, meshes: &mut Vec<String>, instanced: &mut Vec<(String, String)>) -> (Vec3, f32, f32, f32, String) {
+    fn ground_scene(
+        &mut self,
+        t: f64,
+        meshes: &mut Vec<String>,
+        instanced: &mut Vec<(String, String)>,
+        decor: &mut Vec<(String, String)>,
+    ) -> (Vec3, f32, f32, f32, String) {
         let now = WorldMs(t as u64);
         let tick = WorldMs(now.0.max(self.world.now.0));
         let _ = self.world.tick(tick);
@@ -637,11 +689,23 @@ impl Viewer {
                 meshes.push(format!("terrain{},{}", key.0, key.1));
             }
         }
+        // Grass only close up: within two chunks of the camera and below a 90 m view.
+        if self.ground_view <= 90.0 {
+            for dy in -2..=2 {
+                for dx in -2..=2 {
+                    let key = format!("grass{},{}", gx + dx, gy + dy);
+                    if self.gpu.has(&key) {
+                        decor.push(("tuft".into(), key));
+                    }
+                }
+            }
+        }
         let keep = rad + 2;
         let far: Vec<_> = self.chunks.keys().copied().filter(|&(x, y)| (x - gx).abs() > keep || (y - gy).abs() > keep).collect();
         for k in far {
             self.chunks.remove(&k);
             self.chunk_lod.remove(&k);
+            self.gpu.drop_buffer(&format!("grass{},{}", k.0, k.1));
             self.gpu.drop_buffer(&format!("terrain{},{}", k.0, k.1));
         }
         instanced.push(("figure".into(), "soldiers".into()));
