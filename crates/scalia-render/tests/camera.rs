@@ -53,3 +53,15 @@ fn light_matrix_centres_target_and_raises_toward_the_sun() {
     let higher = m * (t + Vec3::Z * 10.0).extend(1.0);
     assert!(higher.z < c.z, "higher points are nearer the sun");
 }
+
+#[test]
+fn camera_angle_can_change_and_defaults_to_isometric() {
+    use scalia_render::camera::{basis, basis_at, ELEV};
+    let (a, b) = (basis(0.7), basis_at(0.7, ELEV));
+    assert!((a.0 - b.0).length() < 1e-6 && (a.1 - b.1).length() < 1e-6 && (a.2 - b.2).length() < 1e-6);
+    for elev in [0.05f32, 0.4, 1.2, 1.5] {
+        let (r, u, to_cam) = basis_at(0.3, elev);
+        assert!(r.dot(u).abs() < 1e-5 && r.dot(to_cam).abs() < 1e-5 && u.dot(to_cam).abs() < 1e-5, "orthogonal at {elev}");
+        assert!((to_cam.z - elev.sin()).abs() < 1e-5, "camera is {elev} rad above the horizon");
+    }
+}

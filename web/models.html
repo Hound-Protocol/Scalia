@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scalia model viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d11; color: #d8dde6;
+    font: 13px/1.4 ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace; }
+  #view { position: fixed; inset: 0; width: 100vw; height: 100vh; cursor: grab; touch-action: none; }
+  #view.dragging { cursor: grabbing; }
+  .panel { position: fixed; background: rgba(10, 12, 16, 0.82); border: 1px solid #2a313c; padding: 6px 8px; }
+  #bar { top: 8px; left: 8px; right: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #bar select, #bar button { background: #161b22; color: inherit; border: 1px solid #2f3845; padding: 4px 10px; font: inherit; cursor: pointer; }
+  #bar label { display: flex; gap: 5px; align-items: center; }
+  #bar .title { color: #f2d36b; margin-right: 6px; }
+  #info { bottom: 8px; left: 8px; }
+  #hint { bottom: 8px; right: 8px; color: #8b95a5; }
+  #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="bar" class="panel">
+  <span class="title">Model viewer</span>
+  <select id="model" title="Model"></select>
+  <span id="soldierOpts">
+    <select id="pose" title="Pose"></select>
+    <select id="detail" title="Level of detail"><option value="0">full detail</option><option value="1">mid detail</option><option value="2">far detail</option></select>
+    <select id="variant" title="Team colour"></select>
+  </span>
+  <label><input type="checkbox" id="spin" checked> turntable</label>
+  <label>sun <input type="range" id="light" min="0.25" max="0.75" step="0.01" value="0.42"></label>
+  <label><input type="checkbox" id="outline"> outlines</label>
+  <button id="reset">Reset view</button>
+</div>
+<div id="info" class="panel"></div>
+<div id="hint" class="panel">drag: orbit and tilt · wheel: zoom</div>
+<div id="error"></div>
+<script type="module" src="./models.js"></script>
+</body>
+</html>

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
-use crate::camera::{iso_view, light_matrix, snap_target};
+use crate::camera::{light_matrix, snap_target_at, view_at};
 use crate::shaders::{BLIT_WGSL, SCENE_WGSL, SHADOW_WGSL};
 use crate::sky::Sky;
 
@@ -47,6 +47,8 @@ pub struct FrameDesc<'a> {
     pub atmosphere: bool,
     /// Seconds for animation; keep it small (wrap it) so f32 stays precise.
     pub time_s: f32,
+    /// Camera elevation above the horizon (radians); the game uses `camera::ELEV`.
+    pub elev: f32,
     /// How far the flat planet map is bent into a globe (see `bend`).
     pub bend: crate::bend::Bend,
 }
@@ -394,8 +396,8 @@ impl Gpu {
     pub fn frame(&mut self, f: &FrameDesc) -> Result<(), String> {
         let (w, h) = f.internal;
         self.ensure_targets(w, h);
-        let snap = snap_target(f.target, f.yaw, f.view_height / h as f32);
-        let (m, vdir) = iso_view(snap.target, f.yaw, f.view_height * (h + 2) as f32 / h as f32, (w + 2) as f32 / (h + 2) as f32, f.range);
+        let snap = snap_target_at(f.target, f.yaw, f.elev, f.view_height / h as f32);
+        let (m, vdir) = view_at(snap.target, f.yaw, f.elev, f.view_height * (h + 2) as f32 / h as f32, (w + 2) as f32 / (h + 2) as f32, f.range);
         // The sun camera spans 4 view heights in depth: plenty for the scene, and fine depth precision.
         let light_range = f.view_height * 4.0;
         let lm = light_matrix(f.sky.light_dir, snap.target, f.view_height * 1.3, light_range, SHADOW_SIZE);

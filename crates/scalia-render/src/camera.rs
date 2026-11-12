@@ -13,16 +13,27 @@ fn from_rows(rows: [Vec3; 3], target: Vec3) -> Mat4 {
     Mat4::from_cols(r(0), r(1), r(2), Vec4::W).transpose()
 }
 
-/// Camera basis for a yaw: right and up in the camera plane, and the direction towards the camera.
+/// Camera basis for a yaw at the game's isometric elevation: right and up in the camera plane, and the direction
+/// towards the camera.
 pub fn basis(yaw: f32) -> (Vec3, Vec3, Vec3) {
+    basis_at(yaw, ELEV)
+}
+
+/// Camera basis for a yaw and any elevation above the horizon (the model viewer orbits; the game stays isometric).
+pub fn basis_at(yaw: f32, elev: f32) -> (Vec3, Vec3, Vec3) {
     let (s, c) = yaw.sin_cos();
-    let (se, ce) = ELEV.sin_cos();
+    let (se, ce) = elev.sin_cos();
     (Vec3::new(c, s, 0.0), Vec3::new(-s * se, c * se, ce), Vec3::new(s * ce, -c * ce, se))
 }
 
 /// View-projection for an isometric camera `view_height` world units tall, and the direction towards the camera.
 pub fn iso_view(target: Vec3, yaw: f32, view_height: f32, aspect: f32, range: f32) -> (Mat4, Vec3) {
-    let (r, u, to_cam) = basis(yaw);
+    view_at(target, yaw, ELEV, view_height, aspect, range)
+}
+
+/// `iso_view` at any elevation.
+pub fn view_at(target: Vec3, yaw: f32, elev: f32, view_height: f32, aspect: f32, range: f32) -> (Mat4, Vec3) {
+    let (r, u, to_cam) = basis_at(yaw, elev);
     let hh = view_height / 2.0;
     let hw = hh * aspect;
     let m = from_rows([r / hw, u / hh, -to_cam / (2.0 * range)], target);
@@ -38,7 +49,12 @@ pub struct Snap {
 
 /// Moves the target onto the camera-plane texel grid and returns the error the upscale must undo.
 pub fn snap_target(target: Vec3, yaw: f32, texel: f32) -> Snap {
-    let (r, u, _) = basis(yaw);
+    snap_target_at(target, yaw, ELEV, texel)
+}
+
+/// `snap_target` at any elevation.
+pub fn snap_target_at(target: Vec3, yaw: f32, elev: f32, texel: f32) -> Snap {
+    let (r, u, _) = basis_at(yaw, elev);
     let (tr, tu) = (target.dot(r), target.dot(u));
     let er = tr - (tr / texel).round() * texel;
     let eu = tu - (tu / texel).round() * texel;

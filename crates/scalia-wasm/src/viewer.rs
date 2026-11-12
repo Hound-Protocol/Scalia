@@ -147,6 +147,12 @@ pub struct Viewer {
     /// Model viewer: soldier level of detail (0 full, 1 mid, 2 far) and colour variant.
     model_detail: u8,
     model_variant: u8,
+    /// Model viewer camera: elevation (radians), zoom (1 frames the model), light (time of day 0..1), and the yaw
+    /// last drawn (so grabbing a spinning model does not jump).
+    model_elev: f32,
+    model_zoom: f32,
+    model_light: f32,
+    model_yaw: f32,
     order_dest: Option<Vec3>,
     fps: f32,
     frames: u32,
@@ -212,6 +218,10 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         preview_pose: None,
         model_detail: 0,
         model_variant: 0,
+        model_elev: scalia_render::camera::ELEV,
+        model_zoom: 1.0,
+        model_light: 0.42,
+        model_yaw: 0.0,
         order_dest: None,
         fps: 0.0,
         frames: 0,
@@ -335,8 +345,9 @@ impl Viewer {
                 self.sys_cam = Some(base + delta);
             }
             Scene::Ships => {
-                let y = self.ship_yaw.unwrap_or(0.0);
-                self.ship_yaw = Some(y - dx / view_h * 3.0);
+                // Orbit: sideways turns around the model, up and down tilts between front-on and top-down.
+                self.ship_yaw = Some(self.model_yaw - dx / view_h * 3.0 / self.model_zoom);
+                self.model_elev = (self.model_elev + dy / view_h * 2.0 / self.model_zoom).clamp(0.02, 1.55);
             }
         }
     }
@@ -479,6 +490,24 @@ impl Viewer {
     }
 
     /// Holds pose `i` in the soldier preview (walk, run, stand, crouch, cover aim, prone, standing aim); -1 cycles.
+    /// Model viewer: spin on a turntable (true) or hold the angle it was left at.
+    pub fn set_turntable(&mut self, on: bool) {
+        self.ship_yaw = if on { None } else { Some(self.model_yaw) };
+    }
+    /// Model viewer: sun position as a time of day (0.25 sunrise, 0.5 noon, 0.75 sunset).
+    pub fn set_model_light(&mut self, t: f32) {
+        self.model_light = t.clamp(0.2, 0.8);
+    }
+    /// Model viewer: back to the isometric angle, framed, spinning.
+    pub fn reset_model_view(&mut self) {
+        self.model_elev = scalia_render::camera::ELEV;
+        self.model_zoom = 1.0;
+        self.ship_yaw = None;
+    }
+    /// Number of models the viewer can show (the blueprints, then the soldier last).
+    pub fn model_count(&self) -> u32 {
+        self.ships.len() as u32 + 1
+    }
     /// Model viewer: level of detail of the soldier (0 full, 1 mid, 2 far).
     pub fn set_model_detail(&mut self, d: u8) {
         self.model_detail = d.min(2);
@@ -533,7 +562,12 @@ impl Viewer {
     }
     /// Mouse wheel: one call is one step of the zoom ladder (positive zooms out); the camera glides there.
     pub fn wheel(&mut self, delta: f64) {
-        if self.scene == Scene::Ships || delta == 0.0 {
+        if self.scene == Scene::Ships {
+            // The model viewer zooms freely.
+            self.model_zoom = (self.model_zoom * if delta > 0.0 { 1.15 } else { 1.0 / 1.15 }).clamp(0.15, 6.0);
+            return;
+        }
+        if delta == 0.0 {
             return;
         }
         // Away from home the ground is not under the camera: the system's closest step is as far in as it goes.
@@ -587,9 +621,10 @@ impl Viewer {
             Scene::System => (sky(0.5), false),
             Scene::Ground => (sky(tod), self.ground_view < 40_000.0),
             // The model viewer always shows late-morning light, whatever the time of day outside.
-            Scene::Ships => (sky(0.42), true),
+            Scene::Ships => (sky(self.model_light), true),
         };
         let bend = if self.scene == Scene::Ground { self.ground_bend() } else { Bend::FLAT };
+        let elev = if self.scene == Scene::Ships { self.model_elev } else { scalia_render::camera::ELEV };
         // Outlines on terrain cells only a few pixels wide turn into shimmering stripes: off for far views.
         let far_view = match self.scene {
             Scene::Ground => self.ground_view > 20_000.0,
@@ -598,7 +633,7 @@ impl Viewer {
         };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
@@ -713,7 +748,8 @@ impl Viewer {
             let cycling = if self.preview_pose.is_none() { " (poses change every 3 s)" } else { "" };
             // A prone soldier lies 2.5 m forward from where he stood: centre on him and pull back.
             let (centre, size) = if pose == Pose::Prone { (Vec3::new(0.0, 1.2, 0.3), 3.4) } else { (Vec3::new(0.0, 0.0, 0.9), 2.6) };
-            return (centre, yaw, size, 10.0, format!("Soldier, {variant}: {tris} triangles, {detail}, pose {pose:?}{cycling}"));
+            self.model_yaw = yaw;
+            return (centre, yaw, size * self.model_zoom, 10.0, format!("Soldier, {variant}: {tris} triangles, {detail}, pose {pose:?}{cycling}"));
         }
         let s = self.ship_info(i);
         let ext = s.hi - s.lo;
@@ -722,7 +758,8 @@ impl Viewer {
         let centre = (s.lo + s.hi) / 2.0;
         meshes.push(format!("ship{i}"));
         let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
-        (centre, yaw, size, size * 3.0, text)
+        self.model_yaw = yaw;
+        (centre, yaw, size * self.model_zoom, size * 3.0, text)
     }
 
     /// Heights of a chunk in metres, generated once from the planet.

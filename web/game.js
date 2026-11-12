@@ -51,6 +51,7 @@ try {
   for (let i = 0; wasm.shipped_ron(i) !== undefined; i++) sel.append(new Option(JSON.parse(wasm.blueprint_info(wasm.shipped_ron(i))).name, i));
   sel.append(new Option('Soldier', sel.options.length));
   sel.value = '5';
+  $('openModels').addEventListener('click', () => window.open('models.html', 'scalia-models', 'width=1200,height=820'));
   sel.addEventListener('change', () => { v.set_ship(Number(sel.value)); showModelOpts(); });
 
   // Model viewer: pose, level of detail and colour variant for the soldier.

@@ -37,9 +37,9 @@ jobs:
       - name: Stamp the build so browsers never run a stale cached copy
         run: |
           v=${GITHUB_SHA::7}
-          sed -i "s#'./pkg/scalia_wasm.js'#'./pkg/scalia_wasm.js?v=$v'#" web/game.js web/debug.js
+          sed -i "s#'./pkg/scalia_wasm.js'#'./pkg/scalia_wasm.js?v=$v'#" web/game.js web/debug.js web/models.js
           sed -i "s#scalia_wasm_bg.wasm', import.meta.url#scalia_wasm_bg.wasm?v=$v', import.meta.url#" web/pkg/scalia_wasm.js
-          sed -i "s#src=\"./game.js\"#src=\"./game.js?v=$v\"#; s#src=\"./debug.js\"#src=\"./debug.js?v=$v\"#" web/*.html
+          sed -i "s#src=\"./game.js\"#src=\"./game.js?v=$v\"#; s#src=\"./debug.js\"#src=\"./debug.js?v=$v\"#; s#src=\"./models.js\"#src=\"./models.js?v=$v\"#" web/*.html
           echo "{\"v\":\"$v\"}" > web/version.json
           grep -c "v=$v" web/game.js web/pkg/scalia_wasm.js web/index.html
       - uses: actions/upload-pages-artifact@v3
