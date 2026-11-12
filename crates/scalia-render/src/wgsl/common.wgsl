@@ -9,7 +9,8 @@ fn animate(p: vec3f, c: f32, a: vec4f, b: vec4f, time: f32) -> vec3f {
     let ph = fract(time * b.z + b.y) * 6.2831853;
     let arm = part > 2.5;
     let pivot = select(0.85, 1.40, arm);
-    let amp = select(0.55, 0.45, arm);
+    // The rifle arm (part 4) only sways; the free arm swings.
+    let amp = select(select(0.55, 0.45, arm), 0.12, part == 4.0);
     // Left leg and right arm swing together, then the other pair.
     let side = select(-1.0, 1.0, part == 1.0 || part == 4.0);
     let ang = sin(ph) * amp * side;
