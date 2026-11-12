@@ -87,6 +87,11 @@ export async function startViewer(wasm, ui) {
   }
 
   function render(now) {
+    try { draw(now); } catch (e) { ui.hud.textContent = `Render error: ${e.message}`; console.error(e); return; }
+    requestAnimationFrame(render);
+  }
+
+  function draw(now) {
     const w = ui.canvas.width, h = ui.canvas.height;
     const internal = state.full ? [w, h] : [Math.round(w / 2), Math.round(h / 2)];
     const t = simMs();
@@ -141,7 +146,6 @@ export async function startViewer(wasm, ui) {
     r.frame({ ...cam, internal });
     tickFps(now);
     ui.hud.textContent = `${text} | ${internal[0]}x${internal[1]} | ${state.fps.toFixed(0)} fps`;
-    requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
   window.scaliaViewer = { state, simMs, get flight() { return flight; } };
