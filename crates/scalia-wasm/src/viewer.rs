@@ -100,6 +100,8 @@ pub struct Viewer {
     follow_group: u32,
     /// Idle stance per group (P cycles it for the selected group).
     stance: HashMap<u32, Pose>,
+    /// Pose held in the soldier preview; None cycles through all of them.
+    preview_pose: Option<usize>,
     order_dest: Option<Vec3>,
     fps: f32,
     frames: u32,
@@ -149,6 +151,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         selected: Some(0),
         follow_group: 0,
         stance: HashMap::new(),
+        preview_pose: None,
         order_dest: None,
         fps: 0.0,
         frames: 0,
@@ -367,6 +370,11 @@ impl Viewer {
         }
     }
 
+    /// Holds pose `i` in the soldier preview (walk, run, stand, crouch, cover aim, prone, standing aim); -1 cycles.
+    pub fn preview_pose(&mut self, i: i32) {
+        self.preview_pose = (i >= 0).then_some(i as usize);
+    }
+
     /// Cycles the selected group's idle stance: stand, crouch, cover aim, prone, standing aim.
     pub fn cycle_stance(&mut self) -> String {
         let Some(g) = self.selected else { return "select a group first".into() };
@@ -570,7 +578,7 @@ impl Viewer {
                 (Pose::Walk, 0.9), (Pose::Run, 1.35), (Pose::Stand, 0.0), (Pose::Crouch, 0.0),
                 (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0),
             ];
-            let (pose, steps) = SHOW[((t / 3000.0) as usize) % SHOW.len()];
+            let (pose, steps) = SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()];
             self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, 6.0, 0.0, 0.0, steps, pose as u32 as f32]));
             meshes.push("plinth".into());
             instanced.push(("figure".into(), "figure1".into()));
