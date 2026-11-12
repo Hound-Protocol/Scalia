@@ -109,7 +109,7 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
 - Verified in Chrome on an RTX 3050 Ti (Vulkan): 60 fps on all three scenes.
 - **Mood:** day and night (`scalia-render::sky`, tested): moving sun and moon, warm low light, blue night,
   shadows follow the light; 4 light steps with ordered dithering; distance haze and sky background; vignette;
-  drifting cloud shadows by day. T cycles the day speed (6-minute day, 12-second day, paused).
+  drifting cloud shadows by day; instanced grass tufts that sway in travelling gusts (scene pass only, no shadow cost). T cycles the day speed (6-minute day, 12-second day, paused).
 - **Soldier model:** 108 triangles: legs, arms, torso in the unit colour, helmet, pack, rifle. Walk cycle on the GPU
   (legs and free arm swing, rifle arm sways); soldiers face their march; shadows animate too. Ships > "Soldier".
 - **Scale:** soldiers are derived only near the camera; terrain uses coarser meshes when zoomed out; N cycles the army
