@@ -89,6 +89,8 @@ pub struct PoseParams {
     pub twist: f32,
     /// Head turn left and right (radians, positive to the left).
     pub look: f32,
+    /// Each upper arm raised out to the side (radians, positive away from the body), left then right.
+    pub abduct: [f32; 2],
 }
 
 /// The rifle slung on the back: rolled flat (magazine inwards), muzzle down, hung diagonally from the right
@@ -114,8 +116,13 @@ pub fn rot(q: Vec3, pivot_y: f32, pivot_z: f32, a: f32) -> Vec3 {
 
 /// An arm point: bend at the elbow, swing at the shoulder, then turn inward around the vertical through the
 /// shoulder (`side_x` is the shoulder's x; the turn is towards the centre line).
-fn arm(q: Vec3, shoulder: f32, elbow: f32, reach: f32, side_x: f32) -> Vec3 {
+fn arm(q: Vec3, shoulder: f32, elbow: f32, reach: f32, abduct: f32, side_x: f32) -> Vec3 {
     let p = rot(rot(q, 0.0, ELBOW_Z, elbow), 0.0, SHOULDER_Z, shoulder);
+    // Raise the arm out to the side (elbow away from the body) around the front-to-back axis through the shoulder.
+    let g = side_x.signum();
+    let (sa, ca) = abduct.sin_cos();
+    let (dx, dz) = (p.x - side_x, p.z - SHOULDER_Z);
+    let p = Vec3::new(side_x + dx * ca - dz * sa * g, p.y, SHOULDER_Z + dx * sa * g + dz * ca);
     let a = reach * side_x.signum();
     let (s, c) = a.sin_cos();
     let (dx, dy) = (p.x - side_x, p.y);
@@ -131,7 +138,13 @@ pub enum Side {
 /// Where a hand grips, in the figure's frame before lean (for tests and tuning).
 pub fn hand(p: &PoseParams, side: Side) -> Vec3 {
     let (i, x) = if side == Side::Left { (0, -SHOULDER_X) } else { (1, SHOULDER_X) };
-    arm(Vec3::new(x, 0.0, GRIP_Z), p.shoulder[i], p.elbow[i], p.reach[i], x)
+    arm(Vec3::new(x, 0.0, GRIP_Z), p.shoulder[i], p.elbow[i], p.reach[i], p.abduct[i], x)
+}
+
+/// Where an elbow is in a pose.
+pub fn elbow(p: &PoseParams, side: Side) -> Vec3 {
+    let (i, x) = if side == Side::Left { (0, -SHOULDER_X) } else { (1, SHOULDER_X) };
+    arm(Vec3::new(x, 0.0, ELBOW_Z), p.shoulder[i], p.elbow[i], p.reach[i], p.abduct[i], x)
 }
 
 fn leg(q: Vec3, hip: f32, knee: f32) -> Vec3 {
@@ -156,7 +169,6 @@ fn gait(phase: f32, swing: f32, forward: f32, lift: f32, base: f32) -> ([f32; 2]
 /// Pose parameters at a gait phase (0..1; only the gaits use it). Rifle carries per pose (rule 3): low ready when
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
 pub fn params(pose: Pose, phase: f32) -> PoseParams {
-    let sw = (phase * std::f32::consts::TAU).sin();
     let mut p = PoseParams::default();
     match pose {
         Pose::Stand => carry(&mut p, Carry::SafeHang),
@@ -177,9 +189,6 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             (p.hip, p.knee) = gait(phase, 0.58, 0.1, 1.9, 0.26);
             p.lean = 0.42;
             carry(&mut p, Carry::Collapsed);
-            // The rifle bobs with the stride.
-            p.shoulder[1] += 0.04 * sw;
-            p.shoulder[0] += 0.04 * sw;
             p.head = 0.38;
             stride(&mut p, phase, 0.035, 0.12, 0.03, 0.05);
         }
@@ -227,7 +236,7 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
 /// Two layers (motion guide rule 1): the legs of one pose (gait, crouch) under the upper body of another (aim,
 /// carry), so a soldier can walk while aiming.
 pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
-    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, sling: upper.sling, look: upper.look, ..*legs }
+    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, sling: upper.sling, look: upper.look, abduct: upper.abduct, ..*legs }
 }
 
 /// The life a stride puts into the body: a rise and fall twice per cycle, the upper body turning against the legs,
@@ -297,17 +306,19 @@ pub enum Carry {
 }
 
 pub fn carry(p: &mut PoseParams, c: Carry) {
-    let (shoulder, elbow, reach, rifle) = match c {
-        // Angles found by search (examples/carry_search): arms clear of the torso, left hand on the handguard.
-        Carry::SafeHang => ([0.94, 0.78], [0.11, 1.72], [0.51, 0.67], -1.2),
-        Carry::LowReady => ([1.36, 0.59], [-0.10, 1.89], [0.52, 0.59], -0.5),
-        Carry::Collapsed => ([1.30, 0.91], [-0.09, 1.71], [0.53, 0.52], -1.0),
-        Carry::HighReady => ([1.58, 0.03], [-0.08, 1.89], [0.75, 0.25], 0.85),
-        Carry::ReadyUp => ([1.64, 0.72], [-0.06, 1.99], [0.59, 0.44], 0.0),
+    let (shoulder, elbow, reach, abduct, rifle) = match c {
+        // Solved by examples/carry_ik: right hand on the pistol grip, left on the handguard under the barrel,
+        // elbows out to the side and below the hands, arms clear of the torso.
+        Carry::SafeHang => ([0.71, 0.05], [0.06, 1.46], [0.83, 1.02], [0.03, 0.41], -1.2),
+        Carry::LowReady => ([0.88, -0.03], [0.14, 1.64], [0.72, 1.19], [0.11, 0.63], -0.5),
+        Carry::Collapsed => ([0.84, -0.09], [0.00, 1.70], [0.66, 1.23], [-0.09, 0.64], -1.0),
+        Carry::HighReady => ([0.94, -0.13], [0.61, 1.72], [0.98, 0.86], [0.73, 0.39], 0.85),
+        Carry::ReadyUp => ([1.21, 0.50], [0.58, 2.17], [0.66, 0.57], [0.21, 0.53], 0.0),
     };
     p.shoulder = shoulder;
     p.elbow = elbow;
     p.reach = reach;
+    p.abduct = abduct;
     p.rifle = rifle;
 }
 
@@ -336,10 +347,10 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightThigh => rot(v, 0.0, HIP_Z, p.hip[1]),
         Part::LeftShin => leg(v, p.hip[0], p.knee[0]),
         Part::RightShin => leg(v, p.hip[1], p.knee[1]),
-        Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], -SHOULDER_X),
-        Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], SHOULDER_X),
-        Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], -SHOULDER_X),
-        Part::RightForearm => arm(v, p.shoulder[1], p.elbow[1], p.reach[1], SHOULDER_X),
+        Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
+        Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
+        Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
+        Part::RightForearm => arm(v, p.shoulder[1], p.elbow[1], p.reach[1], p.abduct[1], SHOULDER_X),
         Part::Rifle => {
             let h = hand(p, Side::Right);
             let held = rot(v, 0.0, GRIP_Z, p.rifle) + Vec3::new(h.x - SHOULDER_X, h.y, h.z - GRIP_Z);
@@ -399,6 +410,7 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         bob: m(a.bob, b.bob),
         twist: m(a.twist, b.twist),
         look: m(a.look, b.look),
+        abduct: m2(a.abduct, b.abduct),
     }
 }
 

@@ -213,16 +213,22 @@ try {
     closeActions();
     setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 220);
   };
-  // The commander's footsteps on grass: a looped recording, quicker when he sprints, silent when he stops.
-  const steps = new Audio('./sfx/steps-grass.mp3'); steps.loop = true; steps.volume = 0.55; steps.preload = 'auto';
-  let stepGait = 0;
+  // The commander's footsteps on grass: one step each time a foot lands (gait phase 0.25 and 0.75), a little
+  // different every time.
+  const stepSound = new Audio('./sfx/steps-grass.mp3'); stepSound.preload = 'auto';
+  let lastPhase = -1;
   const footsteps = () => {
-    const g = v.scene_name && v.scene_name() !== 'ground' ? 0 : v.commander_gait();
-    if (g === stepGait) return;
-    stepGait = g;
-    if (g === 0) { steps.pause(); return; }
-    steps.playbackRate = g === 2 ? 1.55 : 1.0;
-    steps.play().catch(() => { stepGait = 0; }); // browsers allow sound only after the first key or click
+    const ph = v.scene_name() === 'ground' ? v.commander_phase() : -1;
+    if (ph >= 0 && lastPhase >= 0) {
+      const crossed = (at) => (lastPhase < at && ph >= at) || (lastPhase > ph && (lastPhase < at || ph >= at));
+      if (crossed(0.25) || crossed(0.75)) {
+        const a = stepSound.cloneNode();
+        a.volume = (v.commander_gait() === 2 ? 0.7 : 0.5) * (0.85 + Math.random() * 0.3);
+        a.playbackRate = 0.9 + Math.random() * 0.2;
+        a.play().catch(() => {});
+      }
+    }
+    lastPhase = ph;
   };
   // Called every frame: shows the close-up once the camera has reached the tablet.
   const syncTablet = () => {

@@ -182,6 +182,8 @@ pub struct Viewer {
     agent_anim: HashMap<u32, (f32, f64)>,
     /// The stance each unit takes once its soldiers reach the ordered place.
     arrive_stance: HashMap<u32, Pose>,
+    /// The commander's gait phase (0..1; -1 standing).
+    cmd_phase: f32,
     /// The tablet cinematic: opening (true) or closing, when it began (ms), and the camera it started from.
     cine: Option<(bool, f64, (Vec3, f32, f32, f32))>,
     /// Who answers to whom: squads to captains, or straight to the commander.
@@ -319,6 +321,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_ms: 0.0,
         agent_anim: HashMap::new(),
         arrive_stance: HashMap::new(),
+        cmd_phase: -1.0,
         cine: None,
         chain: Command::default(),
         tasks: BTreeMap::new(),
@@ -768,6 +771,10 @@ impl Viewer {
         if up && self.map_cam.ground_cam.is_none() {
             self.map_cam.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
         }
+    }
+    /// The commander's gait phase (0..1), or -1 when he stands: a foot lands at 0.25 (left) and 0.75 (right).
+    pub fn commander_phase(&self) -> f32 {
+        self.cmd_phase
     }
     /// The commander's gait for his footsteps: 0 standing, 1 walking, 2 sprinting.
     pub fn commander_gait(&self) -> u8 {
@@ -1782,6 +1789,8 @@ impl Viewer {
             self.cmd_pose = (pose, self.cmd_pose.0, ts);
         }
         let steps = match pose { Pose::Sprint => 1.5, Pose::Walk => 0.95, _ => 0.0 };
+        // His gait phase, exactly as the shader computes it (instance phase offset 0.37), for the footsteps.
+        self.cmd_phase = if steps > 0.0 { (ts * steps + 0.37).fract() } else { -1.0 };
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
         let rec = [rx, ry, z, 9.0, self.cmd_heading, 0.37, steps, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
