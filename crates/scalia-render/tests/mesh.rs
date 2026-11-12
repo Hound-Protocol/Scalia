@@ -78,3 +78,12 @@ fn figure_carries_gear_and_forearms_hang_from_the_elbows() {
     let (lo, hi) = span(Part::Head);
     assert!(lo > 1.38 && hi > 1.7, "head {lo}..{hi}");
 }
+
+#[test]
+fn far_figure_is_a_handful_of_triangles_with_the_same_height() {
+    let f = scalia_render::mesh::figure_far();
+    assert!(f.vertices.len() / 3 <= 24, "{} triangles", f.vertices.len() / 3);
+    let top = f.vertices.iter().map(|v| v.pos[2]).fold(0.0, f32::max);
+    assert!((1.6..=1.8).contains(&top), "height {top}");
+    assert!(f.vertices.iter().any(|v| v.color < 0.0), "body takes the instance colour");
+}

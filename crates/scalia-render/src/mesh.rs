@@ -186,6 +186,15 @@ pub fn figure_lo() -> MeshBuilder {
     f
 }
 
+/// The far figure, for views where a soldier is a few pixels tall: a body in the instance colour and a helmet,
+/// 24 triangles. It still leans and lies down with the poses.
+pub fn figure_far() -> MeshBuilder {
+    let mut f = MeshBuilder::default();
+    f.cuboid([-0.2, -0.13, 0.0], [0.2, 0.13, 1.5], -1.0);
+    f.cuboid([-0.12, -0.12, 1.5], [0.12, 0.14, 1.74], code(10, Part::Head));
+    f
+}
+
 /// A grass tuft: five blades fanning out, 0.35-0.55 m tall and wide enough to cover a pixel at
 /// battlefield zoom, all swaying. The instance picks the colour.
 pub fn grass_tuft() -> MeshBuilder {

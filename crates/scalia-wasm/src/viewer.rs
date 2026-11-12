@@ -19,7 +19,7 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use scalia_render::bend::{globe_point, Bend};
 use scalia_render::gpu::{FrameDesc, Gpu};
-use scalia_render::mesh::{figure, figure_lo, grass_tuft, MeshBuilder};
+use scalia_render::mesh::{figure, figure_far, figure_lo, grass_tuft, MeshBuilder};
 use scalia_render::pose::Pose;
 use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
@@ -208,6 +208,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
     };
     v.gpu.upload("figure", figure().bytes());
     v.gpu.upload("figure_lo", figure_lo().bytes());
+    v.gpu.upload("figure_far", figure_far().bytes());
     v.gpu.upload("tuft", grass_tuft().bytes());
     Ok(v)
 }
@@ -830,8 +831,15 @@ impl Viewer {
             meshes.push("markers".into());
         }
         // Full figure close up, the lighter one when zoomed out.
-        let fig = if self.ground_view <= 70.0 { "figure" } else { "figure_lo" };
-        instanced.push((fig.into(), "soldiers".into()));
+        // Three levels of detail. Past 250 m a soldier is a few pixels tall: the 24-triangle figure, and no
+        // shadow pass for it (its shadow would be smaller than a pixel).
+        if self.ground_view <= 70.0 {
+            instanced.push(("figure".into(), "soldiers".into()));
+        } else if self.ground_view <= 250.0 {
+            instanced.push(("figure_lo".into(), "soldiers".into()));
+        } else {
+            decor.push(("figure_far".into(), "soldiers".into()));
+        }
         if let Some(d) = self.order_dest {
             let arrived = self.selected.map_or(true, |g| !self.world.groups.process(GroupId(g)).is_running_at(tick));
             if arrived {
