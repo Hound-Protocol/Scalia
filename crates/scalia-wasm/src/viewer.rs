@@ -246,7 +246,7 @@ fn build_army(groups: u32, per_group: u32) -> World {
     let side = (groups as f64).sqrt().ceil().max(1.0) as u32;
     for g in 0..groups {
         let pos = Pos { region: RegionId(1), x: (g % side) as i64 * 200_000, y: (g / side) as i64 * 200_000, z: 0 };
-        let spec = GroupSpec { pos, composition: Composition([per_group, 0, 4, 3]), needs: Needs::full() };
+        let spec = GroupSpec { pos, composition: Composition([per_group, 0, 0, 0]), needs: Needs::full() }; // soldiers only for now; vehicles return one by one, each with a defined purpose
         let id = w.groups.spawn(spec, &mut w.roster);
         if g % 3 == 0 {
             let _ = w.start_march(id, pos.offset(500_000, 0, 0), MARCH_SPEED_MM_S, WorldMs(0));
