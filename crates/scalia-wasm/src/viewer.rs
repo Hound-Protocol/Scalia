@@ -513,9 +513,15 @@ impl Viewer {
             Scene::Ships => (sky(tod), true),
         };
         let bend = if self.scene == Scene::Ground { self.ground_bend() } else { Bend::FLAT };
+        // Outlines on terrain cells only a few pixels wide turn into shimmering stripes: off for far views.
+        let far_view = match self.scene {
+            Scene::Ground => self.ground_view > 20_000.0,
+            Scene::System => self.sys_scale < 50.0,
+            Scene::Ships => false,
+        };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere, time_s, bend };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");
         }
@@ -864,7 +870,8 @@ impl Viewer {
     /// them to cover the screen (or the whole planet once it is a globe). A level is drawn only when all its
     /// tiles are ready; until then the previous level stays, so zooming never shows holes.
     fn far_terrain(&mut self, tg: Vec3, meshes: &mut Vec<String>) {
-        let want = ((self.ground_view / 100.0).log2().ceil() as i32).clamp(1, 20) as u32;
+        // Cells about five screen pixels wide: any finer and the globe shimmers as the camera moves.
+        let want = ((self.ground_view / 64.0).log2().ceil() as i32).clamp(1, 20) as u32;
         let needed = |level: u32| -> Vec<(u32, i64, i64)> {
             let ts = 64.0 * (1u64 << level) as f32;
             let cov = (1.6 * self.ground_view).min(PLANET_R * std::f32::consts::PI);
