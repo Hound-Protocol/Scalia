@@ -44,8 +44,10 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   let ndl = max(dot(n, u.light.xyz), 0.0);
   let texel_m = 2.0 / (length(vec3f(u.lm[0].x, u.lm[1].x, u.lm[2].x)) * 2048.0);
   let slope = sqrt(max(1.0 - ndl * ndl, 0.0)) / max(ndl, 0.2);
-  let bias_m = max(0.03 + 0.08 * (1.0 - ndl), texel_m * (1.5 + 1.5 * slope));
-  let lit = textureSampleCompareLevel(sm, smp, uv, lp.z - bias_m * u.time.z);
+  let bias_m = max(0.03 + 0.08 * (1.0 - ndl), texel_m * (2.5 + 3.0 * slope));
+  // Far out a texel is most of a metre: the ground would speckle with its own shadow, and the shadows of soldiers
+  // are smaller than a pixel. Sun shadows fade away as texels grow past a quarter metre.
+  let lit = mix(textureSampleCompareLevel(sm, smp, uv, lp.z - bias_m * u.time.z), 1.0, smoothstep(0.25, 0.6, texel_m));
   let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && lp.z < 1.0;
   // time.w = 1 turns sun shadows off (space views, where a shadow map cannot resolve planets).
   var shade = select(1.0, lit, inside && u.time.w < 0.5);
