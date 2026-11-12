@@ -28,6 +28,8 @@ L_THIGH, R_THIGH, L_ARM, R_ARM, L_SHIN, R_SHIN, TORSO, RIFLE, HEAD, L_FORE, R_FO
 UNIFORM, UNIFORM_DARK, VEST, STRAP, PACK, BOOT, GLOVE, BALACLAVA, LENS, GOGGLE, HELMET, SKIN, PAD, METAL, COYOTE_DARK, TEAM = \
     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
 HEIGHT = 1.79  # top of the helmet
+# How close to the body each part is: seams go to the lower rank.
+RANK = {8: 0, 10: 1, 1: 1, 2: 1, 3: 1, 4: 1, 6: 2, 7: 2, 11: 2, 12: 2, 9: 3}
 RIFLE_CELL = 0.02  # vertex clustering cell for the rifle (m)
 
 
@@ -167,9 +169,20 @@ def convert(path):
             ax = np.where(sx < 0, J['arm.L'][0], J['arm.R'][0]) * k
             out[is_arm, 0] = out[is_arm, 0] - ax + sx * SHOULDER_X
             out[is_arm, 1] = out[is_arm, 1] - (J['arm.L'][1] - J['hips'][1]) * k
-        # Each triangle takes its first corner's part, unless most corners agree on another.
+        # Our rig moves whole parts rigidly, so a triangle across a joint seam must stay with the parent part
+        # (body before limb, upper limb before lower): otherwise it flies out with the limb as a shard.
         tp = dom[idx]
-        part = np.where(tp[:, 1] == tp[:, 2], tp[:, 1], tp[:, 0])
+        rank = np.vectorize(lambda q: RANK[int(q)])(tp)
+        part = tp[np.arange(len(tp)), rank.argmin(1)]
+        # Leg seams split at the joint's height instead: below the hip pivot a triangle swings with the thigh,
+        # below the knee with the shin.
+        cz = np.array([piecewise(v[t, 2], z_src, z_dst).mean() for t in idx])
+        for thigh, shin in ((L_THIGH, L_SHIN), (R_THIGH, R_SHIN)):
+            has = lambda q: (tp == q).any(1)
+            hip_seam = has(TORSO) & has(thigh)
+            part[hip_seam] = np.where(cz[hip_seam] < HIP, thigh, TORSO)
+            knee_seam = has(thigh) & has(shin)
+            part[knee_seam] = np.where(cz[knee_seam] < KNEE, shin, thigh)
         for t, pt in zip(idx, part):
             p = out[t]
             pal = palette(mat, pt, p.mean(0))
