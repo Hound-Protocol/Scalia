@@ -1,3 +1,17 @@
+fn hash2(p: vec2f) -> f32 {
+  let q = fract(p * vec2f(127.1, 311.7));
+  return fract((q.x + q.y + q.x * q.y) * 43758.5453 + dot(q, vec2f(12.9898, 78.233)));
+}
+fn vnoise(p: vec2f) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let s = f * f * (3.0 - 2.0 * f);
+  let a = hash2(i);
+  let b = hash2(i + vec2f(1.0, 0.0));
+  let c = hash2(i + vec2f(0.0, 1.0));
+  let d = hash2(i + vec2f(1.0, 1.0));
+  return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
+}
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var sm: texture_depth_2d;
 @group(0) @binding(2) var smp: sampler_comparison;
@@ -17,7 +31,13 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   let uv = vec2f(lp.x * 0.5 + 0.5, 0.5 - lp.y * 0.5);
   let lit = textureSampleCompareLevel(sm, smp, uv, lp.z - 0.0015);
   let inside = all(uv > vec2f(0.0)) && all(uv < vec2f(1.0)) && lp.z < 1.0;
-  let shade = select(1.0, lit, inside);
+  var shade = select(1.0, lit, inside);
+  // Drifting cloud shadows (time.y = 1 when the sky has clouds): two octaves of value noise on the ground plane.
+  if (u.time.y > 0.5) {
+    let cp = i.w.xy * 0.004 + vec2f(u.time.x * 0.004, u.time.x * 0.0015);
+    let cloud = 0.65 * vnoise(cp) + 0.35 * vnoise(cp * 2.3 + vec2f(17.0, 5.0));
+    shade = shade * (1.0 - 0.55 * smoothstep(0.52, 0.62, cloud));
+  }
   let l = max(dot(n, u.light.xyz), 0.0) * shade;
   // Four light steps with a 4x4 ordered dither between them: the hand-shaded pixel-art look.
   let bayer = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
