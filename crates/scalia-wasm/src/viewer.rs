@@ -18,7 +18,10 @@ use scalia_render::mesh::{figure, MeshBuilder};
 use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
 
-const SOLDIERS: u32 = 2000;
+/// Army sizes the N key cycles through, as (groups, soldiers per group).
+const ARMIES: [(u32, u32); 4] = [(1, 2000), (10, 2000), (50, 2000), (250, 2000)];
+/// Most soldiers drawn in one frame.
+const MAX_DRAWN: usize = 60_000;
 const CELLS: u32 = 64;
 const KM: f64 = 1e6;
 /// The ground scene sits on the demo planet's equator: render chunk (cx, cy) is planet chunk
@@ -51,6 +54,8 @@ pub struct Viewer {
     world: World,
     derived: Vec<Derived>,
     chunks: HashMap<(i64, i64), Vec<f32>>,
+    chunk_lod: HashMap<(i64, i64), usize>,
+    army: usize,
     ground_view: f32,
     focus: Vec3,
     system: System,
@@ -88,9 +93,11 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         outline: true,
         t0: None,
         ships: (0..scalia_blueprint::shipped::SHIPPED_RON.len()).map(|_| None).collect(),
-        world: build_scenario(42, 1, SOLDIERS),
+        world: build_scenario(42, ARMIES[0].0, ARMIES[0].1),
         derived: Vec::new(),
         chunks: HashMap::new(),
+        chunk_lod: HashMap::new(),
+        army: 0,
         ground_view: 60.0,
         focus: Vec3::ZERO,
         system: System::demo(),
@@ -198,6 +205,15 @@ impl Viewer {
             _ => "normal day",
         }
         .into()
+    }
+    /// Cycles the army size; returns a description.
+    pub fn cycle_army(&mut self) -> String {
+        self.army = (self.army + 1) % ARMIES.len();
+        let (g, n) = ARMIES[self.army];
+        self.world = build_scenario(42, g, n);
+        self.derived.clear();
+        self.ground_cam = None;
+        format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
     }
     pub fn scene_name(&self) -> String {
         match self.scene {
@@ -340,26 +356,30 @@ impl Viewer {
         (centre, yaw, size, size * 3.0, text)
     }
 
+    /// Heights of a chunk in metres, generated once from the planet.
     fn chunk(&mut self, cx: i64, cy: i64) -> &Vec<f32> {
-        if !self.chunks.contains_key(&(cx, cy)) {
-            let c = Planet::demo(42).chunk(cx, cy + EQUATOR_CHUNK, CELLS);
-            let n = CELLS as usize + 1;
-            let hm: Vec<f32> = c.heights.iter().map(|&h| h as f32 / 1000.0).collect();
-            let mut m = MeshBuilder::default();
-            let base = (cx as f32 * CELLS as f32, cy as f32 * CELLS as f32);
-            let p = |i: usize, j: usize| [base.0 + i as f32, base.1 + j as f32, hm[j * n + i]];
-            for j in 0..CELLS as usize {
-                for i in 0..CELLS as usize {
-                    let (a, b, c2, d) = (p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1));
-                    let col = 10.0 + ((a[2] * 8.0).floor().rem_euclid(4.0));
-                    m.tri(a, b, c2, col);
-                    m.tri(a, c2, d, col);
-                }
+        self.chunks
+            .entry((cx, cy))
+            .or_insert_with(|| Planet::demo(42).chunk(cx, cy + EQUATOR_CHUNK, CELLS).heights.iter().map(|&h| h as f32 / 1000.0).collect())
+    }
+
+    /// Builds (or rebuilds) a chunk's mesh with every `step`-th sample: 1 close up, 2 or 4 zoomed out.
+    fn chunk_mesh(&mut self, cx: i64, cy: i64, step: usize) {
+        let n = CELLS as usize + 1;
+        let hm = self.chunk(cx, cy).clone();
+        let mut m = MeshBuilder::default();
+        let base = (cx as f32 * CELLS as f32, cy as f32 * CELLS as f32);
+        let p = |i: usize, j: usize| [base.0 + i as f32, base.1 + j as f32, hm[j * n + i]];
+        for j in (0..CELLS as usize).step_by(step) {
+            for i in (0..CELLS as usize).step_by(step) {
+                let (a, b, c, d) = (p(i, j), p(i + step, j), p(i + step, j + step), p(i, j + step));
+                let col = 10.0 + ((a[2] * 8.0).floor().rem_euclid(4.0));
+                m.tri(a, b, c, col);
+                m.tri(a, c, d, col);
             }
-            self.gpu.upload(&format!("terrain{cx},{cy}"), m.bytes());
-            self.chunks.insert((cx, cy), hm);
         }
-        &self.chunks[&(cx, cy)]
+        self.gpu.upload(&format!("terrain{cx},{cy}"), m.bytes());
+        self.chunk_lod.insert((cx, cy), step);
     }
 
     fn height_at(&mut self, x: f32, y: f32) -> f32 {
@@ -374,19 +394,22 @@ impl Viewer {
         let now = WorldMs(t as u64);
         let tick = WorldMs(now.0.max(self.world.now.0));
         let _ = self.world.tick(tick);
-        let view = ViewBox { region: RegionId(1), min_x: -1_000_000_000, max_x: 1_000_000_000, min_y: -1_000_000_000, max_y: 1_000_000_000 };
+        // Only soldiers near the camera are derived; everyone else stays an aggregate.
+        let look = self.ground_cam.unwrap_or(self.focus);
+        let r = (self.ground_view as f64 * 1.6 * 1000.0) as i64;
+        let (lx, ly) = ((look.x as f64 * 1000.0) as i64, (look.y as f64 * 1000.0) as i64);
+        let view = ViewBox { region: RegionId(1), min_x: lx - r, max_x: lx + r, min_y: ly - r, max_y: ly + r };
         let mut out = std::mem::take(&mut self.derived);
-        derive_visible(&self.world, tick, &view, SOLDIERS as usize, &mut out);
+        derive_visible(&self.world, tick, &view, MAX_DRAWN, &mut out);
         let n = out.len();
-        let (mut cx, mut cy) = (0.0f64, 0.0f64);
-        for d in &out {
-            cx += d.pos.x as f64 / 1000.0;
-            cy += d.pos.y as f64 / 1000.0;
-        }
-        if n > 0 {
-            cx /= n as f64;
-            cy /= n as f64;
-        }
+        // Follow the first group: its formation centre at this moment.
+        let lead = scalia_core::groups::GroupId(0);
+        let p0 = match self.world.groups.process(lead).kind {
+            ProcessKind::March { .. } => scalia_core::process::process_pos(self.world.groups.process(lead), tick).unwrap_or(self.world.groups.pos(lead)),
+            _ => self.world.groups.pos(lead),
+        };
+        // Formations are centred on the group position.
+        let (cx, cy) = (p0.x as f64 / 1000.0, p0.y as f64 / 1000.0);
         let mut inst = Vec::with_capacity(n * 8);
         for d in &out {
             let (x, y) = (d.pos.x as f32 / 1000.0, d.pos.y as f32 / 1000.0);
@@ -407,16 +430,23 @@ impl Viewer {
         let (gx, gy) = ((look.0 / CELLS as f64).floor() as i64, (look.1 / CELLS as f64).floor() as i64);
         // Enough chunks to cover a wide screen at any yaw; at most a few new ones per frame to avoid hitches.
         let rad = (self.ground_view * 1.3 / CELLS as f32).ceil() as i64 + 1;
+        // Coarser terrain when zoomed out; all chunks share one step, so neighbours always match.
+        let step = if self.ground_view <= 70.0 { 1 } else if self.ground_view <= 130.0 { 2 } else { 4 };
         let mut budget = 6;
         for dy in -rad..=rad {
             for dx in -rad..=rad {
                 let key = (gx + dx, gy + dy);
-                if !self.chunks.contains_key(&key) {
+                let current = self.chunk_lod.get(&key).copied();
+                if current != Some(step) {
+                    if budget == 0 && current.is_some() {
+                        meshes.push(format!("terrain{},{}", key.0, key.1));
+                        continue; // keep the old mesh until there is time to rebuild it
+                    }
                     if budget == 0 {
                         continue;
                     }
                     budget -= 1;
-                    self.chunk(key.0, key.1);
+                    self.chunk_mesh(key.0, key.1, step);
                 }
                 meshes.push(format!("terrain{},{}", key.0, key.1));
             }
@@ -425,6 +455,7 @@ impl Viewer {
         let far: Vec<_> = self.chunks.keys().copied().filter(|&(x, y)| (x - gx).abs() > keep || (y - gy).abs() > keep).collect();
         for k in far {
             self.chunks.remove(&k);
+            self.chunk_lod.remove(&k);
             self.gpu.drop_buffer(&format!("terrain{},{}", k.0, k.1));
         }
         instanced.push(("figure".into(), "soldiers".into()));
@@ -432,7 +463,8 @@ impl Viewer {
         let mut target = self.ground_cam.unwrap_or(self.focus);
         target.z = self.height_at(target.x, target.y);
         let mode = if self.ground_cam.is_some() { "free camera (F follows)" } else { "following the group" };
-        let text = format!("Ground: {n} soldiers, {mode}, {:.0} m view", self.ground_view);
+        let total: u64 = (0..self.world.groups.len()).map(|i| self.world.groups.people(scalia_core::groups::GroupId(i as u32)) as u64).sum();
+        let text = format!("Ground: {n} of {total} soldiers drawn, {mode}, {:.0} m view", self.ground_view);
         (target, self.yaw, self.ground_view, 600.0, text)
     }
 

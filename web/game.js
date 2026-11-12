@@ -89,6 +89,7 @@ try {
     else if (k === 'o') { outline.checked = !outline.checked; v.set_outline(outline.checked); }
     else if (k === 'r') { fullres.checked = !fullres.checked; v.set_full(fullres.checked); }
     else if (k === 't') flash(v.cycle_day_speed(performance.now()));
+    else if (k === 'n') flash(v.cycle_army());
     else if (k === 'l') { capIndex = (capIndex + 1) % CAPS.length; store.set('scalia.cap', String(capIndex)); flash(`frame cap: ${CAPS[capIndex] || 'off'}`); }
   });
   addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
