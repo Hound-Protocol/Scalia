@@ -271,11 +271,36 @@ try {
   // Radio traffic heard and sent, newest first, for the home page.
   const traffic = [];
   const pdaStatus = () => { $('pdaStatus').textContent = PAGE_NAME[page] || ''; };
+  // A burst of glitch lines and big pixel blocks over the glass while a page changes (sound to come: onGlitch).
+  let onGlitch = null;
+  const glitch = () => {
+    if (!tablet.classList.contains('up') || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const disp = tablet.querySelector('.display');
+    disp.querySelector('.glitch')?.remove();
+    const box = document.createElement('div');
+    box.className = 'glitch';
+    const r = (a, b) => a + Math.random() * (b - a);
+    const cols = ['rgba(224,165,38,0.55)', 'rgba(205,191,148,0.45)', 'rgba(111,207,90,0.4)', 'rgba(120,200,230,0.35)', 'rgba(255,255,255,0.5)'];
+    const pick = () => cols[Math.floor(Math.random() * cols.length)];
+    let html = '';
+    for (let k = 0; k < 9; k++) {
+      html += `<i class="ln" style="top:${r(0, 100).toFixed(1)}%;height:${Math.round(r(1, 5))}px;background:${pick()};--x:${Math.round(r(-40, 40))}px;--d:${r(0.06, 0.14).toFixed(3)}s;--w:${r(0, 0.1).toFixed(3)}s"></i>`;
+    }
+    for (let k = 0; k < 7; k++) {
+      const sz = Math.round(r(10, 34)) * 2;
+      html += `<i class="px" style="left:${r(0, 96).toFixed(1)}%;top:${r(0, 92).toFixed(1)}%;width:${sz * Math.round(r(1, 4))}px;height:${sz}px;background:${pick()};--d:${r(0.04, 0.09).toFixed(3)}s;--w:${r(0, 0.13).toFixed(3)}s"></i>`;
+    }
+    box.innerHTML = html;
+    disp.appendChild(box);
+    setTimeout(() => box.remove(), 260);
+    if (onGlitch) onGlitch();
+  };
   const setPage = (p) => {
     // The page that comes in wipes across the glass (only when the page changes, not on a redraw).
     if (p !== page) {
       const el = { map: $('pageMap') }[p] || $(p);
       if (el) { el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter'); }
+      glitch();
     }
     page = p;
     for (const b of tablet.querySelectorAll('[data-page]')) b.classList.toggle('on', b.dataset.page === p);
@@ -477,7 +502,8 @@ try {
   // A voice heard over a radio: most energy between 300 Hz and 3 kHz, little below or above.
   const voiceShape = edges.slice(0, BANDS).map((f, k) => { const g = Math.sqrt(f * edges[k + 1]); return Math.exp(-Math.pow(Math.log(g / 1100) / 1.0, 2)); });
   const waveBars = () => [...document.querySelectorAll('#radio .wave i')];
-  // Idle: a green oscilloscope trace, flat with a faint hiss, moving with whatever the analyser hears.
+  // The green oscilloscope trace, always on: flat with a faint hiss when the net is quiet, swinging with the voice
+  // when someone speaks (what the analyser hears, plus the word bursts for the synthesised voices it cannot hear).
   let scopeData = null;
   const drawScope = () => {
     const cv = document.querySelector('#radio .wave .scope');
@@ -488,13 +514,17 @@ try {
     const g = cv.getContext('2d');
     g.clearRect(0, 0, cv.width, cv.height);
     if (analyser) { scopeData = scopeData || new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(scopeData); }
-    const t = performance.now() / 1000, n = 96;
+    const t = performance.now() / 1000, n = 120;
+    const e = Math.min(1, wordEnergy * Math.exp(-(performance.now() - wordAt) / 160));
     g.beginPath();
     for (let i = 0; i <= n; i++) {
       const x = (i / n) * cv.width;
       const sig = scopeData ? scopeData[Math.floor((i / n) * (scopeData.length - 1))] : 0;
       const hiss = 0.04 * Math.sin(i * 0.9 + t * 13) * Math.sin(i * 0.37 - t * 7) + 0.025 * (Math.random() - 0.5);
-      const y = cv.height / 2 - (sig * 3 + hiss) * cv.height * 0.45;
+      // A voice-like wave: a few formant-ish partials under a syllable envelope, scrolling across the screen.
+      const ph = i * 0.42 - t * 38;
+      const voice = e * (0.55 * Math.sin(ph) + 0.3 * Math.sin(ph * 2.7 + 1.3) + 0.15 * Math.sin(ph * 5.3)) * (0.6 + 0.4 * Math.sin(i * 0.09 - t * 9));
+      const y = cv.height / 2 - Math.max(-1, Math.min(1, sig * 3 + hiss + voice * 0.9)) * cv.height * 0.45;
       if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
     }
     g.strokeStyle = '#6dff8f'; g.lineWidth = 2; g.shadowColor = '#3dff6a'; g.shadowBlur = 6;
@@ -502,7 +532,7 @@ try {
   };
   const drawSpectrum = () => {
     const bars = waveBars();
-    if (radio.classList.contains('up') && !radio.classList.contains('tx') && !radio.classList.contains('rx')) drawScope();
+    if (radio.classList.contains('up')) drawScope();
     if (radio.classList.contains('up')) {
       let real = null;
       if (analyser) {

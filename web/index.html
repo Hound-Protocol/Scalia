@@ -92,7 +92,9 @@
   #radio .wave { position: relative; height: 3.2vh; display: flex; align-items: center; gap: .35vh; }
   #radio .wave .scope { position: absolute; inset: 0; width: 100%; height: 100%; }
   #radio:not(.tx):not(.rx) .wave i { visibility: hidden; }
-  #radio.tx .wave .scope, #radio.rx .wave .scope { visibility: hidden; }
+  /* The trace stays on top at all times; while someone speaks the spectrum bars glow faintly behind it. */
+  #radio .wave .scope { z-index: 1; }
+  #radio.tx .wave i, #radio.rx .wave i { opacity: 0.32; }
   #radio .wave i { flex: 1; height: 8%; background: #4ad8ff; border-radius: 1px; transition: height 40ms linear; }
   #radio.tx .wave, #radio.rx .wave { opacity: 1; }
   #radio.tx .wave i { background: #ff8a7a; }
@@ -204,8 +206,23 @@
   #tablet .screen { position: absolute; left: 0; right: 0; top: 59px; bottom: 0; overflow: hidden; }
   #tablet .screen.map { pointer-events: auto; background: #070906; }
   #tablet .screen.page { pointer-events: auto; padding: 18px 22px; overflow: hidden auto; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--drab) transparent; }
-  #tablet .screen.enter { animation: pda-wipe 0.26s cubic-bezier(.2,.7,.2,1); }
-  @keyframes pda-wipe { from { clip-path: inset(0 0 0 100%); filter: brightness(1.6); } to { clip-path: inset(0); filter: none; } }
+  /* Page change: the incoming page tears in (stepped slices sliding sideways) under a burst of glitch lines and a
+     few big pixel blocks, about a fifth of a second. */
+  #tablet .screen.enter { animation: pda-tear 0.22s steps(1) both; }
+  @keyframes pda-tear {
+    0%   { clip-path: inset(12% 0 64% 0); transform: translateX(-14px); filter: brightness(1.7) saturate(0.4); }
+    18%  { clip-path: inset(48% 0 22% 0); transform: translateX(10px); }
+    36%  { clip-path: inset(0 0 52% 0); transform: translateX(-5px); filter: brightness(1.3); }
+    54%  { clip-path: inset(30% 0 0 0); transform: translateX(4px); }
+    72%  { clip-path: inset(0); transform: translateX(-2px); filter: brightness(1.1); }
+    100% { clip-path: inset(0); transform: none; filter: none; }
+  }
+  #tablet .glitch { position: absolute; left: 0; right: 0; top: 59px; bottom: 0; z-index: 7; pointer-events: none; overflow: hidden; }
+  #tablet .glitch i { position: absolute; display: block; mix-blend-mode: screen; }
+  #tablet .glitch i.ln { left: 0; right: 0; animation: gl-line var(--d, 0.12s) steps(2) var(--w, 0s) both; }
+  #tablet .glitch i.px { animation: gl-px var(--d, 0.1s) steps(1) var(--w, 0s) both; }
+  @keyframes gl-line { 0% { opacity: 0; } 1% { opacity: 1; transform: translateX(var(--x, 0)); } 100% { opacity: 0; transform: translateX(calc(var(--x, 0) * -1)); } }
+  @keyframes gl-px { 0% { opacity: 0; } 1% { opacity: 1; } 100% { opacity: 0; } }
   #tablet .hint { position: absolute; right: 10px; bottom: 10px; white-space: nowrap; color: var(--dim);
     background: rgba(16,20,13,0.82); padding: 4px 12px; font-size: 12.5px; letter-spacing: 0.04em; border: 1px solid var(--line); }
   #tablet .map-home { position: absolute; left: 10px; bottom: 10px; z-index: 2; display: inline-flex; align-items: center; gap: 8px;
@@ -300,6 +317,7 @@
   @media (prefers-reduced-motion: reduce) {
     #tablet .term { display: none !important; }
     #tablet .display.boot *, #tablet .screen.enter { animation: none !important; }
+    #tablet .glitch { display: none; }
   }
 </style>
 </head>
