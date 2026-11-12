@@ -34,7 +34,7 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   var shade = select(1.0, lit, inside);
   // Drifting cloud shadows (time.y = 1 when the sky has clouds): two octaves of value noise on the ground plane.
   if (u.time.y > 0.5) {
-    let cp = i.w.xy * 0.004 + vec2f(u.time.x * 0.004, u.time.x * 0.0015);
+    let cp = i.w.xy * 0.012 + vec2f(u.time.x * 0.036, u.time.x * 0.014);
     let cloud = 0.65 * vnoise(cp) + 0.35 * vnoise(cp * 2.3 + vec2f(17.0, 5.0));
     shade = shade * (1.0 - 0.55 * smoothstep(0.52, 0.62, cloud));
   }
