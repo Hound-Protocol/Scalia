@@ -373,7 +373,9 @@ impl Viewer {
         for j in (0..CELLS as usize).step_by(step) {
             for i in (0..CELLS as usize).step_by(step) {
                 let (a, b, c, d) = (p(i, j), p(i + step, j), p(i + step, j + step), p(i, j + step));
-                let col = 10.0 + ((a[2] * 8.0).floor().rem_euclid(4.0));
+                // Contour bands from the quad's mean height; wider bands on coarse meshes so they stay smooth.
+                let mean = (a[2] + b[2] + c[2] + d[2]) / 4.0;
+                let col = 10.0 + ((mean * 8.0 / step as f32).floor().rem_euclid(4.0));
                 m.tri(a, b, c, col);
                 m.tri(a, c, d, col);
             }
