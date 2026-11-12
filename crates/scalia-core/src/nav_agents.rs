@@ -74,6 +74,17 @@ impl AgentGroup {
         &self.arrived
     }
 
+    pub fn speed_mm_s(&self) -> i64 {
+        self.speed_mm_s
+    }
+
+    /// Centre of the squad (millimetres).
+    pub fn centre(&self) -> (i64, i64) {
+        let n = self.pos.len().max(1) as i64;
+        let (sx, sy) = self.pos.iter().fold((0i64, 0i64), |s, p| (s.0 + p.0, s.1 + p.1));
+        (sx / n, sy / n)
+    }
+
     pub fn all_arrived(&self) -> bool {
         self.arrived.iter().all(|&a| a)
     }

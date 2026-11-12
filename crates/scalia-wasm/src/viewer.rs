@@ -1138,6 +1138,11 @@ impl Viewer {
                 let a = self.agents.get_mut(&g).expect("present");
                 self.agent_prev.insert(g, a.positions().to_vec());
                 a.step(&self.base_grid, 50);
+                // Keep the group's own record where its soldiers are: any later order starts from here, so the
+                // squad never jumps back to where it stood before walking as agents.
+                let (cx, cy) = a.centre();
+                self.world.groups.set_process(GroupId(g), scalia_core::process::Process::idle());
+                self.world.groups.set_pos(GroupId(g), Pos { region: RegionId(1), x: cx, y: cy, z: 0 });
             }
         }
     }
@@ -1155,7 +1160,7 @@ impl Viewer {
             // Drawn between the last two 50 ms steps, so movement is smooth at any frame rate.
             let alpha = ((self.agent_now - self.agent_clock) / 50.0).clamp(0.0, 1.0);
             let stance = self.stance.get(&g).copied().unwrap_or(Pose::Stand);
-            let sprint = matches!(self.world.groups.process(GroupId(g)).kind, ProcessKind::March { speed_mm_s, .. } if speed_mm_s >= RUN_SPEED_MM_S);
+            let sprint = self.agents[&g].speed_mm_s() >= RUN_SPEED_MM_S as i64;
             for (i, (&(x, y), &(px, py))) in pos.iter().zip(&prev).enumerate() {
                 let jitter = (scalia_core::hash::mix64(((g as u64) << 20) ^ i as u64 ^ 0x5ca1) % 1000) as f32 / 1000.0;
                 let moving = !arrived[i] && (x != px || y != py);

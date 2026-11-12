@@ -78,3 +78,29 @@ fn an_order_onto_an_obstacle_goes_to_the_nearest_open_ground() {
         assert!(d < 6_000.0, "they gather round it ({d:.0} mm away)");
     }
 }
+
+#[test]
+fn a_squad_crosses_a_crate_field_and_stays_together() {
+    // Crates 1.2 m wide every 3 m east and 4 m north, like the base's depot, between the squad and its goal.
+    let mut props = Vec::new();
+    for i in 0..6 {
+        for j in 0..5 {
+            props.push(Prop { kind: PropKind::Crate { size_mm: 1_200 }, x_mm: 12_000 + i * 3_000, y_mm: 15_000 + j * 4_000, quarter_turns: 0 });
+        }
+    }
+    let mut g = NavGrid::new(0, 0, 80, 80);
+    g.rebuild(&props);
+    let starts: Vec<(i64, i64)> = (0..12).map(|k| (14_000 + (k % 4) * 1_000, 6_000 + (k / 4) * 1_000)).collect();
+    let mut squad = AgentGroup::new(&g, starts, (20_000, 36_000), 1_500, SOLDIER).unwrap();
+    let mut t = 0;
+    while !squad.all_arrived() && t < 20 * 60 {
+        squad.step(&g, 50);
+        t += 1;
+    }
+    assert!(squad.all_arrived(), "all twelve through the crates within a minute (after {} s)", t / 20);
+    let p = squad.positions();
+    for &(x, y) in p {
+        let d = (((x - 20_000) as f64).powi(2) + ((y - 36_000) as f64).powi(2)).sqrt();
+        assert!(d < 4_000.0, "a straggler at ({x}, {y})");
+    }
+}
