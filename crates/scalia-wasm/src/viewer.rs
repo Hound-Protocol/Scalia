@@ -54,13 +54,13 @@ fn pose_of(s: Stance) -> Pose {
     }
 }
 
-// The tablet cinematic: rise above the commander, hold, dive onto his hands; closing pulls straight back.
-const CINE_RISE_MS: f64 = 650.0;
+// The tablet cinematic: swing up above the commander at the same zoom, hold half a second, dive onto his hands;
+// closing pulls straight back.
+const CINE_RISE_MS: f64 = 350.0;
 const CINE_HOLD_MS: f64 = 500.0;
-const CINE_OPEN_MS: f64 = 2_050.0;
-const CINE_CLOSE_MS: f64 = 700.0;
-/// Camera height (metres of view) and elevation high above, and close on the hands.
-const CINE_HIGH_H: f32 = 45.0;
+const CINE_OPEN_MS: f64 = 1_300.0;
+const CINE_CLOSE_MS: f64 = 550.0;
+/// Camera elevation high above, and view height and elevation close on the hands.
 const CINE_HIGH_ELEV: f32 = 1.4;
 const CINE_CLOSE_H: f32 = 0.5;
 const CINE_CLOSE_ELEV: f32 = 0.95;
@@ -1823,7 +1823,8 @@ impl Viewer {
         let at = scalia_render::pose::TABLET_AT;
         let hands = base + Vec3::new(at.x * h.cos() - at.y * h.sin(), at.x * h.sin() + at.y * h.cos(), at.z);
         let close = (hands, h, CINE_CLOSE_H, CINE_CLOSE_ELEV);
-        let high = (base + Vec3::Z, from.1, (live.2 * 2.2).max(CINE_HIGH_H), CINE_HIGH_ELEV);
+        // Overhead at the zoom the player had: only the angle changes on the way up.
+        let high = (base + Vec3::Z, from.1, from.2, CINE_HIGH_ELEV);
         let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * (3.0 - 2.0 * x) };
         let mix = |a: (Vec3, f32, f32, f32), b: (Vec3, f32, f32, f32), w: f32| {
             let mut dy = b.1 - a.1;

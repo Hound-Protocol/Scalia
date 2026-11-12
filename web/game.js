@@ -185,11 +185,20 @@ try {
   // Tab: the commander raises the tablet. The camera rises above him, holds, then dives onto his hands (the
   // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
   let tabletShown = false;
+  const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
+  const DIVE_AT_MS = 850; // matches the viewer's CINE_RISE_MS + CINE_HOLD_MS
+  let diveSound = 0;
   const setTablet = (up) => {
     if (up === tabletUp) return;
     tabletUp = up;
     $('fieldHint').hidden = up;
-    if (up) { v.set_tablet(true); return; }
+    if (up) {
+      v.set_tablet(true);
+      // The swoosh as the camera starts its dive (after the rise and the half-second hold).
+      clearTimeout(diveSound);
+      diveSound = setTimeout(() => { if (tabletUp) { const a = whoosh.cloneNode(); a.volume = 0.7; a.play().catch(() => {}); } }, DIVE_AT_MS);
+      return;
+    }
     tabletShown = false;
     document.body.classList.remove('pda');
     tablet.classList.remove('up');
@@ -244,13 +253,17 @@ try {
   const mapCanvas = $('mapCanvas');
   let mapAttached = false;
   const sizeMap = () => {
-    const r = mapCanvas.getBoundingClientRect();
+    // Layout size (offsetWidth), not the on-screen rect: the tablet's scale-in transform would shrink the latter.
+    const r = { width: mapCanvas.offsetWidth, height: mapCanvas.offsetHeight };
     const w = Math.max(1, Math.round(r.width * dpr())), h = Math.max(1, Math.round(r.height * dpr()));
     if (mapCanvas.width !== w || mapCanvas.height !== h) { mapCanvas.width = w; mapCanvas.height = h; }
     if (!mapAttached && r.width > 0) { v.attach_map(mapCanvas); mapAttached = true; }
     if (mapAttached) v.resize_map(w, h);
   };
   addEventListener('resize', () => { if (tabletUp && page === 'map') sizeMap(); });
+  // The map's box changes size as the tablet scales in (and with the window): keep its pixels matched to it, or the
+  // map stretches and clicks and zooms land in the wrong place.
+  new ResizeObserver(() => { if (tabletUp && page === 'map') sizeMap(); }).observe(mapCanvas);
   const onMap = (fn) => { v.use_map(true); try { return fn(); } finally { v.use_map(false); } };
   let mDrag = null, mMoved = 0, mBox = null;
   mapCanvas.addEventListener('contextmenu', (e) => e.preventDefault());

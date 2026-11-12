@@ -284,3 +284,99 @@ fn the_tablet_pose_slings_the_rifle_across_the_back() {
     let low = rifle.iter().map(|p| p.z).fold(f32::MAX, f32::min);
     assert!(low > 0.3, "slung rifle clear of the ground: {low}");
 }
+
+/// Fraction of arm vertices inside the torso's core (an ellipse per 5 cm band of height, from the torso at rest).
+fn arm_clip(pp: &scalia_render::pose::PoseParams) -> f32 {
+    let f = figure();
+    let torso: Vec<Vec3> = f.vertices.iter().filter(|v| part_of(v.color) == Part::Torso).map(|v| Vec3::from(v.pos)).collect();
+    let mut bands = Vec::new();
+    for b in 0..14 {
+        let z0 = 0.85 + b as f32 * 0.05;
+        let pts: Vec<&Vec3> = torso.iter().filter(|p| p.z >= z0 - 0.03 && p.z < z0 + 0.08).collect();
+        if pts.len() < 8 { continue; }
+        let mut xs: Vec<f32> = pts.iter().map(|p| p.x.abs()).collect();
+        let mut ys: Vec<f32> = pts.iter().map(|p| p.y).collect();
+        xs.sort_by(f32::total_cmp);
+        ys.sort_by(f32::total_cmp);
+        let q = |v: &Vec<f32>, k: f32| v[((v.len() - 1) as f32 * k) as usize];
+        bands.push((z0, q(&xs, 0.85), q(&ys, 0.08), q(&ys, 0.92)));
+    }
+    let (mut inside, mut n) = (0, 0);
+    for v in &f.vertices {
+        let part = part_of(v.color);
+        if !matches!(part, Part::LeftArm | Part::RightArm | Part::LeftForearm | Part::RightForearm) { continue; }
+        let p = pose_vertex(Vec3::from(v.pos), part, pp);
+        n += 1;
+        if let Some(b) = bands.iter().find(|b| p.z >= b.0 && p.z < b.0 + 0.05) {
+            let cy = (b.2 + b.3) / 2.0;
+            let (ax, ay) = (b.1 * 0.9, (b.3 - b.2) / 2.0 * 0.9);
+            if (p.x / ax).powi(2) + ((p.y - cy) / ay).powi(2) < 1.0 { inside += 1; }
+        }
+    }
+    inside as f32 / n as f32
+}
+
+#[test]
+fn arms_clear_the_torso_in_every_carry() {
+    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Cover, Pose::StandAim] {
+        for k in 0..4 {
+            let pp = params(pose, k as f32 / 4.0);
+            // A little overlap at the shoulder joint itself is unavoidable with rigid parts.
+            let c = arm_clip(&pp);
+            assert!(c < 0.08, "{pose:?} phase {k}/4: {:.1}% of the arms inside the torso", c * 100.0);
+        }
+    }
+}
+
+#[test]
+fn the_rifle_sways_with_the_stride() {
+    use scalia_render::pose::{hand, Side};
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        let hs: Vec<Vec3> = (0..8).map(|k| hand(&params(pose, k as f32 / 8.0), Side::Right)).collect();
+        let rifles: Vec<f32> = (0..8).map(|k| params(pose, k as f32 / 8.0).rifle).collect();
+        let spread = hs.iter().map(|h| (*h - hs[0]).length()).fold(0.0f32, f32::max);
+        let pitch = rifles.iter().fold(f32::MIN, |a, &b| a.max(b)) - rifles.iter().fold(f32::MAX, |a, &b| a.min(b));
+        assert!(spread > 0.02 || pitch > 0.03, "{pose:?}: the rifle stays rigid (hand moves {spread:.3} m, pitch {pitch:.3})");
+        assert!(spread < 0.12, "{pose:?}: sways too much ({spread:.3} m)");
+    }
+}
+
+#[test]
+fn the_body_bobs_and_twists_against_the_legs_when_moving() {
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        let pp: Vec<_> = (0..8).map(|k| params(pose, k as f32 / 8.0)).collect();
+        let bob = pp.iter().map(|p| p.bob).fold(f32::MIN, f32::max) - pp.iter().map(|p| p.bob).fold(f32::MAX, f32::min);
+        let twist = pp.iter().map(|p| p.twist.abs()).fold(0.0f32, f32::max);
+        assert!(bob > 0.01 && bob < 0.08, "{pose:?}: bob {bob}");
+        assert!(twist > 0.03 && twist < 0.2, "{pose:?}: twist {twist}");
+    }
+    let still = params(Pose::Stand, 0.0);
+    assert_eq!((still.bob, still.twist), (0.0, 0.0), "no stride, no bob");
+}
+
+#[test]
+fn standing_soldiers_breathe_shift_and_look_around() {
+    use scalia_render::pose::idle;
+    let base = params(Pose::Stand, 0.0);
+    let at = |t: f32, seed: f32| idle(&base, Pose::Stand, t, seed);
+    // Over half a minute the stance keeps changing a little: breathing, weight, glances.
+    let samples: Vec<_> = (0..60).map(|k| at(k as f32 * 0.5, 0.3)).collect();
+    let range = |f: &dyn Fn(&scalia_render::pose::PoseParams) -> f32| {
+        samples.iter().map(f).fold(f32::MIN, f32::max) - samples.iter().map(f).fold(f32::MAX, f32::min)
+    };
+    assert!(range(&|p| p.shoulder[0]) > 0.02, "breathing moves the shoulders");
+    assert!(range(&|p| p.look) > 0.3, "looks around");
+    assert!(range(&|p| p.twist) > 0.03, "shifts weight");
+    for p in &samples {
+        assert!(p.look.abs() < 0.8 && p.twist.abs() < 0.12 && (p.shoulder[0] - base.shoulder[0]).abs() < 0.12, "{p:?}");
+    }
+    // Different soldiers are out of step with each other.
+    assert_ne!(at(5.0, 0.1).look, at(5.0, 0.7).look);
+    // Aiming soldiers keep their eyes on the sights.
+    let aim = params(Pose::StandAim, 0.0);
+    for k in 0..30 {
+        let p = idle(&aim, Pose::StandAim, k as f32, 0.5);
+        assert!(p.look.abs() < 0.08);
+        assert_eq!(p.rifle, aim.rifle, "the sight picture stays steady");
+    }
+}
