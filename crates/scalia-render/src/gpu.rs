@@ -100,6 +100,9 @@ pub struct Gpu {
     /// True when the adapter is a CPU (software) renderer.
     pub software: bool,
     timing: Option<Timing>,
+    instance: wgpu::Instance,
+    /// A second drawing surface (the tablet's map screen) with its own size and render targets.
+    second: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration, Option<Targets>)>,
 }
 
 fn vertex_layouts() -> [Option<wgpu::VertexBufferLayout<'static>>; 2] {
@@ -283,8 +286,47 @@ impl Gpu {
         Ok(Gpu {
             timing,
             device, queue, surface, config, scene_pipe, shadow_pipe, blit_pipe, uni, b_uni, scene_bind, shadow_bind,
-            shadow_view, one_instance, targets: None, buffers: HashMap::new(), adapter_name, software,
+            shadow_view, one_instance, targets: None, buffers: HashMap::new(), adapter_name, software, instance, second: None,
         })
+    }
+
+    /// Adds a second surface (another canvas) drawn with `frame_second`; it shares meshes and pipelines.
+    pub fn add_second(&mut self, target: impl Into<wgpu::SurfaceTarget<'static>>, width: u32, height: u32) -> Result<(), String> {
+        let surface = self.instance.create_surface(target).map_err(|e| format!("second surface: {e}"))?;
+        let mut config = self.config.clone();
+        config.width = width.max(1);
+        config.height = height.max(1);
+        surface.configure(&self.device, &config);
+        self.second = Some((surface, config, None));
+        Ok(())
+    }
+
+    pub fn resize_second(&mut self, width: u32, height: u32) {
+        if let Some((surface, config, _)) = self.second.as_mut() {
+            if width > 0 && height > 0 && (width, height) != (config.width, config.height) {
+                config.width = width;
+                config.height = height;
+                surface.configure(&self.device, config);
+            }
+        }
+    }
+
+    pub fn has_second(&self) -> bool {
+        self.second.is_some()
+    }
+
+    /// Draws a frame onto the second surface.
+    pub fn frame_second(&mut self, f: &FrameDesc) -> Result<(), String> {
+        let Some(mut sec) = self.second.take() else { return Ok(()) };
+        std::mem::swap(&mut self.surface, &mut sec.0);
+        std::mem::swap(&mut self.config, &mut sec.1);
+        std::mem::swap(&mut self.targets, &mut sec.2);
+        let r = self.frame(f);
+        std::mem::swap(&mut self.surface, &mut sec.0);
+        std::mem::swap(&mut self.config, &mut sec.1);
+        std::mem::swap(&mut self.targets, &mut sec.2);
+        self.second = Some(sec);
+        r
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

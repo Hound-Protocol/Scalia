@@ -52,7 +52,7 @@
     transform: translateY(115%); transition: transform 0.38s cubic-bezier(0.2, 0.8, 0.2, 1); }
   #tablet.up { transform: translateY(0); }
   #tablet .bezel { position: absolute; inset: 0; border: 16px solid #1b1e22; border-top-width: 46px; border-radius: 22px;
-    box-shadow: 0 0 0 100vmax rgba(4, 6, 8, 0.55), inset 0 0 0 2px #2c333c, 0 18px 50px rgba(0,0,0,0.6); }
+    box-shadow: inset 0 0 0 2px #2c333c, 0 18px 50px rgba(0,0,0,0.6); }
   #tablet.up .bezel { pointer-events: none; }
   #tablet .menu { position: absolute; left: 22px; right: 22px; top: 8px; height: 30px; display: flex; gap: 6px; align-items: center; pointer-events: auto; }
   #tablet .menu button { background: #262b31; color: #c9d1db; border: 1px solid #39414b; border-radius: 4px; padding: 4px 14px; font: inherit; cursor: pointer; letter-spacing: 0.06em; }
@@ -60,7 +60,16 @@
   #tablet .menu .spacer { flex: 1; }
   #tablet .menu .brand { color: #c0392b; font-weight: bold; letter-spacing: 0.15em; margin-right: 8px; }
   #tablet .screen { position: absolute; left: 16px; right: 16px; top: 46px; bottom: 16px; border-radius: 6px; overflow: hidden; }
-  #tablet .screen.map { pointer-events: none; box-shadow: inset 0 0 60px rgba(40, 160, 255, 0.12); }
+  #tablet .screen.map { pointer-events: auto; background: #05070a; }
+  #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #home h2 { margin: 0 0 14px; font-size: 18px; letter-spacing: 0.08em; }
+  #home .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+  #home .tile { border: 1px solid #263039; border-radius: 6px; padding: 12px 14px; background: #121820; }
+  #home .tile .big { font-size: 26px; color: #e8eef5; margin: 4px 0; }
+  #home .tile .sub { color: #7f8b98; }
+  #home .apps { display: flex; gap: 14px; }
+  #home .apps button { flex: 1; padding: 22px 10px; background: #18212b; color: #dfe7f0; border: 1px solid #34414f; border-radius: 8px; font: inherit; font-size: 15px; letter-spacing: 0.1em; cursor: pointer; }
+  #home .apps button:hover { background: #22303f; }
   #tablet .screen.page { background: #0f1317; pointer-events: auto; padding: 16px 20px; overflow: auto; }
   #tablet .hint { position: absolute; right: 26px; bottom: 22px; color: #9fb3c8; background: rgba(8, 12, 16, 0.7); padding: 4px 8px; border-radius: 4px; }
   #roster table { border-collapse: collapse; width: 100%; }
@@ -72,6 +81,26 @@
   #comms .box { border: 1px solid #263039; padding: 10px; border-radius: 4px; min-width: 220px; }
   #comms button { background: #1d242c; color: #7f8b98; border: 1px solid #2f3845; padding: 4px 10px; margin: 3px 0; font: inherit; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: #9aa6b4; background: rgba(10,12,16,0.7); padding: 4px 10px; border: 1px solid #2a313c; }
+  /* Actions window for an order, and the commander's walkie-talkie. */
+  #actions { position: fixed; z-index: 40; background: #12171c; border: 1px solid #3d4752; border-radius: 6px; padding: 6px; min-width: 170px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  #actions .head { color: #9fb3c8; font-size: 12px; padding: 2px 4px 6px; }
+  #actions button { display: block; width: 100%; text-align: left; margin: 2px 0; background: #222a32; color: #e3e8ee; border: 1px solid #36404b; border-radius: 4px; padding: 6px 10px; font: inherit; cursor: pointer; }
+  #actions button:hover:not(:disabled) { background: #33465a; }
+  #actions button:disabled { color: #6c7682; cursor: not-allowed; }
+  #actions button small { color: #b5654f; }
+  #actions .cancel { color: #9aa5b1; }
+  #radio { position: fixed; right: 3vw; bottom: -340px; z-index: 45; width: 300px; transition: bottom .4s cubic-bezier(.2,.8,.2,1); pointer-events: none; }
+  #radio.up { bottom: 3vh; }
+  #radio .set { position: relative; margin-left: 30px; width: 120px; height: 250px; background: linear-gradient(#2c3027, #1d2019); border-radius: 18px 18px 14px 14px; border: 2px solid #0e0f0c; box-shadow: inset 0 0 0 3px #3a3f33, 0 8px 20px rgba(0,0,0,.6); }
+  #radio .set::before { content: ''; position: absolute; left: 18px; top: -70px; width: 12px; height: 76px; background: #15170f; border-radius: 6px 6px 2px 2px; }
+  #radio .set .grille { position: absolute; left: 16px; right: 16px; top: 120px; height: 100px; background: repeating-linear-gradient(#161812 0 4px, #2b2f25 4px 8px); border-radius: 6px; }
+  #radio .set .lcd { position: absolute; left: 16px; right: 16px; top: 22px; height: 40px; background: #3d4a2e; color: #b6d17f; font: 13px monospace; border-radius: 4px; padding: 4px 6px; box-sizing: border-box; }
+  #radio .set .led { position: absolute; right: 18px; top: 74px; width: 12px; height: 12px; border-radius: 50%; background: #3a1010; }
+  #radio.tx .set .led { background: #ff3b30; box-shadow: 0 0 10px #ff3b30; }
+  #radio.rx .set .led { background: #38d16a; box-shadow: 0 0 10px #38d16a; }
+  #radioLog { position: absolute; right: 0; bottom: 270px; width: 300px; color: #e8edf2; font-size: 13px; }
+  #radioLog div { background: rgba(10,14,18,.85); border-left: 3px solid #c0392b; padding: 6px 8px; margin-top: 4px; border-radius: 3px; }
+  #radioLog div.unit { border-left-color: #38d16a; }
 </style>
 </head>
 <body>
@@ -127,11 +156,14 @@
 </div>
 <div id="error" class="panel"></div>
 <div id="fieldHint">WASD move · Shift sprint · Q/E turn · <b>Tab</b> tablet</div>
+<div id="actions" hidden></div>
+<div id="radio"><div id="radioLog"></div><div class="set"><div class="lcd">CH 04 · BN NET</div><div class="led"></div><div class="grille"></div></div></div>
 <div id="tablet">
   <div class="bezel"></div>
   <div class="menu">
     <span class="brand">COMMAND</span>
-    <button data-page="map" class="on">MAP</button>
+    <button data-page="home" class="on">HOME</button>
+    <button data-page="map">MAP</button>
     <button data-page="roster">ROSTER</button>
     <button data-page="comms">COMMS HUB</button>
     <span class="spacer"></span>
@@ -139,7 +171,8 @@
     <button id="mAggr" title="Orders are carried out aggressively">AGGRESSIVE</button>
     <button id="tabletClose" title="Tab">CLOSE ✕</button>
   </div>
-  <div class="screen map" id="pageMap"><div class="hint">click a unit · right-click to order (Shift: sprint) · Shift + drag: box · wheel: zoom</div></div>
+  <div class="screen page" id="home"></div>
+  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div class="hint">click a unit, then click a place to give it an order · Shift + drag: box · drag/WASD: pan · wheel: zoom</div></div>
   <div class="screen page" id="roster" hidden></div>
   <div class="screen page" id="comms" hidden>
     <h3>Communications Hub</h3>

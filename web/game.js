@@ -121,7 +121,7 @@ try {
   };
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('pointerdown', (e) => {
-    if (!tabletUp && scene === 'ground') return; // on foot, units are commanded through the tablet
+    if (scene === 'ground') return; // units are commanded through the tablet's map
     if (e.button === 2) {
       const msg = v.command(e.offsetX * dpr(), e.offsetY * dpr(), performance.now(), e.shiftKey);
       if (msg) flash(msg);
@@ -169,12 +169,15 @@ try {
 
   // The commander's tablet: Tab raises it; the map tab looks through to the game view (which then zooms all the way),
   // the roster lists the units, the comms hub is a placeholder for talking to other commanders.
-  let tabletUp = false, page = 'map';
+  let tabletUp = false, page = 'home';
   const tablet = $('tablet');
   const setPage = (p) => {
     page = p;
     for (const b of tablet.querySelectorAll('[data-page]')) b.classList.toggle('on', b.dataset.page === p);
     $('pageMap').hidden = p !== 'map';
+    $('home').hidden = p !== 'home';
+    if (p === 'home') drawHome();
+    if (p === 'map') sizeMap();
     $('roster').hidden = p !== 'roster';
     $('comms').hidden = p !== 'comms';
     if (p === 'roster') drawRoster();
@@ -186,19 +189,132 @@ try {
     v.set_tablet(up);
     if (up) setPage(page);
   };
+  // Home: the overview the tablet opens on.
+  const drawHome = () => {
+    const units = JSON.parse(v.roster());
+    const soldiers = units.reduce((n, u) => n + u.soldiers, 0);
+    const moving = units.filter((u) => u.status !== 'holding').length;
+    $('home').innerHTML = `<h2>BATTALION OVERVIEW</h2>
+      <div class="tiles">
+        <div class="tile">Soldiers<div class="big">${soldiers}</div><div class="sub">${units.length} units · ${moving} on the move</div></div>
+        <div class="tile">Casualties<div class="big">0</div><div class="sub">wounded · evacuating · lost</div></div>
+        <div class="tile">Supplies<div class="big">—</div><div class="sub">rations · ammunition · medical · fuel</div></div>
+        <div class="tile">Morale<div class="big">—</div><div class="sub">rest · food · combat stress</div></div>
+      </div>
+      <div class="apps">
+        <button data-go="map">MAP</button><button data-go="roster">ROSTER</button><button data-go="comms">COMMS HUB</button>
+      </div>`;
+    for (const b of $('home').querySelectorAll('[data-go]')) b.addEventListener('click', () => setPage(b.dataset.go));
+  };
+  // The map: its own canvas, drawn by the viewer with the map's camera (picture in picture).
+  const mapCanvas = $('mapCanvas');
+  let mapAttached = false;
+  const sizeMap = () => {
+    const r = mapCanvas.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width * dpr())), h = Math.max(1, Math.round(r.height * dpr()));
+    if (mapCanvas.width !== w || mapCanvas.height !== h) { mapCanvas.width = w; mapCanvas.height = h; }
+    if (!mapAttached && r.width > 0) { v.attach_map(mapCanvas); mapAttached = true; }
+    if (mapAttached) v.resize_map(w, h);
+  };
+  addEventListener('resize', () => { if (tabletUp && page === 'map') sizeMap(); });
+  const onMap = (fn) => { v.use_map(true); try { return fn(); } finally { v.use_map(false); } };
+  let mDrag = null, mMoved = 0, mBox = null;
+  mapCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  mapCanvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    mapCanvas.setPointerCapture(e.pointerId);
+    if (e.shiftKey) { mBox = [e.offsetX, e.offsetY]; return; }
+    mDrag = [e.clientX, e.clientY]; mMoved = 0;
+  });
+  mapCanvas.addEventListener('pointermove', (e) => {
+    if (!mDrag) return;
+    const dx = e.clientX - mDrag[0], dy = e.clientY - mDrag[1];
+    mMoved += Math.abs(dx) + Math.abs(dy);
+    if (mMoved > 4) onMap(() => v.pan(dx * dpr(), dy * dpr()));
+    mDrag = [e.clientX, e.clientY];
+  });
+  mapCanvas.addEventListener('pointerup', (e) => {
+    if (mBox) { const msg = onMap(() => v.select_box(mBox[0] * dpr(), mBox[1] * dpr(), e.offsetX * dpr(), e.offsetY * dpr(), performance.now())); if (msg) flash(msg); mBox = null; return; }
+    if (mDrag && mMoved <= 4) mapClick(e);
+    mDrag = null;
+  });
+  // Orders: click a unit, then click a place. An actions window asks what the unit should do there; its AI says
+  // whether it can. The order then goes out over the radio, and the unit moves once it has answered.
+  const actionsBox = $('actions');
+  const closeActions = () => { actionsBox.hidden = true; };
+  const mapClick = (e) => {
+    closeActions();
+    const px = e.offsetX * dpr(), py = e.offsetY * dpr();
+    const unit = onMap(() => v.unit_at(px, py));
+    if (unit >= 0 || !onMap(() => v.selection_name())) {
+      const msg = onMap(() => v.click(px, py, performance.now())); if (msg) flash(msg); return;
+    }
+    const [x, y] = onMap(() => v.map_point(px, py));
+    const acts = JSON.parse(v.actions_at(x, y));
+    const grid = `${String(Math.round(x / 10) & 0xffff).padStart(4, '0')} ${String(Math.round(y / 10) & 0xffff).padStart(4, '0')}`;
+    actionsBox.innerHTML = `<div class="head">${onMap(() => v.selection_name())} → grid ${grid}</div>` + acts.map((a) =>
+      `<button data-id="${a.id}" ${a.ok ? '' : 'disabled'} title="${a.reason}">${a.label}${a.ok ? '' : ` <small>${a.reason}</small>`}</button>`).join('') +
+      '<button class="cancel">Cancel</button>';
+    const r = mapCanvas.getBoundingClientRect();
+    actionsBox.style.left = `${r.left + e.offsetX + 8}px`; actionsBox.style.top = `${r.top + e.offsetY + 8}px`;
+    actionsBox.hidden = false;
+    for (const b of actionsBox.querySelectorAll('button[data-id]')) b.addEventListener('click', () => {
+      closeActions(); radioOrder(Number(b.dataset.id), b.textContent.trim(), x, y, grid);
+    });
+    actionsBox.querySelector('.cancel').addEventListener('click', closeActions);
+  };
+  // The walkie-talkie: comes up on screen, the commander speaks the order, waits for the unit, then it moves.
+  const radio = $('radio');
+  const VERB = { 0: ['move to', 'moving'], 1: ['defend', 'defending'], 2: ['assault', 'assaulting'], 3: ['support at', 'supporting'] };
+  const say = (text, pitch, rate) => new Promise((done) => {
+    if (!('speechSynthesis' in window)) { setTimeout(done, 400 + text.length * 45); return; }
+    const u = new SpeechSynthesisUtterance(text); u.pitch = pitch; u.rate = rate;
+    const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
+    if (voices.length) u.voice = voices[pitch < 1 ? Math.min(1, voices.length - 1) : 0];
+    let over = false; const end = () => { if (!over) { over = true; done(); } };
+    u.onend = end; u.onerror = end; setTimeout(end, 1500 + text.length * 90);
+    speechSynthesis.speak(u);
+  });
+  const line = (who, text) => { const d = document.createElement('div'); d.className = who; d.innerHTML = `<b>${who === 'cmd' ? 'Commander' : who === 'unit' ? 'Unit' : ''}</b> ${text}`; $('radioLog').appendChild(d); d.scrollIntoView({ block: 'end' }); };
+  let onAir = false;
+  const radioOrder = async (id, label, x, y, grid) => {
+    if (onAir) { flash('radio busy, wait for the answer'); return; }
+    onAir = true;
+    const who = v.selection_name(), first = who.split(',')[0];
+    const [verb, ing] = VERB[id] || VERB[0];
+    const how = manner === 1 ? ', aggressive' : ', calm';
+    $('radioLog').innerHTML = '';
+    radio.classList.add('up'); v.set_radio(true);
+    await new Promise((r) => setTimeout(r, 450)); // the radio comes up to the ear
+    const order = `${who}, ${verb} grid ${grid}${id === 0 ? '' : how}. Over.`;
+    line('cmd', order); radio.classList.add('tx');
+    await say(order.replace(/(\d)/g, '$1 '), 1.0, 1.05);
+    radio.classList.remove('tx');
+    await new Promise((r) => setTimeout(r, 500 + Math.random() * 700)); // the unit keys up
+    const reply = `${first} copies, ${ing} grid ${grid}. Out.`;
+    radio.classList.add('rx'); line('unit', reply);
+    await say(reply.replace(/(\d)/g, '$1 '), 0.7, 1.1);
+    radio.classList.remove('rx');
+    const msg = v.issue_at(id, x, y, performance.now()); if (msg) flash(msg);
+    await new Promise((r) => setTimeout(r, 600));
+    v.set_radio(false); radio.classList.remove('up'); onAir = false;
+  };
+  mapCanvas.addEventListener('wheel', (e) => { e.preventDefault(); onMap(() => v.wheel(Math.sign(e.deltaY))); }, { passive: false });
+
   const drawRoster = () => {
     const units = JSON.parse(v.roster());
     $('roster').innerHTML = `<h3>Battalion roster</h3><table><tr><th>Unit</th><th>Soldiers</th><th>Status</th><th>Stance</th></tr>${
       units.map((u) => `<tr class="unit${u.selected ? ' sel' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${u.soldiers}</td><td>${u.status}</td><td>${u.stance}</td></tr>`).join('')
     }</table><p style="color:#7f8b98">Click a unit to select it on the map.</p>`;
-    for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', () => { v.select_unit(Number(r.dataset.id)); setPage('map'); });
+    for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', () => { onMap(() => v.select_unit(Number(r.dataset.id))); setPage('map'); });
   };
   for (const b of tablet.querySelectorAll('[data-page]')) b.addEventListener('click', () => setPage(b.dataset.page));
   $('tabletClose').addEventListener('click', () => setTablet(false));
-  const setManner = (m) => { v.set_manner(m); $('mCalm').classList.toggle('on', m === 0); $('mAggr').classList.toggle('on', m === 1); };
+  let manner = 0;
+  const setManner = (m) => { manner = m; v.set_manner(m); $('mCalm').classList.toggle('on', m === 0); $('mAggr').classList.toggle('on', m === 1); };
   $('mCalm').addEventListener('click', () => setManner(0));
   $('mAggr').addEventListener('click', () => setManner(1));
-  setInterval(() => { if (tabletUp && page === 'roster') drawRoster(); }, 1000);
+  setInterval(() => { if (tabletUp && page === 'roster') drawRoster(); if (tabletUp && page === 'home') drawHome(); }, 1000);
 
   // Keyboard: held keys pan and rotate every frame, others act once.
   const held = new Set();
@@ -293,8 +409,11 @@ try {
       if (held.has('d') || held.has('arrowright')) px -= speed;
       if (held.has('w') || held.has('arrowup')) py += speed;
       if (held.has('s') || held.has('arrowdown')) py -= speed;
-      if (tabletUp || scene !== 'ground') {
-        if (px || py) v.pan(px, py);
+      if (tabletUp && page === 'map') {
+        if (px || py) onMap(() => v.pan(px, py));
+        v.move_commander(0, 0, false);
+      } else if (tabletUp || scene !== 'ground') {
+        if ((px || py) && !tabletUp) v.pan(px, py);
         v.move_commander(0, 0, false);
       } else {
         // On foot: WASD walks the commander (Shift sprints); the camera follows him.

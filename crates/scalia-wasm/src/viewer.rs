@@ -60,7 +60,7 @@ const STEP_FIELD_MAX: usize = 4;
 /// The commander's walking and sprinting speeds (m/s), and how long radioing an order takes (ms).
 const CMD_WALK: f32 = 1.7;
 const CMD_SPRINT: f32 = 4.6;
-const RADIO_MS: f64 = 1600.0;
+
 /// How quickly the camera glides to the next step (time constant, ms).
 const GLIDE_MS: f64 = 90.0;
 /// How long the previous terrain detail level lingers over the new one (ms).
@@ -138,8 +138,15 @@ pub struct Viewer {
     tablet: bool,
     /// How orders are carried out: 0 calm, 1 aggressive.
     manner: u8,
+    /// The tablet's map has its own camera (picture in picture); `map_active` while it is swapped in.
+    map_cam: MapCam,
+    map_active: bool,
+    map_pass: bool,
+    cmd_ms: f64,
     /// Per agent soldier: eased heading and walking-until time (smooth turns, no walk/stand flicker).
     agent_anim: HashMap<u32, (f32, f64)>,
+    /// The stance each unit takes once its soldiers reach the ordered place.
+    arrive_stance: HashMap<u32, Pose>,
     cam_smooth: Option<Vec3>,
     yaw_smooth: f32,
     cam_ms: f64,
@@ -242,7 +249,30 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         radio_until: -1.0,
         tablet: false,
         manner: 0,
+        map_cam: MapCam {
+            scene: Scene::Ground,
+            zoom_step: 6,
+            zoom_m: LADDER[6],
+            ground_view: LADDER[6],
+            sys_scale: 1000.0,
+            sys_cam: None,
+            sys_follow: Some(HOME_BODY),
+            ground_cam: None,
+            cam_smooth: None,
+            cam_ms: 0.0,
+            yaw: 0.0,
+            yaw_smooth: 0.0,
+            last_cam: (Vec3::ZERO, 0.0, 1.0),
+            last_view: (1.0, 1.0),
+            size: (1, 1),
+            last_frame_ms: 0.0,
+            last_internal: (1, 1),
+        },
+        map_active: false,
+        map_pass: false,
+        cmd_ms: 0.0,
         agent_anim: HashMap::new(),
+        arrive_stance: HashMap::new(),
         cam_smooth: None,
         yaw_smooth: 0.0,
         cam_ms: 0.0,
@@ -528,11 +558,97 @@ impl Viewer {
         if self.scene != Scene::Ground {
             return String::new();
         }
-        let Some(g) = self.selected else { return "select a group first (left click, or Shift + drag a box)".into() };
+        let p = self.pick(px, py);
+        self.command_world(p, now_ms, run)
+    }
+
+    /// The map point under a pixel (absolute metres), for orders issued after the radio exchange.
+    pub fn map_point(&mut self, px: f64, py: f64) -> Vec<f64> {
+        let p = self.pick(px, py);
+        vec![p.x as f64, p.y as f64]
+    }
+
+    /// The unit under a pixel of the current view, or -1.
+    pub fn unit_at(&mut self, px: f64, py: f64) -> i32 {
+        if self.scene != Scene::Ground {
+            return -1;
+        }
+        let p = self.pick(px, py);
+        let t = self.world.now;
+        let mut best: Option<(u32, f32)> = None;
+        for i in 0..self.world.groups.len() as u32 {
+            let c = self.group_centre(i, t);
+            let reach = (self.world.groups.people(GroupId(i)) as f32).sqrt() * 0.9 * 0.75 + 4.0;
+            let d = Vec3::new(c.x - p.x, c.y - p.y, 0.0).length();
+            if d <= reach && best.map_or(true, |b| d < b.1) {
+                best = Some((i, d));
+            }
+        }
+        best.map_or(-1, |b| b.0 as i32)
+    }
+
+    /// What the selected units can do at a map point, as JSON [{id, label, ok, reason}]. Each unit's AI checks
+    /// the ground: inside the testing ground it must find a way there; what the radar shows, they know.
+    pub fn actions_at(&mut self, x: f64, y: f64) -> String {
+        let groups = if self.selection.is_empty() { self.selected.into_iter().collect() } else { self.selection.clone() };
+        if groups.is_empty() {
+            return "[]".into();
+        }
+        let dest = ((x * 1000.0) as i64, (y * 1000.0) as i64);
+        let reach = if in_base(x as f32, y as f32) {
+            let g = groups[0];
+            let starts: Vec<(i64, i64)> = match self.agents.get(&g) {
+                Some(a) => a.positions().to_vec(),
+                None => {
+                    let c = self.group_centre(g, self.world.now);
+                    vec![((c.x * 1000.0) as i64, (c.y * 1000.0) as i64)]
+                }
+            };
+            AgentGroup::new(&self.base_grid, starts, dest, 1_500, 300).is_some()
+        } else {
+            true
+        };
+        let why = if reach { "" } else { "no way through to there" };
+        let list = [(0, "Move"), (1, "Defend"), (2, "Assault"), (3, "Support")];
+        let items: Vec<String> = list.iter().map(|(id, label)| format!("{{\"id\":{id},\"label\":\"{label}\",\"ok\":{reach},\"reason\":\"{why}\"}}")).collect();
+        format!("[{}]", items.join(","))
+    }
+
+    /// Carries out an order at a map point (after the radio exchange): 0 move, 1 defend, 2 assault, 3 support.
+    /// Assaults go at a sprint; on arrival a unit takes the stance that fits the order.
+    pub fn issue_at(&mut self, action: u8, x: f64, y: f64, now_ms: f64) -> String {
+        let run = action == 2;
+        let stance = match action {
+            1 => Pose::Cover,
+            2 => Pose::StandAim,
+            3 => Pose::CoverAim,
+            _ => Pose::Stand,
+        };
+        let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
+        for g in &groups {
+            self.arrive_stance.insert(*g, stance);
+        }
+        self.command_world(Vec3::new(x as f32, y as f32, 0.0), now_ms, run)
+    }
+
+    /// Names of the selected units (for the radio).
+    pub fn selection_name(&self) -> String {
+        let names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett"];
+        let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
+        let n: Vec<String> = groups.iter().map(|&g| names.get(g as usize).map_or(format!("Group {g}"), |n| n.to_string())).collect();
+        n.join(", ")
+    }
+
+    /// The commander holds the radio to his ear (true) or lets it go.
+    pub fn set_radio(&mut self, on: bool) {
+        self.radio_until = if on { f64::MAX } else { -1.0 };
+    }
+
+    fn command_world(&mut self, p: Vec3, now_ms: f64, run: bool) -> String {
+        let Some(g) = self.selected else { return "select a unit first".into() };
         let t = WorldMs(self.sim_ms(now_ms) as u64);
         let now = WorldMs(t.0.max(self.world.now.0));
         let _ = self.world.tick(now);
-        let p = self.pick(px, py);
         let speed = if run { RUN_SPEED_MM_S } else { MARCH_SPEED_MM_S };
         // Several groups keep their spacing: each goes to the click plus its offset from the selection's centre.
         let groups = if self.selection.is_empty() { vec![g] } else { self.selection.clone() };
@@ -571,8 +687,7 @@ impl Viewer {
             return "those groups cannot move right now".into();
         }
         self.order_dest = Some(p);
-        // The commander radios the order through.
-        self.radio_until = now_ms + RADIO_MS;
+        // (The radio exchange happens before the order is carried out; see the tablet.)
         // The camera stays where the player left it (F follows again).
         if self.ground_cam.is_none() {
             self.ground_cam = Some(self.cam_smooth.unwrap_or(self.focus));
@@ -586,16 +701,32 @@ impl Viewer {
     pub fn move_commander(&mut self, x: f32, y: f32, sprint: bool) {
         self.cmd_input = (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0), sprint);
     }
-    /// Raises or lowers the tablet. Lowering it brings the camera back to the commander at a field zoom.
+    /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
+    /// starts over the commander.
     pub fn set_tablet(&mut self, up: bool) {
         self.tablet = up;
-        if up {
-            self.ground_cam = Some(self.cam_smooth.unwrap_or(self.focus));
-        } else {
-            self.zoom_step = self.zoom_step.min(STEP_FIELD_MAX);
-            if self.scene != Scene::Ground {
-                self.scene = Scene::Ground;
-            }
+        if up && self.map_cam.ground_cam.is_none() {
+            self.map_cam.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
+        }
+    }
+    /// Attaches the tablet's map canvas: drawn with the map camera while the tablet is up.
+    pub fn attach_map(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsError> {
+        let size = (canvas.width().max(1), canvas.height().max(1));
+        self.gpu.add_second(wgpu_target(canvas), size.0, size.1).map_err(|e| JsError::new(&e))?;
+        self.resize_map(size.0, size.1);
+        Ok(())
+    }
+    pub fn resize_map(&mut self, w: u32, h: u32) {
+        let size = (w.max(1), h.max(1));
+        if self.map_active { self.size = size } else { self.map_cam.size = size }
+        self.gpu.resize_second(size.0, size.1);
+    }
+    /// Routes input to the map's camera (true) or the field view (false). Calls between a `use_map(true)` and
+    /// `use_map(false)` (wheel, pan, click, command) act on the map.
+    pub fn use_map(&mut self, on: bool) {
+        if on != self.map_active {
+            self.swap_cam();
+            self.map_active = on;
         }
     }
     /// How orders are carried out: 0 calm, 1 aggressive.
@@ -712,7 +843,7 @@ impl Viewer {
         // Away from home the ground is not under the camera: the system's closest step is as far in as it goes.
         let lowest = if self.scene == Scene::System && self.sys_follow != Some(HOME_BODY) { STEP_HANDOFF + 1 } else { 0 };
         // On foot the view stays close; the tablet's map zooms out to the stars.
-        let highest = if self.tablet { LADDER.len() - 1 } else { STEP_FIELD_MAX };
+        let highest = if self.map_active { LADDER.len() - 1 } else { STEP_FIELD_MAX };
         self.zoom_step = if delta > 0.0 { (self.zoom_step + 1).min(highest) } else { self.zoom_step.saturating_sub(1).max(lowest) };
     }
     pub fn flying(&self) -> bool {
@@ -737,13 +868,29 @@ impl Viewer {
 
     /// Draws one frame and returns the status line.
     pub fn frame(&mut self, now_ms: f64) -> String {
-        let t = self.sim_ms(now_ms);
         self.frames += 1;
         if now_ms - self.fps_t > 500.0 {
             self.fps = (self.frames as f64 * 1000.0 / (now_ms - self.fps_t)) as f32;
             self.frames = 0;
             self.fps_t = now_ms;
         }
+        self.use_map(false);
+        let line = self.render(now_ms, false);
+        // Picture in picture: the tablet's map, drawn with its own camera onto its own canvas.
+        if self.tablet && self.gpu.has_second() {
+            self.use_map(true);
+            self.map_pass = true;
+            let _ = self.render(now_ms, true);
+            self.map_pass = false;
+            self.use_map(false);
+        }
+        line
+    }
+}
+
+impl Viewer {
+    fn render(&mut self, now_ms: f64, second: bool) -> String {
+        let t = self.sim_ms(now_ms);
         let ps = if self.full { 1 } else { self.pixel_scale };
         let internal = ((self.size.0 / ps).max(1), (self.size.1 / ps).max(1));
         self.glide(now_ms);
@@ -783,7 +930,8 @@ impl Viewer {
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
         let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev };
-        if let Err(e) = self.gpu.frame(&desc) {
+        let drawn = if second { self.gpu.frame_second(&desc) } else { self.gpu.frame(&desc) };
+        if let Err(e) = drawn {
             return format!("Render error: {e}");
         }
         self.last_internal = internal;
@@ -982,7 +1130,7 @@ impl Viewer {
         // Keep the floating origin within half a kilometre of the camera.
         let tg = self.ground_cam.unwrap_or(self.focus);
         let o = ((tg.x as f64 / 1024.0).round() * 1024.0, (tg.y as f64 / 1024.0).round() * 1024.0);
-        if o != self.origin {
+        if o != self.origin && !self.map_pass {
             self.origin = o;
             self.reorigin();
         }
@@ -1118,7 +1266,7 @@ impl Viewer {
             }
         }
         let keep = rad + 2;
-        let far: Vec<_> = self.chunks.keys().copied().filter(|&(x, y)| (x - gx).abs() > keep || (y - gy).abs() > keep).collect();
+        let far: Vec<_> = if self.map_pass { Vec::new() } else { self.chunks.keys().copied().filter(|&(x, y)| (x - gx).abs() > keep || (y - gy).abs() > keep).collect() };
         for k in far {
             self.chunks.remove(&k);
             self.chunk_lod.remove(&k);
@@ -1144,7 +1292,11 @@ impl Viewer {
         if !self.base_built {
             self.build_base();
         }
-        self.update_commander(t, ts, instanced);
+        if self.map_pass {
+            instanced.push(("commander".into(), "commander_at".into()));
+        } else {
+            self.update_commander(t, ts, instanced);
+        }
         instanced.push(("base".into(), "base_at".into()));
         let (bx, by) = ((-self.origin.0) as f32, (-self.origin.1) as f32);
         self.gpu.upload_instances("base_at", bytes(&[bx, by, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
@@ -1172,7 +1324,7 @@ impl Viewer {
             }
         }
         self.focus = Vec3::new(cx as f32, cy as f32, 0.0);
-        if !self.tablet {
+        if !self.map_pass {
             self.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
         }
         let mut target = self.ground_cam.unwrap_or(self.focus);
@@ -1221,6 +1373,11 @@ impl Viewer {
                 let a = self.agents.get_mut(&g).expect("present");
                 self.agent_prev.insert(g, a.positions().to_vec());
                 a.step(&self.base_grid, 50);
+                if a.all_arrived() {
+                    if let Some(p) = self.arrive_stance.remove(&g) {
+                        self.stance.insert(g, p);
+                    }
+                }
                 // Keep the group's own record where its soldiers are: any later order starts from here, so the
                 // squad never jumps back to where it stood before walking as agents.
                 let (cx, cy) = a.centre();
@@ -1282,14 +1439,35 @@ impl Viewer {
         }
     }
 
+    fn swap_cam(&mut self) {
+        std::mem::swap(&mut self.scene, &mut self.map_cam.scene);
+        std::mem::swap(&mut self.zoom_step, &mut self.map_cam.zoom_step);
+        std::mem::swap(&mut self.zoom_m, &mut self.map_cam.zoom_m);
+        std::mem::swap(&mut self.ground_view, &mut self.map_cam.ground_view);
+        std::mem::swap(&mut self.sys_scale, &mut self.map_cam.sys_scale);
+        std::mem::swap(&mut self.sys_cam, &mut self.map_cam.sys_cam);
+        std::mem::swap(&mut self.sys_follow, &mut self.map_cam.sys_follow);
+        std::mem::swap(&mut self.ground_cam, &mut self.map_cam.ground_cam);
+        std::mem::swap(&mut self.cam_smooth, &mut self.map_cam.cam_smooth);
+        std::mem::swap(&mut self.cam_ms, &mut self.map_cam.cam_ms);
+        std::mem::swap(&mut self.yaw, &mut self.map_cam.yaw);
+        std::mem::swap(&mut self.yaw_smooth, &mut self.map_cam.yaw_smooth);
+        std::mem::swap(&mut self.last_cam, &mut self.map_cam.last_cam);
+        std::mem::swap(&mut self.last_view, &mut self.map_cam.last_view);
+        std::mem::swap(&mut self.size, &mut self.map_cam.size);
+        std::mem::swap(&mut self.last_frame_ms, &mut self.map_cam.last_frame_ms);
+        std::mem::swap(&mut self.last_internal, &mut self.map_cam.last_internal);
+    }
+
     /// Moves the commander by his input (relative to the camera), keeps him out of walls, and draws him: black
     /// clothing, a red armband, walking, sprinting or on the radio.
     fn update_commander(&mut self, t: f64, ts: f32, instanced: &mut Vec<(String, String)>) {
         if !self.gpu.has("commander") {
             self.gpu.upload("commander", commander_figure().bytes());
         }
-        let dt = ((t - self.cam_ms).clamp(0.0, 100.0) / 1000.0) as f32;
-        let (ix, iy, sprint) = if self.tablet { (0.0, 0.0, false) } else { self.cmd_input };
+        let dt = ((t - self.cmd_ms).clamp(0.0, 100.0) / 1000.0) as f32;
+        self.cmd_ms = t;
+        let (ix, iy, sprint) = self.cmd_input;
         let (s, c) = self.yaw_smooth.sin_cos();
         let (right, fwd) = ((c, s), (-s, c));
         let (mut vx, mut vy) = (right.0 * ix + fwd.0 * iy, right.1 * ix + fwd.1 * iy);
@@ -1866,4 +2044,25 @@ fn commander_figure() -> MeshBuilder {
         }
     }
     f
+}
+
+/// The tablet map's camera: everything that differs between the field view and the map view.
+struct MapCam {
+    scene: Scene,
+    zoom_step: usize,
+    zoom_m: f32,
+    ground_view: f32,
+    sys_scale: f32,
+    sys_cam: Option<Vec3>,
+    sys_follow: Option<u8>,
+    ground_cam: Option<Vec3>,
+    cam_smooth: Option<Vec3>,
+    cam_ms: f64,
+    yaw: f32,
+    yaw_smooth: f32,
+    last_cam: (Vec3, f32, f32),
+    last_view: (f32, f32),
+    size: (u32, u32),
+    last_frame_ms: f64,
+    last_internal: (u32, u32),
 }
