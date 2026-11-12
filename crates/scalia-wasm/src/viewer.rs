@@ -139,6 +139,9 @@ pub struct Viewer {
     group_pose: HashMap<u32, (Pose, Pose, f32)>,
     /// Pose held in the soldier preview; None cycles through all of them.
     preview_pose: Option<usize>,
+    /// Model viewer: soldier level of detail (0 full, 1 mid, 2 far) and colour variant.
+    model_detail: u8,
+    model_variant: u8,
     order_dest: Option<Vec3>,
     fps: f32,
     frames: u32,
@@ -200,6 +203,8 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         stance: HashMap::new(),
         group_pose: HashMap::new(),
         preview_pose: None,
+        model_detail: 0,
+        model_variant: 0,
         order_dest: None,
         fps: 0.0,
         frames: 0,
@@ -420,6 +425,17 @@ impl Viewer {
     }
 
     /// Holds pose `i` in the soldier preview (walk, run, stand, crouch, cover aim, prone, standing aim); -1 cycles.
+    /// Model viewer: level of detail of the soldier (0 full, 1 mid, 2 far).
+    pub fn set_model_detail(&mut self, d: u8) {
+        self.model_detail = d.min(2);
+    }
+    /// Model viewer: colour variant (an index into `variant_name`).
+    pub fn set_model_variant(&mut self, i: u8) {
+        self.model_variant = i;
+    }
+    pub fn variant_name(&self, i: u8) -> Option<String> {
+        VARIANTS.get(i as usize).map(|v| v.0.to_string())
+    }
     pub fn preview_pose(&mut self, i: i32) {
         self.preview_pose = (i >= 0).then_some(i as usize);
     }
@@ -624,12 +640,19 @@ impl Viewer {
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
             let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
-            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, 6.0, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), 0.0, 0.0]));
+            let colour = VARIANTS[self.model_variant as usize % VARIANTS.len()].1;
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), 0.0, 0.0]));
             meshes.push("plinth".into());
-            instanced.push(("figure".into(), "figure1".into()));
+            let (mesh, tris, detail) = match self.model_detail {
+                1 => ("figure_lo", figure_lo().vertices.len() / 3, "mid detail, 70-250 m"),
+                2 => ("figure_far", figure_far().vertices.len() / 3, "far detail, beyond 250 m"),
+                _ => ("figure", figure().vertices.len() / 3, "full detail, up to 70 m"),
+            };
+            instanced.push((mesh.into(), "figure1".into()));
             let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
-            let tris = figure().vertices.len() / 3;
-            return (Vec3::new(0.0, 0.0, 0.9), yaw, 2.6, 10.0, format!("Soldier: {tris} triangles, pose {pose:?} (poses change every 3 s)"));
+            let variant = VARIANTS[self.model_variant as usize % VARIANTS.len()].0;
+            let cycling = if self.preview_pose.is_none() { " (poses change every 3 s)" } else { "" };
+            return (Vec3::new(0.0, 0.0, 0.9), yaw, 2.6, 10.0, format!("Soldier, {variant}: {tris} triangles, {detail}, pose {pose:?}{cycling}"));
         }
         let s = self.ship_info(i);
         let ext = s.hi - s.lo;
@@ -1220,3 +1243,6 @@ fn oriented_globe(planet: &Planet, tx: f32, ty: f32, cols: usize, rows: usize) -
     }
     out
 }
+
+/// Uniform colour variants for the model viewer: (name, palette index of the body).
+const VARIANTS: [(&str, f32); 6] = [("blue", 6.0), ("green", 7.0), ("red", 9.0), ("ochre", 4.0), ("grey", 1.0), ("khaki", 13.0)];

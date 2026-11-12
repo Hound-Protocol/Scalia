@@ -51,7 +51,17 @@ try {
   for (let i = 0; wasm.shipped_ron(i) !== undefined; i++) sel.append(new Option(JSON.parse(wasm.blueprint_info(wasm.shipped_ron(i))).name, i));
   sel.append(new Option('Soldier', sel.options.length));
   sel.value = '5';
-  sel.addEventListener('change', () => v.set_ship(Number(sel.value)));
+  sel.addEventListener('change', () => { v.set_ship(Number(sel.value)); showModelOpts(); });
+
+  // Model viewer: pose, level of detail and colour variant for the soldier.
+  const poseSel = $('poseSel'), detailSel = $('detailSel'), variantSel = $('variantSel');
+  poseSel.append(new Option('all poses', -1));
+  ['walk', 'run', 'stand', 'crouch', 'cover aim', 'prone', 'standing aim'].forEach((n, i) => poseSel.append(new Option(n, i)));
+  for (let i = 0; v.variant_name(i) !== undefined; i++) variantSel.append(new Option(v.variant_name(i), i));
+  poseSel.addEventListener('change', () => v.preview_pose(Number(poseSel.value)));
+  detailSel.addEventListener('change', () => v.set_model_detail(Number(detailSel.value)));
+  variantSel.addEventListener('change', () => v.set_model_variant(Number(variantSel.value)));
+  const showModelOpts = () => { $('modelOpts').hidden = !(scene === 'ships' && sel.value === String(sel.options.length - 1)); };
 
   // Scenes.
   let scene = 'ships';
@@ -59,6 +69,7 @@ try {
     scene = name;
     v.set_scene(name);
     for (const b of document.querySelectorAll('[data-scene]')) b.classList.toggle('on', b.dataset.scene === name);
+    showModelOpts();
     store.set('scalia.scene', name);
   };
   for (const b of document.querySelectorAll('[data-scene]')) b.addEventListener('click', () => setScene(b.dataset.scene));
