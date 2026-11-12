@@ -27,6 +27,17 @@ This replaces the "player is the general of a whole army" framing; the premise a
   carries it out on its own, led by its AI captain, for example clearing the building.
 - **Orders can carry a manner and specifics.** You can say how: calmly or aggressively. You can leave the details
   to the AI below you, or give them yourself: use flashbangs, report what you find, and so on.
+- **Command structure (decided 2026-11-12):** by default every unit answers to you, and you can order any unit
+  directly. You can also **attach units to a captain**. Captains are their own rank, separate from the other units.
+  An attached group becomes the captain's command: he holds back a little behind it, takes a **goal** from you
+  ("take that building", "hold this ridge") and plans how to reach it with **GOAP** (goal-oriented action
+  planning), then leads his smaller units there himself. Detach them and they answer to you directly again.
+- **Command is communication, not point and click.** Everything goes over the radio as speech and text, with
+  proper procedure (call signs, read-backs, "say again", over/out). Units also call you unprompted: contact
+  reports, casualties, requests to fall back, "in position". One net, one speaker at a time, urgent calls cut in.
+  Voices carry the speaker's state (calm, stressed, exhausted); a fallen captain's second takes over with his own
+  voice. Accent mix across the cast. Voice clips are generated once with ElevenLabs and shipped with the game,
+  stitched at play time and run through a radio filter in the browser.
 - **Light infantry look:** an olive jumpsuit with chest pockets, a dark hood and mask, dark shoulder and elbow pads,
   one rolled sleeve, a pouch belt, a drop-leg holster and a rear back pouch.
 
