@@ -123,6 +123,9 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
 - **Vehicles:** `derive_vehicles` (4 tests) places a group's tanks (left) and trucks (right) in columns behind the
   formation, facing the march; the viewer draws them with the shipped Bulwark and Hauler. Viewer armies: 4 tanks and
   3 trucks per group, every third group marching.
+- **GPU timing:** timestamp queries measure the shadow, scene and upscale passes (HUD). Measured on the RTX 3050 Ti:
+  2,000 soldiers at 60 m: GPU 1.0 ms, CPU 0.7 ms; 100,000 simulated / 8,000 drawn at 160 m: GPU 1.1 ms, CPU 1.8 ms;
+  the same at full resolution (1920x947): GPU 1.3 ms. The 16.7 ms budget for 60 fps has a lot of room.
 - **Frame pacing:** L cycles a frame cap (off, 60, 30); the HUD shows fps and CPU ms per frame. Everything moves by time,
   so a lower frame rate only drops frames.
 
