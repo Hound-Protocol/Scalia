@@ -267,7 +267,7 @@ fn the_tablet_pose_holds_it_in_both_hands_at_the_chest() {
     for side in [Side::Left, Side::Right] {
         let h = hand(&pp, side);
         assert!((0.25..0.45).contains(&h.y) && (1.05..1.3).contains(&h.z), "{side:?} hand at {h:?}");
-        assert!((0.08..0.2).contains(&h.x.abs()), "{side:?} hand at {h:?}");
+        assert!((0.08..0.3).contains(&h.x.abs()), "{side:?} hand at {h:?}");
         // The tablet sits between the hands.
         assert!((h.y - TABLET_AT.y).abs() < 0.08 && (h.z - TABLET_AT.z).abs() < 0.08, "{side:?} hand {h:?} vs tablet {TABLET_AT:?}");
     }

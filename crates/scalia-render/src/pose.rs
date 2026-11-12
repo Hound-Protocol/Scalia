@@ -38,7 +38,7 @@ pub enum Pose {
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
-pub const TABLET_AT: Vec3 = Vec3::new(0.0, 0.437, 1.249);
+pub const TABLET_AT: Vec3 = Vec3::new(0.0, 0.375, 1.19);
 /// How far the tablet's face tilts back towards the face (radians from upright).
 pub const TABLET_TILT: f32 = 0.85;
 
@@ -197,7 +197,7 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
         Pose::Tablet => {
             p.shoulder = [0.35, 0.35];
             p.elbow = [1.5, 1.5];
-            p.reach = [0.13, 0.13];
+            p.reach = [-0.07, -0.07];
             p.head = -0.45;
             p.sling = 1.0;
         }

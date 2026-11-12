@@ -155,7 +155,7 @@ fn pose_params(pose: u32, phase: f32) -> PP {
   } else if (pose == 10u) {
     p.sh = vec2f(0.35);
     p.el = vec2f(1.5);
-    p.reach = vec2f(0.13);
+    p.reach = vec2f(-0.07);
     p.head = -0.45;
     p.sling = 1.0;
   } else if (pose == 9u) {

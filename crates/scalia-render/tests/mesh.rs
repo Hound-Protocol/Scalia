@@ -108,7 +108,8 @@ fn the_tablet_sits_between_the_hands_facing_the_holder() {
     let pp = params(Pose::Tablet, 0.0);
     for side in [Side::Left, Side::Right] {
         let h = hand(&pp, side);
-        assert!((h.x.abs() - hi.x).abs() < 0.06, "{side:?} hand {h:?} on the edge {}", hi.x);
+        // Holding it by the sides: the hand just outside the edge.
+        assert!((0.0..0.08).contains(&(h.x.abs() - hi.x)), "{side:?} hand {h:?} at the edge {}", hi.x);
     }
     // Tilted back: its far edge higher than its near edge.
     assert!(hi.z - lo.z > 0.1 && hi.y - lo.y > 0.1);

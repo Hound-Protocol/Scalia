@@ -12,8 +12,11 @@ from PIL import Image
 W, H = 1920, 1080
 HFOV = np.radians(100.0)
 EYE = np.array([0.0, 0.16, 1.57])
-TABLET_AT = np.array([0.0, 0.437, 1.249])
+TABLET_AT = np.array([0.0, 0.375, 1.19])
 TILT = 0.85
+# The ultrawide tablet image (scripts/widen.py): width and margin in pixels, the display's span across it.
+IMG_W_PX, IMG_MARGIN_PX = 2658, 32
+SCREEN_X = (0.08542, 0.91687)  # (no longer used for a front layer; kept for reference)
 # Palette (gpu.rs PALETTE), with the commander's recolouring (viewer.rs commander_figure) and his red armband.
 PAL = [[0.10, 0.12, 0.15], [0.42, 0.46, 0.52], [0.55, 0.58, 0.60], [0.30, 0.33, 0.38], [0.72, 0.58, 0.20],
        [0.80, 0.35, 0.15], [0.25, 0.50, 0.70], [0.30, 0.62, 0.40], [0.90, 0.88, 0.80], [0.60, 0.20, 0.20],
@@ -94,17 +97,16 @@ def main():
         rgb[y0:y1 + 1, x0:x1 + 1][win] = col
         alpha[y0:y1 + 1, x0:x1 + 1][win] = 1.0
     front = alpha * (depth < z_plane - 0.004)
-    # Tablet image extent (glb_render_front: the model fills 96% of the width, 2% margins all round).
+    # Tablet image extent: the model plus a margin of IMG_MARGIN_PX pixels all round (glb_render_front, widen).
     pd = np.frombuffer(open(pda, 'rb').read(), np.float32).reshape(-1, 4)[:, :3].astype(float)
     lo, hi = pd.min(0), pd.max(0)
     width = hi[0] - lo[0]
-    mx = width / 0.96 * 0.02
+    mx = width * IMG_MARGIN_PX / (IMG_W_PX - 2 * IMG_MARGIN_PX)
     corners = [(lo[0] - mx, hi[1] + mx), (hi[0] + mx, hi[1] + mx), (hi[0] + mx, lo[1] - mx), (lo[0] - mx, lo[1] - mx)]
     pts = np.array([project(TABLET_AT + R * a + U * b, cam) for a, b in corners])
     bx0, by0, bx1, by1 = pts[:, 0].min(), pts[:, 1].min(), pts[:, 0].max(), pts[:, 1].max()
-    # Fingers may lie over the frame, never over the display (glb_render_front measured it: 14.19-86.19% across,
-    # 11.94-87.71% down the tablet image).
-    sx0, sx1 = bx0 + 0.1419 * (bx1 - bx0), bx0 + 0.8619 * (bx1 - bx0)
+    # Fingers may lie over the frame, never over the display.
+    sx0, sx1 = bx0 + SCREEN_X[0] * (bx1 - bx0), bx0 + SCREEN_X[1] * (bx1 - bx0)
     sy0, sy1 = by0 + 0.1194 * (by1 - by0), by0 + 0.8771 * (by1 - by0)
     on_screen = (gx >= sx0) & (gx <= sx1) & (gy >= sy0) & (gy <= sy1)
     front = front * ~on_screen

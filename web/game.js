@@ -171,6 +171,8 @@ try {
   // the roster lists the units, the comms hub is a placeholder for talking to other commanders.
   let tabletUp = false, page = 'home';
   const tablet = $('tablet');
+  const PAGE_NAME = { home: 'HOME', map: 'MAP', roster: 'ROSTER', comms: 'COMMS HUB' };
+  const pdaStatus = () => { $('pdaStatus').innerHTML = `${PAGE_NAME[page] || ''} · ORDERS <b>${manner === 1 ? 'AGGRESSIVE' : 'CALM'}</b>`; };
   const setPage = (p) => {
     page = p;
     for (const b of tablet.querySelectorAll('[data-page]')) b.classList.toggle('on', b.dataset.page === p);
@@ -181,6 +183,7 @@ try {
     $('roster').hidden = p !== 'roster';
     $('comms').hidden = p !== 'comms';
     if (p === 'roster') drawRoster();
+    try { pdaStatus(); } catch (_) { /* before the manner exists */ }
   };
   // Tab: the commander raises the tablet. The camera rises above him, holds, then dives onto his hands (the
   // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
@@ -414,7 +417,7 @@ try {
   for (const b of tablet.querySelectorAll('[data-page]')) b.addEventListener('click', () => setPage(b.dataset.page));
   $('tabletClose').addEventListener('click', () => setTablet(false));
   let manner = 0;
-  const setManner = (m) => { manner = m; v.set_manner(m); $('mCalm').classList.toggle('on', m === 0); $('mAggr').classList.toggle('on', m === 1); };
+  const setManner = (m) => { manner = m; pdaStatus(); v.set_manner(m); $('mCalm').classList.toggle('on', m === 0); $('mAggr').classList.toggle('on', m === 1); };
   $('mCalm').addEventListener('click', () => setManner(0));
   $('mAggr').addEventListener('click', () => setManner(1));
   // Pages keep up with the units while open: redrawn only when something changed, and never while a picker is open
