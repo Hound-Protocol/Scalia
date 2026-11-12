@@ -16,8 +16,8 @@ fn vnoise(p: vec2f) -> f32 {
 @group(0) @binding(1) var sm: texture_depth_2d;
 @group(0) @binding(2) var smp: sampler_comparison;
 struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32 };
-@vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) ia: vec4f, @location(3) ib: vec4f) -> VO {
-  let w = animate(p, c, ia, ib, u.time.x);
+@vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) ia: vec4f, @location(3) ib: vec4f, @location(4) ic: vec4f) -> VO {
+  let w = animate(p, c, ia, ib, ic, u.time.x);
   var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
   o.ci = palette_index(c, ia);
   return o;

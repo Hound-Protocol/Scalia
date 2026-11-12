@@ -1,6 +1,7 @@
 struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f };
 
-// Instances: a = (x, y, z, palette for the body), b = (heading, phase offset, steps per second, pose id).
+// Instances: a = (x, y, z, palette for the body), b = (heading, phase offset, steps per second, pose id),
+// c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
 struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, rifle: f32, prone: f32, drop: f32 };
@@ -47,12 +48,23 @@ fn pose_params(pose: u32, phase: f32) -> PP {
   } else if (pose == 6u) {
     p.sh = vec2f(1.3, 1.45);
   }
+  p.drop = ground_drop(p.hip, p.knee);
+  return p;
+}
+
+fn ground_drop(hip: vec2f, knee: vec2f) -> f32 {
   var low = 1e9;
   for (var i = 0; i < 2; i++) {
-    low = min(low, leg(vec3f(0.0, -0.10, 0.0), p.hip[i], p.knee[i]).z);
-    low = min(low, leg(vec3f(0.0, 0.14, 0.0), p.hip[i], p.knee[i]).z);
+    low = min(low, leg(vec3f(0.0, -0.10, 0.0), hip[i], knee[i]).z);
+    low = min(low, leg(vec3f(0.0, 0.14, 0.0), hip[i], knee[i]).z);
   }
-  p.drop = -low;
+  return -low;
+}
+
+fn blend(a: PP, b: PP, w: f32) -> PP {
+  var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
+             mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0);
+  p.drop = select(select(ground_drop(p.hip, p.knee), b.drop, w >= 1.0), a.drop, w <= 0.0);
   return p;
 }
 
@@ -72,14 +84,14 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
     q = rot(q, 0.0, 0.88, -p.lean);
   }
   q.z = q.z + p.drop;
-  if (p.prone > 0.5) {
-    q = rot(q, 0.0, 0.0, -1.5707963);
-    q.z = q.z + 0.15;
+  if (p.prone > 0.0) {
+    q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
+    q.z = q.z + 0.15 * p.prone + 0.12 * sin(3.1415927 * p.prone);
   }
   return q;
 }
 
-fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, time: f32) -> vec3f {
+fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32) -> vec3f {
   var q = v;
   let part = select(u32(floor(c / 16.0)), 8u, c < 0.0);
   if (part == 5u) {
@@ -88,7 +100,10 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, time: f32) -> vec3f {
     q = q + vec3f(0.09, 0.04, 0.0) * gust * q.z * 2.5;
   } else if (part != 0u) {
     let phase = select(0.0, fract(time * b.z + b.y), b.z > 0.0);
-    q = pose_vertex(v, part, pose_params(u32(b.w), phase));
+    let w = clamp((time - d.y) / 0.35, 0.0, 1.0);
+    var pp = pose_params(u32(b.w), phase);
+    if (w < 1.0) { pp = blend(pose_params(u32(d.x), phase), pp, w); }
+    q = pose_vertex(v, part, pp);
   }
   let ch = cos(b.x);
   let sh = sin(b.x);

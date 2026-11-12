@@ -12,8 +12,9 @@ use crate::shaders::{BLIT_WGSL, SCENE_WGSL, SHADOW_WGSL};
 use crate::sky::Sky;
 
 pub const SHADOW_SIZE: u32 = 2048;
-/// Bytes per instance: (x, y, z, body palette) and (heading, phase offset, steps per second, 0).
-pub const INSTANCE_BYTES: usize = 32;
+/// Bytes per instance: (x, y, z, body palette), (heading, phase offset, steps per second, pose) and
+/// (previous pose, time of the change in seconds, 0, 0).
+pub const INSTANCE_BYTES: usize = 48;
 
 /// Sixteen-colour palette.
 pub const PALETTE: [[f32; 3]; 16] = [
@@ -94,7 +95,7 @@ pub struct Gpu {
 
 fn vertex_layouts() -> [Option<wgpu::VertexBufferLayout<'static>>; 2] {
     const MESH: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32];
-    const INST: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![2 => Float32x4, 3 => Float32x4];
+    const INST: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![2 => Float32x4, 3 => Float32x4, 4 => Float32x4];
     [
         Some(wgpu::VertexBufferLayout { array_stride: 16, step_mode: wgpu::VertexStepMode::Vertex, attributes: &MESH }),
         Some(wgpu::VertexBufferLayout { array_stride: INSTANCE_BYTES as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &INST }),
@@ -152,7 +153,7 @@ impl Gpu {
         });
         let one_instance = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("identity instance"),
-            contents: f32_bytes(&[0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0]),
+            contents: f32_bytes(&[0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {

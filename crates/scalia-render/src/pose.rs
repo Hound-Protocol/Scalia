@@ -49,7 +49,8 @@ pub struct PoseParams {
     pub shoulder: [f32; 2],
     /// Rifle pitch around the grip (positive points the muzzle up).
     pub rifle: f32,
-    pub prone: bool,
+    /// 0 upright, 1 lying flat; fractions only while blending.
+    pub prone: f32,
     /// Vertical shift that keeps the lowest foot point on the ground.
     pub drop: f32,
 }
@@ -96,21 +97,25 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.shoulder = [1.3, 1.45];
         }
         Pose::Prone => {
-            p.prone = true;
+            p.prone = 1.0;
             p.shoulder = [3.05, 3.05];
             p.rifle = std::f32::consts::FRAC_PI_2;
         }
         Pose::StandAim => p.shoulder = [1.3, 1.45],
     }
-    // Lowest heel or toe of either leg goes to the ground.
+    p.drop = ground_drop(p.hip, p.knee);
+    p
+}
+
+/// Vertical shift that puts the lowest heel or toe of either leg on the ground.
+pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
     let mut low = f32::MAX;
     for i in 0..2 {
         for y in [-0.10, 0.14] {
-            low = low.min(leg(Vec3::new(0.0, y, 0.0), p.hip[i], p.knee[i]).z);
+            low = low.min(leg(Vec3::new(0.0, y, 0.0), hip[i], knee[i]).z);
         }
     }
-    p.drop = -low;
-    p
+    -low
 }
 
 /// Moves one vertex of a figure part into the pose (in the figure's frame, before heading and position).
@@ -133,9 +138,31 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         q = rot(q, 0.0, HIP_Z, -p.lean);
     }
     q.z += p.drop;
-    if p.prone {
-        q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2);
-        q.z += PRONE_LIFT;
+    if p.prone > 0.0 {
+        q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2 * p.prone);
+        // Mid-transition the bent knees would dip into the ground: lift a little, most at the halfway point.
+        q.z += PRONE_LIFT * p.prone + 0.12 * (std::f32::consts::PI * p.prone).sin();
     }
     q
 }
+
+/// Linear blend between two poses (`w` 0 gives `a`, 1 gives `b`); the shader blends over `BLEND_S` after a change.
+pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
+    let w = w.clamp(0.0, 1.0);
+    let m = |x: f32, y: f32| x + (y - x) * w;
+    let m2 = |x: [f32; 2], y: [f32; 2]| [m(x[0], y[0]), m(x[1], y[1])];
+    let (hip, knee) = (m2(a.hip, b.hip), m2(a.knee, b.knee));
+    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop(hip, knee) };
+    PoseParams {
+        lean: m(a.lean, b.lean),
+        hip,
+        knee,
+        shoulder: m2(a.shoulder, b.shoulder),
+        rifle: m(a.rifle, b.rifle),
+        prone: m(a.prone, b.prone),
+        drop,
+    }
+}
+
+/// Seconds a pose change takes.
+pub const BLEND_S: f32 = 0.35;

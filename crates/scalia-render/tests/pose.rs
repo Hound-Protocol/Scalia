@@ -78,3 +78,24 @@ fn pose_ids_round_trip() {
     }
     assert_eq!(Pose::from_id(99), Pose::Stand);
 }
+
+#[test]
+fn blending_starts_at_the_old_pose_and_ends_at_the_new() {
+    use scalia_render::pose::blend;
+    let (a, b) = (params(Pose::Stand, 0.0), params(Pose::Prone, 0.0));
+    assert_eq!(blend(&a, &b, 0.0), a);
+    assert_eq!(blend(&a, &b, 1.0), b);
+}
+
+#[test]
+fn going_prone_never_sinks_into_the_ground() {
+    use scalia_render::pose::blend;
+    for (from, to) in [(Pose::Stand, Pose::Prone), (Pose::Crouch, Pose::Prone), (Pose::Prone, Pose::Run), (Pose::Walk, Pose::CoverAim)] {
+        let (a, b) = (params(from, 0.3), params(to, 0.3));
+        for k in 0..=20 {
+            let pp = blend(&a, &b, k as f32 / 20.0);
+            let low = figure().vertices.iter().map(|v| pose_vertex(Vec3::from(v.pos), part_of(v.color), &pp).z).fold(f32::MAX, f32::min);
+            assert!(low > -0.09, "{from:?} -> {to:?} at {k}/20: lowest {low}");
+        }
+    }
+}

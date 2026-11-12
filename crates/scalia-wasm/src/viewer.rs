@@ -100,6 +100,8 @@ pub struct Viewer {
     follow_group: u32,
     /// Idle stance per group (P cycles it for the selected group).
     stance: HashMap<u32, Pose>,
+    /// Per group: (current pose, previous pose, time of the change in seconds) for blending.
+    group_pose: HashMap<u32, (Pose, Pose, f32)>,
     /// Pose held in the soldier preview; None cycles through all of them.
     preview_pose: Option<usize>,
     order_dest: Option<Vec3>,
@@ -151,6 +153,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         selected: Some(0),
         follow_group: 0,
         stance: HashMap::new(),
+        group_pose: HashMap::new(),
         preview_pose: None,
         order_dest: None,
         fps: 0.0,
@@ -207,7 +210,7 @@ fn grass_for(hm: &[f32], cx: i64, cy: i64) -> Vec<f32> {
             let y = cy as f32 * CELLS as f32 + j as f32 + fy;
             let heading = ((h >> 32) & 0xffff) as f32 / 65535.0 * std::f32::consts::TAU;
             let phase = ((h >> 48) & 0xff) as f32 / 255.0;
-            out.extend_from_slice(&[x, y, z0, colour, heading, phase, 0.0, 0.0]);
+            out.extend_from_slice(&[x, y, z0, colour, heading, phase, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]);
         }
     }
     out
@@ -322,6 +325,8 @@ impl Viewer {
         self.ground_cam = None;
         self.selected = Some(0);
         self.follow_group = 0;
+        self.group_pose.clear();
+        self.stance.clear();
         self.order_dest = None;
         format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
     }
@@ -579,7 +584,10 @@ impl Viewer {
                 (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0),
             ];
             let (pose, steps) = SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()];
-            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, 6.0, 0.0, 0.0, steps, pose as u32 as f32]));
+            let ts = ((t / 1000.0) % 86_400.0) as f32;
+            let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
+            let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, 6.0, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), 0.0, 0.0]));
             meshes.push("plinth".into());
             instanced.push(("figure".into(), "figure1".into()));
             let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
@@ -660,7 +668,8 @@ impl Viewer {
         let lead = self.follow_group.min(self.world.groups.len().saturating_sub(1) as u32);
         let c0 = self.group_centre(lead, tick);
         let (cx, cy) = (c0.x as f64, c0.y as f64);
-        let mut inst = Vec::with_capacity(n * 8);
+        let ts = ((t / 1000.0) % 86_400.0) as f32;
+        let mut inst = Vec::with_capacity(n * 12);
         for d in &out {
             let (x, y) = (d.pos.x as f32 / 1000.0, d.pos.y as f32 / 1000.0);
             let z = self.height_at(x, y);
@@ -680,7 +689,13 @@ impl Viewer {
                 (self.stance.get(&d.group.0).copied().unwrap_or(Pose::Stand), 0.0)
             };
             let body = if self.selected == Some(d.group.0) { 14.0 } else if walking { 7.0 } else { 6.0 };
-            inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, pose as u32 as f32]);
+            // Pose changes are tracked per group and ripple through it: each soldier starts up to 0.4 s late.
+            let entry = self.group_pose.entry(d.group.0).or_insert((pose, pose, -1000.0));
+            if entry.0 != pose {
+                *entry = (pose, entry.0, ts);
+            }
+            let (prev, since) = (entry.1, entry.2 + jitter * 0.4);
+            inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, pose as u32 as f32, prev as u32 as f32, since, 0.0, 0.0]);
         }
         self.derived = out;
         self.gpu.upload_instances("soldiers", bytes(&inst));
@@ -698,7 +713,7 @@ impl Viewer {
             let (x, y) = (v.pos.x as f32 / 1000.0, v.pos.y as f32 / 1000.0);
             let z = self.height_at(x, y);
             let heading = (-(v.facing.0 as f32)).atan2(v.facing.1 as f32);
-            let rec = [x, y, z, 0.0, heading, 0.0, 0.0, 0.0];
+            let rec = [x, y, z, 0.0, heading, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0];
             if v.kind == UnitType::Tank { tanks.extend_from_slice(&rec) } else { trucks.extend_from_slice(&rec) }
         }
         self.ship_info(3);
