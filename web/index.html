@@ -104,7 +104,7 @@
   @keyframes upd-sweep { 0%, 55% { left: -60%; } 100% { left: 130%; } }
   /* The commander's tablet: the rugged PDA in his hands. The game's camera dives onto it (see the viewer), then
      this close-up takes over: the device render as the frame, our UI inside its screen, its side buttons live. */
-  #tablet { position: fixed; left: 50%; top: 50%; width: min(80vw, calc(80vh * 2658 / 1139)); aspect-ratio: 2658 / 1139;
+  #tablet { position: fixed; left: 50%; top: 50%; width: min(80vw, calc(84vh * 2164 / 1139)); aspect-ratio: 2164 / 1139;
     z-index: 30; pointer-events: none; opacity: 0; transform: translate(-50%, -46%) scale(0.72) rotateX(28deg);
     transition: opacity 0.3s ease, transform 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
   /* Put away, nothing of it may catch the mouse: it would eat the field's zoom and clicks. */
@@ -113,14 +113,14 @@
   #tablet.up { opacity: 1; transform: translate(-50%, -50%) scale(1) rotateX(0deg); }
   /* What the commander sees around the tablet: his arms and body behind it, his fingers over its frame. Rendered
      from his eyes (scripts/first_person.py), placed so the tablet in that view lands exactly on this box. */
-  #tablet .fp { position: absolute; width: 239.991%; height: 335.194%; left: -69.996%; top: -115.512%; max-width: none;
+  #tablet .fp { position: absolute; width: 238.232%; height: 273.386%; left: -69.116%; top: -84.139%; max-width: none;
     pointer-events: none; user-select: none; }
   #tablet .device { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
     filter: drop-shadow(0 18px 40px rgba(0,0,0,0.65)); }
-  #tablet .display { position: absolute; left: 8.542%; top: 11.94%; width: 83.145%; height: 75.77%; overflow: hidden;
+  #tablet .display { position: absolute; left: 10.492%; top: 11.94%; width: 79.297%; height: 75.77%; overflow: hidden;
     border-radius: 3px; background: #0b0f13; box-shadow: inset 0 0 18px rgba(120, 200, 140, 0.08); opacity: 0; transition: opacity 0.25s ease 0.25s; }
   #tablet.up .display { opacity: 1; pointer-events: auto; }
-  #tablet .hw { z-index: 3; position: absolute; left: 93.138%; width: 3.371%; height: 6.6%; border: 0; border-radius: 22%; background: transparent; cursor: pointer; pointer-events: auto; }
+  #tablet .hw { z-index: 3; position: absolute; left: 91.571%; width: 4.141%; height: 6.6%; border: 0; border-radius: 22%; background: transparent; cursor: pointer; pointer-events: auto; }
   #tablet .hw:hover { box-shadow: 0 0 0 2px rgba(150, 220, 160, 0.55); }
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
   #tablet .menu button { display: none; }

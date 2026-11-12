@@ -15,8 +15,8 @@ EYE = np.array([0.0, 0.16, 1.57])
 TABLET_AT = np.array([0.0, 0.375, 1.19])
 TILT = 0.85
 # The ultrawide tablet image (scripts/widen.py): width and margin in pixels, the display's span across it.
-IMG_W_PX, IMG_MARGIN_PX = 2658, 32
-SCREEN_X = (0.08542, 0.91687)  # (no longer used for a front layer; kept for reference)
+IMG_W_PX, IMG_MARGIN_PX = 2164, 32
+SCREEN_X = (0.10492, 0.89789)  # (reference only)
 # Palette (gpu.rs PALETTE), with the commander's recolouring (viewer.rs commander_figure) and his red armband.
 PAL = [[0.10, 0.12, 0.15], [0.42, 0.46, 0.52], [0.55, 0.58, 0.60], [0.30, 0.33, 0.38], [0.72, 0.58, 0.20],
        [0.80, 0.35, 0.15], [0.25, 0.50, 0.70], [0.30, 0.62, 0.40], [0.90, 0.88, 0.80], [0.60, 0.20, 0.20],
