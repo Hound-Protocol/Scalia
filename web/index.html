@@ -71,6 +71,8 @@
   #radio { position: fixed; right: 2.5vw; bottom: -60vh; z-index: 45; height: 54vh; aspect-ratio: 760 / 1572;
     transition: bottom .4s cubic-bezier(.2,.8,.2,1); pointer-events: none; filter: drop-shadow(0 14px 30px rgba(0,0,0,.6)); }
   #radio.up { bottom: 2vh; }
+  /* With the tablet up, the handset moves to the left side, clear of the tablet's buttons on the right. */
+  body.pda #radio { right: auto; left: 1.5vw; height: 46vh; }
   #radio .body { position: absolute; inset: 0; width: 100%; height: 100%; }
   #radio .scr { position: absolute; left: 12.63%; top: 24.43%; width: 75%; height: 53.5%; overflow: hidden; border-radius: 4px;
     display: flex; flex-direction: column; gap: 0.6vh; padding: 1.1vh 1vh; box-sizing: border-box;
