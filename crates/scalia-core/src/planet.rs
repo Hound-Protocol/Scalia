@@ -40,36 +40,51 @@ fn lerp(a: Fix, b: Fix, t: Fix) -> Fix {
     Fix(a.0 + Fix(b.0 - a.0).mul(t).0)
 }
 
-/// Noise in [0, 1) at (x, y) for one octave, using floor division so negative
-/// coordinates continue smoothly through zero.
-fn octave_noise(seed: u64, face: u8, octave: u64, x: i64, y: i64) -> Fix {
-    noise_at(seed, face, octave, BASE_LATTICE_MM >> octave, x, y)
-}
+/// The four lattice values around one cell, remembered so neighbouring samples skip the hashing.
+type Corners = Option<((i64, i64), [Fix; 4])>;
 
-fn noise_at(seed: u64, face: u8, octave: u64, l: i64, x: i64, y: i64) -> Fix {
+/// Noise in [0, 1) at (x, y) on a lattice of spacing `l`, using floor division so negative
+/// coordinates continue smoothly through zero.
+fn noise_cached(seed: u64, face: u8, octave: u64, l: i64, x: i64, y: i64, cache: &mut Corners) -> Fix {
     let (ix, iy) = (x.div_euclid(l), y.div_euclid(l));
-    let tx = smooth(Fix::from_ratio(x.rem_euclid(l), l).unwrap());
-    let ty = smooth(Fix::from_ratio(y.rem_euclid(l), l).unwrap());
-    let v = |dx: i64, dy: i64| lattice_value(seed, face, octave, ix.wrapping_add(dx), iy.wrapping_add(dy));
-    let top = lerp(v(0, 0), v(1, 0), tx);
-    let bottom = lerp(v(0, 1), v(1, 1), tx);
+    // 0 <= rem < l < 2^31, so rem << 32 fits in u64: same value as Fix::from_ratio, without i128 division.
+    let frac = |r: i64| Fix((((r as u64) << 32) / l as u64) as i64);
+    let tx = smooth(frac(x.rem_euclid(l)));
+    let ty = smooth(frac(y.rem_euclid(l)));
+    let c = match cache {
+        Some((key, c)) if *key == (ix, iy) => *c,
+        _ => {
+            let v = |dx: i64, dy: i64| lattice_value(seed, face, octave, ix.wrapping_add(dx), iy.wrapping_add(dy));
+            let c = [v(0, 0), v(1, 0), v(0, 1), v(1, 1)];
+            *cache = Some(((ix, iy), c));
+            c
+        }
+    };
+    let top = lerp(c[0], c[1], tx);
+    let bottom = lerp(c[2], c[3], tx);
     lerp(top, bottom, ty)
 }
 
 /// Terrain height in millimetres at (x_mm, y_mm) on a face. `face` above 5 counts as 5.
 pub fn height_mm(seed: u64, face: u8, x_mm: i64, y_mm: i64) -> i32 {
+    height_cached(seed, face, x_mm, y_mm, &mut [None; 8])
+}
+
+/// `height_mm` with one corner cache per noise layer (4 coarse octaves, then the detail layers).
+fn height_cached(seed: u64, face: u8, x_mm: i64, y_mm: i64, cache: &mut [Corners; 8]) -> i32 {
     let face = face.min(5);
     let mut sum: i128 = 0;
     for o in 0..OCTAVES {
         let weight = 8i128 >> o;
-        sum += weight * octave_noise(seed, face, o, x_mm, y_mm).0 as i128;
+        let v = noise_cached(seed, face, o, BASE_LATTICE_MM >> o, x_mm, y_mm, &mut cache[o as usize]);
+        sum += weight * v.0 as i128;
     }
     let n = Fix((sum / WEIGHT_TOTAL as i128) as i64); // in [0, 1)
     let span = Fix::from_int(TERRAIN_MAX_MM - TERRAIN_MIN_MM);
     let mut h = TERRAIN_MIN_MM as i64 + n.mul(span).floor_to_i64();
     for (k, &(l, amp)) in DETAIL.iter().enumerate() {
         // Centred noise in [-amp, amp).
-        let v = noise_at(seed, face, DETAIL_TAG_BASE + k as u64, l, x_mm, y_mm);
+        let v = noise_cached(seed, face, DETAIL_TAG_BASE + k as u64, l, x_mm, y_mm, &mut cache[OCTAVES as usize + k]);
         h += ((v.0 as i128 * 2 * amp as i128) >> 32) as i64 - amp;
     }
     h.clamp(TERRAIN_MIN_MM as i64, TERRAIN_MAX_MM as i64) as i32
@@ -91,10 +106,11 @@ pub fn chunk(seed: u64, face: u8, cx: i64, cy: i64, cells: u32) -> Chunk {
     let (x0, y0) = (cx.wrapping_mul(side), cy.wrapping_mul(side));
     let n = cells as usize + 1;
     let mut heights = Vec::with_capacity(n * n);
+    let mut cache = [None; 8];
     for j in 0..n as i64 {
         let y = y0.wrapping_add(j * CELL_MM);
         for i in 0..n as i64 {
-            heights.push(height_mm(seed, face, x0.wrapping_add(i * CELL_MM), y));
+            heights.push(height_cached(seed, face.min(5), x0.wrapping_add(i * CELL_MM), y, &mut cache));
         }
     }
     Chunk { cells, heights }

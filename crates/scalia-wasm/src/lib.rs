@@ -10,6 +10,9 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+pub mod viewer;
+
 fn json_str(s: &str) -> String {
     let mut o = String::from("\"");
     for c in s.chars() {
