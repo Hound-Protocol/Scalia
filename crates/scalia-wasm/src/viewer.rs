@@ -1959,8 +1959,12 @@ impl Viewer {
     /// them to cover the screen (or the whole planet once it is a globe). A level is drawn only when all its
     /// tiles are ready; until then the previous level stays, so zooming never shows holes.
     fn far_terrain(&mut self, tg: Vec3, now: f64, _meshes: &mut Vec<String>, instanced: &mut Vec<(String, String)>) {
-        // Cells about five screen pixels wide: any finer and the globe shimmers as the camera moves.
-        let want = ((self.ground_view / 64.0).log2().ceil() as i32).clamp(1, 20) as u32;
+        // Cells about five screen pixels wide: any finer and the globe shimmers as the camera moves. And at least
+        // six internal pixels (the small tablet map draws at few of them): smaller facets get speckled normals.
+        let pix = self.ground_view / self.size.1.max(1) as f32 * self.pixel_scale as f32;
+        let by_view = (self.ground_view / 64.0).log2().ceil() as i32;
+        let by_pixels = (pix * 6.0).log2().ceil() as i32;
+        let want = by_view.max(by_pixels).clamp(1, 20) as u32;
         let view = self.ground_view;
         let needed = |level: u32| -> Vec<(u32, i64, i64)> {
             let ts = 64.0 * (1u64 << level) as f32;
