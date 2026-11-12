@@ -191,6 +191,7 @@ try {
     $('fieldHint').hidden = up;
     if (up) { v.set_tablet(true); return; }
     tabletShown = false;
+    document.body.classList.remove('pda');
     tablet.classList.remove('up');
     closeActions();
     setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 220);
@@ -210,6 +211,7 @@ try {
   const syncTablet = () => {
     if (tabletUp && !tabletShown && v.tablet_view() === 2) {
       tabletShown = true;
+      document.body.classList.add('pda');
       tablet.classList.add('up');
       setPage(page);
       setTimeout(() => { if (tabletShown && page === 'map') sizeMap(); }, 450);
@@ -543,11 +545,17 @@ try {
   if (!mine) return; // local build
   const bar = document.getElementById('update');
   document.getElementById('update-reload').addEventListener('click', () => location.reload());
+  let dismissed = null;
+  document.getElementById('update-close').addEventListener('click', () => { bar.hidden = true; dismissed = bar.dataset.v; });
   const check = async () => {
     try {
       const r = await fetch('version.json', { cache: 'no-store' });
       const live = (await r.json()).v;
-      if (live && live !== mine) bar.hidden = false;
+      if (live && live !== mine && live !== dismissed) {
+        bar.dataset.v = live;
+        document.getElementById('update-sub').textContent = `Build ${String(live).slice(0, 7)} is ready · you run ${mine.slice(0, 7)}`;
+        if (bar.hidden) { bar.hidden = false; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
+      }
     } catch (_) { /* offline: try again later */ }
   };
   setInterval(check, 60_000);

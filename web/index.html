@@ -10,6 +10,7 @@
   #view { position: fixed; inset: 0; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: grab; touch-action: none; }
   #view.dragging { cursor: grabbing; }
   .panel { position: fixed; background: rgba(10, 12, 16, 0.78); border: 1px solid #2a313c; padding: 6px 8px; }
+  body.pda .panel { visibility: hidden; }
   #bar { top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   #bar button, #bar select { background: #161b22; color: inherit; border: 1px solid #2f3845; padding: 4px 10px; font: inherit; cursor: pointer; }
   #bar button.on { background: #2b3a4f; border-color: #5d7fa6; }
@@ -37,15 +38,37 @@
   #perf .warn { color: #ff8a65; margin-top: 4px; }
   #error { inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; }
   a { color: #9cc4ff; }
-  #update { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 20;
-    background: #1d2b3a; color: #e8eef5; border: 1px solid #4b7bb0; border-radius: 6px; padding: 7px 10px 7px 14px;
-    font: 13px system-ui, sans-serif; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+  /* New version: an incoming-transmission card that drops in from the top. */
+  #update { position: fixed; top: 14px; left: 50%; z-index: 90; display: flex; align-items: center; gap: 14px;
+    transform: translate(-50%, 0); padding: 12px 12px 12px 18px; min-width: 380px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(28, 32, 24, 0.97), rgba(14, 16, 12, 0.97)); color: #e4e8dc;
+    border: 1px solid #4d5a37; border-radius: 6px; font: 12px ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    letter-spacing: 0.06em; box-shadow: 0 10px 34px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
+    animation: upd-drop 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
+  #update::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 6px;
+    background: repeating-linear-gradient(-45deg, #e0a526 0 6px, #16180f 6px 12px); }
+  #update::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 3px); }
   #update[hidden] { display: none; }
-  #selbox { position: fixed; border: 1px solid #f2d36b; background: rgba(242, 211, 107, 0.12); pointer-events: none; z-index: 5; }
-  #selbox[hidden] { display: none; }
-  #update button { margin-left: 10px; background: #4b7bb0; color: #fff; border: 0; border-radius: 4px;
-    padding: 4px 10px; font: inherit; cursor: pointer; }
-  #update button:hover { background: #5e91c9; }
+  #update .sig { width: 10px; height: 10px; border-radius: 50%; background: #e0a526; flex: none;
+    box-shadow: 0 0 0 0 rgba(224, 165, 38, 0.7); animation: upd-ping 1.6s ease-out infinite; }
+  #update .txt { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  #update .ttl { color: #f0c55a; font-weight: bold; letter-spacing: 0.18em; }
+  #update .sub { color: #9aa58a; }
+  #update button { font: inherit; letter-spacing: 0.16em; cursor: pointer; }
+  #update-reload { position: relative; overflow: hidden; padding: 9px 16px; color: #16180f; font-weight: bold;
+    background: linear-gradient(180deg, #f2c14e, #d39a1f); border: 1px solid #8a6514; border-radius: 4px;
+    box-shadow: 0 2px 0 #6b4f10, inset 0 1px 0 rgba(255,255,255,.45); transition: transform .08s, filter .15s; }
+  #update-reload::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; left: -60%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent); transform: skewX(-20deg);
+    animation: upd-sweep 2.4s ease-in-out infinite; }
+  #update-reload:hover { filter: brightness(1.1); }
+  #update-reload:active { transform: translateY(2px); box-shadow: 0 0 0 #6b4f10, inset 0 1px 0 rgba(255,255,255,.45); }
+  #update-close { background: none; border: 0; color: #7c8670; font-size: 16px; padding: 4px 6px; }
+  #update-close:hover { color: #e4e8dc; }
+  @keyframes upd-drop { from { transform: translate(-50%, -140%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+  @keyframes upd-ping { 0% { box-shadow: 0 0 0 0 rgba(224,165,38,.7); } 70% { box-shadow: 0 0 0 10px rgba(224,165,38,0); } 100% { box-shadow: 0 0 0 0 rgba(224,165,38,0); } }
+  @keyframes upd-sweep { 0%, 55% { left: -60%; } 100% { left: 130%; } }
   /* The commander's tablet: the rugged PDA in his hands. The game's camera dives onto it (see the viewer), then
      this close-up takes over: the device render as the frame, our UI inside its screen, its side buttons live. */
   #tablet { position: fixed; left: 50%; top: 50%; width: min(94vw, calc(92vh * 1600 / 1139)); aspect-ratio: 1600 / 1139;
@@ -203,7 +226,7 @@
   </div>
 </div>
 </div>
-<div id="update" hidden>A new version is out. <button id="update-reload">Refresh to apply</button></div>
+<div id="update" hidden><span class="sig"></span><span class="txt"><span class="ttl">UPDATE RECEIVED</span><span class="sub" id="update-sub">A new build is ready for deployment.</span></span><button id="update-reload">REDEPLOY</button><button id="update-close" title="Later">✕</button></div>
 <script type="module" src="./game.js"></script>
 </body>
 </html>

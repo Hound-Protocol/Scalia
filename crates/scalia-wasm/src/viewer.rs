@@ -1669,7 +1669,7 @@ impl Viewer {
                 self.world.groups.set_pos(GroupId(g), Pos { region: RegionId(1), x: cx, y: cy, z: 0 });
             }
         }
-        self.run_captains(t);
+        self.run_captains(self.frame_ms);
     }
 
     /// Instances for every agent soldier, posed like the derived ones.
@@ -1787,7 +1787,10 @@ impl Viewer {
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
         let rec = [rx, ry, z, 9.0, self.cmd_heading, 0.37, steps, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
-        self.gpu.upload_instances("commander_at", bytes(&rec));
+        // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
+        let mut me = rec;
+        me[11] = self.cine_fade(self.frame_ms);
+        self.gpu.upload_instances("commander_at", bytes(&me));
         instanced.push(("commander".into(), "commander_at".into()));
         // The tablet appears in his hands once they have come up to hold it.
         if pose == Pose::Tablet && ts - self.cmd_pose.2 >= scalia_render::pose::BLEND_S {
@@ -1796,6 +1799,16 @@ impl Viewer {
             }
             self.gpu.upload_instances("pda_at", bytes(&rec));
             instanced.push(("pda".into(), "pda_at".into()));
+        }
+    }
+
+    /// How far the commander has dissolved for the tablet close-up (0 solid, 1 gone).
+    fn cine_fade(&self, now_ms: f64) -> f32 {
+        let s = |a: f64, b: f64, x: f64| { let k = ((x - a) / (b - a)).clamp(0.0, 1.0) as f32; k * k * (3.0 - 2.0 * k) };
+        match self.cine {
+            Some((true, start, _)) => s(CINE_OPEN_MS - 450.0, CINE_OPEN_MS - 120.0, now_ms - start),
+            Some((false, start, _)) => 1.0 - s(0.0, CINE_CLOSE_MS * 0.45, now_ms - start),
+            None => 0.0,
         }
     }
 
