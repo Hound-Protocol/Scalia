@@ -129,9 +129,12 @@ export class Mesh {
 
 export async function createRenderer(canvas) {
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
-  const adapter = await navigator.gpu.requestAdapter();
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('No WebGPU adapter found');
   const device = await adapter.requestDevice();
+  const info = adapter.info || {};
+  const software = !!info.isFallbackAdapter || /swiftshader|llvmpipe/i.test(`${info.architecture} ${info.description}`);
+  const adapterName = info.description || [info.vendor, info.architecture].filter(Boolean).join(' ') || 'unknown GPU';
   const ctx = canvas.getContext('webgpu');
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: 'opaque' });
@@ -216,5 +219,5 @@ export async function createRenderer(canvas) {
     p2.setPipeline(blitPipe); p2.setBindGroup(0, blitBind); p2.draw(3); p2.end();
     device.queue.submit([enc.finish()]);
   }
-  return { upload, drop, frame, device };
+  return { upload, drop, frame, device, software, adapterName };
 }

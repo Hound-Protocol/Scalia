@@ -89,7 +89,16 @@ export async function startViewer(wasm, ui) {
     if (now - state.last > 500) { state.fps = (state.frames * 1000) / (now - state.last); state.frames = 0; state.last = now; }
   }
 
+  // Software WebGPU runs on the CPU: cap it at 20 fps. Draw nothing while the tab or the viewer is hidden.
+  const minFrameMs = r.software ? 50 : 0;
+  let lastDraw = 0, visible = true;
+  new IntersectionObserver((e) => { visible = e[0].isIntersecting; }).observe(ui.canvas);
+  const gpuNote = r.software
+    ? `SOFTWARE RENDERING (${r.adapterName}): the CPU is drawing, enable hardware WebGPU in Chrome`
+    : r.adapterName;
   function render(now) {
+    if (document.hidden || !visible || now - lastDraw < minFrameMs) { requestAnimationFrame(render); return; }
+    lastDraw = now;
     try { draw(now); } catch (e) { ui.hud.textContent = `Render error: ${e.message}`; console.error(e); return; }
     requestAnimationFrame(render);
   }
@@ -148,7 +157,7 @@ export async function startViewer(wasm, ui) {
     ui.shipSel.hidden = state.scene !== 'ships';
     r.frame({ ...cam, internal, outline: state.outline });
     tickFps(now);
-    ui.hud.textContent = `${text} | ${internal[0]}x${internal[1]} | ${state.fps.toFixed(0)} fps`;
+    ui.hud.textContent = `${text} | ${internal[0]}x${internal[1]} | ${state.fps.toFixed(0)} fps | ${gpuNote}`;
   }
   requestAnimationFrame(render);
   window.scaliaViewer = { state, simMs, get flight() { return flight; } };
