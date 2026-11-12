@@ -416,7 +416,11 @@ impl Viewer {
         }
         let gpu = if self.gpu.software { " | SOFTWARE RENDERING: the CPU is drawing" } else { "" };
         let time = if matches!(self.scene, Scene::System | Scene::Planet) { String::new() } else { format!(" | {}", clock(tod)) };
-        format!("{text}{time} | {}x{} | {:.0} fps{gpu}", internal.0, internal.1, self.fps)
+        let gpu_ms = match self.gpu.gpu_ms() {
+            Some([sh, sc, up]) => format!(" | gpu {:.1} ms (shadow {sh:.1}, scene {sc:.1}, upscale {up:.1})", sh + sc + up),
+            None => String::new(),
+        };
+        format!("{text}{time} | {}x{} | {:.0} fps{gpu_ms}{gpu}", internal.0, internal.1, self.fps)
     }
 }
 

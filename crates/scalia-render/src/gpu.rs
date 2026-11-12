@@ -2,6 +2,7 @@
 //! then an upscale pass that adds outlines and undoes the camera snap.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -48,6 +49,19 @@ struct Targets {
     blit_bind: wgpu::BindGroup,
 }
 
+/// GPU timestamps around the three passes, read back without stalling: a new measurement starts only
+/// after the previous one has been mapped and read.
+struct Timing {
+    set: wgpu::QuerySet,
+    resolve: wgpu::Buffer,
+    readback: wgpu::Buffer,
+    period_ns: f32,
+    /// 0 idle, 1 waiting for the map, 2 mapped and ready to read.
+    state: Arc<Mutex<u8>>,
+    /// Milliseconds for the shadow, scene and upscale passes.
+    last: Option<[f32; 3]>,
+}
+
 struct Gpubuf {
     buf: wgpu::Buffer,
     count: u32,
@@ -73,6 +87,7 @@ pub struct Gpu {
     pub adapter_name: String,
     /// True when the adapter is a CPU (software) renderer.
     pub software: bool,
+    timing: Option<Timing>,
 }
 
 fn vertex_layouts() -> [Option<wgpu::VertexBufferLayout<'static>>; 2] {
@@ -107,7 +122,11 @@ impl Gpu {
             || info.driver.to_lowercase().contains("swiftshader");
         let adapter_name = if info.name.is_empty() { format!("{:?}", info.backend) } else { info.name.clone() };
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor { required_limits: adapter.limits(), ..Default::default() })
+            .request_device(&wgpu::DeviceDescriptor {
+                required_limits: adapter.limits(),
+                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+                ..Default::default()
+            })
             .await
             .map_err(|e| format!("device: {e}"))?;
         let mut config = surface
@@ -230,7 +249,27 @@ impl Gpu {
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: uni.as_entire_binding() }],
         });
 
+        let timing = device.features().contains(wgpu::Features::TIMESTAMP_QUERY).then(|| Timing {
+            set: device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("pass times"), ty: wgpu::QueryType::Timestamp, count: 6 }),
+            resolve: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("timestamps"),
+                size: 48,
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            readback: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("timestamps readback"),
+                size: 48,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            period_ns: queue.get_timestamp_period(),
+            state: Arc::new(Mutex::new(0)),
+            last: None,
+        });
+
         Ok(Gpu {
+            timing,
             device, queue, surface, config, scene_pipe, shadow_pipe, blit_pipe, uni, b_uni, scene_bind, shadow_bind,
             shadow_view, one_instance, targets: None, buffers: HashMap::new(), adapter_name, software,
         })
@@ -275,6 +314,29 @@ impl Gpu {
             self.queue.write_buffer(&b.buf, 0, bytes);
         }
         b.count = (bytes.len() / record) as u32;
+    }
+
+    /// Last measured GPU milliseconds for the shadow, scene and upscale passes, when the browser allows timestamps.
+    pub fn gpu_ms(&self) -> Option<[f32; 3]> {
+        self.timing.as_ref().and_then(|t| t.last)
+    }
+
+    /// Reads a finished measurement, if any; returns whether a new one may be recorded this frame.
+    fn poll_timing(&mut self) -> bool {
+        let Some(t) = self.timing.as_mut() else { return false };
+        let state = *t.state.lock().expect("timing lock");
+        if state == 2 {
+            {
+                let view = t.readback.slice(..).get_mapped_range().expect("mapped");
+                let v: Vec<u64> = view.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes"))).collect();
+                let ms = |a: u64, b: u64| b.saturating_sub(a) as f32 * t.period_ns / 1e6;
+                t.last = Some([ms(v[0], v[1]), ms(v[2], v[3]), ms(v[4], v[5])]);
+            }
+            t.readback.unmap();
+            *t.state.lock().expect("timing lock") = 0;
+            return true;
+        }
+        state == 0
     }
 
     pub fn has(&self, key: &str) -> bool {
@@ -356,11 +418,19 @@ impl Gpu {
             }
         };
         let screen = frame.texture.create_view(&Default::default());
-        let t = self.targets.as_ref().expect("ensured");
+        let measure = self.poll_timing();
         let bg = if f.atmosphere {
             wgpu::Color { r: fog[0] as f64, g: fog[1] as f64, b: fog[2] as f64, a: 1.0 }
         } else {
             wgpu::Color { r: 0.02, g: 0.025, b: 0.04, a: 1.0 }
+        };
+        let t = self.targets.as_ref().expect("ensured");
+        let tw = |i: u32| {
+            self.timing.as_ref().filter(|_| measure).map(|tm| wgpu::RenderPassTimestampWrites {
+                query_set: &tm.set,
+                beginning_of_pass_write_index: Some(2 * i),
+                end_of_pass_write_index: Some(2 * i + 1),
+            })
         };
         let mut enc = self.device.create_command_encoder(&Default::default());
 
@@ -385,6 +455,7 @@ impl Gpu {
         {
             let mut p = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow"),
+                timestamp_writes: tw(0),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.shadow_view,
@@ -408,6 +479,7 @@ impl Gpu {
             };
             let mut p = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
+                timestamp_writes: tw(1),
                 color_attachments: &[
                     clear(bg, &t.color),
                     clear(wgpu::Color { r: 0.5, g: 0.5, b: 1.0, a: 1.0 }, &t.normal),
@@ -426,6 +498,7 @@ impl Gpu {
         {
             let mut p = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("upscale"),
+                timestamp_writes: tw(2),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &screen,
                     depth_slice: None,
@@ -438,8 +511,19 @@ impl Gpu {
             p.set_bind_group(0, &t.blit_bind, &[]);
             p.draw(0..3, 0..1);
         }
+        if let Some(tm) = self.timing.as_ref().filter(|_| measure) {
+            enc.resolve_query_set(&tm.set, 0..6, &tm.resolve, 0);
+            enc.copy_buffer_to_buffer(&tm.resolve, 0, &tm.readback, 0, 48);
+        }
         self.queue.submit([enc.finish()]);
         self.queue.present(frame);
+        if let Some(tm) = self.timing.as_ref().filter(|_| measure) {
+            *tm.state.lock().expect("timing lock") = 1;
+            let state = tm.state.clone();
+            tm.readback.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                *state.lock().expect("timing lock") = if r.is_ok() { 2 } else { 0 };
+            });
+        }
         Ok(())
     }
 }
