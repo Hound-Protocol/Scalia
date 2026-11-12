@@ -18,7 +18,8 @@ use scalia_core::system::{BodyId, System, PARK_OFFSET};
 use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use scalia_render::gpu::{FrameDesc, Gpu};
-use scalia_render::mesh::{figure, grass_tuft, MeshBuilder};
+use scalia_render::mesh::{figure, figure_lo, grass_tuft, MeshBuilder};
+use scalia_render::pose::Pose;
 use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
 
@@ -29,6 +30,8 @@ const MAX_DRAWN: usize = 60_000;
 const CELLS: u32 = 64;
 const KM: f64 = 1e6;
 const GROUND_MAX: f32 = 160.0;
+/// Orders at or above this speed run (Shift + right click).
+const RUN_SPEED_MM_S: u32 = 3_500;
 /// Planet view heights in globe units (the globe has radius 100).
 const PLANET_MIN: f32 = 60.0;
 const PLANET_MAX: f32 = 420.0;
@@ -95,6 +98,8 @@ pub struct Viewer {
     last_cam: (Vec3, f32, f32),
     selected: Option<u32>,
     follow_group: u32,
+    /// Idle stance per group (P cycles it for the selected group).
+    stance: HashMap<u32, Pose>,
     order_dest: Option<Vec3>,
     fps: f32,
     frames: u32,
@@ -143,6 +148,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         last_cam: (Vec3::ZERO, 0.0, 60.0),
         selected: Some(0),
         follow_group: 0,
+        stance: HashMap::new(),
         order_dest: None,
         fps: 0.0,
         frames: 0,
@@ -150,6 +156,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         size,
     };
     v.gpu.upload("figure", figure().bytes());
+    v.gpu.upload("figure_lo", figure_lo().bytes());
     v.gpu.upload("tuft", grass_tuft().bytes());
     Ok(v)
 }
@@ -339,7 +346,7 @@ impl Viewer {
     }
 
     /// Right click on the ground: the selected group marches there (redirecting if already marching).
-    pub fn command(&mut self, px: f64, py: f64, now_ms: f64) -> String {
+    pub fn command(&mut self, px: f64, py: f64, now_ms: f64, run: bool) -> String {
         if self.scene != Scene::Ground {
             return String::new();
         }
@@ -348,15 +355,30 @@ impl Viewer {
         let _ = self.world.tick(WorldMs(t.0.max(self.world.now.0)));
         let p = self.pick(px, py);
         let to = Pos { region: RegionId(1), x: (p.x as f64 * 1000.0) as i64, y: (p.y as f64 * 1000.0) as i64, z: 0 };
-        match self.world.order_march(GroupId(g), to, MARCH_SPEED_MM_S, WorldMs(t.0.max(self.world.now.0))) {
+        let speed = if run { RUN_SPEED_MM_S } else { MARCH_SPEED_MM_S };
+        match self.world.order_march(GroupId(g), to, speed, WorldMs(t.0.max(self.world.now.0))) {
             Ok(()) => {
                 self.order_dest = Some(p);
                 self.ground_cam = None;
                 self.follow_group = g;
-                format!("group {g} marching to ({:.0}, {:.0})", p.x, p.y)
+                format!("group {g} {} to ({:.0}, {:.0})", if run { "running" } else { "marching" }, p.x, p.y)
             }
             Err(e) => format!("cannot order group {g}: {e:?}"),
         }
+    }
+
+    /// Cycles the selected group's idle stance: stand, crouch, cover aim, prone, standing aim.
+    pub fn cycle_stance(&mut self) -> String {
+        let Some(g) = self.selected else { return "select a group first".into() };
+        let next = match self.stance.get(&g).copied().unwrap_or(Pose::Stand) {
+            Pose::Stand => Pose::Crouch,
+            Pose::Crouch => Pose::CoverAim,
+            Pose::CoverAim => Pose::Prone,
+            Pose::Prone => Pose::StandAim,
+            _ => Pose::Stand,
+        };
+        self.stance.insert(g, next);
+        format!("group {g} stance: {next:?}")
     }
 
     pub fn scene_name(&self) -> String {
@@ -543,12 +565,18 @@ impl Viewer {
             let mut plinth = MeshBuilder::default();
             plinth.cuboid([-1.0, -1.0, -0.1], [1.0, 1.0, 0.0], 12.0);
             self.gpu.upload("plinth", plinth.bytes());
-            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.9, 0.0]));
+            // Every 3 seconds the next pose: walk, run, stand, crouch, cover aim, prone, standing aim.
+            const SHOW: [(Pose, f32); 7] = [
+                (Pose::Walk, 0.9), (Pose::Run, 1.35), (Pose::Stand, 0.0), (Pose::Crouch, 0.0),
+                (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0),
+            ];
+            let (pose, steps) = SHOW[((t / 3000.0) as usize) % SHOW.len()];
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, 6.0, 0.0, 0.0, steps, pose as u32 as f32]));
             meshes.push("plinth".into());
             instanced.push(("figure".into(), "figure1".into()));
             let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
             let tris = figure().vertices.len() / 3;
-            return (Vec3::new(0.0, 0.0, 0.9), yaw, 2.6, 10.0, format!("Soldier: {tris} triangles, walk cycle on the GPU"));
+            return (Vec3::new(0.0, 0.0, 0.9), yaw, 2.6, 10.0, format!("Soldier: {tris} triangles, pose {pose:?} (poses change every 3 s)"));
         }
         let s = self.ship_info(i);
         let ext = s.hi - s.lo;
@@ -635,9 +663,16 @@ impl Viewer {
                 _ => (jitter - 0.5) * 0.4,
             };
             let walking = d.phase == Phase::Marching || d.phase == Phase::Walking || d.phase == Phase::Climbing;
-            let steps = if walking { 0.9 + jitter * 0.1 } else { 0.0 };
+            let running = walking && matches!(self.world.groups.process(d.group).kind, ProcessKind::March { speed_mm_s, .. } if speed_mm_s >= RUN_SPEED_MM_S);
+            let (pose, steps) = if running {
+                (Pose::Run, 1.35 + jitter * 0.1)
+            } else if walking {
+                (Pose::Walk, 0.9 + jitter * 0.1)
+            } else {
+                (self.stance.get(&d.group.0).copied().unwrap_or(Pose::Stand), 0.0)
+            };
             let body = if self.selected == Some(d.group.0) { 14.0 } else if walking { 7.0 } else { 6.0 };
-            inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, 0.0]);
+            inst.extend_from_slice(&[x, y, z, body, heading, jitter, steps, pose as u32 as f32]);
         }
         self.derived = out;
         self.gpu.upload_instances("soldiers", bytes(&inst));
@@ -708,7 +743,9 @@ impl Viewer {
             self.gpu.drop_buffer(&format!("grass{},{}", k.0, k.1));
             self.gpu.drop_buffer(&format!("terrain{},{}", k.0, k.1));
         }
-        instanced.push(("figure".into(), "soldiers".into()));
+        // Full figure close up, the lighter one when zoomed out.
+        let fig = if self.ground_view <= 70.0 { "figure" } else { "figure_lo" };
+        instanced.push((fig.into(), "soldiers".into()));
         if let Some(d) = self.order_dest {
             let arrived = self.selected.map_or(true, |g| !self.world.groups.process(GroupId(g)).is_running_at(tick));
             if arrived {

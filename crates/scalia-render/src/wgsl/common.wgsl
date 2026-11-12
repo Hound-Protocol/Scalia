@@ -1,25 +1,94 @@
 struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 16>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f };
 
-// Instances: a = (x, y, z, palette for the body), b = (heading, phase offset, steps per second, unused).
-// A figure faces +y; heading turns it around z. Limbs (part codes 1-4) swing around their pivots.
-fn animate(p: vec3f, c: f32, a: vec4f, b: vec4f, time: f32) -> vec3f {
-  var q = p;
-  let part = select(floor(c / 16.0), 0.0, c < 0.0);
-  if (part == 5.0) {
+// Instances: a = (x, y, z, palette for the body), b = (heading, phase offset, steps per second, pose id).
+// A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
+
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, rifle: f32, prone: f32, drop: f32 };
+
+fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
+  let s = sin(ang);
+  let c = cos(ang);
+  let dy = q.y - py;
+  let dz = q.z - pz;
+  return vec3f(q.x, py + dy * c - dz * s, pz + dy * s + dz * c);
+}
+
+fn leg(q: vec3f, hip: f32, knee: f32) -> vec3f {
+  return rot(rot(q, 0.0, 0.46, -knee), 0.0, 0.88, hip);
+}
+
+fn pose_params(pose: u32, phase: f32) -> PP {
+  let l = sin(phase * 6.2831853);
+  let r = -l;
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0);
+  if (pose == 1u) {
+    p.hip = vec2f(0.45 * l, 0.45 * r);
+    p.knee = vec2f(0.8 * max(l, 0.0) + 0.05, 0.8 * max(r, 0.0) + 0.05);
+    p.sh = vec2f(-0.4 * l, 0.2 - 0.08 * r);
+  } else if (pose == 2u) {
+    p.lean = 0.3;
+    p.hip = vec2f(0.75 * l + 0.1, 0.75 * r + 0.1);
+    p.knee = vec2f(1.3 * max(l, 0.0) + 0.3, 1.3 * max(r, 0.0) + 0.3);
+    p.sh = vec2f(0.6 - 0.35 * l, 0.9 - 0.1 * r);
+  } else if (pose == 3u) {
+    p.lean = 0.45;
+    p.hip = vec2f(1.4);
+    p.knee = vec2f(2.4);
+    p.sh = vec2f(0.3);
+  } else if (pose == 4u) {
+    p.lean = 0.2;
+    p.hip = vec2f(1.4);
+    p.knee = vec2f(2.4);
+    p.sh = vec2f(1.3, 1.45);
+  } else if (pose == 5u) {
+    p.prone = 1.0;
+    p.sh = vec2f(3.05);
+    p.rifle = 1.5707963;
+  } else if (pose == 6u) {
+    p.sh = vec2f(1.3, 1.45);
+  }
+  var low = 1e9;
+  for (var i = 0; i < 2; i++) {
+    low = min(low, leg(vec3f(0.0, -0.10, 0.0), p.hip[i], p.knee[i]).z);
+    low = min(low, leg(vec3f(0.0, 0.14, 0.0), p.hip[i], p.knee[i]).z);
+  }
+  p.drop = -low;
+  return p;
+}
+
+fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
+  var q = v;
+  if (part == 1u) { q = rot(v, 0.0, 0.88, p.hip.x); }
+  else if (part == 2u) { q = rot(v, 0.0, 0.88, p.hip.y); }
+  else if (part == 6u) { q = leg(v, p.hip.x, p.knee.x); }
+  else if (part == 7u) { q = leg(v, p.hip.y, p.knee.y); }
+  else if (part == 3u) { q = rot(v, 0.0, 1.40, p.sh.x); }
+  else if (part == 4u) { q = rot(v, 0.0, 1.40, p.sh.y); }
+  else if (part == 9u) {
+    let hand = rot(vec3f(0.0, 0.0, 0.95), 0.0, 1.40, p.sh.y);
+    q = rot(v, 0.0, 0.95, p.rifle) + vec3f(0.0, hand.y, hand.z - 0.95);
+  }
+  if (part == 8u || part == 3u || part == 4u || part == 9u) {
+    q = rot(q, 0.0, 0.88, -p.lean);
+  }
+  q.z = q.z + p.drop;
+  if (p.prone > 0.5) {
+    q = rot(q, 0.0, 0.0, -1.5707963);
+    q.z = q.z + 0.15;
+  }
+  return q;
+}
+
+fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, time: f32) -> vec3f {
+  var q = v;
+  let part = select(u32(floor(c / 16.0)), 8u, c < 0.0);
+  if (part == 5u) {
     // Wind: a slow gust that travels across the field, scaled by height so the roots stay put.
     let gust = sin(time * 1.7 + a.x * 0.35 + a.y * 0.21 + b.y * 6.28) * 0.5 + 0.5;
     q = q + vec3f(0.09, 0.04, 0.0) * gust * q.z * 2.5;
-  } else if (part > 0.5 && b.z > 0.0) {
-    let ph = fract(time * b.z + b.y) * 6.2831853;
-    let arm = part > 2.5;
-    let pivot = select(0.85, 1.40, arm);
-    // The rifle arm (part 4) only sways; the free arm swings.
-    let amp = select(select(0.55, 0.45, arm), 0.12, part == 4.0);
-    // Left leg and right arm swing together, then the other pair.
-    let side = select(-1.0, 1.0, part == 1.0 || part == 4.0);
-    let ang = sin(ph) * amp * side;
-    let dz = q.z - pivot;
-    q = vec3f(q.x, q.y * cos(ang) - dz * sin(ang), pivot + q.y * sin(ang) + dz * cos(ang));
+  } else if (part != 0u) {
+    let phase = select(0.0, fract(time * b.z + b.y), b.z > 0.0);
+    q = pose_vertex(v, part, pose_params(u32(b.w), phase));
   }
   let ch = cos(b.x);
   let sh = sin(b.x);

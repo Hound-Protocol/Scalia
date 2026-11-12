@@ -81,7 +81,7 @@ try {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button === 2) {
-      const msg = v.command(e.offsetX * dpr(), e.offsetY * dpr(), performance.now());
+      const msg = v.command(e.offsetX * dpr(), e.offsetY * dpr(), performance.now(), e.shiftKey);
       if (msg) flash(msg);
       return;
     }
@@ -125,6 +125,7 @@ try {
     else if (k === 'r') { fullres.checked = !fullres.checked; v.set_full(fullres.checked); }
     else if (k === 't') flash(v.cycle_day_speed(performance.now()));
     else if (k === 'n') flash(v.cycle_army());
+    else if (k === 'p') flash(v.cycle_stance());
     else if (k === 'l') { capIndex = (capIndex + 1) % CAPS.length; store.set('scalia.cap', String(capIndex)); flash(`frame cap: ${CAPS[capIndex] || 'off'}`); }
   });
   addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
