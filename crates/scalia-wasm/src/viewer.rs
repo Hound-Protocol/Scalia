@@ -2033,7 +2033,7 @@ fn commander_figure() -> MeshBuilder {
     for v in &mut f.vertices {
         let to = match palette_of(v.color) as u8 {
             kit::UNIFORM => Some(kit::BALACLAVA),
-            kit::UNIFORM_DARK | kit::PACK => Some(kit::PAD),
+            kit::UNIFORM_DARK | kit::PACK | kit::HELMET => Some(kit::PAD),
             kit::STRAP | kit::GLOVE => Some(kit::METAL),
             _ => None,
         };

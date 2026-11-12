@@ -276,6 +276,13 @@ try {
     speechSynthesis.speak(u);
   });
   const line = (who, text) => { const d = document.createElement('div'); d.className = who; d.innerHTML = `<b>${who === 'cmd' ? 'Commander' : who === 'unit' ? 'Unit' : ''}</b> ${text}`; $('radioLog').appendChild(d); d.scrollIntoView({ block: 'end' }); };
+  // The talkie button: a click as the button is pressed and another as it is let go.
+  const keyClick = new Audio('./sfx/radio-key.mp3'); keyClick.preload = 'auto';
+  const click = () => new Promise((done) => {
+    const a = keyClick.cloneNode(); a.volume = 0.8;
+    a.onended = done; a.onerror = done; setTimeout(done, 450);
+    a.play().catch(done);
+  });
   let onAir = false;
   const radioOrder = async (id, label, x, y, grid) => {
     if (onAir) { flash('radio busy, wait for the answer'); return; }
@@ -287,14 +294,14 @@ try {
     radio.classList.add('up'); v.set_radio(true);
     await new Promise((r) => setTimeout(r, 450)); // the radio comes up to the ear
     const order = `${who}, ${verb} grid ${grid}${id === 0 ? '' : how}. Over.`;
-    line('cmd', order); radio.classList.add('tx');
+    radio.classList.add('tx'); await click(); line('cmd', order);
     await say(order.replace(/(\d)/g, '$1 '), 1.0, 1.05);
-    radio.classList.remove('tx');
+    await click(); radio.classList.remove('tx');
     await new Promise((r) => setTimeout(r, 500 + Math.random() * 700)); // the unit keys up
     const reply = `${first} copies, ${ing} grid ${grid}. Out.`;
-    radio.classList.add('rx'); line('unit', reply);
+    await click(); radio.classList.add('rx'); line('unit', reply);
     await say(reply.replace(/(\d)/g, '$1 '), 0.7, 1.1);
-    radio.classList.remove('rx');
+    await click(); radio.classList.remove('rx');
     const msg = v.issue_at(id, x, y, performance.now()); if (msg) flash(msg);
     await new Promise((r) => setTimeout(r, 600));
     v.set_radio(false); radio.classList.remove('up'); onAir = false;

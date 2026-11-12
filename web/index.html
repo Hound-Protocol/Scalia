@@ -98,6 +98,8 @@
   #radio .set .led { position: absolute; right: 18px; top: 74px; width: 12px; height: 12px; border-radius: 50%; background: #3a1010; }
   #radio.tx .set .led { background: #ff3b30; box-shadow: 0 0 10px #ff3b30; }
   #radio.rx .set .led { background: #38d16a; box-shadow: 0 0 10px #38d16a; }
+  #radio .set .ptt { position: absolute; left: -12px; top: 70px; width: 12px; height: 56px; background: #111309; border-radius: 4px 0 0 4px; transition: transform .08s; }
+  #radio.tx .set .ptt { transform: translateX(5px); background: #2a2d22; }
   #radioLog { position: absolute; right: 0; bottom: 270px; width: 300px; color: #e8edf2; font-size: 13px; }
   #radioLog div { background: rgba(10,14,18,.85); border-left: 3px solid #c0392b; padding: 6px 8px; margin-top: 4px; border-radius: 3px; }
   #radioLog div.unit { border-left-color: #38d16a; }
@@ -157,7 +159,7 @@
 <div id="error" class="panel"></div>
 <div id="fieldHint">WASD move · Shift sprint · Q/E turn · <b>Tab</b> tablet</div>
 <div id="actions" hidden></div>
-<div id="radio"><div id="radioLog"></div><div class="set"><div class="lcd">CH 04 · BN NET</div><div class="led"></div><div class="grille"></div></div></div>
+<div id="radio"><div id="radioLog"></div><div class="set"><div class="lcd">CH 04 · BN NET</div><div class="led"></div><div class="grille"></div><div class="ptt"></div></div></div>
 <div id="tablet">
   <div class="bezel"></div>
   <div class="menu">

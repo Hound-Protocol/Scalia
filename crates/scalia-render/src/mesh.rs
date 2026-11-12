@@ -191,6 +191,16 @@ impl MeshBuilder {
     }
 }
 
+/// The basic soldier, converted from "low poly soldier" by Kolos Studios (CC-BY-4.0, see CREDITS.md) with
+/// `scripts/glb_figure.py`: arms swung down onto our rig's pivots, each vertex given the part of its strongest bone,
+/// materials mapped onto the kit palette, the M4 decimated into the right hand, a team armband on each upper arm.
+pub fn figure() -> MeshBuilder {
+    const FIG: &[u8] = include_bytes!("../assets/soldier.fig");
+    let f = |i: usize| f32::from_le_bytes([FIG[i], FIG[i + 1], FIG[i + 2], FIG[i + 3]]);
+    let vertices = (0..FIG.len() / 16).map(|k| Vertex { pos: [f(k * 16), f(k * 16 + 4), f(k * 16 + 8)], color: f(k * 16 + 12) }).collect();
+    MeshBuilder { vertices }
+}
+
 /// The basic soldier, facing +y, about 1.78 m to the top of the helmet: chunky low-poly volumes after the art
 /// reference. Tan uniform with thigh cargo pockets; plate carrier with front pouches and wings at the back; layered
 /// shoulder pads; gloves with fingers and bare fingertips; boots with sole, heel, rounded toe cap, dark cuff and lace
@@ -198,7 +208,7 @@ impl MeshBuilder {
 /// colour patch on each upper arm. Thighs hang from the hips (0.88 m), shins from the knees (0.46 m), upper arms
 /// from the shoulders (1.40 m), forearms from the elbows (1.09 m), and the head nods around the neck (1.46 m); the
 /// rifle is gripped in the right hand.
-pub fn figure() -> MeshBuilder {
+pub fn figure_kit() -> MeshBuilder {
     use kit::*;
     let mut f = MeshBuilder::default();
     let c = |p: u8, part: Part| code(p, part);
