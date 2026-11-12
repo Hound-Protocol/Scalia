@@ -390,7 +390,8 @@ impl Viewer {
             Scene::System | Scene::Planet => (sky(0.5), false),
             _ => (sky(tod), true),
         };
-        let time_s = ((t / 1000.0) % 3600.0) as f32;
+        // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
+        let time_s = ((t / 1000.0) % 86_400.0) as f32;
         let desc = FrameDesc { meshes: &meshes, instanced: &instanced, target, yaw, view_height, range, internal, outline: self.outline, sky: sky_now, atmosphere, time_s };
         if let Err(e) = self.gpu.frame(&desc) {
             return format!("Render error: {e}");

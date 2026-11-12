@@ -124,5 +124,5 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
   so a lower frame rate only drops frames.
 
 Open items: boarding seats use an abstract 20-column grid (about 60 m long) instead of the blueprint's interior, so no
-transport is drawn yet; animation and cloud time wrap every hour (a visible jump); sea level and the heightmap design (the noise is almost all above 0 m, so the globe has no oceans);
+transport is drawn yet; sea level and the heightmap design (the noise is almost all above 0 m, so the globe has no oceans);
 regional terrain levels for a seamless zoom; GPU timing in the HUD; vehicles on the ground; a fresh review of the branch.
