@@ -72,4 +72,8 @@ try { new wasm.Flight(0, 9, 0, 2e9); } catch (e) { e1 = String(e).length > 0 && 
 try { new wasm.Flight(0, 1, 0, 0); } catch (e) { e2 = String(e).length > 0 && !String(e).includes('unreachable'); }
 check('bad flights throw readable errors', e1 && e2);
 
+// (h) mesh buffer for drawing: 148 triangles, 4 floats per vertex, finite.
+const mb = wasm.blueprint_mesh(ox);
+check('blueprint_mesh has 148 triangles of finite vertices', mb.length === 148 * 3 * 4 && mb.every(Number.isFinite), `len=${mb.length}`);
+
 process.exit(failed ? 1 : 0);

@@ -15,6 +15,8 @@
   .meta { font-size: 13px; color: #98a3b3; margin-top: 6px; word-break: break-all; }
   label { margin-right: 12px; } input, select { background: #0e1116; color: inherit; border: 1px solid #2b3340; padding: 3px 6px; width: 90px; }
   canvas { image-rendering: pixelated; border: 1px solid #2b3340; margin-top: 12px; width: 520px; height: 520px; max-width: 100%; }
+  #view { width: 960px; height: 540px; max-width: 100%; image-rendering: pixelated; margin-top: 8px; }
+  .bar button, .bar select { margin-right: 8px; background: #1b2028; color: inherit; border: 1px solid #2b3340; padding: 4px 10px; }
   #status { color: #98a3b3; }
 </style>
 </head>
@@ -22,6 +24,14 @@
 <main>
   <h1>Scalia: blueprints and planet</h1>
   <p id="status">Loading WebAssembly...</p>
+  <h2>Viewer (WebGPU)</h2>
+  <div class="bar">
+    <button data-scene="ships">Ships</button><button data-scene="ground">Ground</button><button data-scene="system">System</button>
+    <select id="shipSel"></select><button id="launch" hidden>Launch to the other planet</button>
+    <label><input type="checkbox" id="fullres" style="width:auto"> full resolution</label>
+  </div>
+  <canvas id="view" width="960" height="540"></canvas>
+  <p id="hud" class="meta">Starting...</p>
   <h2>Shipped blueprints</h2>
   <div id="blueprints"></div>
   <h2>Planet chunk</h2>

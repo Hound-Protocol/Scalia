@@ -46,6 +46,22 @@ pub fn blueprint_info(text: &str) -> Result<String, JsError> {
     ))
 }
 
+/// Flat-shaded triangle list for drawing: 4 floats per vertex (x, y, z in metres, palette index),
+/// 3 vertices per triangle.
+#[wasm_bindgen]
+pub fn blueprint_mesh(text: &str) -> Result<Vec<f32>, JsError> {
+    let b = scalia_blueprint::parse(text).map_err(|e| JsError::new(&e.to_string()))?;
+    let m = scalia_blueprint::mesh::mesh(&b);
+    let mut out = Vec::with_capacity(m.indices.len() * 4);
+    for (t, tri) in m.indices.chunks(3).enumerate() {
+        for &i in tri {
+            let v = m.vertices[i as usize];
+            out.extend_from_slice(&[v[0] as f32 / 1000.0, v[1] as f32 / 1000.0, v[2] as f32 / 1000.0, m.colors[t] as f32]);
+        }
+    }
+    Ok(out)
+}
+
 /// File text of shipped blueprint `index`, or undefined when there is no such blueprint.
 #[wasm_bindgen]
 pub fn shipped_ron(index: u32) -> Option<String> {

@@ -1,4 +1,5 @@
 import init, * as wasm from './pkg/scalia_wasm.js';
+import { startViewer } from './viewer.js';
 
 const status = document.getElementById('status');
 
@@ -49,6 +50,14 @@ try {
   }
   for (const id of ['seed', 'face', 'cx', 'cy']) document.getElementById(id).addEventListener('input', drawChunk);
   drawChunk();
+  const sel = document.getElementById('shipSel');
+  for (let i = 0; wasm.shipped_ron(i) !== undefined; i++) sel.append(new Option(JSON.parse(wasm.blueprint_info(wasm.shipped_ron(i))).name, i));
+  sel.value = '5';
+  try {
+    await startViewer(wasm, { canvas: document.getElementById('view'), hud: document.getElementById('hud'), launch: document.getElementById('launch'), shipSel: sel, fullres: document.getElementById('fullres') });
+  } catch (e) {
+    document.getElementById('hud').textContent = `The viewer needs WebGPU: ${e.message}`;
+  }
   status.textContent = 'Everything below is computed in WebAssembly by the same Rust core as the native build.';
 } catch (e) {
   status.textContent = `Failed to start: ${e}`;
