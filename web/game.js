@@ -15,16 +15,16 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
 };
 
-// Background music (placeholder track): starts at 50% once the player enters the game, loops, and can be turned
+// Background music (placeholder track): starts at 25% once the player enters the game, loops, and can be turned
 // off or turned down on the tablet's settings page. The choice is remembered.
 const music = (() => {
   const el = new Audio('./sfx/music-vance.mp3');
   el.loop = true;
   el.preload = 'auto';
-  const saved = parseFloat(store.get('music.vol'));
+  const saved = parseFloat(store.get('music.volume'));
   const m = {
     on: store.get('music.on') !== '0',
-    vol: Number.isFinite(saved) ? Math.min(Math.max(saved, 0), 1) : 0.5,
+    vol: Number.isFinite(saved) ? Math.min(Math.max(saved, 0), 1) : 0.25,
     started: false,
     start() { m.started = true; m.apply(); },
     apply() {
@@ -32,7 +32,7 @@ const music = (() => {
       if (m.on && m.started && m.vol > 0) el.play().catch(() => { /* blocked until a click */ });
       else el.pause();
     },
-    set(on, vol) { m.on = on; m.vol = vol; store.set('music.on', on ? '1' : '0'); store.set('music.vol', String(vol)); m.apply(); },
+    set(on, vol) { m.on = on; m.vol = vol; store.set('music.on', on ? '1' : '0'); store.set('music.volume', String(vol)); m.apply(); },
   };
   return m;
 })();
