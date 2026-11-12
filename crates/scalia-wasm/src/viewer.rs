@@ -55,6 +55,12 @@ const STEP_GROUND: usize = 2;
 const STEP_PLANET: usize = 13;
 const STEP_HANDOFF: usize = 14;
 const STEP_SYSTEM: usize = 19;
+/// Furthest zoom on foot, with the tablet away (the tablet's map zooms all the way).
+const STEP_FIELD_MAX: usize = 4;
+/// The commander's walking and sprinting speeds (m/s), and how long radioing an order takes (ms).
+const CMD_WALK: f32 = 1.7;
+const CMD_SPRINT: f32 = 4.6;
+const RADIO_MS: f64 = 1600.0;
 /// How quickly the camera glides to the next step (time constant, ms).
 const GLIDE_MS: f64 = 90.0;
 /// How long the previous terrain detail level lingers over the new one (ms).
@@ -120,6 +126,20 @@ pub struct Viewer {
     agent_prev: HashMap<u32, Vec<(i64, i64)>>,
     agent_clock: f64,
     /// Smoothed camera: ground target (absolute metres) and yaw, eased towards where they are aimed each frame.
+    /// The player's commander: position (metres, absolute), heading, movement input (screen right, screen up),
+    /// sprinting, moving, and until when he is on the radio.
+    cmd: (f64, f64),
+    cmd_heading: f32,
+    cmd_input: (f32, f32, bool),
+    cmd_moving: bool,
+    cmd_pose: (Pose, Pose, f32),
+    radio_until: f64,
+    /// The tablet is up: the camera leaves the commander for the map, which zooms all the way.
+    tablet: bool,
+    /// How orders are carried out: 0 calm, 1 aggressive.
+    manner: u8,
+    /// Per agent soldier: eased heading and walking-until time (smooth turns, no walk/stand flicker).
+    agent_anim: HashMap<u32, (f32, f64)>,
     cam_smooth: Option<Vec3>,
     yaw_smooth: f32,
     cam_ms: f64,
@@ -214,6 +234,15 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         agents: HashMap::new(),
         agent_prev: HashMap::new(),
         agent_clock: -1.0,
+        cmd: (70_000.0 / 1000.0 + 20.0, 20.0),
+        cmd_heading: 0.0,
+        cmd_input: (0.0, 0.0, false),
+        cmd_moving: false,
+        cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
+        radio_until: -1.0,
+        tablet: false,
+        manner: 0,
+        agent_anim: HashMap::new(),
         cam_smooth: None,
         yaw_smooth: 0.0,
         cam_ms: 0.0,
@@ -542,6 +571,8 @@ impl Viewer {
             return "those groups cannot move right now".into();
         }
         self.order_dest = Some(p);
+        // The commander radios the order through.
+        self.radio_until = now_ms + RADIO_MS;
         // The camera stays where the player left it (F follows again).
         if self.ground_cam.is_none() {
             self.ground_cam = Some(self.cam_smooth.unwrap_or(self.focus));
@@ -551,6 +582,52 @@ impl Viewer {
     }
 
     /// Holds pose `i` in the soldier preview (walk, run, stand, crouch, cover aim, prone, standing aim); -1 cycles.
+    /// Commander movement for this frame: x to the screen's right, y to its top (-1..1 each), and sprinting.
+    pub fn move_commander(&mut self, x: f32, y: f32, sprint: bool) {
+        self.cmd_input = (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0), sprint);
+    }
+    /// Raises or lowers the tablet. Lowering it brings the camera back to the commander at a field zoom.
+    pub fn set_tablet(&mut self, up: bool) {
+        self.tablet = up;
+        if up {
+            self.ground_cam = Some(self.cam_smooth.unwrap_or(self.focus));
+        } else {
+            self.zoom_step = self.zoom_step.min(STEP_FIELD_MAX);
+            if self.scene != Scene::Ground {
+                self.scene = Scene::Ground;
+            }
+        }
+    }
+    /// How orders are carried out: 0 calm, 1 aggressive.
+    pub fn set_manner(&mut self, m: u8) {
+        self.manner = m.min(1);
+    }
+    /// The units under command, as JSON: [{id, name, soldiers, status, stance, selected}].
+    pub fn roster(&self) -> String {
+        let names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett"];
+        let mut out = Vec::new();
+        for i in 0..self.world.groups.len() as u32 {
+            let name = match names.get(i as usize) { Some(n) => format!("{n} squad"), None => format!("Group {i}") };
+            let soldiers = self.world.groups.people(GroupId(i));
+            let status = match self.agents.get(&i) {
+                Some(a) if !a.all_arrived() => "moving",
+                _ if self.world.groups.process(GroupId(i)).is_running_at(self.world.now) => "marching",
+                _ => "holding",
+            };
+            let stance = format!("{:?}", self.stance.get(&i).copied().unwrap_or(Pose::Stand)).to_lowercase();
+            out.push(format!("{{\"id\":{i},\"name\":\"{name}\",\"soldiers\":{soldiers},\"status\":\"{status}\",\"stance\":\"{stance}\",\"selected\":{}}}", self.selection.contains(&i)));
+        }
+        format!("[{}]", out.join(","))
+    }
+    /// Selects one unit (from the roster) and centres the tablet's map on it.
+    pub fn select_unit(&mut self, id: u32) {
+        if id < self.world.groups.len() as u32 {
+            self.selected = Some(id);
+            self.selection = vec![id];
+            let c = self.group_centre(id, self.world.now);
+            self.ground_cam = Some(c);
+        }
+    }
     /// Model viewer: spin on a turntable (true) or hold the angle it was left at.
     pub fn set_turntable(&mut self, on: bool) {
         self.ship_yaw = if on { None } else { Some(self.model_yaw) };
@@ -634,7 +711,9 @@ impl Viewer {
         }
         // Away from home the ground is not under the camera: the system's closest step is as far in as it goes.
         let lowest = if self.scene == Scene::System && self.sys_follow != Some(HOME_BODY) { STEP_HANDOFF + 1 } else { 0 };
-        self.zoom_step = if delta > 0.0 { (self.zoom_step + 1).min(LADDER.len() - 1) } else { self.zoom_step.saturating_sub(1).max(lowest) };
+        // On foot the view stays close; the tablet's map zooms out to the stars.
+        let highest = if self.tablet { LADDER.len() - 1 } else { STEP_FIELD_MAX };
+        self.zoom_step = if delta > 0.0 { (self.zoom_step + 1).min(highest) } else { self.zoom_step.saturating_sub(1).max(lowest) };
     }
     pub fn flying(&self) -> bool {
         self.flight.is_some()
@@ -1065,6 +1144,7 @@ impl Viewer {
         if !self.base_built {
             self.build_base();
         }
+        self.update_commander(t, ts, instanced);
         instanced.push(("base".into(), "base_at".into()));
         let (bx, by) = ((-self.origin.0) as f32, (-self.origin.1) as f32);
         self.gpu.upload_instances("base_at", bytes(&[bx, by, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
@@ -1092,6 +1172,9 @@ impl Viewer {
             }
         }
         self.focus = Vec3::new(cx as f32, cy as f32, 0.0);
+        if !self.tablet {
+            self.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
+        }
         let mut target = self.ground_cam.unwrap_or(self.focus);
         // Zoomed far out the camera sinks to the planet's centre, so the globe ends up in the middle of the screen.
         let sink = smooth_log(self.ground_view, 400_000.0, 2_400_000.0);
@@ -1163,8 +1246,21 @@ impl Viewer {
             let sprint = self.agents[&g].speed_mm_s() >= RUN_SPEED_MM_S as i64;
             for (i, (&(x, y), &(px, py))) in pos.iter().zip(&prev).enumerate() {
                 let jitter = (scalia_core::hash::mix64(((g as u64) << 20) ^ i as u64 ^ 0x5ca1) % 1000) as f32 / 1000.0;
-                let moving = !arrived[i] && (x != px || y != py);
-                let heading = if x != px || y != py { ((px - x) as f32).atan2((y - py) as f32) } else { (jitter - 0.5) * 0.4 };
+                // Walking lasts a moment past the last step, so jostling never flickers between walk and stand;
+                // the heading eases round instead of snapping to each step's direction.
+                let key = g * 1000 + i as u32;
+                let stepped = x != px || y != py;
+                let entry = self.agent_anim.entry(key).or_insert(((jitter - 0.5) * 0.4, -1.0));
+                if stepped && !arrived[i] {
+                    entry.1 = self.agent_now + 300.0;
+                    let want = ((px - x) as f32).atan2((y - py) as f32);
+                    let mut d = want - entry.0;
+                    while d > std::f32::consts::PI { d -= std::f32::consts::TAU; }
+                    while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
+                    entry.0 += d * 0.25;
+                }
+                let moving = self.agent_now < entry.1;
+                let heading = entry.0;
                 let (pose, steps) = if moving && sprint { (Pose::Sprint, 1.45 + jitter * 0.1) } else if moving { (Pose::Walk, 0.9 + jitter * 0.1) } else { (stance, 0.0) };
                 let (ix, iy) = (px as f64 + (x - px) as f64 * alpha, py as f64 + (y - py) as f64 * alpha);
                 let (ax, ay) = (ix / 1000.0, iy / 1000.0);
@@ -1174,7 +1270,6 @@ impl Viewer {
                     continue;
                 }
                 let body = if self.selection.contains(&g) { 14.0 } else if moving { 7.0 } else { 6.0 };
-                let key = g * 1000 + i as u32;
                 let entry = self.group_pose.entry(1_000_000 + key).or_insert((pose, pose, -1000.0));
                 if entry.0 != pose {
                     *entry = (pose, entry.0, ts);
@@ -1185,6 +1280,51 @@ impl Viewer {
                 inst.extend_from_slice(&[rx, ry, z, body, heading, jitter, steps, pose as u32 as f32, prev_pose as u32 as f32, since, upper, 0.0]);
             }
         }
+    }
+
+    /// Moves the commander by his input (relative to the camera), keeps him out of walls, and draws him: black
+    /// clothing, a red armband, walking, sprinting or on the radio.
+    fn update_commander(&mut self, t: f64, ts: f32, instanced: &mut Vec<(String, String)>) {
+        if !self.gpu.has("commander") {
+            self.gpu.upload("commander", commander_figure().bytes());
+        }
+        let dt = ((t - self.cam_ms).clamp(0.0, 100.0) / 1000.0) as f32;
+        let (ix, iy, sprint) = if self.tablet { (0.0, 0.0, false) } else { self.cmd_input };
+        let (s, c) = self.yaw_smooth.sin_cos();
+        let (right, fwd) = ((c, s), (-s, c));
+        let (mut vx, mut vy) = (right.0 * ix + fwd.0 * iy, right.1 * ix + fwd.1 * iy);
+        let len = (vx * vx + vy * vy).sqrt();
+        self.cmd_moving = len > 0.01 && t >= self.radio_until;
+        if self.cmd_moving {
+            let speed = if sprint { CMD_SPRINT } else { CMD_WALK };
+            vx = vx / len * speed * dt;
+            vy = vy / len * speed * dt;
+            let (nx, ny) = (self.cmd.0 + vx as f64, self.cmd.1 + vy as f64);
+            let free = |x: f64, y: f64| !in_base(x as f32, y as f32) || self.base_grid.walkable_at((x * 1000.0) as i64, (y * 1000.0) as i64, 300);
+            if free(nx, ny) {
+                self.cmd = (nx, ny);
+            } else if free(nx, self.cmd.1) {
+                self.cmd.0 = nx;
+            } else if free(self.cmd.0, ny) {
+                self.cmd.1 = ny;
+            }
+            // Turn smoothly towards where he walks.
+            let want = (-vx).atan2(vy);
+            let mut d = want - self.cmd_heading;
+            while d > std::f32::consts::PI { d -= std::f32::consts::TAU; }
+            while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
+            self.cmd_heading += d.clamp(-8.0 * dt, 8.0 * dt);
+        }
+        let pose = if t < self.radio_until { Pose::Radio } else if self.cmd_moving && sprint { Pose::Sprint } else if self.cmd_moving { Pose::Walk } else { Pose::Stand };
+        if self.cmd_pose.0 != pose {
+            self.cmd_pose = (pose, self.cmd_pose.0, ts);
+        }
+        let steps = match pose { Pose::Sprint => 1.5, Pose::Walk => 0.95, _ => 0.0 };
+        let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
+        let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
+        let rec = [rx, ry, z, 9.0, self.cmd_heading, 0.37, steps, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
+        self.gpu.upload_instances("commander_at", bytes(&rec));
+        instanced.push(("commander".into(), "commander_at".into()));
     }
 
     /// Whether a point (origin-relative metres) falls on screen, by last frame's camera, with `margin` metres
@@ -1706,4 +1846,24 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
         }
     }
     m
+}
+
+/// The commander's figure: the soldier in black, with the armband patches in the instance (team) colour.
+fn commander_figure() -> MeshBuilder {
+    use scalia_render::mesh::{code, kit, palette_of, part_of};
+    let mut f = figure();
+    for v in &mut f.vertices {
+        let to = match palette_of(v.color) as u8 {
+            kit::UNIFORM => Some(kit::BALACLAVA),
+            kit::UNIFORM_DARK | kit::PACK => Some(kit::PAD),
+            kit::STRAP | kit::GLOVE => Some(kit::METAL),
+            _ => None,
+        };
+        if let Some(p) = to {
+            if v.color >= 0.0 {
+                v.color = code(p, part_of(v.color));
+            }
+        }
+    }
+    f
 }

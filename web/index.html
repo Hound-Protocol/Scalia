@@ -46,6 +46,32 @@
   #update button { margin-left: 10px; background: #4b7bb0; color: #fff; border: 0; border-radius: 4px;
     padding: 4px 10px; font: inherit; cursor: pointer; }
   #update button:hover { background: #5e91c9; }
+  /* The commander's tablet: widescreen, 80% of the screen, slides up from the bottom. Its map tab is a window
+     onto the game view behind it (the frame dims everything else); roster and comms cover the screen. */
+  #tablet { position: fixed; left: 10vw; bottom: 4vh; width: 80vw; height: 80vh; z-index: 30; pointer-events: none;
+    transform: translateY(115%); transition: transform 0.38s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  #tablet.up { transform: translateY(0); }
+  #tablet .bezel { position: absolute; inset: 0; border: 16px solid #1b1e22; border-top-width: 46px; border-radius: 22px;
+    box-shadow: 0 0 0 100vmax rgba(4, 6, 8, 0.55), inset 0 0 0 2px #2c333c, 0 18px 50px rgba(0,0,0,0.6); }
+  #tablet.up .bezel { pointer-events: none; }
+  #tablet .menu { position: absolute; left: 22px; right: 22px; top: 8px; height: 30px; display: flex; gap: 6px; align-items: center; pointer-events: auto; }
+  #tablet .menu button { background: #262b31; color: #c9d1db; border: 1px solid #39414b; border-radius: 4px; padding: 4px 14px; font: inherit; cursor: pointer; letter-spacing: 0.06em; }
+  #tablet .menu button.on { background: #3b4a5c; color: #fff; border-color: #6d8fb3; }
+  #tablet .menu .spacer { flex: 1; }
+  #tablet .menu .brand { color: #c0392b; font-weight: bold; letter-spacing: 0.15em; margin-right: 8px; }
+  #tablet .screen { position: absolute; left: 16px; right: 16px; top: 46px; bottom: 16px; border-radius: 6px; overflow: hidden; }
+  #tablet .screen.map { pointer-events: none; box-shadow: inset 0 0 60px rgba(40, 160, 255, 0.12); }
+  #tablet .screen.page { background: #0f1317; pointer-events: auto; padding: 16px 20px; overflow: auto; }
+  #tablet .hint { position: absolute; right: 26px; bottom: 22px; color: #9fb3c8; background: rgba(8, 12, 16, 0.7); padding: 4px 8px; border-radius: 4px; }
+  #roster table { border-collapse: collapse; width: 100%; }
+  #roster th, #roster td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #222a33; }
+  #roster tr.unit { cursor: pointer; }
+  #roster tr.unit:hover { background: #18212b; }
+  #roster tr.sel { background: #2b3a4f; }
+  #comms .channels { display: flex; gap: 18px; }
+  #comms .box { border: 1px solid #263039; padding: 10px; border-radius: 4px; min-width: 220px; }
+  #comms button { background: #1d242c; color: #7f8b98; border: 1px solid #2f3845; padding: 4px 10px; margin: 3px 0; font: inherit; }
+  #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: #9aa6b4; background: rgba(10,12,16,0.7); padding: 4px 10px; border: 1px solid #2a313c; }
 </style>
 </head>
 <body>
@@ -100,6 +126,31 @@
   <div class="warn" id="pWarn" hidden></div>
 </div>
 <div id="error" class="panel"></div>
+<div id="fieldHint">WASD move · Shift sprint · Q/E turn · <b>Tab</b> tablet</div>
+<div id="tablet">
+  <div class="bezel"></div>
+  <div class="menu">
+    <span class="brand">COMMAND</span>
+    <button data-page="map" class="on">MAP</button>
+    <button data-page="roster">ROSTER</button>
+    <button data-page="comms">COMMS HUB</button>
+    <span class="spacer"></span>
+    <button id="mCalm" class="on" title="Orders are carried out calmly">CALM</button>
+    <button id="mAggr" title="Orders are carried out aggressively">AGGRESSIVE</button>
+    <button id="tabletClose" title="Tab">CLOSE ✕</button>
+  </div>
+  <div class="screen map" id="pageMap"><div class="hint">click a unit · right-click to order (Shift: sprint) · Shift + drag: box · wheel: zoom</div></div>
+  <div class="screen page" id="roster" hidden></div>
+  <div class="screen page" id="comms" hidden>
+    <h3>Communications Hub</h3>
+    <div class="channels">
+      <div class="box"><b>Channels</b><br><br>Battalion net<br>Allied commanders<br>Theatre command</div>
+      <div class="box"><b>Requests</b><br><br><button disabled>Request resources</button><br><button disabled>Request fire support</button><br><button disabled>Request reinforcements</button><br><button disabled>Request assault</button></div>
+      <div class="box"><b>Messages</b><br><br><i>No contact with other commanders yet.</i></div>
+    </div>
+    <p style="color:#7f8b98">Coming once the basic systems are in.</p>
+  </div>
+</div>
 <div id="update" hidden>A new version is out. <button id="update-reload">Refresh to apply</button></div>
 <script type="module" src="./game.js"></script>
 </body>

@@ -96,6 +96,12 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     p.head = -0.1;
   } else if (pose == 8u) {
     carry(&p, 3u);
+  } else if (pose == 9u) {
+    carry(&p, 0u);
+    p.sh.x = 1.45;
+    p.el.x = 2.4;
+    p.reach.x = 1.05;
+    p.head = 0.1;
   }
   p.drop = ground_drop(p.hip, p.knee);
   return p;

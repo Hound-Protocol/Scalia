@@ -31,6 +31,8 @@ pub enum Pose {
     Sprint = 7,
     /// Standing behind a wall, rifle at high ready (muzzle up), not shooting.
     Cover = 8,
+    /// Radioing: the left hand holds the handset to the ear, the right keeps the rifle hanging.
+    Radio = 9,
 }
 
 impl Pose {
@@ -44,6 +46,7 @@ impl Pose {
             6 => Pose::StandAim,
             7 => Pose::Sprint,
             8 => Pose::Cover,
+            9 => Pose::Radio,
             _ => Pose::Stand,
         }
     }
@@ -158,6 +161,13 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.head = 0.05;
         }
         Pose::Cover => carry(&mut p, Carry::HighReady),
+        Pose::Radio => {
+            carry(&mut p, Carry::SafeHang);
+            p.shoulder[0] = 1.45;
+            p.elbow[0] = 2.4;
+            p.reach[0] = 1.05;
+            p.head = 0.1;
+        }
         Pose::Prone => {
             p.prone = 1.0;
             p.shoulder = [2.8, 2.8];

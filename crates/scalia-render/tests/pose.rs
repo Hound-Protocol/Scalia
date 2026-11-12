@@ -249,3 +249,12 @@ fn crouching_is_a_kneel_right_knee_down_left_foot_forward() {
         assert!(top > 0.4, "{pose:?}: left shin not upright (top {top})");
     }
 }
+
+#[test]
+fn the_radio_pose_holds_the_handset_to_the_ear() {
+    use scalia_render::pose::{hand, Side};
+    let pp = params(Pose::Radio, 0.0);
+    let l = hand(&pp, Side::Left);
+    assert!(l.z > 1.5 && l.x.abs() < 0.2 && l.y.abs() < 0.15, "left hand at {l:?}");
+    assert_eq!(Pose::from_id(9), Pose::Radio);
+}

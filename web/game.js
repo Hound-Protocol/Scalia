@@ -121,6 +121,7 @@ try {
   };
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('pointerdown', (e) => {
+    if (!tabletUp && scene === 'ground') return; // on foot, units are commanded through the tablet
     if (e.button === 2) {
       const msg = v.command(e.offsetX * dpr(), e.offsetY * dpr(), performance.now(), e.shiftKey);
       if (msg) flash(msg);
@@ -166,12 +167,46 @@ try {
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
+  // The commander's tablet: Tab raises it; the map tab looks through to the game view (which then zooms all the way),
+  // the roster lists the units, the comms hub is a placeholder for talking to other commanders.
+  let tabletUp = false, page = 'map';
+  const tablet = $('tablet');
+  const setPage = (p) => {
+    page = p;
+    for (const b of tablet.querySelectorAll('[data-page]')) b.classList.toggle('on', b.dataset.page === p);
+    $('pageMap').hidden = p !== 'map';
+    $('roster').hidden = p !== 'roster';
+    $('comms').hidden = p !== 'comms';
+    if (p === 'roster') drawRoster();
+  };
+  const setTablet = (up) => {
+    tabletUp = up;
+    tablet.classList.toggle('up', up);
+    $('fieldHint').hidden = up;
+    v.set_tablet(up);
+    if (up) setPage(page);
+  };
+  const drawRoster = () => {
+    const units = JSON.parse(v.roster());
+    $('roster').innerHTML = `<h3>Battalion roster</h3><table><tr><th>Unit</th><th>Soldiers</th><th>Status</th><th>Stance</th></tr>${
+      units.map((u) => `<tr class="unit${u.selected ? ' sel' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${u.soldiers}</td><td>${u.status}</td><td>${u.stance}</td></tr>`).join('')
+    }</table><p style="color:#7f8b98">Click a unit to select it on the map.</p>`;
+    for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', () => { v.select_unit(Number(r.dataset.id)); setPage('map'); });
+  };
+  for (const b of tablet.querySelectorAll('[data-page]')) b.addEventListener('click', () => setPage(b.dataset.page));
+  $('tabletClose').addEventListener('click', () => setTablet(false));
+  const setManner = (m) => { v.set_manner(m); $('mCalm').classList.toggle('on', m === 0); $('mAggr').classList.toggle('on', m === 1); };
+  $('mCalm').addEventListener('click', () => setManner(0));
+  $('mAggr').addEventListener('click', () => setManner(1));
+  setInterval(() => { if (tabletUp && page === 'roster') drawRoster(); }, 1000);
+
   // Keyboard: held keys pan and rotate every frame, others act once.
   const held = new Set();
   addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     held.add(k);
+    if (k === 'tab') { e.preventDefault(); setTablet(!tabletUp); return; }
     if (k === '1') setScene('ships');
     else if (k === '2') setScene('ground');
     else if (k === '3') setScene('planet');
@@ -258,7 +293,15 @@ try {
       if (held.has('d') || held.has('arrowright')) px -= speed;
       if (held.has('w') || held.has('arrowup')) py += speed;
       if (held.has('s') || held.has('arrowdown')) py -= speed;
-      if (px || py) v.pan(px, py);
+      if (tabletUp || scene !== 'ground') {
+        if (px || py) v.pan(px, py);
+        v.move_commander(0, 0, false);
+      } else {
+        // On foot: WASD walks the commander (Shift sprints); the camera follows him.
+        const mx = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
+        const my = (held.has('w') || held.has('arrowup') ? 1 : 0) - (held.has('s') || held.has('arrowdown') ? 1 : 0);
+        v.move_commander(mx, my, held.has('shift'));
+      }
       if (held.has('q')) v.rotate(-1.5 * dt);
       if (held.has('e')) v.rotate(1.5 * dt);
       const t0 = performance.now();
