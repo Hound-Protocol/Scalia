@@ -6,6 +6,7 @@ pub mod fixed;
 pub mod flight;
 pub mod groups;
 pub mod hash;
+pub mod nav;
 pub mod planet;
 pub mod position;
 pub mod process;

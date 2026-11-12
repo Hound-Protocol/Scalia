@@ -1,0 +1,253 @@
+//! Navigation: static props (rocks, walls, crates) rasterised into a grid of 0.5 m cells, with each cell's
+//! clearance (distance to the nearest obstacle) so one grid serves movers of every size: a soldier needs about
+//! 0.3 m, a truck 1.5 m, a tank 2 m. Integer-only and deterministic.
+
+/// Cell edge in millimetres.
+pub const CELL_MM: i64 = 500;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PropKind {
+    /// A boulder: a disc on the ground.
+    Rock { radius_mm: i64 },
+    /// A straight wall, running east-west before turning.
+    Wall { length_mm: i64, thickness_mm: i64 },
+    /// A square crate.
+    Crate { size_mm: i64 },
+}
+
+/// A static obstacle at a position, turned by whole quarter turns.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Prop {
+    pub kind: PropKind,
+    pub x_mm: i64,
+    pub y_mm: i64,
+    pub quarter_turns: u8,
+}
+
+impl Prop {
+    /// Whether the prop overlaps a cell whose centre is at (dx, dy) from the prop's centre. Overlap, not just
+    /// the centre, so a wall thinner than a cell still blocks it.
+    fn overlaps_cell(&self, dx: i64, dy: i64) -> bool {
+        let h = CELL_MM / 2;
+        match self.kind {
+            PropKind::Rock { radius_mm } => {
+                // Nearest point of the cell to the rock's centre.
+                let nx = dx.signum() * (dx.abs() - h).max(0);
+                let ny = dy.signum() * (dy.abs() - h).max(0);
+                nx * nx + ny * ny < radius_mm * radius_mm
+            }
+            _ => {
+                let (hx, hy) = self.half_extent();
+                dx.abs() < hx + h && dy.abs() < hy + h
+            }
+        }
+    }
+
+    /// Half the width and height of the prop's bounding box.
+    fn half_extent(&self) -> (i64, i64) {
+        match self.kind {
+            PropKind::Rock { radius_mm } => (radius_mm, radius_mm),
+            PropKind::Wall { length_mm, thickness_mm } => {
+                if self.quarter_turns % 2 == 0 { (length_mm / 2, thickness_mm / 2) } else { (thickness_mm / 2, length_mm / 2) }
+            }
+            PropKind::Crate { size_mm } => (size_mm / 2, size_mm / 2),
+        }
+    }
+}
+
+/// A rectangle of cells with its south-west corner at (x_mm, y_mm).
+pub struct NavGrid {
+    pub x_mm: i64,
+    pub y_mm: i64,
+    pub w: usize,
+    pub h: usize,
+    blocked: Vec<bool>,
+    clearance_mm: Vec<i64>,
+}
+
+impl NavGrid {
+    pub fn new(x_mm: i64, y_mm: i64, w: usize, h: usize) -> NavGrid {
+        NavGrid { x_mm, y_mm, w, h, blocked: vec![false; w * h], clearance_mm: vec![0; w * h] }
+    }
+
+    /// The cell holding a point, if it is inside the grid.
+    pub fn cell_of(&self, x_mm: i64, y_mm: i64) -> Option<(usize, usize)> {
+        let (i, j) = ((x_mm - self.x_mm).div_euclid(CELL_MM), (y_mm - self.y_mm).div_euclid(CELL_MM));
+        (i >= 0 && j >= 0 && (i as usize) < self.w && (j as usize) < self.h).then_some((i as usize, j as usize))
+    }
+
+    /// Centre of a cell in millimetres.
+    pub fn centre(&self, i: usize, j: usize) -> (i64, i64) {
+        (self.x_mm + i as i64 * CELL_MM + CELL_MM / 2, self.y_mm + j as i64 * CELL_MM + CELL_MM / 2)
+    }
+
+    pub fn blocked(&self, i: usize, j: usize) -> bool {
+        self.blocked[j * self.w + i]
+    }
+
+    pub fn clearance(&self, i: usize, j: usize) -> i64 {
+        self.clearance_mm[j * self.w + i]
+    }
+
+    /// Rasterises the props (a cell is blocked when a prop overlaps it) and recomputes clearance.
+    pub fn rebuild(&mut self, props: &[Prop]) {
+        self.blocked.iter_mut().for_each(|b| *b = false);
+        for p in props {
+            let (hx, hy) = p.half_extent();
+            let lo = self.cell_range(p.x_mm - hx, p.y_mm - hy);
+            let hi = self.cell_range(p.x_mm + hx, p.y_mm + hy);
+            for j in lo.1..=hi.1 {
+                for i in lo.0..=hi.0 {
+                    let (cx, cy) = self.centre(i, j);
+                    if p.overlaps_cell(cx - p.x_mm, cy - p.y_mm) {
+                        self.blocked[j * self.w + i] = true;
+                    }
+                }
+            }
+        }
+        self.compute_clearance();
+    }
+
+    /// Clamped cell coordinates of a point (for bounding boxes that may poke outside the grid).
+    fn cell_range(&self, x_mm: i64, y_mm: i64) -> (usize, usize) {
+        let i = (x_mm - self.x_mm).div_euclid(CELL_MM).clamp(0, self.w as i64 - 1);
+        let j = (y_mm - self.y_mm).div_euclid(CELL_MM).clamp(0, self.h as i64 - 1);
+        (i as usize, j as usize)
+    }
+
+    /// Exact Euclidean distance transform (Felzenszwalb and Huttenlocher) over the grid padded with one ring of
+    /// blocked cells, so the grid's edge counts as an obstacle. Clearance is the distance from a cell's centre to
+    /// the nearest blocked cell's centre, less half a cell; blocked cells have none.
+    fn compute_clearance(&mut self) {
+        let (pw, ph) = (self.w + 2, self.h + 2);
+        const INF: i64 = i64::MAX / 4;
+        let mut d = vec![INF; pw * ph];
+        for j in 0..ph {
+            for i in 0..pw {
+                let edge = i == 0 || j == 0 || i == pw - 1 || j == ph - 1;
+                if edge || self.blocked[(j - 1) * self.w + (i - 1)] {
+                    d[j * pw + i] = 0;
+                }
+            }
+        }
+        // Columns, then rows: squared distances in cells.
+        let mut line = Vec::new();
+        for i in 0..pw {
+            line.clear();
+            line.extend((0..ph).map(|j| d[j * pw + i]));
+            let out = edt_1d(&line);
+            for j in 0..ph {
+                d[j * pw + i] = out[j];
+            }
+        }
+        for j in 0..ph {
+            let out = edt_1d(&d[j * pw..(j + 1) * pw]);
+            d[j * pw..(j + 1) * pw].copy_from_slice(&out);
+        }
+        for j in 0..self.h {
+            for i in 0..self.w {
+                let sq = d[(j + 1) * pw + (i + 1)];
+                self.clearance_mm[j * self.w + i] = if sq == 0 { 0 } else { (isqrt(sq * CELL_MM * CELL_MM) - CELL_MM / 2).max(0) };
+            }
+        }
+    }
+
+    /// Clearance at a point (0 outside the grid).
+    pub fn clearance_mm_at(&self, x_mm: i64, y_mm: i64) -> i64 {
+        self.cell_of(x_mm, y_mm).map_or(0, |(i, j)| self.clearance(i, j))
+    }
+
+    /// Whether a mover of `radius_mm` can stand at a point.
+    pub fn walkable_at(&self, x_mm: i64, y_mm: i64, radius_mm: i64) -> bool {
+        self.cell_of(x_mm, y_mm).is_some_and(|(i, j)| !self.blocked(i, j) && self.clearance(i, j) >= radius_mm)
+    }
+
+    /// A hash of the grid's contents (for determinism checks).
+    pub fn fingerprint(&self) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for (b, c) in self.blocked.iter().zip(&self.clearance_mm) {
+            for v in [*b as u64, *c as u64] {
+                h ^= v;
+                h = h.wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        h
+    }
+}
+
+/// One-dimensional squared distance transform of a sampled function (0 at obstacles, "infinite" elsewhere).
+fn edt_1d(f: &[i64]) -> Vec<i64> {
+    let n = f.len();
+    let inf = i64::MAX / 4;
+    let mut out = vec![inf; n];
+    // Lower envelope of parabolas rooted at the finite samples; boundaries compared as exact fractions.
+    let mut v: Vec<usize> = Vec::with_capacity(n);
+    let mut z_num: Vec<i64> = Vec::with_capacity(n + 1);
+    let mut z_den: Vec<i64> = Vec::with_capacity(n + 1);
+    for q in 0..n {
+        if f[q] >= inf {
+            continue;
+        }
+        loop {
+            match v.last() {
+                None => {
+                    v.push(q);
+                    z_num.push(i64::MIN / 4);
+                    z_den.push(1);
+                    break;
+                }
+                Some(&p) => {
+                    // Intersection of the parabolas at p and q: s = ((f[q] + q^2) - (f[p] + p^2)) / (2(q - p)).
+                    let num = (f[q] + (q * q) as i64) - (f[p] + (p * p) as i64);
+                    let den = 2 * (q - p) as i64;
+                    let k = v.len() - 1;
+                    // Drop p while s <= z[k] (compare num/den <= z_num[k]/z_den[k], both denominators positive).
+                    if (num as i128) * (z_den[k] as i128) <= (z_num[k] as i128) * (den as i128) && k > 0 {
+                        v.pop();
+                        z_num.pop();
+                        z_den.pop();
+                        continue;
+                    }
+                    if (num as i128) * (z_den[k] as i128) <= (z_num[k] as i128) * (den as i128) {
+                        // k == 0: q replaces the only parabola.
+                        v[0] = q;
+                        break;
+                    }
+                    v.push(q);
+                    z_num.push(num);
+                    z_den.push(den);
+                    break;
+                }
+            }
+        }
+    }
+    if v.is_empty() {
+        return out;
+    }
+    let mut k = 0;
+    for (q, o) in out.iter_mut().enumerate() {
+        // Advance while the next boundary lies at or before q.
+        while k + 1 < v.len() && (z_num[k + 1] as i128) <= (q as i128) * (z_den[k + 1] as i128) {
+            k += 1;
+        }
+        let p = v[k];
+        let d = q as i64 - p as i64;
+        *o = d * d + f[p];
+    }
+    out
+}
+
+/// Integer square root (floor).
+fn isqrt(n: i64) -> i64 {
+    if n <= 0 {
+        return 0;
+    }
+    let mut x = (n as f64).sqrt() as i64;
+    while x * x > n {
+        x -= 1;
+    }
+    while (x + 1) * (x + 1) <= n {
+        x += 1;
+    }
+    x
+}

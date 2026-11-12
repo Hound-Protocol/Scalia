@@ -80,6 +80,29 @@ fn main() {
     let plan_worst_ms = plans.iter().cloned().fold(0.0, f64::max);
     let plan_ms = median_ms(plans);
 
+    // Navigation: a 400 m testing ground (800 x 800 cells) with 300 props, rebuilt; the budget is 1 ms per
+    // 32 m tile, so the whole ground (156 tiles) may take 156 ms, but we hold it to the per-tile rate.
+    use scalia_core::nav::{NavGrid, Prop, PropKind};
+    let mut props = Vec::new();
+    for k in 0..300i64 {
+        let h = scalia_core::hash::mix64(k as u64);
+        let (x, y) = ((h % 390_000) as i64 + 5_000, ((h >> 20) % 390_000) as i64 + 5_000);
+        let kind = match k % 3 {
+            0 => PropKind::Rock { radius_mm: 600 + (h >> 40) as i64 % 2_000 },
+            1 => PropKind::Wall { length_mm: 4_000 + (h >> 40) as i64 % 12_000, thickness_mm: 400 },
+            _ => PropKind::Crate { size_mm: 1_200 },
+        };
+        props.push(Prop { kind, x_mm: x, y_mm: y, quarter_turns: (k % 4) as u8 });
+    }
+    let mut grid = NavGrid::new(0, 0, 800, 800);
+    let mut navs = Vec::new();
+    for _ in 0..5 {
+        let s = Instant::now();
+        grid.rebuild(&props);
+        navs.push(s.elapsed().as_secs_f64() * 1000.0);
+    }
+    let nav_tile_ms = median_ms(navs) / (800.0 * 800.0 / (64.0 * 64.0));
+
     // Printing real state keeps the work observable and sanity-checks that ticks drained needs.
     let food: f64 = w.groups.needs(scalia_core::groups::GroupId(5)).food.to_f32() as f64;
     println!("sanity_group5_food={food:.4} after {} ticks", t / 1000);
@@ -87,11 +110,13 @@ fn main() {
     let (v1, v2) = (verdict(tick_ms, TICK_BUDGET_MS), verdict(derive_ms, DERIVE_BUDGET_MS));
     let v3 = verdict(chunk_ms, CHUNK_BUDGET_MS);
     let v4 = verdict(plan_ms, PLAN_BUDGET_MS);
+    let v5 = verdict(nav_tile_ms, 1.0);
     println!("tick_1m_soldiers_ms={tick_ms:.3} budget=5 {v1}");
     println!("derive_20k_ms={derive_ms:.3} budget=2 {v2}");
     println!("chunk_64_ms={chunk_ms:.3} budget=1 {v3} (check {guard})");
     println!("goap_squad_plan_ms={plan_ms:.4} worst={plan_worst_ms:.4} budget={PLAN_BUDGET_MS} {v4} ({steps} steps over 4096 plans)");
-    if !report_only && (v1 == "FAIL" || v2 == "FAIL" || v3 == "FAIL" || v4 == "FAIL") {
+    println!("nav_grid_per_tile_ms={nav_tile_ms:.4} budget=1 {v5} (fingerprint {:x})", grid.fingerprint());
+    if !report_only && (v1 == "FAIL" || v2 == "FAIL" || v3 == "FAIL" || v4 == "FAIL" || v5 == "FAIL") {
         std::process::exit(1);
     }
 }
