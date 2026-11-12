@@ -82,6 +82,9 @@ pub struct Viewer {
     sys_now: WorldMs,
     planet_view: f32,
     globe_built: bool,
+    /// Unit globes for the star system view: one per body (its own map), and the sun.
+    body_globes: Vec<Vec<([Vec3; 3], f32)>>,
+    sun_globe: Vec<([Vec3; 3], f32)>,
     docked: u8,
     flight: Option<(FlightPlan, u8)>,
     trail: Vec<(f64, f32, f32)>,
@@ -141,6 +144,8 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         sys_now: WorldMs(0),
         planet_view: 220.0,
         globe_built: false,
+        body_globes: vec![globe_triangles(42, 64, 32), globe_triangles(7, 64, 32)],
+        sun_globe: sphere_triangles(32, 16, 14.0),
         docked: 0,
         flight: None,
         trail: Vec::new(),
@@ -807,51 +812,14 @@ impl Viewer {
         (target, self.yaw, self.ground_view, 600.0, text)
     }
 
-    /// The demo planet as a globe: longitude from x, latitude from y, relief exaggerated, sea and ice.
+    /// The demo planet as a globe, with a marker where the battlefield is.
     fn build_globe(&mut self) {
-        let p = Planet::demo(42);
-        let (cols, rows) = (192usize, 96usize);
-        let mut h = vec![0i32; (cols + 1) * (rows + 1)];
-        for j in 0..=rows {
-            for i in 0..=cols {
-                let x = p.width_mm() / cols as i64 * i as i64;
-                let y = p.depth_mm() / rows as i64 * j as i64;
-                h[j * (cols + 1) + i] = p.coarse_height_mm(x, y);
-            }
-        }
-        let vert = |i: usize, j: usize| -> [f32; 3] {
-            let lon = i as f32 / cols as f32 * std::f32::consts::TAU;
-            let lat = (j as f32 / rows as f32 - 0.5) * std::f32::consts::PI;
-            let z = h[j * (cols + 1) + i].max(0) as f32; // the sea is flat
-            let r = GLOBE_R * (1.0 + z / 1_000_000.0 * 0.004); // relief exaggerated about 2.6x
-            [r * lat.cos() * lon.cos(), r * lat.cos() * lon.sin(), r * lat.sin()]
-        };
         let mut m = MeshBuilder::default();
-        for j in 0..rows {
-            for i in 0..cols {
-                let mean = (h[j * (cols + 1) + i] + h[j * (cols + 1) + i + 1] + h[(j + 1) * (cols + 1) + i] + h[(j + 1) * (cols + 1) + i + 1]) / 4;
-                let y = p.depth_mm() / rows as i64 * j as i64 + p.depth_mm() / rows as i64 / 2;
-                let col = if p.is_ice(y) {
-                    15.0
-                } else if mean < 0 {
-                    6.0
-                } else if mean < 1_200_000 {
-                    11.0
-                } else if mean < 2_500_000 {
-                    12.0
-                } else if mean < 4_000_000 {
-                    13.0
-                } else {
-                    2.0
-                };
-                let (a, b, c, d) = (vert(i, j), vert(i + 1, j), vert(i + 1, j + 1), vert(i, j + 1));
-                m.tri(a, b, c, col);
-                m.tri(a, c, d, col);
-            }
+        for (tri, col) in globe_triangles(42, 192, 96) {
+            m.tri((tri[0] * GLOBE_R).to_array(), (tri[1] * GLOBE_R).to_array(), (tri[2] * GLOBE_R).to_array(), col);
         }
-        // The battlefield: a marker on the equator at x = 0.
-        let site = vert(0, rows / 2);
-        m.diamond([site[0] * 1.03, site[1] * 1.03, site[2]], 2.0, 9.0);
+        let site = Vec3::new(1.0, 0.0, 0.0) * GLOBE_R * 1.03;
+        m.diamond(site.to_array(), 2.0, 9.0);
         self.gpu.upload("globe", m.bytes());
         self.globe_built = true;
     }
@@ -874,9 +842,16 @@ impl Viewer {
         for (i, b) in self.system.bodies.iter().enumerate() {
             let p = self.system.body_pos(BodyId(i as u8), now).expect("known body");
             m.ring([0.0, 0.0], (b.orbit_radius_mm as f64 / KM) as f32, (pix * 0.6).max(20.0), 128, 3.0);
-            m.diamond([(p.x as f64 / KM) as f32, (p.y as f64 / KM) as f32, 0.0], (pix * 5.0).max(800.0), if i == 0 { 6.0 } else { 5.0 });
+            let c = Vec3::new((p.x as f64 / KM) as f32, (p.y as f64 / KM) as f32, 0.0);
+            let r = (pix * 5.0).max(800.0);
+            for (tri, col) in &self.body_globes[i] {
+                m.tri((tri[0] * r + c).to_array(), (tri[1] * r + c).to_array(), (tri[2] * r + c).to_array(), *col);
+            }
         }
-        m.diamond([0.0, 0.0, 0.0], (pix * 9.0).max(2500.0), 14.0);
+        let r = (pix * 9.0).max(2500.0);
+        for (tri, col) in &self.sun_globe {
+            m.tri((tri[0] * r).to_array(), (tri[1] * r).to_array(), (tri[2] * r).to_array(), *col);
+        }
         let mut text;
         let (sx, sy) = match self.flight {
             Some((plan, dest)) if now.0 < plan.start.0 + plan.duration_ms => {
@@ -914,4 +889,67 @@ impl Viewer {
         let target = self.sys_cam.unwrap_or_else(|| self.sys_follow_pos());
         (target, self.yaw, self.sys_scale, self.sys_scale * 4.0, text)
     }
+}
+
+/// A planet as a unit-radius globe of coloured triangles: longitude from the map's x (it wraps), latitude from y,
+/// relief exaggerated, flat seas, polar ice. The same map the ground scenes are cut from.
+fn globe_triangles(seed: u64, cols: usize, rows: usize) -> Vec<([Vec3; 3], f32)> {
+    let p = Planet::demo(seed);
+    let mut h = vec![0i32; (cols + 1) * (rows + 1)];
+    for j in 0..=rows {
+        for i in 0..=cols {
+            let x = p.width_mm() / cols as i64 * i as i64;
+            let y = p.depth_mm() / rows as i64 * j as i64;
+            h[j * (cols + 1) + i] = p.coarse_height_mm(x, y);
+        }
+    }
+    let vert = |i: usize, j: usize| -> Vec3 {
+        let lon = i as f32 / cols as f32 * std::f32::consts::TAU;
+        let lat = (j as f32 / rows as f32 - 0.5) * std::f32::consts::PI;
+        let z = h[j * (cols + 1) + i].max(0) as f32; // the sea is flat
+        let r = 1.0 + z / 1_000_000.0 * 0.004; // relief exaggerated about 2.6x
+        Vec3::new(r * lat.cos() * lon.cos(), r * lat.cos() * lon.sin(), r * lat.sin())
+    };
+    let mut out = Vec::with_capacity(cols * rows * 2);
+    for j in 0..rows {
+        for i in 0..cols {
+            let mean = (h[j * (cols + 1) + i] + h[j * (cols + 1) + i + 1] + h[(j + 1) * (cols + 1) + i] + h[(j + 1) * (cols + 1) + i + 1]) / 4;
+            let y = p.depth_mm() / rows as i64 * j as i64 + p.depth_mm() / rows as i64 / 2;
+            let col = if p.is_ice(y) {
+                15.0
+            } else if mean < 0 {
+                6.0
+            } else if mean < 1_200_000 {
+                11.0
+            } else if mean < 2_500_000 {
+                12.0
+            } else if mean < 4_000_000 {
+                13.0
+            } else {
+                2.0
+            };
+            let (a, b, c, d) = (vert(i, j), vert(i + 1, j), vert(i + 1, j + 1), vert(i, j + 1));
+            out.push(([a, b, c], col));
+            out.push(([a, c, d], col));
+        }
+    }
+    out
+}
+
+/// A plain unit sphere of one colour (the sun).
+fn sphere_triangles(cols: usize, rows: usize, col: f32) -> Vec<([Vec3; 3], f32)> {
+    let vert = |i: usize, j: usize| {
+        let lon = i as f32 / cols as f32 * std::f32::consts::TAU;
+        let lat = (j as f32 / rows as f32 - 0.5) * std::f32::consts::PI;
+        Vec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin())
+    };
+    let mut out = Vec::new();
+    for j in 0..rows {
+        for i in 0..cols {
+            let (a, b, c, d) = (vert(i, j), vert(i + 1, j), vert(i + 1, j + 1), vert(i, j + 1));
+            out.push(([a, b, c], col));
+            out.push(([a, c, d], col));
+        }
+    }
+    out
 }
