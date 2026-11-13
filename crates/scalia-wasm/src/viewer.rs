@@ -171,6 +171,8 @@ pub struct Viewer {
     cmd_input: (f32, f32, bool),
     cmd_moving: bool,
     cmd_pose: (Pose, Pose, f32),
+    /// The live killhouse assault, when one is running (replaces the static enemy posts).
+    assault: Option<crate::assault::Assault>,
     radio_until: f64,
     /// The tablet is up: the camera leaves the commander for the map, which zooms all the way.
     tablet: bool,
@@ -308,6 +310,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_input: (0.0, 0.0, false),
         cmd_moving: false,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
+        assault: None,
         radio_until: -1.0,
         tablet: false,
         manner: 0,
@@ -605,6 +608,34 @@ impl Viewer {
         self.arrive_stance.clear();
         self.arrive_report.clear();
         format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
+    }
+    /// Starts the training assault: a squad of 12 forms up south of the killhouse and takes it from the 8
+    /// enemy soldiers inside, all on the battle AI. Starting again restarts it.
+    pub fn start_assault(&mut self, seed: u32) {
+        self.assault = Some(crate::assault::Assault::new(KILLHOUSE_MM, seed as u64, self.frame_ms));
+    }
+    /// Ends the assault and puts the enemy back on their posts.
+    pub fn stop_assault(&mut self) {
+        self.assault = None;
+    }
+    /// The assault as JSON: running, who is alive, and the leader's steps since the last call.
+    pub fn assault_state(&mut self) -> String {
+        let Some(a) = self.assault.as_mut() else { return "{\"running\":false}".into() };
+        let steps: Vec<String> = a.steps.drain(..).map(|(squad, step)| format!("{{\"squad\":{squad},\"step\":\"{step}\"}}")).collect();
+        format!("{{\"running\":true,\"over\":{},\"attackers\":{},\"defenders\":{},\"steps\":[{}]}}", a.over, a.alive(0), a.alive(1), steps.join(","))
+    }
+    /// Sounds since the last call, three floats each: distance from the commander (m), pan (-1 left .. 1 right
+    /// on screen), and 1 for a blast or 0 for a shot.
+    pub fn take_sounds(&mut self) -> Vec<f32> {
+        let Some(a) = self.assault.as_mut() else { return Vec::new() };
+        let (r, _, _) = scalia_render::camera::basis(self.last_cam.1);
+        let mut out = Vec::new();
+        for snd in a.sounds.drain(..) {
+            let d = Vec3::new((snd.x - self.cmd.0) as f32, (snd.y - self.cmd.1) as f32, 0.0);
+            let len = d.length();
+            out.extend_from_slice(&[len, if len > 0.5 { d.dot(r) / len } else { 0.0 }, if snd.blast { 1.0 } else { 0.0 }]);
+        }
+        out
     }
     /// Benchmark scene: `squads` squads of 12 around the commander (see `bench_army`). Returns the soldier count.
     pub fn bench_army(&mut self, squads: u32) -> u32 {
@@ -1880,10 +1911,25 @@ impl Viewer {
         instanced.push(("base".into(), "base_at".into()));
         let (bx, by) = ((-self.origin.0) as f32, (-self.origin.1) as f32);
         self.gpu.upload_instances("base_at", bytes(&[bx, by, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
-        // The enemy squad in the training house.
+        // The enemy squad in the training house: on their posts, or fighting the live assault.
         let mut foes = Vec::with_capacity(ENEMY_POSTS.len() * 12);
+        let mut assaulters = Vec::new();
+        if let Some(mut a) = self.assault.take() {
+            a.advance(self.frame_ms);
+            let ts = ((t / 1000.0) % 86_400.0) as f32;
+            let origin = self.origin;
+            let mut place = |x: f64, y: f64| {
+                let z = self.height_at(x as f32, y as f32);
+                let (rx, ry) = ((x - origin.0) as f32, (y - origin.1) as f32);
+                self.on_screen(rx, ry, z, 3.0).then_some((rx, ry, z))
+            };
+            foes = a.instances(1, ts, ENEMY_RED as f32, &mut place);
+            assaulters = a.instances(0, ts, 6.0, &mut place);
+            self.assault = Some(a);
+        }
         let (kx, ky) = (KILLHOUSE_MM.0 as f32 / 1000.0, KILLHOUSE_MM.1 as f32 / 1000.0);
-        for (i, &((px, py), (wx, wy), pose)) in ENEMY_POSTS.iter().enumerate() {
+        let posts: &[((f32, f32), (f32, f32), Pose)] = if self.assault.is_none() { &ENEMY_POSTS } else { &[] };
+        for (i, &((px, py), (wx, wy), pose)) in posts.iter().enumerate() {
             let (ax, ay) = (kx + px, ky + py);
             let z = self.height_at(ax, ay);
             let heading = (px - wx).atan2(wy - py);
@@ -1891,17 +1937,21 @@ impl Viewer {
             foes.extend_from_slice(&[x, y, z, ENEMY_RED as f32, heading, i as f32 * 0.137 % 1.0, 0.0, pose as u32 as f32, pose as u32 as f32, -1000.0, 0.0, 0.0]);
         }
         self.gpu.upload_instances("enemies", bytes(&foes));
+        self.gpu.upload_instances("assaulters", bytes(&assaulters));
         // Three levels of detail. Past 250 m a soldier is a few pixels tall: the 24-triangle figure, and no
         // shadow pass for it (its shadow would be smaller than a pixel).
         if self.ground_view <= 70.0 {
             instanced.push(("figure".into(), "soldiers".into()));
             instanced.push(("enemy".into(), "enemies".into()));
+            instanced.push(("figure".into(), "assaulters".into()));
         } else if self.ground_view <= 250.0 {
             instanced.push(("figure_lo".into(), "soldiers".into()));
             instanced.push(("enemy_lo".into(), "enemies".into()));
+            instanced.push(("figure_lo".into(), "assaulters".into()));
         } else {
             decor.push(("figure_far".into(), "soldiers".into()));
             decor.push(("enemy_far".into(), "enemies".into()));
+            decor.push(("figure_far".into(), "assaulters".into()));
         }
         if let Some(d) = self.order_dest {
             let arrived = self.selected.map_or(true, |g| !self.world.groups.process(GroupId(g)).is_running_at(tick));

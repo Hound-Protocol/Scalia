@@ -488,6 +488,7 @@ name = "scalia-wasm"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "scalia-ai",
  "scalia-blueprint",
  "scalia-core",
  "scalia-render",

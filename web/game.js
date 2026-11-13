@@ -691,6 +691,7 @@ try {
     else if (o.kind === 'tank' || o.kind === 'truck') hints.push('Click: select armored vehicle');
     else if (!sel) hints.push('Click a unit to select it');
     if (sel) hints.push(`Right-click: order ${sel.split(',')[0]}${sel.includes(',') ? ' +' : ''} here`);
+    if (o.kind === 'killhouse') hints.push('K: run the training assault');
     hints.push(infoOf(o).scan ? 'Hold S: scan structure' : 'Hold right-click: about');
     const sub = o.kind === 'unit' ? `${infoOf(o).type} · ${o.soldiers}` : infoOf(o).type;
     const html = `<b>${nameOf(o)}</b><span>${sub} · grid ${o.grid}</span>${hints.map((h) => `<i>${h}</i>`).join('')}`;
@@ -1265,10 +1266,62 @@ try {
 
   // Keyboard: held keys pan and rotate every frame, others act once.
   const held = new Set();
+  // ---- Training assault (K): a squad takes the killhouse from the enemy inside, on the battle AI ----
+  // Gunfire is the recorded M4 shot, placed by distance from the commander (quieter, duller, later) and panned
+  // to where it is on screen; a grenade is the same shot slowed down and loud.
+  let fireCtx = null, shotBuf = null, voices = 0;
+  const fireGraph = () => {
+    if (fireCtx) return fireCtx;
+    try {
+      fireCtx = new AudioContext();
+      fetch('./sfx/m4-shot.mp3').then((r) => r.arrayBuffer()).then((b) => fireCtx.decodeAudioData(b)).then((d) => { shotBuf = d; }).catch(() => {});
+    } catch (_) { fireCtx = null; }
+    return fireCtx;
+  };
+  const fire = (dist, pan, blast) => {
+    const c = fireGraph(); if (!c || !shotBuf || voices > 24) return;
+    if (c.state === 'suspended') c.resume().catch(() => {});
+    const src = c.createBufferSource(); src.buffer = shotBuf;
+    src.playbackRate.value = blast ? 0.45 : 0.94 + Math.random() * 0.12;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(1800, 18000 / (1 + dist / 40));
+    const g = c.createGain(); g.gain.value = Math.min(1, (blast ? 2.2 : 0.9) / (1 + dist / 20));
+    const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan * 0.8));
+    src.connect(lp).connect(g).connect(p).connect(c.destination);
+    voices++; src.onended = () => { voices--; };
+    src.start(c.currentTime + dist / 343);
+  };
+  const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
+    storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
+  let assaultOn = false, assaultPoll = 0;
+  const assaultTick = (now) => {
+    if (!assaultOn) return;
+    const s = v.take_sounds();
+    for (let i = 0; i + 2 < s.length; i += 3) fire(s[i], s[i + 1], s[i + 2] > 0.5);
+    if (now - assaultPoll < 250) return;
+    assaultPoll = now;
+    let st; try { st = JSON.parse(v.assault_state()); } catch (_) { return; }
+    if (!st.running) { assaultOn = false; return; }
+    for (const step of st.steps) {
+      if (step.squad === 0 && STEP_SAY[step.step]) flash(`Alpha 1: ${STEP_SAY[step.step]} (${st.attackers} up)`);
+      else if (step.squad === 1 && step.step === 'fall back') flash('Enemy falling back inside the house');
+    }
+    if (st.over) {
+      assaultOn = false;
+      flash(st.defenders === 0 ? `Killhouse taken: ${st.attackers} of 12 still up. K to run it again.` : `Assault failed: ${st.defenders} enemy left. K to run it again.`);
+    }
+  };
+  const toggleAssault = () => {
+    if (assaultOn) { v.stop_assault(); assaultOn = false; flash('Training assault called off'); return; }
+    fireGraph();
+    v.start_assault((Math.random() * 1e9) >>> 0);
+    assaultOn = true; assaultPoll = 0;
+    flash('Training assault: Alpha 1 takes the killhouse');
+  };
   addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     held.add(k);
+    if (k === 'k' && !e.repeat && !tabletUp) { toggleAssault(); return; }
     if (k === 'tab') {
       e.preventDefault();
       if (e.repeat) return;
@@ -1438,6 +1491,7 @@ Click to copy and close.`;
       drawFieldLabels();
       drawMapMarks(); drawScan();
       footsteps();
+      assaultTick(now);
       const cpuFrame = performance.now() - t0;
       cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
       if (bench) benchTick(now, cpuFrame);

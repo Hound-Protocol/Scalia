@@ -10,6 +10,7 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use wasm_bindgen::prelude::*;
 
+pub mod assault;
 #[cfg(target_arch = "wasm32")]
 pub mod viewer;
 
