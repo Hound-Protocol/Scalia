@@ -7,10 +7,10 @@
 //! what happens next. Each step is a drill that hands the soldiers their tasks; the soldiers' own survival
 //! (cover when pinned, fighting what they see) runs underneath it.
 
-use crate::battle::{Act, Battle, Event, Gait, Task};
+use crate::battle::{Act, Battle, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM};
 use crate::goap::{self, Action, Goal, Limits, State};
 use crate::sight::isqrt;
-use crate::tactics::Building;
+use crate::tactics::{Building, Height};
 use scalia_core::killhouse::Killhouse;
 
 /// The commander's intent for a squad.
@@ -21,7 +21,27 @@ pub enum Order {
     Capture,
     /// Hold the building (or wherever they stand): defend.
     Hold,
+    /// Go to a point and make it safe there (cover within 10 m, else a perimeter), in the given manner.
+    Move { to: (i64, i64), mode: Mode },
 }
+
+/// How a squad moves (the commander's choice on the radio).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Mode {
+    /// Just go there.
+    Plain,
+    /// Possible hostile presence: slow, weapons up, scanning sectors and corners.
+    Caution,
+    /// Hostile presence confirmed: expect contact, bound and be ready to assault.
+    Confirmed,
+    /// Hold the area: fighting positions and fortification.
+    Garrison,
+}
+
+/// Around the spot they were sent to: cover within this reach is taken on arrival.
+pub const SECURE_MM: i64 = 10_000;
+/// Close enough to the spot to count as there when he cannot get onto it (it is taken or blocked).
+const ARRIVE_NEAR_MM: i64 = 4_500;
 
 /// One step of a building assault.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -137,11 +157,13 @@ pub struct Brain {
     grenade_used: bool,
     blast_at: Option<(i64, (i64, i64))>,
     holding: bool,
+    /// Move order: arrived and security set.
+    secured: bool,
 }
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false }
     }
 }
 
@@ -192,9 +214,88 @@ impl Battle {
         self.brains[squad] = Brain { order, ..Brain::new() };
     }
 
-    /// The squad has done what it was told (the building taken and held).
+    /// The squad has done what it was told (the building taken and held, or arrived and secured).
     pub fn squad_done(&self, squad: usize) -> bool {
-        self.brains.get(squad).is_some_and(|b| b.holding)
+        self.brains.get(squad).is_some_and(|b| b.holding || b.secured)
+    }
+
+    /// Move: everyone heads for the spot (each gets his own place round it); once all are there, security:
+    /// each man takes the nearest free cover within SECURE_MM of the spot, and the rest form a ring round it,
+    /// low, each facing out over his own sector.
+    fn lead_move(&mut self, squad: usize, to: (i64, i64), mode: Mode) {
+        let ms = self.members(squad);
+        if ms.is_empty() || self.brains[squad].secured {
+            return;
+        }
+        let far = ms.iter().map(|&i| dist(self.soldiers[i].pos, to)).max().unwrap_or(0);
+        let gait = match mode {
+            Mode::Caution => Gait::Walk,
+            _ if far > 40_000 => Gait::Run,
+            _ => Gait::Walk,
+        };
+        let mut all_there = true;
+        for &i in &ms {
+            let s = &mut self.soldiers[i];
+            let going = matches!(s.task, Task::Move { to: t, .. } if t == to);
+            if !going {
+                s.task = Task::Move { to, gait };
+                s.posture = None;
+                s.aim = mode != Mode::Plain;
+            }
+            all_there &= s.settled || dist(s.pos, to) <= ARRIVE_NEAR_MM && !s.moving;
+        }
+        if !all_there {
+            return;
+        }
+        self.brains[squad].secured = true;
+        self.log.push(Event::Order { squad, step: "secure" });
+        // Cover first: nearest free spot to each man, within reach of the place, spaced apart.
+        let spots: Vec<(usize, (i64, i64), (i64, i64), Height)> = match self.cover.as_ref() {
+            Some(c) => c.spots.iter().enumerate().filter(|(_, sp)| dist(sp.pos, to) <= SECURE_MM).map(|(k, sp)| (k, sp.pos, sp.toward, sp.height)).collect(),
+            None => Vec::new(),
+        };
+        let mut taken: Vec<(i64, i64)> = Vec::new();
+        let mut open: Vec<usize> = Vec::new();
+        for &i in &ms {
+            let me = self.soldiers[i].pos;
+            let pick = spots
+                .iter()
+                .filter(|sp| taken.iter().all(|&t| dist(t, sp.1) >= SPACING_MM))
+                .min_by_key(|sp| (dist(sp.1, me), sp.0));
+            match pick {
+                Some(&(_, pos, toward, height)) => {
+                    taken.push(pos);
+                    let s = &mut self.soldiers[i];
+                    s.task = Task::Hold { at: pos, face: (pos.0 + toward.0 * 5, pos.1 + toward.1 * 5) };
+                    s.posture = Some(if height == Height::Low { Stance::Crouch } else { Stance::Stand });
+                    s.gait = Gait::Walk;
+                }
+                None => open.push(i),
+            }
+        }
+        // In the open: a ring round the spot, sectors evenly spread, each man to the nearest free slot.
+        let n = open.len() as i64;
+        if n == 0 {
+            return;
+        }
+        let radius = (n * 700).max(3_000);
+        let mut slots: Vec<((i64, i64), (i64, i64))> = (0..n)
+            .map(|k| {
+                let d = DIRS_24[(k * 24 / n) as usize];
+                let at = (to.0 + d.0 * radius / 1_000, to.1 + d.1 * radius / 1_000);
+                (at, d)
+            })
+            .filter(|(at, _)| self.nav().is_none_or(|nv| nv.walkable_at(at.0, at.1, BODY_MM)))
+            .collect();
+        for i in open {
+            let me = self.soldiers[i].pos;
+            let Some(k) = (0..slots.len()).min_by_key(|&k| (dist(slots[k].0, me), k)) else { break };
+            let (at, d) = slots.remove(k);
+            let s = &mut self.soldiers[i];
+            s.task = Task::Hold { at, face: (at.0 + d.0 * 10, at.1 + d.1 * 10) };
+            s.posture = Some(Stance::Crouch);
+            s.gait = Gait::Walk;
+        }
     }
 
     /// The step the squad is on (for labels and tests).
@@ -257,6 +358,7 @@ impl Battle {
             match self.brains[squad].order {
                 Order::None => {}
                 Order::Hold => self.lead_hold(squad),
+                Order::Move { to, mode } => self.lead_move(squad, to, mode),
                 Order::Capture => {
                     if self.building.is_some() && !self.members(squad).is_empty() {
                         self.lead_capture(squad);

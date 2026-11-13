@@ -58,7 +58,7 @@ pub enum Act {
 }
 
 /// Radius a soldier needs to pass (doorways are 1.2 m and more).
-const BODY_MM: i64 = 250;
+pub(crate) const BODY_MM: i64 = 250;
 /// Within this of where he is going he has arrived.
 const ARRIVE_MM: i64 = 150;
 const PERSONAL_MM: i64 = 700;
@@ -67,7 +67,7 @@ pub const SPACING_MM: i64 = 900;
 /// Once there, a man stays put until pushed this far off his spot.
 const SETTLE_MM: i64 = 600;
 /// 24 directions, 15° apart, as unit vectors ×1000.
-const DIRS_24: [(i64, i64); 24] = [(1000, 0), (966, 259), (866, 500), (707, 707), (500, 866), (259, 966), (0, 1000), (-259, 966), (-500, 866), (-707, 707), (-866, 500), (-966, 259), (-1000, 0), (-966, -259), (-866, -500), (-707, -707), (-500, -866), (-259, -966), (0, -1000), (259, -966), (500, -866), (707, -707), (866, -500), (966, -259)];
+pub(crate) const DIRS_24: [(i64, i64); 24] = [(1000, 0), (966, 259), (866, 500), (707, 707), (500, 866), (259, 966), (0, 1000), (-259, 966), (-500, 866), (-707, 707), (-866, 500), (-966, 259), (-1000, 0), (-966, -259), (-866, -500), (-707, -707), (-500, -866), (-259, -966), (0, -1000), (259, -966), (500, -866), (707, -707), (866, -500), (966, -259)];
 /// Winding up and braking (mm/s²): about a second from standing to a run, a little less to stop.
 const ACCEL: i64 = 4_000;
 const BRAKE: i64 = 5_000;
@@ -209,7 +209,9 @@ pub struct Soldier {
     /// Where he is really going: the ordered spot, moved aside if another man already has it.
     goal: Option<(i64, i64)>,
     /// Arrived at his goal: he stands still until his goal changes or he is pushed well off it.
-    settled: bool,
+    pub(crate) settled: bool,
+    /// The stance his leader set for holding a position (low on a perimeter, low behind low cover).
+    pub(crate) posture: Option<Stance>,
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
@@ -217,7 +219,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, speed: 0, calm_ms: 0 }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, speed: 0, calm_ms: 0 }
     }
     pub fn alive(&self) -> bool {
         self.health > 0
@@ -567,6 +569,11 @@ impl Battle {
             // (Without a task or cover he keeps the stance he was given.)
             if s.task != Task::Idle || s.cover.is_some() {
                 s.stance = if s.gait == Gait::Crouch && s.moving || low_cover && !s.moving { Stance::Crouch } else { Stance::Stand };
+                if !s.moving && s.cover.is_none() {
+                    if let Some(p) = s.posture {
+                        s.stance = p;
+                    }
+                }
             }
         }
     }
