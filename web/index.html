@@ -129,6 +129,43 @@
      from his eyes (scripts/first_person.py), placed so the tablet in that view lands exactly on this box. */
   #tablet .fp { position: absolute; width: 238.232%; height: 273.386%; left: -69.116%; top: -84.139%; max-width: none;
     pointer-events: none; user-select: none; }
+  /* Cursor helper (above-left of the cursor), the right-button hold ring, the about panel and the structure scan. */
+  #tablet #mapTip { position: absolute; z-index: 6; pointer-events: none; transform: translate(-100%, -100%); max-width: 260px;
+    padding: 6px 9px; background: rgba(10, 13, 8, 0.88); border: 1px solid var(--drab); border-left: 2px solid var(--amber);
+    font: 500 12px/1.35 'Saira Condensed', sans-serif; color: var(--sand); white-space: nowrap; }
+  #tablet #mapTip[hidden], #tablet #aboutPanel[hidden], #tablet #holdRing[hidden], #tablet #scanOverlay[hidden] { display: none; }
+  #tablet #mapTip b { display: block; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: #f2d34a; }
+  #tablet #mapTip span { display: block; color: var(--dim); margin-bottom: 3px; }
+  #tablet #mapTip i { display: block; font-style: normal; color: #d9d2b2; }
+  #tablet #holdRing { position: absolute; z-index: 7; width: 30px; height: 30px; margin: -15px 0 0 -15px; pointer-events: none; border-radius: 50%;
+    background: conic-gradient(var(--amber) calc(var(--p, 0) * 1turn), rgba(0,0,0,0.25) 0); -webkit-mask: radial-gradient(circle, transparent 10px, #000 11px); mask: radial-gradient(circle, transparent 10px, #000 11px); }
+  #tablet #holdRing.go { animation: hold-fill 0.45s linear forwards; }
+  @property --p { syntax: '<number>'; inherits: false; initial-value: 0; }
+  @keyframes hold-fill { to { --p: 1; } }
+  #tablet #aboutPanel { position: absolute; right: 10px; top: 10px; width: 27%; min-width: 230px; z-index: 6; pointer-events: auto;
+    background: rgba(12,16,10,0.93); border: 1px solid var(--drab); padding: 10px 12px; color: var(--sand); animation: up-in 0.18s ease-out;
+    font: 400 13px/1.35 'Saira Condensed', sans-serif; }
+  #tablet #aboutPanel h4 { margin: 0; font-size: 18px; letter-spacing: 0.06em; color: #f2d34a; }
+  #tablet #aboutPanel .role { color: var(--amber); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 6px; }
+  #tablet #aboutPanel dt { color: var(--dim); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 6px; }
+  #tablet #aboutPanel dd { margin: 1px 0 0; }
+  #tablet #aboutPanel .x { position: absolute; right: 6px; top: 4px; background: none; border: 0; color: var(--dim); font-size: 18px; cursor: pointer; }
+  #tablet #aboutPanel .scaninfo { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  #tablet #aboutPanel .scanning span { color: #5ab0ff; letter-spacing: 0.16em; text-transform: uppercase; font-size: 12px; animation: scan-blink 0.5s steps(2, end) infinite; }
+  #tablet #aboutPanel .bar { display: block; height: 3px; margin-top: 5px; background: rgba(90,176,255,0.15); }
+  #tablet #aboutPanel .bar i { display: block; height: 100%; width: 0; background: #5ab0ff; box-shadow: 0 0 6px #5ab0ff; animation: scan-bar 1.6s linear forwards; }
+  #tablet #aboutPanel .result { display: none; }
+  #tablet #aboutPanel.scanned .scanning { display: none; }
+  #tablet #aboutPanel.scanned .result { display: block; animation: up-in 0.25s ease-out; }
+  #tablet #aboutPanel.scanned .result dd { color: #9fd0ff; }
+  @keyframes scan-bar { to { width: 100%; } }
+  @keyframes scan-blink { 50% { opacity: 0.4; } }
+  #tablet #scanOverlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+  #tablet #scanOverlay .face { fill: rgba(242,193,78,0.16); stroke: #f2c14e; stroke-width: 1.2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  #tablet #scanOverlay .win { fill: rgba(90,176,255,0.55); stroke: #8fd0ff; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  #tablet #scanOverlay .door { fill: rgba(60,140,255,0.75); stroke: #bfe3ff; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  #tablet #scanOverlay .room { fill: none; stroke: #5ab0ff; stroke-width: 1.4; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+  #tablet #scanOverlay .sweep { stroke: #5ab0ff; stroke-width: 2; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 3px #5ab0ff); }
   /* With the tablet up, the world behind it goes out of focus. */
   #view { transition: filter 0.35s ease; }
   body.pda #view { filter: blur(7px) brightness(0.8) saturate(0.85); }
@@ -148,7 +185,8 @@
   @keyframes call-in { from { transform: translateX(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
   /* The arms are separate layers so they can move: the left hand leaves the tablet to raise the walkie-talkie
      beside it (the tablet stays), and the right thumb follows the side buttons and presses them. */
-  #tablet .arm-l { transition: translate 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) 0.26s, visibility 0s 0.26s; }
+  /* (No visibility transition here: the arm would appear late when the whole tablet becomes visible.) */
+  #tablet .arm-l { transition: translate 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) 0.26s; }
   #tablet.walkie .arm-l { translate: 0 70cqw; visibility: hidden; transition: translate 0.22s cubic-bezier(0.55, 0, 0.8, 0.3) 0s, visibility 0s 0.22s; }
   #tablet .wk { z-index: 4; translate: 0 70cqw; visibility: hidden; transition: translate 0.24s cubic-bezier(0.55, 0, 0.8, 0.3) 0s, visibility 0s 0.24s; }
   #tablet.walkie .wk { translate: 0 0; visibility: visible; transition: translate 0.34s cubic-bezier(0.2, 0.85, 0.25, 1) 0.2s, visibility 0s 0.2s; }
@@ -471,7 +509,7 @@
     <div class="ph-right"><button class="ph-btn" data-page="changelog" id="chgBtn" title="What changed in each update">Changelog</button><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
   </header>
   <div class="screen page" id="home"></div>
-  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div id="mapMarks"></div><div id="mapBox" hidden></div><div id="unitPanel" hidden></div><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">left click: select · drag: select a square · right click: commands · middle drag/WASD: pan · wheel: zoom</div></div>
+  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div id="mapMarks"></div><svg id="scanOverlay" viewBox="0 0 1 1" preserveAspectRatio="none" hidden></svg><div id="mapBox" hidden></div><div id="mapTip" hidden></div><div id="holdRing" hidden></div><div id="aboutPanel" hidden></div><div id="unitPanel" hidden></div><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">left click: select · drag: select a square · right click: commands · hold right: about · middle drag/WASD: pan · wheel: zoom</div></div>
   <div class="screen page" id="roster" hidden></div>
   <div class="screen page" id="settings" hidden>
     <h3>Identity</h3>

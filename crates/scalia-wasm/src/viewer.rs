@@ -921,6 +921,69 @@ impl Viewer {
         }
         format!("[{}]", out.join(","))
     }
+    /// What is under a pixel (the active camera; the tablet map inside `use_map(true)`), as JSON:
+    /// {kind: unit|commander|barracks|tower|wall|sandbags|container|crate|rock|ground, id, grid, ...}.
+    pub fn object_at(&mut self, px: f64, py: f64) -> String {
+        if self.scene != Scene::Ground {
+            return "{\"kind\":\"none\"}".into();
+        }
+        let p = self.pick(px, py);
+        let g = grid(p.x as f64, p.y as f64);
+        if (Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0) - Vec3::new(p.x, p.y, 0.0)).length() < 1.6 {
+            return format!("{{\"kind\":\"commander\",\"id\":-1,\"grid\":\"{g}\"}}");
+        }
+        let unit = self.unit_at(px, py);
+        if unit >= 0 {
+            let i = unit as u32;
+            let captain = self.chain.is_captain(GroupId(i));
+            return format!("{{\"kind\":\"unit\",\"id\":{i},\"cs\":\"{}\",\"n\":{},\"captain\":{captain},\"soldiers\":{},\"grid\":\"{g}\"}}",
+                self.call_sign(i), i + 1, self.world.groups.people(GroupId(i)));
+        }
+        // Props: the nearest box the view ray passes through.
+        let (o, d) = self.ray(px, py);
+        let mut best: Option<(usize, f32)> = None;
+        for (k, prop) in self.base_props.iter().enumerate() {
+            let (lo, hi) = prop_box(prop, self.base_h);
+            let (mut t0, mut t1) = (f32::MIN, f32::MAX);
+            for a in 0..3 {
+                if d[a].abs() < 1e-6 {
+                    if o[a] < lo[a] || o[a] > hi[a] { t0 = f32::MAX; }
+                    continue;
+                }
+                let (ta, tb) = ((lo[a] - o[a]) / d[a], (hi[a] - o[a]) / d[a]);
+                t0 = t0.max(ta.min(tb));
+                t1 = t1.min(ta.max(tb));
+            }
+            if t0 <= t1 && best.is_none_or(|b| t0 < b.1) {
+                best = Some((k, t0));
+            }
+        }
+        if let Some((k, _)) = best {
+            return format!("{{\"kind\":\"{}\",\"id\":{k},\"grid\":\"{g}\"}}", prop_kind(&self.base_props[k]));
+        }
+        format!("{{\"kind\":\"ground\",\"id\":-1,\"grid\":\"{g}\",\"inside\":{}}}", in_base(p.x, p.y))
+    }
+
+    /// A structure's scan overlay for the active camera: its faces, doors, windows and room partitions as screen
+    /// polygons (fractions of the canvas, y down), JSON {faces:[[x,y,...]], doors, windows, rooms} (rooms are lines).
+    pub fn structure_overlay(&mut self, id: u32) -> String {
+        let Some(prop) = self.base_props.get(id as usize).copied() else { return "{}".into() };
+        let s = structure_of(&prop, self.base_h);
+        let (target, yaw, view_h) = self.last_cam;
+        let (r, u, _) = scalia_render::camera::basis(yaw);
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        let o = Vec3::new(self.origin.0 as f32, self.origin.1 as f32, 0.0);
+        let poly = |pts: &[Vec3]| {
+            let v: Vec<String> = pts.iter().map(|&q| {
+                let dd = q - o - target;
+                format!("{:.4},{:.4}", 0.5 + dd.dot(r) / (view_h * aspect), 0.5 - dd.dot(u) / view_h)
+            }).collect();
+            format!("[{}]", v.join(","))
+        };
+        let list = |v: &[Vec<Vec3>]| v.iter().map(|q| poly(q)).collect::<Vec<_>>().join(",");
+        format!("{{\"faces\":[{}],\"doors\":[{}],\"windows\":[{}],\"rooms\":[{}]}}", list(&s.faces), list(&s.doors), list(&s.windows), list(&s.rooms))
+    }
+
     /// Selects exactly one unit without moving the camera (clicking its marker on the tablet map).
     pub fn select_only(&mut self, id: i32) {
         if id >= 0 && (id as u32) < self.world.groups.len() as u32 {
@@ -1180,6 +1243,16 @@ impl Viewer {
         q + o
     }
 
+    /// The view ray through a pixel: a point on it (absolute metres) and its direction, away from the camera.
+    fn ray(&self, px: f64, py: f64) -> (Vec3, Vec3) {
+        let (target, yaw, view_h) = self.last_cam;
+        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+        let (nx, ny) = (2.0 * px as f32 / w - 1.0, 1.0 - 2.0 * py as f32 / h);
+        let (r, u, to_cam) = scalia_render::camera::basis(yaw);
+        let o = Vec3::new(self.origin.0 as f32, self.origin.1 as f32, 0.0);
+        (target + r * (nx * view_h / 2.0 * w / h) + u * (ny * view_h / 2.0) + o, -to_cam)
+    }
+
     /// Where a group's formation is centred at time t (render metres).
     /// The testing ground's captains: two officers, each his own unit, answering to the commander.
     fn add_captains(&mut self) {
@@ -1313,14 +1386,14 @@ impl Viewer {
             self.arrive_stance.insert(c, Pose::Crouch);
         }
         let names: Vec<String> = self.chain.squads_of(GroupId(c)).iter().map(|g| self.call_sign(g.0)).collect();
-        let g = grid(task.objective.0 as f64 / 1000.0, task.objective.1 as f64 / 1000.0);
+        let _g = grid(task.objective.0 as f64 / 1000.0, task.objective.1 as f64 / 1000.0);
         let support = names.first().cloned().unwrap_or_default();
         let report = match (step, task.at) {
             (Step::Approach, 0) | (Step::Occupy, 0) => None, // the acknowledgement covers it
-            (Step::Advance, _) => Some((format!("Actual, {{me}}. At the line of departure, no contact. Advancing on grid {g}. Out."), false)),
-            (Step::Suppress, _) => Some((format!("Actual, {{me}}. Contact at grid {g}. {support} laying down fire, assault going in. Out."), true)),
+            (Step::Advance, _) => Some((format!("Commander, {{me}}. At the line of departure, no contact. Advancing on the coordinates. Out."), false)),
+            (Step::Suppress, _) => Some((format!("Commander, {{me}}. Contact at the coordinates. {support} laying down fire, assault going in. Out."), true)),
             (Step::Assault, _) => Some(("Assaulting now!".to_string(), true)),
-            (Step::DigIn, _) => Some((format!("Actual, {{me}}. On the objective. Digging in at grid {g}. Out."), false)),
+            (Step::DigIn, _) => Some((format!("Commander, {{me}}. On the objective. Digging in at the coordinates. Out."), false)),
             _ => None,
         };
         if let Some((text, urgent)) = report {
@@ -1350,11 +1423,11 @@ impl Viewer {
             entry.0.advance();
             if done_after {
                 let (task, _, _) = self.tasks.remove(&c).expect("present");
-                let g = grid(task.objective.0 as f64 / 1000.0, task.objective.1 as f64 / 1000.0);
+                let _g = grid(task.objective.0 as f64 / 1000.0, task.objective.1 as f64 / 1000.0);
                 let me = self.call_sign(c);
                 let text = match task.kind {
-                    Kind::Take => format!("Actual, {me}. Grid {g} taken, no casualties. Squads holding. Over."),
-                    Kind::Hold => format!("Actual, {me}. In position, holding grid {g}. Out."),
+                    Kind::Take => format!("Commander, {me}. Objective taken, no casualties. Squads holding at the coordinates. Over."),
+                    Kind::Hold => format!("Commander, {me}. In position, holding the coordinates. Out."),
                 };
                 self.radio(c, text, false);
             } else {
@@ -1800,22 +1873,22 @@ impl Viewer {
                 self.world.groups.set_process(GroupId(g), scalia_core::process::Process::idle());
                 self.world.groups.set_pos(GroupId(g), Pos { region: RegionId(1), x: cx, y: cy, z: 0 });
             }
-            for (g, spot, kind) in reports {
+            for (g, _spot, kind) in reports {
                 let me = self.call_sign(g);
                 let pick = (g as usize + self.radio_out.len() + (t as usize / 50)) % 3;
                 let text = match (kind, pick) {
-                    (1, 0) => format!("Actual, {me}. Dug in at grid {spot}, holding. Over."),
-                    (1, 1) => format!("Actual, {me}. Grid {spot} secured, we hold here. Out."),
-                    (1, _) => format!("Actual, {me}. In cover at {spot}, watching our front. Over."),
-                    (2, 0) => format!("Actual, {me}. Assault element on grid {spot}. Awaiting orders. Over."),
-                    (2, 1) => format!("Actual, {me}. Reached {spot}, area clear. Over."),
-                    (2, _) => format!("Actual, {me}. At objective {spot}, ready. Out."),
-                    (3, 0) => format!("Actual, {me}. Support set at grid {spot}. Over."),
-                    (3, 1) => format!("Actual, {me}. In position at {spot}, eyes on. Out."),
-                    (3, _) => format!("Actual, {me}. Overwatch established, grid {spot}. Over."),
-                    (_, 0) => format!("Actual, {me}. Arrived at grid {spot}. Over."),
-                    (_, 1) => format!("Actual, {me}. We are at {spot}, awaiting orders. Over."),
-                    (_, _) => format!("Actual, {me}. At position, grid {spot}. Out."),
+                    (1, 0) => format!("Commander, {me}. Dug in at the coordinates, holding. Over."),
+                    (1, 1) => format!("Commander, {me}. Coordinates secured, we hold here. Out."),
+                    (1, _) => format!("Commander, {me}. In cover at the coordinates, watching our front. Over."),
+                    (2, 0) => format!("Commander, {me}. Assault element at the coordinates. Awaiting orders. Over."),
+                    (2, 1) => format!("Commander, {me}. Reached the coordinates, area clear. Over."),
+                    (2, _) => format!("Commander, {me}. At the objective, ready. Out."),
+                    (3, 0) => format!("Commander, {me}. Support set at the coordinates. Over."),
+                    (3, 1) => format!("Commander, {me}. In position at the coordinates, eyes on. Out."),
+                    (3, _) => format!("Commander, {me}. Overwatch established at the coordinates. Over."),
+                    (_, 0) => format!("Commander, {me}. Arrived at the coordinates. Over."),
+                    (_, 1) => format!("Commander, {me}. We are at the coordinates, awaiting orders. Over."),
+                    (_, _) => format!("Commander, {me}. At position, at the coordinates. Out."),
                 };
                 self.radio(g, text, false);
             }
@@ -2455,6 +2528,105 @@ fn level_base(h: &mut [f32], cx: i64, cy: i64) {
     }
 }
 
+/// A prop's bounding box (absolute metres), standing on the base pad at height `h`.
+fn prop_box(p: &Prop, h: f32) -> (Vec3, Vec3) {
+    let (x, y) = (p.x_mm as f32 / 1000.0, p.y_mm as f32 / 1000.0);
+    match p.kind {
+        PropKind::Rock { radius_mm } => {
+            let r = radius_mm as f32 / 1000.0;
+            (Vec3::new(x - r, y - r, h - 0.2), Vec3::new(x + r, y + r, h + r * 0.9))
+        }
+        PropKind::Wall { length_mm, thickness_mm } => {
+            let (l, t) = (length_mm as f32 / 1000.0, thickness_mm as f32 / 1000.0);
+            let (hx, hy) = if p.quarter_turns % 2 == 0 { (l / 2.0, t / 2.0) } else { (t / 2.0, l / 2.0) };
+            let top = if t <= 0.65 { 2.75 } else if t <= 0.8 { 1.0 } else if t <= 3.0 { 2.6 } else { 3.9 };
+            (Vec3::new(x - hx, y - hy, h), Vec3::new(x + hx, y + hy, h + top))
+        }
+        PropKind::Crate { size_mm } => {
+            let s = size_mm as f32 / 2000.0;
+            let top = if size_mm >= 2_500 { 6.6 } else { s * 2.0 };
+            (Vec3::new(x - s, y - s, h), Vec3::new(x + s, y + s, h + top))
+        }
+    }
+}
+
+/// What a prop is, by its shape (the same rules `base_mesh` draws it by).
+fn prop_kind(p: &Prop) -> &'static str {
+    match p.kind {
+        PropKind::Rock { .. } => "rock",
+        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 650 => "wall",
+        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 800 => "sandbags",
+        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 3_000 => "container",
+        PropKind::Wall { .. } => "barracks",
+        PropKind::Crate { size_mm } if size_mm >= 2_500 => "tower",
+        PropKind::Crate { .. } => "crate",
+    }
+}
+
+/// A building's layout for the structure scan: outer faces, doors, windows and room partitions (absolute metres).
+/// Barracks run along x (24 x 8 m): four rooms, a door at each end and two on the south side, windows between.
+/// Guard towers: an open platform with a firing port on each side and a ladder hatch.
+struct Structure {
+    faces: Vec<Vec<Vec3>>,
+    doors: Vec<Vec<Vec3>>,
+    windows: Vec<Vec<Vec3>>,
+    rooms: Vec<Vec<Vec3>>,
+}
+
+/// Door and window layout of a barracks block, along its length from its west end (metres): (x, width, sill, height).
+const BARRACKS_SOUTH: [(f32, f32, f32, f32, bool); 8] = [
+    (2.5, 1.2, 1.0, 1.0, false), (6.0, 1.2, 0.0, 2.1, true), (9.0, 1.2, 1.0, 1.0, false), (11.5, 1.2, 1.0, 1.0, false),
+    (14.5, 1.2, 1.0, 1.0, false), (18.0, 1.2, 0.0, 2.1, true), (21.5, 1.2, 1.0, 1.0, false), (0.0, 0.0, 0.0, 0.0, false),
+];
+const BARRACKS_NORTH: [f32; 8] = [2.0, 5.0, 8.0, 11.0, 13.0, 16.0, 19.0, 22.0];
+const BARRACKS_ROOMS: [f32; 3] = [6.0, 12.0, 18.0];
+
+fn structure_of(p: &Prop, h: f32) -> Structure {
+    let (lo, hi) = prop_box(p, h);
+    let box_faces = |lo: Vec3, hi: Vec3| {
+        let c = |x: f32, y: f32, z: f32| Vec3::new(x, y, z);
+        vec![
+            vec![c(lo.x, lo.y, hi.z), c(hi.x, lo.y, hi.z), c(hi.x, hi.y, hi.z), c(lo.x, hi.y, hi.z)],
+            vec![c(lo.x, lo.y, lo.z), c(hi.x, lo.y, lo.z), c(hi.x, lo.y, hi.z), c(lo.x, lo.y, hi.z)],
+            vec![c(lo.x, hi.y, lo.z), c(hi.x, hi.y, lo.z), c(hi.x, hi.y, hi.z), c(lo.x, hi.y, hi.z)],
+            vec![c(lo.x, lo.y, lo.z), c(lo.x, hi.y, lo.z), c(lo.x, hi.y, hi.z), c(lo.x, lo.y, hi.z)],
+            vec![c(hi.x, lo.y, lo.z), c(hi.x, hi.y, lo.z), c(hi.x, hi.y, hi.z), c(hi.x, lo.y, hi.z)],
+        ]
+    };
+    let mut s = Structure { faces: box_faces(lo, hi), doors: vec![], windows: vec![], rooms: vec![] };
+    let quad_y = |y: f32, x0: f32, x1: f32, z0: f32, z1: f32| vec![Vec3::new(x0, y, z0), Vec3::new(x1, y, z0), Vec3::new(x1, y, z1), Vec3::new(x0, y, z1)];
+    let quad_x = |x: f32, y0: f32, y1: f32, z0: f32, z1: f32| vec![Vec3::new(x, y0, z0), Vec3::new(x, y1, z0), Vec3::new(x, y1, z1), Vec3::new(x, y0, z1)];
+    match prop_kind(p) {
+        "barracks" => {
+            let my = (lo.y + hi.y) / 2.0;
+            for &(x, w, sill, ht, door) in BARRACKS_SOUTH.iter().filter(|q| q.1 > 0.0) {
+                let q = quad_y(lo.y - 0.02, lo.x + x - w / 2.0, lo.x + x + w / 2.0, h + sill, h + sill + ht);
+                if door { s.doors.push(q) } else { s.windows.push(q) }
+            }
+            for &x in &BARRACKS_NORTH {
+                s.windows.push(quad_y(hi.y + 0.02, lo.x + x - 0.6, lo.x + x + 0.6, h + 1.0, h + 2.0));
+            }
+            s.doors.push(quad_x(lo.x - 0.02, my - 0.6, my + 0.6, h, h + 2.1));
+            s.doors.push(quad_x(hi.x + 0.02, my - 0.6, my + 0.6, h, h + 2.1));
+            for &x in &BARRACKS_ROOMS {
+                s.rooms.push(vec![Vec3::new(lo.x + x, lo.y, hi.z), Vec3::new(lo.x + x, hi.y, hi.z)]);
+            }
+            s.rooms.push(vec![Vec3::new(lo.x, my + 1.0, hi.z), Vec3::new(hi.x, my + 1.0, hi.z)]); // the corridor
+        }
+        "tower" => {
+            let (z0, z1) = (h + 4.8, h + 5.7);
+            let (mx, my, a) = ((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, 0.5);
+            s.windows.push(quad_y(lo.y - 0.02, mx - a, mx + a, z0 + 0.3, z1));
+            s.windows.push(quad_y(hi.y + 0.02, mx - a, mx + a, z0 + 0.3, z1));
+            s.windows.push(quad_x(lo.x - 0.02, my - a, my + a, z0 + 0.3, z1));
+            s.windows.push(quad_x(hi.x + 0.02, my - a, my + a, z0 + 0.3, z1));
+            s.doors.push(vec![Vec3::new(mx - 0.4, my - 0.4, h + 4.82), Vec3::new(mx + 0.4, my - 0.4, h + 4.82), Vec3::new(mx + 0.4, my + 0.4, h + 4.82), Vec3::new(mx - 0.4, my + 0.4, h + 4.82)]);
+        }
+        _ => {}
+    }
+    s
+}
+
 /// The testing ground's military base (positions in millimetres). A walled compound with a gate, barracks,
 /// guard towers, sandbag lines and containers, and outside it an obstacle lane: a rock field and a narrow gap.
 fn base_props() -> Vec<Prop> {
@@ -2523,9 +2695,16 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
                     // Shipping container.
                     m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + 2.6], c(9));
                 } else {
-                    // Barracks block with a flat roof.
+                    // Barracks block with a flat roof, its doors and windows (the layout the structure scan reports).
                     m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + 3.6], c(kit::UNIFORM));
                     m.cuboid([x - hx - 0.3, y - hy - 0.3, h + 3.6], [x + hx + 0.3, y + hy + 0.3, h + 3.9], c(kit::UNIFORM_DARK));
+                    let st = structure_of(p, h);
+                    for q in st.doors.iter().chain(st.windows.iter()) {
+                        let (a, b) = (q[0], q[2]);
+                        let n = Vec3::new(if (a.x - b.x).abs() < 1e-3 { 0.04 } else { 0.0 }, if (a.y - b.y).abs() < 1e-3 { 0.04 } else { 0.0 }, 0.0);
+                        let (lo, hi) = (a.min(b) - n, a.max(b) + n);
+                        m.cuboid([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z], c(kit::GLOVE));
+                    }
                 }
             }
             PropKind::Crate { size_mm } => {

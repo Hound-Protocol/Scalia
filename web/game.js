@@ -397,8 +397,13 @@ try {
     frameS = from + (frameGoal - from) * e; applyFrame();
     frameRaf = k < 1 ? requestAnimationFrame(stepFrame(t0, from)) : 0;
   };
+  // Equip and put-away sounds for the handset, whichever view it comes up in.
+  const equipWalkie = sfx('./sfx/walkie-up.mp3', 0.6), stowWalkie = sfx('./sfx/walkie-down.mp3', 0.6);
+  let radioWasUp = false;
   const walkieUp = () => {
-    const on = radioEl.classList.contains('up') && tablet.classList.contains('up');
+    const isUp = radioEl.classList.contains('up');
+    if (isUp !== radioWasUp) { radioWasUp = isUp; (isUp ? equipWalkie : stowWalkie)(); }
+    const on = isUp && tablet.classList.contains('up');
     tablet.classList.toggle('walkie', on);
     // Room for the handset left of the tablet (it reaches 24.5% of the tablet's width past its left edge).
     const w = tablet.offsetWidth, right = (innerWidth + w) / 2, need = w * 1.245 + innerWidth * 0.015;
@@ -511,12 +516,22 @@ try {
   $('mapHome').addEventListener('click', () => v.map_center_commander());
   let mDrag = null, mMoved = 0, mBox = null, hoverId = null;
   const mapBoxEl = $('mapBox');
-  mapCanvas.addEventListener('contextmenu', (e) => { e.preventDefault(); mapMenu(e); });
+  mapCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Right button: a short click opens the commands menu; held, it opens the about panel for what is under it.
+  let rHold = null;
+  const HOLD_MS = 450;
   mapCanvas.addEventListener('pointerdown', (e) => {
     mapCanvas.setPointerCapture(e.pointerId);
+    if (e.button === 2) {
+      closeActions();
+      const at = { offsetX: e.offsetX, offsetY: e.offsetY };
+      holdRing(e.offsetX, e.offsetY, true);
+      rHold = { at, timer: setTimeout(() => { rHold = null; holdRing(0, 0, false); openAbout(at); }, HOLD_MS) };
+      return;
+    }
     if (e.button === 1) { e.preventDefault(); mDrag = [e.clientX, e.clientY]; return; }   // middle button: move the camera
     if (e.button !== 0) return;
-    closeActions();
+    closeActions(); closeAbout();
     mBox = [e.offsetX, e.offsetY]; mMoved = 0;                                            // left: select, or drag a square
   });
   mapCanvas.addEventListener('pointermove', (e) => {
@@ -543,10 +558,15 @@ try {
       if (d <= Math.max(14, m.r * h) && d < best) { best = d; hit = m.id; }
     }
     hoverId = hit;
+    showTip(e);
   });
-  mapCanvas.addEventListener('pointerleave', () => { hoverId = null; });
+  mapCanvas.addEventListener('pointerleave', () => { hoverId = null; mapTip.hidden = true; });
   mapCanvas.addEventListener('pointerup', (e) => {
     if (e.button === 1) { mDrag = null; return; }
+    if (e.button === 2) {
+      if (rHold) { clearTimeout(rHold.timer); holdRing(0, 0, false); const at = rHold.at; rHold = null; mapMenu({ offsetX: at.offsetX, offsetY: at.offsetY }); }
+      return;
+    }
     if (e.button !== 0 || !mBox) return;
     mapBoxEl.hidden = true;
     if (mMoved > 6) {
@@ -556,6 +576,99 @@ try {
     } else mapSelect(e);
     mBox = null;
   });
+  // ---- Cursor helper and about panels ----
+  // A small helper by the cursor names whatever it is over and says what the mouse does there; holding the right
+  // button opens an about panel for it (what it is, what it does, what it does not). Buildings are scanned: their
+  // doors, windows and rooms are counted and shown over the building on the map.
+  const mapTip = $('mapTip'), about = $('aboutPanel'), scanSvg = $('scanOverlay'), ring = $('holdRing');
+  const holdRing = (x, y, on) => {
+    ring.hidden = !on;
+    if (on) { ring.style.left = `${x}px`; ring.style.top = `${y}px`; ring.classList.remove('go'); void ring.offsetWidth; ring.classList.add('go'); }
+  };
+  const ABOUT = {
+    unit: { type: 'Infantry squad', what: 'Riflemen under one call sign: they move, take cover and report as a team.',
+      does: 'Moves, defends, assaults or supports where you order; reports by radio when it gets there.',
+      not: 'Acts only on orders (yours or its captain\'s). No vehicles or heavy weapons yet.' },
+    captain: { type: 'Captain', what: 'An officer leading his own small team.',
+      does: 'Give him a goal (take or hold a grid) and attach squads in the roster: he plans the steps and leads them.',
+      not: 'Fights poorly alone; without squads attached he only reports.' },
+    commander: { type: 'You · battalion commander', what: 'The commander on foot. Command goes out over the radio; the PDA is how you see the battalion.',
+      does: 'Calls units up, gives orders, takes reports.', not: 'Not a fighter: the rifle stays slung. A unit only acts on what you tell it over the radio.' },
+    barracks: { type: 'Structure · barracks block', what: 'Single-storey troop quarters, 24 × 8 m, flat concrete roof.',
+      does: 'Hard cover and a strongpoint for a squad.', not: 'Units do not go inside yet.', scan: true, rooms: '4 and a corridor',
+      built: 'Reinforced concrete blocks, 25 cm walls, concrete roof slab', caliber: '12.7 mm (.50 cal). Not 30 mm cannon, RPGs or tank guns.' },
+    tower: { type: 'Structure · guard tower', what: 'Roofed lookout on timber legs, platform 4.5 m up.',
+      does: 'Sees over the walls; the sandbag lining protects one sentry.', not: 'The legs give no cover.', scan: true, rooms: '1 platform',
+      built: 'Timber frame, sandbag-lined platform, sheet roof', caliber: '7.62 mm at the platform; pistol rounds only at the legs.' },
+    wall: { type: 'Concrete wall', what: 'Perimeter wall, 0.6 m thick, 2.7 m high.', does: 'Blocks movement and sight; stops up to 14.5 mm.', not: 'Cannot be breached yet (engineers later).' },
+    sandbags: { type: 'Sandbag line', what: 'Two courses of sandbags, about 1 m high.', does: 'Cover for crouching or prone troops; stops rifle fire up to 7.62 mm.', not: 'No protection against explosives or sustained heavy machine-gun fire.' },
+    container: { type: 'Shipping container', what: 'A 12 m steel container in the depot.', does: 'Blocks movement and sight: concealment more than cover.', not: 'Thin steel: stops pistol rounds and fragments only.' },
+    crate: { type: 'Supply crate', what: 'A wooden crate by the depot.', does: 'Low concealment.', not: 'Stops fragments only. Supplies are not simulated yet.' },
+    rock: { type: 'Rock', what: 'A boulder in the obstacle lane.', does: 'Natural hard cover against small arms.', not: 'Low: cover only when prone.' },
+    ground: { type: 'Ground', what: 'Open ground.', does: 'Units can move here.', not: 'No cover.' },
+    tank: { type: 'Armored vehicle · main battle tank', what: 'Tracked, armoured, a 120 mm gun.', does: 'Breaks strongpoints, leads assaults.', not: 'Not in the battalion yet.' },
+    truck: { type: 'Vehicle · utility truck', what: 'Carries troops and supplies.', does: 'Moves a squad fast along roads.', not: 'Unarmoured. Not in the battalion yet.' },
+  };
+  const nameOf = (o) => o.kind === 'unit' ? `${o.cs} ${pad2(o.n)}` : o.kind === 'commander' ? 'Actual 00' :
+    o.kind === 'ground' ? (o.inside ? 'Testing ground' : 'Open ground') : ABOUT[o.kind]?.type.split(' · ').pop().replace(/^./, (c) => c.toUpperCase()) || o.kind;
+  const infoOf = (o) => o.kind === 'unit' && o.captain ? ABOUT.captain : ABOUT[o.kind] || ABOUT.ground;
+  const objectAt = (x, y) => { try { return JSON.parse(onMap(() => v.object_at(x * dpr(), y * dpr()))); } catch (_) { return { kind: 'none' }; } };
+  let tipAt = 0;
+  const showTip = (e) => {
+    if (performance.now() - tipAt < 50) return; tipAt = performance.now();
+    const o = objectAt(e.offsetX, e.offsetY);
+    if (o.kind === 'none') { mapTip.hidden = true; return; }
+    const sel = onMap(() => v.selection_name());
+    const hints = [];
+    if (o.kind === 'unit') hints.push(`Click: select ${o.captain ? 'captain' : 'squad'}`);
+    else if (o.kind === 'commander') hints.push('Click: select yourself');
+    else if (o.kind === 'tank' || o.kind === 'truck') hints.push('Click: select armored vehicle');
+    else if (!sel) hints.push('Click a unit to select it');
+    if (sel) hints.push(`Right-click: order ${sel.split(',')[0]}${sel.includes(',') ? ' +' : ''} here`);
+    hints.push(`Hold right-click: ${infoOf(o).scan ? 'scan structure' : 'about'}`);
+    const sub = o.kind === 'unit' ? `${infoOf(o).type} · ${o.soldiers}` : infoOf(o).type;
+    mapTip.innerHTML = `<b>${nameOf(o)}</b><span>${sub} · grid ${o.grid}</span>${hints.map((h) => `<i>${h}</i>`).join('')}`;
+    mapTip.hidden = false;
+    // Above and to the left of the cursor.
+    mapTip.style.left = `${e.offsetX - 14}px`; mapTip.style.top = `${e.offsetY - 14}px`;
+  };
+  let scanId = null, scanStart = 0;
+  const closeAbout = () => { about.hidden = true; scanId = null; scanSvg.innerHTML = ''; scanSvg.hidden = true; };
+  const openAbout = (at) => {
+    const o = objectAt(at.offsetX, at.offsetY);
+    if (o.kind === 'none') return;
+    const i = infoOf(o);
+    menuOpen();
+    let html = `<button class="x" title="Close (Esc)">×</button><h4>${nameOf(o)}</h4><div class="role">${i.type}</div>
+      <dl><dt>What it is</dt><dd>${i.what}</dd><dt>What it does</dt><dd>${i.does}</dd><dt>What it does not</dt><dd>${i.not}</dd></dl>`;
+    if (i.scan) {
+      const ov = JSON.parse(onMap(() => v.structure_overlay(o.id)));
+      html += `<div class="scaninfo"><div class="scanning"><span>Scanning structure</span><i class="bar"><i></i></i></div>
+        <dl class="result"><dt>Doors</dt><dd>${ov.doors.length}</dd><dt>Windows</dt><dd>${ov.windows.length}</dd><dt>Rooms</dt><dd>${i.rooms}</dd>
+        <dt>Built from</dt><dd>${i.built}</dd><dt>Stops up to</dt><dd>${i.caliber}</dd></dl></div>`;
+      scanId = o.id; scanStart = performance.now(); scanSvg.hidden = false;
+    } else { scanId = null; scanSvg.hidden = true; scanSvg.innerHTML = ''; }
+    about.innerHTML = html; about.hidden = false;
+    about.querySelector('.x').addEventListener('click', closeAbout);
+  };
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && !about.hidden) closeAbout(); });
+  const SCAN_MS = 1600;
+  // The scan overlay, redrawn every frame while the panel is open (the map can move under it).
+  const drawScan = () => {
+    if (scanId === null || about.hidden) return;
+    const ov = JSON.parse(onMap(() => v.structure_overlay(scanId)));
+    const pts = (q) => q.map((n, k) => n.toFixed(4)).join(' ');
+    const p = Math.min(1, (performance.now() - scanStart) / SCAN_MS);
+    const all = ov.faces.flat(), ys = all.filter((_, k) => k % 2), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const reveal = y1 - (y1 - y0) * p; // the scan sweeps up the building
+    scanSvg.innerHTML = `<g style="mask-image:none">${ov.faces.map((q) => `<polygon class="face" points="${pts(q)}"/>`).join('')}
+      ${p >= 1 ? ov.rooms.map((q) => `<polyline class="room" points="${pts(q)}"/>`).join('') : ''}
+      ${p >= 1 ? ov.windows.map((q) => `<polygon class="win" points="${pts(q)}"/>`).join('') : ''}
+      ${p >= 1 ? ov.doors.map((q) => `<polygon class="door" points="${pts(q)}"/>`).join('') : ''}</g>
+      ${p < 1 ? `<line class="sweep" x1="0" x2="1" y1="${reveal.toFixed(4)}" y2="${reveal.toFixed(4)}"/>` : ''}`;
+    scanSvg.style.maskImage = p < 1 ? `linear-gradient(to bottom, transparent ${(reveal * 100).toFixed(2)}%, #000 ${(reveal * 100).toFixed(2)}%)` : '';
+    about.classList.toggle('scanned', p >= 1);
+  };
   // Orders: click a unit, then click a place. An actions window asks what the unit should do there; its AI says
   // whether it can. The order then goes out over the radio, and the unit moves once it has answered.
   const actionsBox = $('actions');
@@ -669,7 +782,7 @@ try {
   };
   // The walkie-talkie: comes up on screen, the commander speaks the order, waits for the unit, then it moves.
   const radio = $('radio');
-  const VERB = { 0: ['move to', 'moving to'], 1: ['defend', 'defending'], 2: ['assault', 'assaulting'], 3: ['support at', 'supporting at'], 10: ['take', 'taking'], 11: ['hold', 'holding'] };
+  const VERB = { 0: ['move to', 'moving to the coordinates'], 1: ['defend', 'defending the coordinates'], 2: ['assault', 'assaulting the coordinates'], 3: ['support from', 'supporting from the coordinates'], 10: ['take', 'taking the coordinates'], 11: ['hold', 'holding the coordinates'] };
   // The handset's spectrum: 20 bars, log-spaced from 40 Hz to 10 kHz. Every sound the game plays itself goes
   // through an analyser (radio clicks now; recorded voices later) and drives them for real. The browser's speech
   // voice cannot be listened to by the page, so while it talks the bars pulse on each word it reports, in the
@@ -696,6 +809,40 @@ try {
   });
   const edges = Array.from({ length: BANDS + 1 }, (_, k) => F_LO * Math.pow(F_HI / F_LO, k / BANDS));
   let wordEnergy = 0, wordAt = 0;
+  // The browser's speech voice cannot be listened to, so its loudness is followed from the text instead: where it
+  // is in the sentence (re-synced on every word the voice reports, when it reports them), syllables as peaks,
+  // spaces and punctuation as dips.
+  let speech = null; // { text, t0, base, msPerChar }
+  const speechEnergy = (now) => {
+    if (!speech) return 0;
+    const pos = speech.base + (now - speech.t0) / speech.msPerChar;
+    if (pos >= speech.text.length) return 0.12;
+    const ch = speech.text[Math.floor(pos)];
+    if (/[.,!?]/.test(ch)) return 0.03;
+    if (ch === ' ') return 0.18;
+    return Math.min(1, 0.4 + 0.6 * Math.abs(Math.sin(pos * Math.PI / 2.6)) * (0.8 + 0.2 * Math.random()));
+  };
+  // While a set transmits, the net hiss runs through the analyser for real (band-limited noise), and a squelch tail
+  // closes each transmission.
+  let bed = null;
+  const startBed = () => {
+    const c = audioGraph(); if (!c || bed) return;
+    if (c.state === 'suspended') c.resume().catch(() => {});
+    const buf = c.createBuffer(1, c.sampleRate * 2, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.002 ? 3 : 1); // hiss with crackle
+    const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.7;
+    const g = c.createGain(); g.gain.value = 0; g.gain.setTargetAtTime(0.03, c.currentTime, 0.03);
+    src.connect(bp).connect(g).connect(analyser); src.start();
+    bed = { src, g, c };
+  };
+  const stopBed = () => {
+    if (!bed) return;
+    const { src, g, c } = bed; bed = null;
+    const t = c.currentTime;
+    g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0.11, t); g.gain.exponentialRampToValueAtTime(0.0004, t + 0.2);
+    src.stop(t + 0.22);
+  };
   // A voice heard over a radio: most energy between 300 Hz and 3 kHz, little below or above.
   const voiceShape = edges.slice(0, BANDS).map((f, k) => { const g = Math.sqrt(f * edges[k + 1]); return Math.exp(-Math.pow(Math.log(g / 1100) / 1.0, 2)); });
   const waveBars = () => [...document.querySelectorAll('#radio .wave i')];
@@ -712,7 +859,8 @@ try {
     g.clearRect(0, 0, cv.width, cv.height);
     if (analyser) { scopeData = scopeData || new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(scopeData); }
     const t = performance.now() / 1000, n = 120;
-    const e = Math.min(1, wordEnergy * Math.exp(-(performance.now() - wordAt) / 160));
+    const now = performance.now();
+    const e = Math.min(1, Math.max(speechEnergy(now), wordEnergy * Math.exp(-(now - wordAt) / 160)));
     g.beginPath();
     for (let i = 0; i <= n; i++) {
       const x = (i / n) * cv.width;
@@ -742,7 +890,7 @@ try {
           return Math.min(1, Math.max(0, (m + 85) / 60)); // -85 dB silent, -25 dB full
         });
       }
-      const e = wordEnergy * Math.exp(-(performance.now() - wordAt) / 160);
+      const e = Math.max(speechEnergy(performance.now()), wordEnergy * Math.exp(-(performance.now() - wordAt) / 160));
       bars.forEach((bar, k) => {
         const synth = e * voiceShape[k] * (0.55 + 0.45 * Math.random());
         const v = Math.max(real ? real[k] : 0, synth, 0.06 + 0.04 * Math.random()); // a little radio hiss
@@ -757,11 +905,10 @@ try {
     const u = new SpeechSynthesisUtterance(text); u.pitch = pitch; u.rate = rate;
     const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
     if (voices.length) u.voice = voices[pitch < 1 ? Math.min(1, voices.length - 1) : 0];
-    let over = false; const end = () => { if (!over) { over = true; done(); } };
+    let over = false; const end = () => { if (!over) { over = true; speech = null; done(); } };
     u.onend = end; u.onerror = end; setTimeout(end, 1500 + text.length * 90);
-    // Each word the voice starts: a burst on the handset's spectrum, louder for longer words.
-    u.onboundary = (ev) => { wordEnergy = Math.min(1, 0.55 + (ev.charLength || 4) * 0.06); wordAt = performance.now(); };
-    u.onstart = () => { wordEnergy = 0.8; wordAt = performance.now(); };
+    u.onboundary = (ev) => { if (speech) { speech.base = ev.charIndex; speech.t0 = performance.now(); } };
+    u.onstart = () => { speech = { text, t0: performance.now(), base: 0, msPerChar: 66 / rate }; };
     speechSynthesis.speak(u);
   });
   const line = (who, name, text) => {
@@ -789,7 +936,9 @@ try {
     await click(); radio.classList.add(cls); radioState(cls === 'tx' ? 'TRANSMITTING' : 'RECEIVING'); line(who, name, text);
     traffic.unshift({ when: $('pdaClock').textContent.slice(0, 5), name: cls === 'tx' ? ident.cmdr : name, text, me: cls === 'tx' });
     traffic.length = Math.min(traffic.length, 20);
+    startBed();
     await say(text.replace(/(\d)/g, '$1 '), voice.pitch, voice.rate);
+    stopBed();
     await click(); radio.classList.remove(cls); radioState('ONLINE');
   };
   const pump = async () => {
@@ -806,12 +955,12 @@ try {
   // waits: the call shows as an Answer Transmission button (E) and the handset stays down until it is answered.
   // To give an order or ask for a sitrep the commander calls the unit and waits for "send it"; a unit that is busy
   // or misses the call gets a second call, then the commander gives up on it.
-  const ACTUAL = 'Actual';
+  const ACTUAL = 'Commander'; // how the net names the commander
   const pad2 = (n) => String(n).padStart(2, '0');
   const csOf = (u) => `${u.cs} ${pad2(u.n)}`;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const ME = { pitch: 1.0, rate: 1.05 };
-  const sayTx = (text) => transmit('tx', 'cmd', 'Actual', text, ME);
+  const sayTx = (text) => transmit('tx', 'cmd', 'Commander', text, ME);
   const sayRx = (name, text) => transmit('rx', 'unit', name, text, voiceOf(name));
   const busy = (u) => /Assault/.test(u.task || '');
   // Call a unit up; true once it answers "send it".
@@ -843,7 +992,7 @@ try {
         await sayTx('Send sitrep. Over.');
         await wait(600 + Math.random() * 600);
         const doing = u.status === 'holding' ? 'holding, no contact' : u.status === 'moving' || u.status === 'marching' ? 'on the move' : u.status;
-        await sayRx(csOf(u), `At grid ${u.grid}. ${u.soldiers} effective, ${doing}. Over.`);
+        await sayRx(csOf(u), `At position, ${u.soldiers} effective, ${doing}. Over.`);
         await sayTx(`${ACTUAL} copies. Out.`);
       }
       await wait(300); v.set_radio(false);
@@ -874,7 +1023,7 @@ try {
     const ev = incoming.shift(); showCalls();
     if (!ev) return;
     const name = `${ev.from} ${pad2(ev.n)}`;
-    const body = ev.text.replace(/^Actual,\s*[^.!]*\.\s*/, '').replace(/\s*(Over|Out)\.?\s*$/, '').replace(/[.!]\s*$/, '');
+    const body = ev.text.replace(/^(Actual|Commander),\s*[^.!]*\.\s*/, '').replace(/\s*(Over|Out)\.?\s*$/, '').replace(/[.!]\s*$/, '');
     net.unshift(async () => {
       $('radioLog').innerHTML = ''; v.set_radio(true); await keyUp();
       talkingTo('INCOMING FROM', name);
@@ -901,9 +1050,9 @@ try {
         const u = JSON.parse(v.roster()).find((q) => q.id === uid);
         if (!u || !(await callUp(u))) continue;
         const name = csOf(u);
-        await sayTx(`${verb.charAt(0).toUpperCase() + verb.slice(1)} grid ${grid}. Over.`);
+        await sayTx(`${verb.charAt(0).toUpperCase() + verb.slice(1)} these coordinates. I've transmitted you the coordinates. Over.`);
         await wait(500 + Math.random() * 700);
-        await sayRx(name, `Roger, ${ing} grid ${grid}. Over.`);
+        await sayRx(name, `Roger, coordinates received, ${ing}. Over.`);
         await sayTx(`${ACTUAL}, out.`);
         const keep = new Uint32Array(JSON.parse(v.selection_ids()));
         v.set_selection(new Uint32Array([uid]));
@@ -916,7 +1065,13 @@ try {
     pump();
   };
   // The blur only runs while the view really changes: at the end of the zoom range it stays sharp.
-  mapCanvas.addEventListener('wheel', notches((d) => { if (onMap(() => v.wheel(d))) zoomGlitch(); }), { passive: false });
+  const zoomSound = sfx('./sfx/map-zoom.mp3', 0.45);
+  let zoomSoundAt = 0;
+  mapCanvas.addEventListener('wheel', notches((d) => {
+    if (!onMap(() => v.wheel(d))) return;
+    zoomGlitch();
+    if (performance.now() - zoomSoundAt > 140) { zoomSoundAt = performance.now(); zoomSound(); } // one whoosh per step, not a pile-up
+  }), { passive: false });
 
   const drawRoster = () => {
     const units = JSON.parse(v.roster());
@@ -935,7 +1090,7 @@ try {
     });
     for (const b of $('roster').querySelectorAll('button.cmdu.call')) b.addEventListener('click', () => sitrep([Number(b.dataset.id)]));
     for (const b of $('roster').querySelectorAll('button.cmdu:not(.call)')) b.addEventListener('click', () => {
-      flash(v.command_unit(Number(b.dataset.id))); setTablet(false);
+      onMap(() => v.select_unit(Number(b.dataset.id))); unitSelect(); setPage('map');
     });
     for (const sel of $('roster').querySelectorAll('select.boss')) sel.addEventListener('change', () => {
       flash(v.attach(Number(sel.dataset.id), Number(sel.value))); drawRoster();
@@ -1081,7 +1236,7 @@ try {
       const line = v.frame(now);
       syncTablet();
       drawFieldLabels();
-      drawMapMarks();
+      drawMapMarks(); drawScan();
       footsteps();
       cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
       const showNote = now < noteUntil;

@@ -21,7 +21,7 @@ for name, m in (('fp_left', arm & (xx < W // 2)), ('fp_right', arm & (xx >= W //
 # The walkie hand: the same left hand moved under the handset's lower left. It holds the handset from behind:
 # only the fingers that wrap round its left edge are drawn in front of it.
 left = Image.open(f'{out}/fp_left.webp')
-moved = Image.new('RGBA', left.size, (0, 0, 0, 0)); moved.paste(left, (-150, 100), left)
+moved = Image.new('RGBA', left.size, (0, 0, 0, 0)); moved.paste(left, (-188, 55), left)
 save(moved, 'fp_lwalkie_back')
 WALKIE_LEFT_PX = 557.0 - 0.23756 * 806.0  # the handset's left edge in the render (first_person.py: walkie css)
 front = np.asarray(moved).copy()
