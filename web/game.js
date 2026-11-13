@@ -864,14 +864,18 @@ try {
     actionsBox.hidden = false;
     menuOpen();
     for (const b of actionsBox.querySelectorAll('button[data-id]')) b.addEventListener('click', () => {
-      closeActions(); radioOrder(Number(b.dataset.id), b.textContent.trim(), x, y, grid);
+      closeActions();
+      const id = Number(b.dataset.id), label = b.textContent.trim();
+      // A move: the walkie-talkie comes up first, with the decision of how they go.
+      if (id === 0 || id === 20) decide((mode) => radioOrder(id, label, x, y, grid, mode));
+      else radioOrder(id, label, x, y, grid, id === 22 ? 2 : 0);
     });
     actionsBox.querySelector('.cancel').addEventListener('click', closeActions);
     actionsBox.querySelector('.sitrep').addEventListener('click', () => { closeActions(); sitrep(JSON.parse(v.selection_ids())); });
   };
   // The walkie-talkie: comes up on screen, the commander speaks the order, waits for the unit, then it moves.
   const radio = $('radio');
-  const VERB = { 0: ['move to', 'moving to the coordinates'], 1: ['defend', 'defending the coordinates'], 2: ['assault', 'assaulting the coordinates'], 3: ['support from', 'supporting from the coordinates'], 10: ['take', 'taking the coordinates'], 11: ['hold', 'holding the coordinates'] };
+  const VERB = { 20: ['move into the building at', 'moving into the building'], 21: ['clear the building at', 'clearing the building'], 22: ['garrison the building at', 'garrisoning the building'], 0: ['move to', 'moving to the coordinates'], 1: ['defend', 'defending the coordinates'], 2: ['assault', 'assaulting the coordinates'], 3: ['support from', 'supporting from the coordinates'], 10: ['take', 'taking the coordinates'], 11: ['hold', 'holding the coordinates'] };
   // The handset's spectrum: 20 bars, log-spaced from 40 Hz to 10 kHz. Every sound the game plays itself goes
   // through an analyser (radio clicks now; recorded voices later) and drives them for real. The browser's speech
   // voice cannot be listened to by the page, so while it talks the bars pulse on each word it reports, in the
@@ -1179,8 +1183,33 @@ try {
   };
   answerBox.querySelector('button').addEventListener('click', answer);
   setInterval(() => { try { for (const ev of JSON.parse(v.radio_events())) hear(ev); } catch (e) { /* viewer busy */ } }, 400);
+  // How a move is made: decided with the walkie-talkie up, before the call goes out.
+  const MODES = [
+    { m: 0, label: 'Move there', say: '', ack: '' },
+    { m: 1, label: 'Proceed with caution · possible hostiles', say: ' Proceed with caution, possible hostile presence.', ack: ', moving with caution' },
+    { m: 2, label: 'Garrison this area', say: ' Garrison the area.', ack: ', will garrison' },
+    { m: 3, label: 'Secure the area · hostiles confirmed', say: ' Secure the area, hostile presence confirmed.', ack: ', expecting contact' },
+  ];
+  const decide = (then) => {
+    radio.classList.add('up');
+    const box = document.createElement('div');
+    box.className = 'decide';
+    box.innerHTML = '<div class="head">How do they go?</div>' + MODES.map((o) => `<button data-m="${o.m}">${o.label}</button>`).join('') + '<button class="cancel">Cancel</button>';
+    document.body.appendChild(box);
+    const r = radio.getBoundingClientRect();
+    const left = r.left > innerWidth / 2 ? r.left - 290 : r.right + 12;
+    Object.assign(box.style, { left: `${Math.max(8, left)}px`, top: `${Math.max(8, r.top + r.height * 0.25)}px` });
+    const done = (m) => {
+      box.remove();
+      if (m == null) { if (!onAir && !net.length) radio.classList.remove('up'); return; }
+      then(m);
+    };
+    for (const b of box.querySelectorAll('button[data-m]')) b.addEventListener('click', () => done(Number(b.dataset.m)));
+    box.querySelector('.cancel').addEventListener('click', () => done(null));
+  };
   // Orders: call each selected unit up; the ones that answer get the order and read it back.
-  const radioOrder = (id, label, x, y, grid) => {
+  const radioOrder = (id, label, x, y, grid, mode = 0) => {
+    const how = MODES.find((o) => o.m === mode) || MODES[0];
     const [verb, ing] = VERB[id] || VERB[0];
     const ids = JSON.parse(v.selection_ids());
     if (onAir) flash('net busy: your call goes out next');
@@ -1190,12 +1219,13 @@ try {
         const u = JSON.parse(v.roster()).find((q) => q.id === uid);
         if (!u || !(await callUp(u))) continue;
         const name = csOf(u);
-        await sayTx(`${verb.charAt(0).toUpperCase() + verb.slice(1)} the coordinates transmitted. Over.`);
+        await sayTx(`${verb.charAt(0).toUpperCase() + verb.slice(1)} the coordinates transmitted.${how.say} Over.`);
         await wait(500 + Math.random() * 700);
-        await sayRx(name, `Roger, coordinates received, ${ing}. Over.`);
+        await sayRx(name, `Roger, coordinates received, ${ing}${how.ack}. Over.`);
         await sayTx(`${ACTUAL}, out.`);
         const keep = new Uint32Array(JSON.parse(v.selection_ids()));
         v.set_selection(new Uint32Array([uid]));
+        v.set_order_mode(mode);
         const msg = v.issue_at(id, x, y, performance.now()); if (msg) flash(msg);
         v.set_selection(keep);
         if (page === 'roster') drawRoster();

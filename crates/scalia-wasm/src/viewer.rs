@@ -820,7 +820,16 @@ impl Viewer {
         // A captain takes goals and plans the rest himself; squads take direct orders.
         let captain = self.chain.is_captain(GroupId(groups[0]));
         let (reach, why) = if captain && self.chain.squads_of(GroupId(groups[0])).is_empty() { (false, "no squads attached") } else { (reach, why) };
-        let list: &[(u8, &str)] = if captain { &[(10, "Take"), (11, "Hold")] } else { &[(0, "Move"), (1, "Defend"), (2, "Assault"), (3, "Support")] };
+        // What was clicked decides what can be done there: a building offers entering, clearing and garrisoning;
+        // open ground is a move.
+        let building = killhouse().room_at(dest.0, dest.1).is_some();
+        let list: &[(u8, &str)] = if captain {
+            &[(10, "Take"), (11, "Hold")]
+        } else if building {
+            &[(20, "Move into"), (21, "Clear building"), (22, "Garrison")]
+        } else {
+            &[(0, "Move")]
+        };
         let items: Vec<String> = list.iter().map(|(id, label)| format!("{{\"id\":{id},\"label\":\"{label}\",\"ok\":{reach},\"reason\":\"{why}\"}}")).collect();
         format!("[{}]", items.join(","))
     }
@@ -833,6 +842,23 @@ impl Viewer {
             let kind = if action == 10 { Kind::Take } else { Kind::Hold };
             return self.assign_task(c, kind, (x, y), now_ms);
         }
+        let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
+        // Clearing the building: the squad joins the field and its leader plans the assault.
+        if action == 21 {
+            let spot = grid(x, y);
+            for &g in &groups {
+                self.field_join(g);
+                if let Some(a) = self.assault.as_mut() {
+                    a.order(g as u16, scalia_ai::leader::Order::Capture);
+                }
+                self.arrive_report.insert(g, (spot.clone(), 2));
+            }
+            self.order_mode = None;
+            return format!("{} clearing the building", groups.len());
+        }
+        if action == 22 {
+            self.order_mode = Some(scalia_ai::leader::Mode::Garrison);
+        }
         let run = action == 2;
         let stance = match action {
             1 => Pose::Cover,
@@ -840,13 +866,55 @@ impl Viewer {
             3 => Pose::CoverAim,
             _ => Pose::Stand,
         };
-        let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
         let spot = grid(x, y);
         for g in &groups {
             self.arrive_stance.insert(*g, stance);
-            self.arrive_report.insert(*g, (spot.clone(), action));
+            self.arrive_report.insert(*g, (spot.clone(), if action >= 20 { 1 } else { action }));
         }
-        self.command_world(Vec3::new(x as f32, y as f32, 0.0), now_ms, run)
+        let msg = self.command_world(Vec3::new(x as f32, y as f32, 0.0), now_ms, run);
+        self.order_mode = None;
+        msg
+    }
+
+    /// How the next move is to be made, as chosen on the radio: 0 just move, 1 with caution (possible hostiles),
+    /// 2 garrison the area, 3 secure the area (hostiles confirmed).
+    pub fn set_order_mode(&mut self, m: u8) {
+        use scalia_ai::leader::Mode;
+        self.order_mode = Some(match m {
+            1 => Mode::Caution,
+            2 => Mode::Garrison,
+            3 => Mode::Confirmed,
+            _ => Mode::Plain,
+        });
+    }
+
+    /// Puts a squad on the testing ground's field battle (its men where they stand), if it is not on it yet and
+    /// is on the ground. Returns whether it is on the field.
+    fn field_join(&mut self, i: u32) -> bool {
+        if self.assault.as_ref().is_some_and(|a| a.has_squad(i as u16)) {
+            return true;
+        }
+        let gp = self.world.groups.pos(GroupId(i));
+        let on_ground = |x: i64, y: i64| (BASE_LO..BASE_HI).contains(&(x as f32 / 1000.0)) && (BASE_LO..BASE_HI).contains(&(y as f32 / 1000.0));
+        if self.assault.is_none() || !on_ground(gp.x, gp.y) {
+            return false;
+        }
+        let mut mine: Vec<&Derived> = self.derived.iter().filter(|s| s.group.0 == i).collect();
+        mine.sort_by_key(|s| s.slot);
+        let mut starts: Vec<(i64, i64)> = match self.agents.get(&i) {
+            Some(a) => a.positions().to_vec(),
+            None => mine.iter().map(|s| (s.pos.x, s.pos.y)).collect(),
+        };
+        if starts.is_empty() {
+            // Not drawn right now: everyone at the group's place (they spread out as they go).
+            let n = self.world.groups.people(GroupId(i)).max(1) as i64;
+            starts = (0..n).map(|k| (gp.x + (k % 4) * 1_200, gp.y + (k / 4) * 1_200)).collect();
+        }
+        self.agents.remove(&i);
+        if let Some(a) = self.assault.as_mut() {
+            a.spawn_squad(i as u16, 0, &starts);
+        }
+        true
     }
 
     /// Names of the selected units (for the radio).
@@ -1443,29 +1511,8 @@ impl Viewer {
         let to = Pos { region: RegionId(1), x: (d.x as f64 * 1000.0) as i64, y: (d.y as f64 * 1000.0) as i64, z: 0 };
         // Inside the testing ground the squad fights on the field battle: it routes round walls and through doors,
         // takes cover and makes the place safe when it gets there.
-        let gp = self.world.groups.pos(GroupId(i));
-        let on_ground = |x: i64, y: i64| (BASE_LO..BASE_HI).contains(&(x as f32 / 1000.0)) && (BASE_LO..BASE_HI).contains(&(y as f32 / 1000.0));
-        let has = self.assault.as_ref().is_some_and(|a| a.has_squad(i as u16));
-        if in_base(d.x, d.y) && self.assault.is_some() && (has || on_ground(gp.x, gp.y)) {
-            if !has {
-                let mut mine: Vec<&Derived> = self.derived.iter().filter(|s| s.group.0 == i).collect();
-                mine.sort_by_key(|s| s.slot);
-                let mut starts: Vec<(i64, i64)> = match self.agents.get(&i) {
-                    Some(a) => a.positions().to_vec(),
-                    None => mine.iter().map(|s| (s.pos.x, s.pos.y)).collect(),
-                };
-                if starts.is_empty() {
-                    // Not drawn right now: everyone at the group's place (they spread out as they go).
-                    let p = self.world.groups.pos(GroupId(i));
-                    let n = self.world.groups.people(GroupId(i)).max(1) as i64;
-                    starts = (0..n).map(|k| (p.x + (k % 4) * 1_200, p.y + (k / 4) * 1_200)).collect();
-                }
-                self.agents.remove(&i);
-                if let Some(a) = self.assault.as_mut() {
-                    a.spawn_squad(i as u16, 0, &starts);
-                }
-            }
-            let mode = self.order_mode.take().unwrap_or(scalia_ai::leader::Mode::Plain);
+        if in_base(d.x, d.y) && self.field_join(i) {
+            let mode = self.order_mode.unwrap_or(scalia_ai::leader::Mode::Plain);
             if let Some(a) = self.assault.as_mut() {
                 a.order(i as u16, scalia_ai::leader::Order::Move { to: (to.x, to.y), mode });
             }
