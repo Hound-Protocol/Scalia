@@ -227,6 +227,11 @@
   #tablet .glitch i { position: absolute; display: block; mix-blend-mode: screen; }
   #tablet .glitch i.ln { left: 0; right: 0; animation: gl-line var(--d, 0.12s) steps(2) var(--w, 0s) both; }
   #tablet .glitch i.px { animation: gl-px var(--d, 0.1s) steps(1) var(--w, 0s) both; }
+  #tablet .glitch.zoom i { position: absolute; display: block; mix-blend-mode: normal; }
+  #tablet .glitch.zoom i.hl { height: 1px; mix-blend-mode: screen; animation: gl-line var(--d) steps(2) both; }
+  #tablet .glitch.zoom i.dr { left: 0; right: 0; background: rgba(6,8,6,0.85); animation: gl-px var(--d) steps(1) both; }
+  #tablet .glitch.zoom i.bd { left: -14px; right: -14px; -webkit-backdrop-filter: saturate(1.8) contrast(1.35) brightness(1.25) hue-rotate(var(--hue)); backdrop-filter: saturate(1.8) contrast(1.35) brightness(1.25) hue-rotate(var(--hue)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(255,60,90,0.35); animation: gl-band var(--d) steps(2) both; }
+  @keyframes gl-band { 0% { opacity: 0; transform: translateX(var(--x)); } 1% { opacity: 1; } 100% { opacity: 0; transform: translateX(calc(var(--x) * -0.6)); } }
   @keyframes gl-line { 0% { opacity: 0; } 1% { opacity: 1; transform: translateX(var(--x, 0)); } 100% { opacity: 0; transform: translateX(calc(var(--x, 0) * -1)); } }
   @keyframes gl-px { 0% { opacity: 0; } 1% { opacity: 1; } 100% { opacity: 0; } }
   #tablet .hint { position: absolute; right: 10px; bottom: 10px; white-space: nowrap; color: var(--dim);
