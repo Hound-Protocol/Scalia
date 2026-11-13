@@ -1,6 +1,6 @@
 //! The killhouse assault, live: a `scalia_ai` battle run at the training house, and how its soldiers are drawn
 //! (pose, gait cadence, aim layer) and heard (shots, grenades, the leader's steps).
-use scalia_ai::battle::{Act, Battle, Event, Gait, Soldier, Stance};
+use scalia_ai::battle::{Act, Bark, Battle, Event, Gait, Soldier, Stance};
 pub use scalia_ai::scenario::KILLHOUSE_ATTACKERS as ATTACKERS;
 use scalia_render::pose::{stride_m_dir, Pose};
 
@@ -96,6 +96,17 @@ impl Assault {
                         self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false });
                     }
                     Event::Order { squad, step } => self.steps.push((squad, step)),
+                    // What his men shout, as steps of their squad ("bark:" marks them for the note line).
+                    Event::Bark { soldier, bark } => {
+                        let word = match bark {
+                            Bark::TakingCover => "bark:taking cover",
+                            Bark::Contact => "bark:contact",
+                            Bark::Reloading => "bark:reloading",
+                            Bark::ManDown => "bark:man down",
+                            Bark::Frag => "bark:frag out",
+                        };
+                        self.steps.push((self.battle.soldiers[soldier].squad as usize, word));
+                    }
                     _ => {}
                 }
             }

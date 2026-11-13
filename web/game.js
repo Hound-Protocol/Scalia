@@ -1292,7 +1292,7 @@ try {
   };
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
-  let assaultOn = false, assaultPoll = 0;
+  let assaultOn = false, assaultPoll = 0, lastAlive = null;
   const assaultTick = (now) => {
     if (!assaultOn) return;
     const s = v.take_sounds();
@@ -1301,8 +1301,15 @@ try {
     assaultPoll = now;
     let st; try { st = JSON.parse(v.assault_state()); } catch (_) { return; }
     if (!st.running) { assaultOn = false; return; }
+    // Casualty calls: a man of ours down, or an enemy down (from the alive counts).
+    if (lastAlive && !st.over) {
+      if (st.attackers < lastAlive.a) flash(`Alpha 1: man down! (${st.attackers} up)`);
+      else if (st.defenders < lastAlive.d) flash(`Alpha 1: enemy down, ${st.defenders} left`);
+    }
+    lastAlive = { a: st.attackers, d: st.defenders };
     for (const step of st.steps) {
-      if (step.squad === 0 && STEP_SAY[step.step]) flash(`Alpha 1: ${STEP_SAY[step.step]} (${st.attackers} up)`);
+      if (step.squad === 0 && step.step.startsWith('bark:')) flash(`Alpha 1: "${step.step.slice(5).replace(/^./, (c) => c.toUpperCase())}!"`);
+      else if (step.squad === 0 && STEP_SAY[step.step]) flash(`Alpha 1: ${STEP_SAY[step.step]} (${st.attackers} up)`);
       else if (step.squad === 1 && step.step === 'fall back') flash('Enemy falling back inside the house');
     }
     if (st.over) {
@@ -1314,7 +1321,7 @@ try {
     if (assaultOn) { v.stop_assault(); assaultOn = false; flash('Training assault called off'); return; }
     fireGraph();
     v.start_assault((Math.random() * 1e9) >>> 0);
-    assaultOn = true; assaultPoll = 0;
+    assaultOn = true; assaultPoll = 0; lastAlive = null;
     flash('Training assault: Alpha 1 takes the killhouse');
   };
   addEventListener('keydown', (e) => {
