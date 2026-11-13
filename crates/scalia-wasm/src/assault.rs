@@ -125,6 +125,19 @@ impl Assault {
         (!ms.is_empty()).then(|| (ms.iter().map(|p| p.0).sum::<i64>() / ms.len() as i64, ms.iter().map(|p| p.1).sum::<i64>() / ms.len() as i64))
     }
 
+    /// One line per squad on this ground: id, alive, centre (m), the leader's current step, and how many men
+    /// are moving (for the console: scaliaField()).
+    pub fn describe(&self) -> String {
+        let mut out = format!("t={} ms\n", self.battle.time_ms);
+        for &sq in &self.squads {
+            let ms: Vec<&Soldier> = self.battle.soldiers.iter().filter(|s| s.squad == sq).collect();
+            let c = self.centre(sq).unwrap_or((0, 0));
+            let moving = ms.iter().filter(|s| s.moving).count();
+            out += &format!("squad {sq}: {}/{} alive at ({:.1}, {:.1}) m, step '{}', {} moving, done {}\n", self.squad_alive(sq), ms.len(), c.0 as f64 / 1000.0, c.1 as f64 / 1000.0, self.battle.squad_phase(sq as usize), moving, self.battle.squad_done(sq as usize));
+        }
+        out
+    }
+
     /// Living soldiers of a squad.
     pub fn squad_alive(&self, squad: u16) -> usize {
         self.battle.soldiers.iter().filter(|s| s.squad == squad && s.alive()).count()

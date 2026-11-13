@@ -673,6 +673,10 @@ impl Viewer {
         }
         format!("{{\"running\":true,\"over\":{over},\"attackers\":{att},\"defenders\":{def},\"steps\":[{}]}}", steps.join(","))
     }
+    /// The field battle in words (debugging: squads, positions, steps).
+    pub fn field_debug(&self) -> String {
+        self.assault.as_ref().map_or("no field".into(), |a| a.describe())
+    }
     /// Sounds since the last call, four floats each: distance from the commander (m), pan (-1 left .. 1 right
     /// on screen), 1 for a blast or 0 for a shot, and how long from now it happens (s; rounds of a burst).
     pub fn take_sounds(&mut self) -> Vec<f32> {

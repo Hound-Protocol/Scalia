@@ -1197,9 +1197,15 @@ try {
     box.className = 'decide';
     box.innerHTML = '<div class="head">How do they go?</div>' + MODES.map((o) => `<button data-m="${o.m}">${o.label}</button>`).join('') + '<button class="cancel">Cancel</button>';
     document.body.appendChild(box);
-    const r = radio.getBoundingClientRect();
-    const left = r.left > innerWidth / 2 ? r.left - 290 : r.right + 12;
-    Object.assign(box.style, { left: `${Math.max(8, left)}px`, top: `${Math.max(8, r.top + r.height * 0.25)}px` });
+    // Beside the walkie-talkie once it has come up (it slides in), kept on screen.
+    const place = () => {
+      const r = radio.getBoundingClientRect();
+      const left = r.left > innerWidth / 2 ? r.left - box.offsetWidth - 12 : r.right + 12;
+      const top = Math.min(r.top + r.height * 0.25, innerHeight - box.offsetHeight - 8);
+      Object.assign(box.style, { left: `${Math.max(8, Math.min(left, innerWidth - box.offsetWidth - 8))}px`, top: `${Math.max(8, top)}px` });
+    };
+    box.style.visibility = 'hidden';
+    setTimeout(() => { place(); box.style.visibility = ''; }, 470);
     const done = (m) => {
       box.remove();
       if (m == null) { if (!onAir && !net.length) radio.classList.remove('up'); return; }
@@ -1300,6 +1306,7 @@ try {
   // ---- Inventory (Q): the field around the commander blurs and his kit floats in a ring around him. Pick a slot
   // with a small move of the mouse from the middle (its direction), or keys 1 to 5; click or Enter to use it.
   const DEBUG = new URLSearchParams(location.search).has('debug');
+  window.scaliaField = () => v.field_debug();
   const SLOTS = [
     { key: 'main', name: 'Main weapon', item: 'M4 carbine', note: '5.56 mm, 30-round magazine', icon: '<path d="M6 30h34l4-4h10v6h-6l-2 4H28l-2 6h-6l2-6H6z"/>' },
     { key: 'belt', name: 'Belt', item: '6 magazines, 2 frag grenades', note: 'Within reach while moving', icon: '<path d="M8 26h48v12H8z M14 22h8v4h-8z M28 22h8v4h-8z M42 22h8v4h-8z"/>' },
