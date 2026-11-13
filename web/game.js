@@ -866,7 +866,7 @@ try {
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.002 ? 3 : 1); // hiss with crackle
     const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
     const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.7;
-    const g = c.createGain(); g.gain.value = 0; g.gain.setTargetAtTime(0.03, c.currentTime, 0.03);
+    const g = c.createGain(); g.gain.value = 0; g.gain.setTargetAtTime(0.06, c.currentTime, 0.03);
     src.connect(bp).connect(g).connect(analyser); src.start();
     bed = { src, g, c };
   };
@@ -987,11 +987,11 @@ try {
   const radioChain = () => {
     if (chainIn) return chainIn;
     const c = audioGraph();
-    const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 330; hp.Q.value = 0.7;
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3100; lp.Q.value = 0.9;
-    const mid = c.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1700; mid.gain.value = 5; mid.Q.value = 1.1;
+    const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 480; hp.Q.value = 0.9;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2500; lp.Q.value = 1.2;
+    const mid = c.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1500; mid.gain.value = 8; mid.Q.value = 1.1;
     const drive = c.createWaveShaper(); const curve = new Float32Array(1024);
-    for (let i = 0; i < curve.length; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(x * 2.6) / Math.tanh(2.6); }
+    for (let i = 0; i < curve.length; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(x * 5) / Math.tanh(5); }
     drive.curve = curve; drive.oversample = '2x';
     const comp = c.createDynamicsCompressor(); comp.threshold.value = -24; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.12;
     const out = c.createGain(); out.gain.value = 0.85;
@@ -999,10 +999,11 @@ try {
     chainIn = hp;
     return chainIn;
   };
-  const playClip = (buf) => new Promise((done) => {
+  // The other side comes through the heavy radio chain; the commander's own voice is heard clean.
+  const playClip = (buf, clean) => new Promise((done) => {
     const c = audioGraph();
     if (c.state === 'suspended') c.resume().catch(() => {});
-    const src = c.createBufferSource(); src.buffer = buf; src.connect(radioChain());
+    const src = c.createBufferSource(); src.buffer = buf; src.connect(clean ? analyser : radioChain());
     let over = false; const end = () => { if (!over) { over = true; done(); } };
     src.onended = end; setTimeout(end, buf.duration * 1000 + 600);
     src.start();
@@ -1012,9 +1013,9 @@ try {
     await click(); radio.classList.add(cls); radioState(cls === 'tx' ? 'TRANSMITTING' : 'RECEIVING'); line(who, name, text);
     traffic.unshift({ when: $('pdaClock').textContent.slice(0, 5), name: cls === 'tx' ? ident.cmdr : name, text, me: cls === 'tx' });
     traffic.length = Math.min(traffic.length, 20);
-    startBed();
+    if (cls === 'rx') startBed();
     const clip = voice.id ? await clipFor(voice.id, text) : null;
-    if (clip) await playClip(clip);
+    if (clip) await playClip(clip, cls === 'tx');
     else { if (voiceManifest && voice.id) console.debug('radio: no recorded clip for', voice.id, JSON.stringify(text)); await say(text.replace(/(\d)/g, '$1 '), voice.pitch, voice.rate); }
     stopBed();
     await click(); radio.classList.remove(cls); radioState('ONLINE');
