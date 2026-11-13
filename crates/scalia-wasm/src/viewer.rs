@@ -1570,13 +1570,17 @@ impl Viewer {
                 (Pose::Cover, 0.0),
             ];
             // Entry 9 is "walk while aiming": the walk with an aiming upper body layered on top.
-            let walk_aim = self.preview_pose == Some(9);
-            let (pose, steps) = if walk_aim { (Pose::Walk, 1.5 / stride_m(Pose::Walk)) } else { SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()] };
+            // Previews past the pose list: 9 walk while aiming, 10/11 strafe left/right while aiming, 12 backpedal
+            // while aiming (the legs walk that way, the upper body stays on the target).
+            let moving_dir = match self.preview_pose { Some(9) => Some(0.0f32), Some(10) => Some(std::f32::consts::FRAC_PI_2), Some(11) => Some(-std::f32::consts::FRAC_PI_2), Some(12) => Some(std::f32::consts::PI), _ => None };
+            let walk_aim = moving_dir.is_some();
+            let dir = moving_dir.unwrap_or(0.0);
+            let (pose, steps) = if walk_aim { (Pose::Walk, 1.2 / scalia_render::pose::stride_m_dir(Pose::Walk, dir)) } else { SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()] };
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
             let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
             let colour = VARIANTS[self.model_variant as usize % VARIANTS.len()].1;
-            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), if walk_aim { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 }, 0.0]));
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), if walk_aim { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 }, dir]));
             meshes.push("plinth".into());
             let (mesh, tris, detail) = match self.model_detail {
                 1 => ("figure_lo", figure_lo().vertices.len() / 3, "mid detail, 70-250 m"),

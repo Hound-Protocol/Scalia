@@ -91,6 +91,9 @@ pub struct PoseParams {
     pub look: f32,
     /// Each upper arm raised out to the side (radians, positive away from the body), left then right.
     pub abduct: [f32; 2],
+    /// Each leg swung out to the side around the front-to-back line through its hip (radians, positive moves the
+    /// foot to the figure's right, +x), left then right: walking sideways and at angles while facing ahead.
+    pub side: [f32; 2],
     /// Rifle turn around the vertical through the grip (positive swings the muzzle to the left, across the
     /// body, and the stock out to the right shoulder), applied after `rifle` pitch.
     pub rifle_yaw: f32,
@@ -289,6 +292,19 @@ fn leg(q: Vec3, hip: f32, knee: f32) -> Vec3 {
     rot(rot(q, 0.0, KNEE_Z, -knee), 0.0, HIP_Z, hip)
 }
 
+/// Where each hip joint is across the body (x), the pivot for `side`.
+pub const HIP_X: f32 = 0.1;
+
+/// A leg point swung out to the side by `a` around the front-to-back line through the hip at `px`.
+pub fn sideways(q: Vec3, a: f32, px: f32) -> Vec3 {
+    if a == 0.0 {
+        return q;
+    }
+    let (s, c) = a.sin_cos();
+    let (dx, dz) = (q.x - px, q.z - HIP_Z);
+    Vec3::new(px + dx * c - dz * s, q.y, HIP_Z + dx * s + dz * c)
+}
+
 /// Height of the ankle joint above the ground (rest pose).
 pub const ANKLE_Z: f32 = 0.085;
 /// The boot's heel and toe along the foot (y), where it touches the ground.
@@ -320,6 +336,43 @@ fn gait(phase: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32)
         (hip[i], knee[i]) = gait_leg((phase + off).fract(), swing, forward, lift, base, stance);
     }
     (hip, knee)
+}
+
+/// Gait in any direction while facing ahead: `dir` is the way the body moves, measured from straight ahead
+/// towards the left (radians). Each leg's swing about `forward` splits into a forward part (hip, cos dir) and a
+/// sideways part (side, sin dir), so the planted foot sweeps straight back along the line of travel.
+fn gait_dir(phase: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32, dir: f32) -> ([f32; 2], [f32; 2], [f32; 2]) {
+    let (hip, knee) = gait(phase, swing, forward, lift, base, stance);
+    if dir == 0.0 {
+        return (hip, knee, [0.0; 2]);
+    }
+    let (s, c) = dir.sin_cos();
+    // Side-stepping is a shuffle: shorter steps (the cadence rises to match, `stride_scale`) with the feet kept
+    // a little apart, so the legs do not scissor across each other.
+    let k = stride_scale(dir);
+    let mut h = [0.0; 2];
+    let mut sd = [0.0; 2];
+    for i in 0..2 {
+        let e = (hip[i] - forward) * k;
+        h[i] = forward + e * c;
+        let out = if i == 0 { -1.0 } else { 1.0 };
+        sd[i] = -e * s + out * SIDE_SPREAD * s.abs();
+    }
+    (h, knee, sd)
+}
+
+/// How far the feet sit apart (radians out from each hip) when stepping straight sideways.
+const SIDE_SPREAD: f32 = 0.06;
+
+/// Stride length when moving in direction `dir`, as a share of the forward stride: 1 forwards and backwards,
+/// down to 0.55 straight sideways.
+pub fn stride_scale(dir: f32) -> f32 {
+    1.0 - 0.45 * dir.sin().abs()
+}
+
+/// Ground covered per gait cycle moving in direction `dir` (see `stride_m`); the cadence is speed / this.
+pub fn stride_m_dir(pose: Pose, dir: f32) -> f32 {
+    stride_m(pose) * stride_scale(dir)
 }
 
 /// One leg through a stride (u in 0..1, heel strike at 0). Stance (the first `stance` of the cycle): the hip sweeps
@@ -358,11 +411,17 @@ pub const SPRINT_STRIDE: f32 = 2.50;
 /// Pose parameters at a gait phase (0..1; only the gaits use it). Rifle carries per pose (rule 3): low ready when
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
 pub fn params(pose: Pose, phase: f32) -> PoseParams {
+    params_dir(pose, phase, 0.0)
+}
+
+/// `params` for a soldier moving in direction `dir` (from straight ahead towards the left, radians) while facing
+/// ahead: the gaits step sideways and backwards; other poses ignore it.
+pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
     let mut p = PoseParams::default();
     match pose {
         Pose::Stand => carry(&mut p, Carry::SafeHang),
         Pose::Walk => {
-            (p.hip, p.knee) = gait(phase, 0.45, 0.0, 0.75, 0.06, 0.6);
+            (p.hip, p.knee, p.side) = gait_dir(phase, 0.45, 0.0, 0.75, 0.06, 0.6, dir);
             p.lean = 0.05;
             carry(&mut p, Carry::LowReady);
             stride(&mut p, phase, 0.018, 0.06, 0.035, 0.025, 0.04);
@@ -370,14 +429,14 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
         Pose::Run => {
             // Combat run (reference: BF3 E3 trailer, the squad rushing the street): low, knees well bent, torso
             // pitched forward, rifle nearly level across the chest.
-            (p.hip, p.knee) = gait(phase, 0.6, 0.2, 1.15, 0.4, 0.45);
+            (p.hip, p.knee, p.side) = gait_dir(phase, 0.6, 0.2, 1.15, 0.4, 0.45, dir);
             p.lean = 0.32;
             carry(&mut p, Carry::Rush);
             p.head = 0.28;
             stride(&mut p, phase, 0.03, 0.2, 0.08, 0.06, 0.16);
         }
         Pose::Sprint => {
-            (p.hip, p.knee) = gait(phase, 0.56, 0.1, 1.45, 0.2, 0.36);
+            (p.hip, p.knee, p.side) = gait_dir(phase, 0.56, 0.1, 1.45, 0.2, 0.36, dir);
             p.lean = 0.42;
             carry(&mut p, Carry::Collapsed);
             p.head = 0.38;
@@ -420,7 +479,7 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             p.head = -0.1;
         }
     }
-    p.drop = ground_drop(p.hip, p.knee);
+    p.drop = ground_drop_side(p.hip, p.knee, p.side);
     p
 }
 
@@ -534,10 +593,16 @@ fn aim_arms(p: &mut PoseParams) {
 
 /// Vertical shift that puts the lowest heel or toe of either leg on the ground.
 pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
+    ground_drop_side(hip, knee, [0.0; 2])
+}
+
+/// `ground_drop` with the legs swung out to the side.
+pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2]) -> f32 {
     let mut low = f32::MAX;
     for i in 0..2 {
+        let px = if i == 0 { -HIP_X } else { HIP_X };
         for y in [HEEL_Y, TOE_Y] {
-            low = low.min(foot(Vec3::new(0.0, y, 0.0), hip[i], knee[i]).z);
+            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i]), side[i], px).z);
         }
     }
     -low
@@ -547,12 +612,12 @@ pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
 pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
     let mut q = match part {
         Part::Body | Part::Sway => return v,
-        Part::LeftThigh => rot(v, 0.0, HIP_Z, p.hip[0]),
-        Part::RightThigh => rot(v, 0.0, HIP_Z, p.hip[1]),
-        Part::LeftShin => leg(v, p.hip[0], p.knee[0]),
-        Part::RightShin => leg(v, p.hip[1], p.knee[1]),
-        Part::LeftFoot => foot(v, p.hip[0], p.knee[0]),
-        Part::RightFoot => foot(v, p.hip[1], p.knee[1]),
+        Part::LeftThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[0]), p.side[0], -HIP_X),
+        Part::RightThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[1]), p.side[1], HIP_X),
+        Part::LeftShin => sideways(leg(v, p.hip[0], p.knee[0]), p.side[0], -HIP_X),
+        Part::RightShin => sideways(leg(v, p.hip[1], p.knee[1]), p.side[1], HIP_X),
+        Part::LeftFoot => sideways(foot(v, p.hip[0], p.knee[0]), p.side[0], -HIP_X),
+        Part::RightFoot => sideways(foot(v, p.hip[1], p.knee[1]), p.side[1], HIP_X),
         Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
         Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
         Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
@@ -599,11 +664,13 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
     let m = |x: f32, y: f32| x + (y - x) * w;
     let m2 = |x: [f32; 2], y: [f32; 2]| [m(x[0], y[0]), m(x[1], y[1])];
     let (hip, knee) = (m2(a.hip, b.hip), m2(a.knee, b.knee));
-    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop(hip, knee) };
+    let side = m2(a.side, b.side);
+    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop_side(hip, knee, side) };
     PoseParams {
         lean: m(a.lean, b.lean),
         hip,
         knee,
+        side,
         shoulder: m2(a.shoulder, b.shoulder),
         elbow: m2(a.elbow, b.elbow),
         reach: m2(a.reach, b.reach),

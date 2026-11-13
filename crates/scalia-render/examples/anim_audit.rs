@@ -64,6 +64,28 @@ fn main() {
         println!("{:<10} {:>6.1}m/s {:>8.2}m/s {:>8.2}m/s {:>9.3}r {:>9.0}   stride {measured:.2} m/cycle, {hz:.2} cycles/s (foot {:.2} m/s)", format!("{pose:?}"), speed, sum / n.max(1) as f32, max, seam, jerk, vs / n.max(1) as f32);
         if seam > 0.01 { println!("  !! loop seam {seam:.3} rad: the cycle jumps where it restarts"); bad += 1; }
     }
+    // Walking any direction while facing ahead (strafe, backpedal): the planted foot against the ground, in 2D.
+    println!("\nWalk by direction (facing ahead): planted-foot slide (m/s)");
+    for deg in [0.0f32, 45.0, 90.0, 135.0, 180.0, -90.0, -45.0] {
+        let dir = deg.to_radians();
+        let speed = 1.5f32;
+        let mv = Vec3::new(-dir.sin(), dir.cos(), 0.0) * speed;
+        let ps: Vec<PoseParams> = (0..=N).map(|k| params_dir(Pose::Walk, k as f32 / N as f32, dir)).collect();
+        let hz = speed / stride_m_dir(Pose::Walk, dir);
+        let dt = 1.0 / hz / N as f32;
+        let f: Vec<[[Vec3; 2]; 2]> = ps.iter().map(|p| feet(p, &pts)).collect();
+        let c = |k: usize| (f[k][0][0] + f[k][0][1]) * 0.5;
+        let (k0, k1) = ((0.08 * N as f32) as usize, ((0.6 - 0.08) * N as f32) as usize);
+        let (mut sum, mut n) = (0.0f32, 0);
+        for k in k0..k1 {
+            let v = (c(k + 1) - c(k)) / dt + mv; // foot velocity over the ground
+            sum += Vec3::new(v.x, v.y, 0.0).length(); n += 1;
+        }
+        let avg = sum / n as f32;
+        println!("  {deg:>6.0} deg  slide {avg:.2}");
+        if avg > 0.2 { println!("  !! walking at {deg} deg: the planted foot slides {avg:.2} m/s"); bad += 1; }
+    }
+
     println!("\nLeft palm to the rifle handguard (m, worst over the cycle, after grip()); the right palm holds the grip by construction");
     for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim] {
         // Worst over the cycle, as drawn (after grip()).
