@@ -206,6 +206,11 @@
   /* The hand slides along the tablet's edge with the thumb; a tap is a small push onto the button's edge. */
   #tablet .arm-r { transition: translate 0.32s cubic-bezier(0.3, 0.75, 0.3, 1); }
   #tablet .thumb.press { transform: translateX(-0.75cqw); }
+  /* The left hand mirrors the right: its thumb (the same sprite, flipped) rests by the left-side buttons. */
+  #tablet .thumb-l { left: -6.58%; scale: -1 1; transform: translateY(var(--ly, 0)) translateX(var(--lx, 0));
+    transition: translate 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) 0.26s, transform 0.32s cubic-bezier(0.3, 0.75, 0.3, 1); }
+  #tablet .thumb-l.press { --lx: -0.75cqw; transform: translateY(var(--ly, 0)) translateX(var(--lx)); transition: translate 0.26s, transform 0.07s ease-out; }
+  #tablet img.fp.arm-l { transform: translateY(var(--ly, 0)); transition: translate 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) 0.26s, transform 0.32s cubic-bezier(0.3, 0.75, 0.3, 1); }
   /* Held in two hands, the tablet is never quite still: a slow breath, and a small give when it is used. */
   #tablet.up { animation: pda-breath 5.2s ease-in-out infinite; }
   #tablet { transition: top 0.45s cubic-bezier(0.2, 0.85, 0.25, 1), visibility 0s, rotate 0.3s cubic-bezier(0.3, 0.7, 0.3, 1); }
@@ -506,8 +511,11 @@
   <span class="hwl" style="top:63.56%">Settings</span>
   <button class="hw" data-hw="manual" style="left:4.83%;top:60.58%" title="Field Manual"></button>
   <span class="hwl" style="left:3.47%;width:6%;top:56.4%;white-space:normal;line-height:1.15;font-size:0.85cqw">Field<br>Manual</span>
+  <button class="hw" data-hw="changelog" style="left:4.83%;top:74.45%" title="What changed in each update"></button>
+  <span class="hwl" style="left:3.47%;width:6%;top:71.6%;font-size:0.85cqw">Changelog</span>
   <div class="closeHint">Press <kbd>Tab</kbd> or the <b>Close</b> button on the PDA to close the PDA</div>
   <img class="thumb" src="./img/fp_thumb.webp" alt="" draggable="false">
+  <img class="thumb thumb-l arm-l" src="./img/fp_thumb.webp" alt="" draggable="false">
   <div class="display">
   <div class="scan"></div>
   <pre class="term" id="pdaTerm" aria-hidden="true"></pre>
@@ -517,7 +525,7 @@
       <div class="ph-batt" id="pdaBatt">1st Battalion</div>
       <div class="ph-meta"><span class="ph-cmdr"><i class="band"></i><span id="pdaCmdr">Commander</span></span><i class="ph-sep"></i><span><b id="pdaSoldiers">0</b> manpower</span></div>
     </div>
-    <div class="ph-right"><button class="ph-btn" data-page="changelog" id="chgBtn" title="What changed in each update">Changelog</button><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
+    <div class="ph-right"><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
   </header>
   <div class="screen page" id="home"></div>
   <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div id="mapMarks"></div><svg id="scanOverlay" viewBox="0 0 1 1" preserveAspectRatio="none" hidden></svg><div id="mapBox" hidden></div><div id="mapTip" hidden></div><div id="holdRing" hidden></div><div id="aboutPanel" hidden></div><div id="unitPanel" hidden></div><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">left click: select · drag: select a square · right click: commands · hold right: about · hold S: scan building · middle drag/WASD: pan · wheel: zoom</div></div>

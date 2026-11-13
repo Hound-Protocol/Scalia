@@ -28,6 +28,14 @@ ImageDraw.Draw(mask).polygon([(1308, 492), (1376, 482), (1400, 580), (1312, 596)
 m = (np.asarray(mask) > 0) & (rgba[..., 3] > 0)
 rgba[m, :3] = (31, 33, 35)
 save(Image.fromarray(rgba), 'fp_right')
+# The left hand loses its thumb the same way (mirrored polygon): its blocky thumb is fp_thumb flipped.
+left = Image.open(f'{out}/fp_left.webp')
+rgba = np.asarray(left).copy()
+mask = Image.new('L', left.size, 0)
+ImageDraw.Draw(mask).polygon([(1920 - x, y) for x, y in [(1308, 492), (1376, 482), (1400, 580), (1312, 596), (1296, 590), (1277, 536)]], fill=255)
+m = (np.asarray(mask) > 0) & (rgba[..., 3] > 0)
+rgba[m, :3] = (31, 33, 35)
+save(Image.fromarray(rgba), 'fp_left')
 # The walkie hand: the same left hand, raised so the handset sits in its palm; the handset is drawn wholly in
 # front of it (the front layer stays empty).
 left = Image.open(f'{out}/fp_left.webp')

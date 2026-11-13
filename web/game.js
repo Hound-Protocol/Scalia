@@ -355,7 +355,7 @@ try {
   const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
   const sfx = (src, vol) => { const a = new Audio(src); a.preload = 'auto'; a.volume = vol; return () => { const b = a.cloneNode(); b.volume = vol; b.play().catch(() => {}); }; };
   const unitSelect = sfx('./sfx/unit-select.mp3', 0.6), menuOpen = sfx('./sfx/context-menu.mp3', 0.6);
-  const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-close.mp3', 0.7), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
+  const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-leave.mp3', 0.6), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
   // Every button on the tablet, on screen or on the device, taps.
   tablet.addEventListener('click', (e) => { if (e.target.closest('button')) pdaTap(); }, true);
   const DIVE_AT_MS = 550; // matches the viewer's CINE_TURN_MS + CINE_HOLD_MS: the zoom begins
@@ -441,7 +441,20 @@ try {
       tablet.style.rotate = '0.2deg'; setTimeout(() => { tablet.style.rotate = ''; }, 120);
     });
   }
+  // The left hand: the same, mirrored, for the buttons on the left side (Field Manual, Changelog).
+  const thumbL = tablet.querySelector('.thumb-l'), armL = tablet.querySelector('img.fp.arm-l');
+  const leftTo = (y) => { const dy = `${((y - TIP_Y) / ASPECT).toFixed(2)}cqw`; thumbL.style.setProperty('--ly', dy); armL.style.setProperty('--ly', dy); };
+  leftTo(btnY(tablet.querySelector('.hw[data-hw="manual"]')));
+  for (const b of tablet.querySelectorAll('.hw')) {
+    if (parseFloat(b.style.left || '91.99') >= 50) continue;
+    b.addEventListener('pointerenter', () => leftTo(btnY(b)));
+    b.addEventListener('pointerdown', () => {
+      leftTo(btnY(b)); thumbL.classList.add('press');
+      tablet.style.rotate = '-0.2deg'; setTimeout(() => { tablet.style.rotate = ''; }, 120);
+    });
+  }
   addEventListener('pointerup', () => thumb.classList.remove('press'));
+  addEventListener('pointerup', () => thumbL.classList.remove('press'));
   // Putting the tablet away with Tab: the thumb goes to the power button and presses it first, then it goes down.
   let pressingOff = false;
   const pressOff = () => {
