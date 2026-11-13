@@ -2039,6 +2039,13 @@ impl Viewer {
         let mut assaulters = Vec::new();
         if let Some(mut a) = self.assault.take() {
             a.advance(self.frame_ms);
+            // Sandbags laid on the field: part of the base from now on (drawn, and in the agents' grid).
+            if let Some(props) = a.battle.map_spec().map(|m| m.props()).filter(|p| p.len() > self.base_props.len()) {
+                self.base_props = props;
+                self.base_grid.rebuild(&self.base_props);
+                let m = base_mesh(&self.base_props, self.base_h);
+                self.gpu.upload("base", m.bytes());
+            }
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let origin = self.origin;
             // Our squads keep their roster colours: selected, captain, or plain.

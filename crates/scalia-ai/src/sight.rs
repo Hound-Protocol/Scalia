@@ -68,32 +68,37 @@ impl SightGrid {
     pub fn build(x_mm: i64, y_mm: i64, w: usize, h: usize, props: &[Prop]) -> SightGrid {
         let bw = w.div_ceil(BLOCK);
         let mut g = SightGrid { x_mm, y_mm, w, h, bands: vec![0; w * h], coarse: vec![0; bw * h.div_ceil(BLOCK)], bw };
-        let hc = CELL_MM / 2;
         for p in props {
-            let b = bands_of(p);
-            if b == 0 {
-                continue;
-            }
-            // Only the cells around the prop (one cell of margin).
-            let r = reach(p) + CELL_MM;
-            let span = |lo: i64, origin: i64, n: usize| (lo - origin).div_euclid(CELL_MM).clamp(0, n as i64) as usize;
-            let (i0, i1) = (span(p.x_mm - r, x_mm, w), (span(p.x_mm + r, x_mm, w) + 1).min(w));
-            let (j0, j1) = (span(p.y_mm - r, y_mm, h), (span(p.y_mm + r, y_mm, h) + 1).min(h));
-            for j in j0..j1 {
-                for i in i0..i1 {
-                    let (cx, cy) = (x_mm + i as i64 * CELL_MM + hc, y_mm + j as i64 * CELL_MM + hc);
-                    // A cell is filled if the prop covers its centre or any corner (thin panels too).
-                    let hit = [(0, 0), (-hc, -hc), (hc, -hc), (-hc, hc), (hc, hc)].iter().any(|&(dx, dy)| p.covers(cx + dx, cy + dy));
-                    if hit {
-                        g.bands[j * w + i] |= b;
-                        g.coarse[(j / BLOCK) * bw + i / BLOCK] |= b;
-                    }
-                }
-            }
+            g.stamp(p);
         }
         g
     }
 
+    /// Marks a prop's cells (at build, or a prop placed during a battle: sandbags).
+    pub fn stamp(&mut self, p: &Prop) {
+        let (w, h) = (self.w, self.h);
+        let hc = CELL_MM / 2;
+        let b = bands_of(p);
+        if b == 0 {
+            return;
+        }
+        // Only the cells around the prop (one cell of margin).
+        let r = reach(p) + CELL_MM;
+        let span = |lo: i64, origin: i64, n: usize| (lo - origin).div_euclid(CELL_MM).clamp(0, n as i64) as usize;
+        let (i0, i1) = (span(p.x_mm - r, self.x_mm, w), (span(p.x_mm + r, self.x_mm, w) + 1).min(w));
+        let (j0, j1) = (span(p.y_mm - r, self.y_mm, h), (span(p.y_mm + r, self.y_mm, h) + 1).min(h));
+        for j in j0..j1 {
+            for i in i0..i1 {
+                let (cx, cy) = (self.x_mm + i as i64 * CELL_MM + hc, self.y_mm + j as i64 * CELL_MM + hc);
+                // A cell is filled if the prop covers its centre or any corner (thin panels too).
+                let hit = [(0, 0), (-hc, -hc), (hc, -hc), (-hc, hc), (hc, hc)].iter().any(|&(dx, dy)| p.covers(cx + dx, cy + dy));
+                if hit {
+                    self.bands[j * w + i] |= b;
+                    self.coarse[(j / BLOCK) * self.bw + i / BLOCK] |= b;
+                }
+            }
+        }
+    }
 
     /// The filled bands at a point (0 outside the grid).
     pub fn bands_at(&self, x: i64, y: i64) -> u32 {

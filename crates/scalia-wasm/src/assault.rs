@@ -281,7 +281,17 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
         return (Pose::Prone, 0.0, None, 0.0);
     }
     if let Some((act, _)) = s.act {
-        return (if act == Act::Throw { Pose::Throw } else { Pose::Drone }, 0.6, None, 0.0);
+        return (
+            match act {
+                Act::Throw => Pose::Throw,
+                Act::Drone => Pose::Drone,
+                // Filling and laying sandbags: down on one knee, working.
+                Act::Build => Pose::Crouch,
+            },
+            0.6,
+            None,
+            0.0,
+        );
     }
     let moving = walking && speed > 0.15;
     let dir = if moving { dir } else { 0.0 };

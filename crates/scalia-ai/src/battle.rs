@@ -10,7 +10,7 @@ use crate::save::{decode, encode, frame, unframe, Command, MapSpec};
 use crate::tactics::{Building, CoverMap, Height};
 use scalia_core::killhouse::Killhouse;
 use scalia_core::hash::mix64;
-use scalia_core::nav::{find_path, NavGrid};
+use scalia_core::nav::{find_path, NavGrid, Prop};
 
 /// How he moves: pace and how low.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -58,6 +58,8 @@ pub enum Bark {
 pub enum Act {
     Throw,
     Drone,
+    /// Filling and laying sandbags.
+    Build,
 }
 
 /// Radius a soldier needs to pass (doorways are 1.2 m and more).
@@ -311,6 +313,24 @@ impl Battle {
         Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![Vec::new(); n], grid: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), goals: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), scratch: Vec::new(), paths_this_step: 0, perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
     }
 
+    /// Puts a prop on the ground mid-battle (sandbags): it blocks sight and movement and gives cover from now on.
+    pub(crate) fn place_prop(&mut self, p: Prop) {
+        let Some(map) = self.map.as_mut() else { return };
+        map.push_prop(p);
+        let props = map.props();
+        self.sight.stamp(&p);
+        if let Some(nav) = self.nav.as_mut() {
+            nav.rebuild(&props);
+        }
+        if let (Some(cover), Some(nav)) = (self.cover.as_mut(), self.nav.as_ref()) {
+            cover.add_prop(props.len() - 1, &p, nav);
+        }
+        // Routes planned through the new prop are planned again.
+        for s in &mut self.soldiers {
+            s.path_to = None;
+        }
+    }
+
     /// Adds a soldier (use `Command::Spawn` for a battle that is replayed or saved). Returns his index.
     pub fn join(&mut self, s: Soldier) -> usize {
         let sq = s.squad as usize;
@@ -423,6 +443,11 @@ impl Battle {
 
     pub(crate) fn state_bytes(&self) -> Vec<u8> {
         encode(&self.state())
+    }
+
+    /// The map this battle is on (with any props placed during it), if it was built from one.
+    pub fn map_spec(&self) -> Option<&MapSpec> {
+        self.map.as_ref()
     }
 
     pub fn nav(&self) -> Option<&NavGrid> {

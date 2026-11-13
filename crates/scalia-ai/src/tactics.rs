@@ -62,6 +62,13 @@ pub struct CoverMap {
 }
 
 impl CoverMap {
+    /// Appends the spots of a prop placed during a battle (index `k` in the map's props). Spots already handed
+    /// out keep their indices.
+    pub fn add_prop(&mut self, k: usize, p: &Prop, nav: &NavGrid) {
+        let more = CoverMap::build(std::slice::from_ref(p), nav);
+        self.spots.extend(more.spots.into_iter().map(|c| Cover { prop: k, ..c }));
+    }
+
     pub fn build(props: &[Prop], nav: &NavGrid) -> CoverMap {
         let mut spots = Vec::new();
         for (k, p) in props.iter().enumerate() {

@@ -122,3 +122,50 @@ fn with_hostiles_confirmed_they_bound_in_two_teams() {
     assert!(b.squad_done(0), "they get there and secure it");
     assert!(split * 2 > samples, "bounding most of the way: {split} of {samples} samples");
 }
+
+fn sandbags(b: &Battle) -> Vec<scalia_core::nav::Prop> {
+    b.map_spec().unwrap().props().into_iter().filter(|p| matches!(p.kind, PropKind::Wall { thickness_mm: 700, length_mm: 2_000 })).collect()
+}
+
+#[test]
+fn garrisoning_open_ground_they_build_sandbags_from_their_kit() {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(6, (20_000, 20_000)), 6);
+    let to = (50_000, 50_000);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to, mode: Mode::Garrison } });
+    run(&mut b, 80_000);
+    let bags = sandbags(&b);
+    assert_eq!(bags.len(), 4, "the squad's kit is four loads");
+    // Each bag is in front of a man, on the outer side; he is low behind it.
+    for p in &bags {
+        let man = b.soldiers.iter().min_by_key(|s| dist(s.pos, (p.x_mm, p.y_mm))).unwrap();
+        assert!(dist(man.pos, (p.x_mm, p.y_mm)) < 1_500, "a man behind each bag: {:?} {:?}", man.pos, (p.x_mm, p.y_mm));
+        assert!(dist((p.x_mm, p.y_mm), to) > dist(man.pos, to), "the bag is on the outer side");
+        assert_eq!(man.stance, Stance::Crouch);
+    }
+    // The kit is used up: garrisoning somewhere else builds nothing more.
+    b.submit(b.time_ms, Command::Squad { squad: 0, order: Order::Move { to: (70_000, 50_000), mode: Mode::Garrison } });
+    run(&mut b, 60_000);
+    assert_eq!(sandbags(&b).len(), 4);
+    // And the sandbags survive a save.
+    let loaded = Battle::load(&b.save()).unwrap();
+    assert_eq!(loaded.hash(), b.hash());
+}
+
+#[test]
+fn garrisoning_a_building_they_man_its_windows_facing_out() {
+    let k = Killhouse::new(80_000, 62_000);
+    let mut b = Battle::on_map(MapSpec::killhouse((80_000, 62_000)), squad(4, (86_000, 35_000)), 7);
+    let to = (80_000 + 4_000, 62_000 + 11_000); // room C
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to, mode: Mode::Garrison } });
+    run(&mut b, 120_000);
+    let centre = (80_000 + 10_000, 62_000 + 7_000);
+    for s in &b.soldiers {
+        let w = k.windows.iter().map(|w| dist(s.pos, (w.x_mm, w.y_mm))).min().unwrap();
+        let door = k.doors.iter().map(|d| dist(s.pos, (d.x_mm, d.y_mm))).min().unwrap();
+        assert!(w < 1_300 || door < 1_600, "at a window or door: {:?}", s.pos);
+        assert!(k.room_at(s.pos.0, s.pos.1).is_some(), "inside: {:?}", s.pos);
+        let out = (s.pos.0 - centre.0, s.pos.1 - centre.1);
+        assert!(out.0 * s.facing.0 + out.1 * s.facing.1 > 0, "facing out: {:?} {:?}", s.pos, s.facing);
+    }
+    assert!(sandbags(&b).is_empty(), "no sandbags in doorways");
+}

@@ -12,6 +12,7 @@ use crate::goap::{self, Action, Goal, Limits, State};
 use crate::sight::isqrt;
 use crate::tactics::{Building, Height};
 use scalia_core::killhouse::Killhouse;
+use scalia_core::nav::{Prop, PropKind};
 
 /// The commander's intent for a squad.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -38,6 +39,12 @@ pub enum Mode {
     Garrison,
 }
 
+/// Garrison: sandbag loads a squad carries, one 2 m wall each (0.7 m thick: low cover, 1 m high), and the time
+/// to fill and lay one.
+pub const SANDBAG_KIT: u8 = 4;
+const SANDBAG_LEN_MM: i64 = 2_000;
+const SANDBAG_THICK_MM: i64 = 700;
+const BUILD_MS: i64 = 6_000;
 /// Hostiles confirmed: the length of one bound.
 const BOUND_MM: i64 = 12_000;
 /// With caution: corners this close ahead are watched.
@@ -174,11 +181,14 @@ pub struct Brain {
     holding: bool,
     /// Move order: arrived and security set.
     secured: bool,
+    /// Sandbag loads the squad carries (kept across orders), and bags being laid: (done at ms, x, y, turns).
+    kit: u8,
+    builds: Vec<(i64, i64, i64, u8)>,
 }
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new() }
     }
 }
 
@@ -226,7 +236,9 @@ impl Battle {
         while self.brains.len() <= squad {
             self.brains.push(Brain::new());
         }
-        self.brains[squad] = Brain { order, ..Brain::new() };
+        // The sandbags they carry stay with them whatever the order.
+        let kit = self.brains[squad].kit;
+        self.brains[squad] = Brain { order, kit, ..Brain::new() };
     }
 
     /// The squad has done what it was told (the building taken and held, or arrived and secured).
@@ -353,7 +365,12 @@ impl Battle {
             self.soldiers[i].watch = None;
         }
         self.brains[squad].secured = true;
-        self.log.push(Event::Order { squad, step: "secure" });
+        self.log.push(Event::Order { squad, step: if mode == Mode::Garrison { "garrison" } else { "secure" } });
+        // Garrisoning a building: its windows and doors, facing out.
+        if mode == Mode::Garrison && self.building.as_ref().is_some_and(|(k, _)| k.room_at(to.0, to.1).is_some()) {
+            self.man_building(&ms, to);
+            return;
+        }
         // Cover first: nearest free spot to each man, within reach of the place, spaced apart.
         let spots: Vec<(usize, (i64, i64), (i64, i64), Height)> = match self.cover.as_ref() {
             Some(c) => c.spots.iter().enumerate().filter(|(_, sp)| dist(sp.pos, to) <= SECURE_MM).map(|(k, sp)| (k, sp.pos, sp.toward, sp.height)).collect(),
@@ -392,6 +409,7 @@ impl Battle {
             })
             .filter(|(at, _)| self.nav().is_none_or(|nv| nv.walkable_at(at.0, at.1, BODY_MM)))
             .collect();
+        let mut ring = Vec::new();
         for i in open {
             let me = self.soldiers[i].pos;
             let Some(k) = (0..slots.len()).min_by_key(|&k| (dist(slots[k].0, me), k)) else { break };
@@ -399,6 +417,82 @@ impl Battle {
             let s = &mut self.soldiers[i];
             s.task = Task::Hold { at, face: (at.0 + d.0 * 10, at.1 + d.1 * 10) };
             s.posture = Some(Stance::Crouch);
+            s.gait = Gait::Walk;
+            ring.push((i, at, d));
+        }
+        if mode == Mode::Garrison {
+            self.fortify(squad, &ring);
+        }
+    }
+
+    /// Garrison in the open: men on the ring without cover lay a sandbag wall just outside their spot, across
+    /// their sector, while the kit lasts.
+    fn fortify(&mut self, squad: usize, ring: &[(usize, (i64, i64), (i64, i64))]) {
+        for &(i, at, d) in ring {
+            if self.brains[squad].kit == 0 {
+                break;
+            }
+            let c = (at.0 + d.0 * 900 / 1_000, at.1 + d.1 * 900 / 1_000);
+            // Across his line of fire: along x when he faces north or south.
+            let turns = if d.1.abs() >= d.0.abs() { 0 } else { 1 };
+            let half = if turns == 0 { (SANDBAG_LEN_MM / 2, 0) } else { (0, SANDBAG_LEN_MM / 2) };
+            let clear = [c, (c.0 - half.0, c.1 - half.1), (c.0 + half.0, c.1 + half.1)].iter().all(|p| self.nav().is_none_or(|n| n.walkable_at(p.0, p.1, 0)));
+            if !clear {
+                continue;
+            }
+            let done = self.time_ms + BUILD_MS + dist(self.soldiers[i].pos, at) * 1_000 / 1_500;
+            self.soldiers[i].act = Some((Act::Build, done));
+            let b = &mut self.brains[squad];
+            b.kit -= 1;
+            b.builds.push((done, c.0, c.1, turns));
+        }
+    }
+
+    /// Garrison a building: men to the outer windows (standing, over the sill) nearest the spot, then the outer
+    /// doors (low, just inside), each facing out.
+    fn man_building(&mut self, ms: &[usize], to: (i64, i64)) {
+        let Some((k, _)) = self.building.clone() else { return };
+        let inside = |p: (i64, i64)| k.room_at(p.0, p.1).is_some();
+        let mut posts: Vec<((i64, i64), (i64, i64), Stance)> = Vec::new();
+        for w in &k.windows {
+            let n = if w.along_x { (0, 1_000) } else { (1_000, 0) };
+            let (a, b) = ((w.x_mm + n.0 * 700 / 1_000, w.y_mm + n.1 * 700 / 1_000), (w.x_mm - n.0 * 700 / 1_000, w.y_mm - n.1 * 700 / 1_000));
+            let (post, out) = match (inside(a), inside(b)) {
+                (true, false) => (a, (-n.0, -n.1)),
+                (false, true) => (b, n),
+                _ => continue,
+            };
+            posts.push((post, out, Stance::Stand));
+        }
+        for d in &k.doors {
+            let outer = matches!(d.rooms, (Some(_), None) | (None, Some(_)));
+            if !outer {
+                continue;
+            }
+            let n = if d.along_x { (0, 1_000) } else { (1_000, 0) };
+            let side = if d.along_x { (1_000, 0) } else { (0, 1_000) };
+            let off = d.width_mm / 2 + 500;
+            for sgn in [1, -1] {
+                let a = (d.x_mm + sgn * n.0 * 900 / 1_000 + side.0 * off / 1_000, d.y_mm + sgn * n.1 * 900 / 1_000 + side.1 * off / 1_000);
+                if inside(a) {
+                    posts.push((a, (-sgn * n.0, -sgn * n.1), Stance::Crouch));
+                }
+            }
+        }
+        posts.sort_by_key(|p| (dist(p.0, to), p.0));
+        for &i in ms {
+            let me = self.soldiers[i].pos;
+            let s = &mut self.soldiers[i];
+            if posts.is_empty() {
+                s.task = Task::Hold { at: to, face: me };
+                s.posture = Some(Stance::Crouch);
+                continue;
+            }
+            // The nearest of the first few posts (closest to where he was sent).
+            let pick = (0..posts.len().min(ms.len() + 2)).min_by_key(|&k| (dist(posts[k].0, me), k)).unwrap_or(0);
+            let (at, out, stance) = posts.remove(pick);
+            s.task = Task::Hold { at, face: (at.0 + out.0 * 10, at.1 + out.1 * 10) };
+            s.posture = Some(stance);
             s.gait = Gait::Walk;
         }
     }
@@ -469,6 +563,15 @@ impl Battle {
                         self.lead_capture(squad);
                     }
                 }
+            }
+        }
+        // Sandbags being laid: in place once the work is done.
+        for squad in 0..self.brains.len() {
+            let now = self.time_ms;
+            let (done, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.brains[squad].builds).into_iter().partition(|b| b.0 <= now);
+            self.brains[squad].builds = wait;
+            for (_, x, y, turns) in done {
+                self.place_prop(Prop { kind: PropKind::Wall { length_mm: SANDBAG_LEN_MM, thickness_mm: SANDBAG_THICK_MM }, x_mm: x, y_mm: y, quarter_turns: turns });
             }
         }
         // Grenades in the air.

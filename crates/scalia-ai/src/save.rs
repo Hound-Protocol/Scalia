@@ -30,6 +30,8 @@ pub struct MapSpec {
     pub h_mm: i64,
     props: Vec<PropSpec>,
     pub killhouse: Option<(i64, i64)>,
+    /// How many of the props (the last ones) were placed during the battle, in order.
+    placed: usize,
 }
 
 /// Navigation cells are 500 mm, sight cells 250 mm.
@@ -38,13 +40,19 @@ const SIGHT_CELL: i64 = 250;
 
 impl MapSpec {
     pub fn new(x0: i64, y0: i64, w_mm: i64, h_mm: i64, props: &[Prop]) -> MapSpec {
-        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None }
+        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None, placed: 0 }
     }
 
     /// The training house with its south-west corner at `origin`, on 100 × 80 m of open ground around it.
     pub fn killhouse(origin: (i64, i64)) -> MapSpec {
         let k = Killhouse::new(origin.0, origin.1);
         MapSpec { killhouse: Some(origin), ..MapSpec::new(origin.0 - 40_000, origin.1 - 42_000, 100_000, 80_000, &k.props()) }
+    }
+
+    /// Adds a prop placed during the battle (sandbags): it is part of the map from now on, saves included.
+    pub fn push_prop(&mut self, p: Prop) {
+        self.props.push(PropSpec::from(p));
+        self.placed += 1;
     }
 
     pub fn props(&self) -> Vec<Prop> {
@@ -54,10 +62,16 @@ impl MapSpec {
     /// Builds the navigation, sight and cover grids.
     pub(crate) fn grids(&self) -> (NavGrid, SightGrid, CoverMap) {
         let props = self.props();
+        let base = props.len() - self.placed;
         let mut nav = NavGrid::new(self.x0, self.y0, (self.w_mm / NAV_CELL) as usize, (self.h_mm / NAV_CELL) as usize);
-        nav.rebuild(&props);
+        nav.rebuild(&props[..base]);
         let sight = SightGrid::build(self.x0, self.y0, (self.w_mm / SIGHT_CELL) as usize, (self.h_mm / SIGHT_CELL) as usize, &props);
-        let cover = CoverMap::build(&props, &nav);
+        let mut cover = CoverMap::build(&props[..base], &nav);
+        // Props placed during the battle, replayed in order exactly as they were added (cover indices included).
+        for k in base..props.len() {
+            nav.rebuild(&props[..=k]);
+            cover.add_prop(k, &props[k], &nav);
+        }
         (nav, sight, cover)
     }
 }
@@ -99,7 +113,7 @@ impl From<PropSpec> for Prop {
 
 /// "SCAB" (Scalia battle) and the format version: a save from another version is refused, not misread.
 const MAGIC: [u8; 4] = *b"SCAB";
-pub const SAVE_VERSION: u32 = 1;
+pub const SAVE_VERSION: u32 = 2;
 
 /// Frames a state as magic, version, payload and a checksum over the payload.
 pub(crate) fn frame(payload: &[u8]) -> Vec<u8> {
