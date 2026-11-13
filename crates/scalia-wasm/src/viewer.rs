@@ -1874,7 +1874,8 @@ impl Viewer {
         let behind = (base + Vec3::Z, h, from.2, from.3);
         // Face-on to the tablet (the camera's elevation is the tablet's tilt), sized like the close-up on screen.
         let close = (hands, h, TABLET_IMG_H / self.tablet_fit.max(0.05), scalia_render::pose::TABLET_TILT);
-        let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * (3.0 - 2.0 * x) };
+        // Smootherstep: starts slow, runs at full pace mid-way, lands slow; the duration is unchanged.
+        let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * x * (x * (x * 6.0 - 15.0) + 10.0) };
         let mix = |a: (Vec3, f32, f32, f32), b: (Vec3, f32, f32, f32), w: f32| {
             let mut dy = b.1 - a.1;
             while dy > std::f32::consts::PI { dy -= std::f32::consts::TAU; }

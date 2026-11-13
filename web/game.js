@@ -270,6 +270,17 @@ try {
     setTimeout(() => box.remove(), 260);
     if (onGlitch) onGlitch();
   };
+  // Zooming the map glitches the glass for as long as the wheel moves (and while the new detail settles), hiding the pop-in.
+  let zoomGlitchUntil = 0, zoomGlitchTimer = 0;
+  const zoomGlitch = () => {
+    zoomGlitchUntil = performance.now() + 320;
+    if (zoomGlitchTimer) return;
+    glitch();
+    zoomGlitchTimer = setInterval(() => {
+      if (performance.now() > zoomGlitchUntil) { clearInterval(zoomGlitchTimer); zoomGlitchTimer = 0; return; }
+      glitch();
+    }, 110);
+  };
   const setPage = (p) => {
     // The page that comes in wipes across the glass (only when the page changes, not on a redraw).
     if (p !== page) {
@@ -611,7 +622,7 @@ try {
     });
     pump();
   };
-  mapCanvas.addEventListener('wheel', (e) => { e.preventDefault(); onMap(() => v.wheel(Math.sign(e.deltaY))); }, { passive: false });
+  mapCanvas.addEventListener('wheel', (e) => { e.preventDefault(); zoomGlitch(); onMap(() => v.wheel(Math.sign(e.deltaY))); }, { passive: false });
 
   const drawRoster = () => {
     const units = JSON.parse(v.roster());
@@ -773,7 +784,9 @@ try {
       syncTablet();
       footsteps();
       cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
-      hud.textContent = `${line}${now < noteUntil ? ` | ${note}` : ''}`;
+      const showNote = now < noteUntil;
+      hud.hidden = !showNote || tabletUp;
+      if (showNote) hud.textContent = note;
       perfPanel(v.perf(), cpuMs, now, cap);
       const now_scene = v.scene_name();
       if (now_scene !== scene) { scene = now_scene; store.set('scalia.scene', scene); }
