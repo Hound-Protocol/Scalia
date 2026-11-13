@@ -1026,7 +1026,7 @@ try {
   // Incoming calls: wait for the commander to answer (urgent ones first, at most a few waiting).
   const incoming = [];
   const answerBox = $('answerCall');
-  const ringTone = sfx('./sfx/radio-key.mp3', 0.55);
+  const ringTone = sfx('./sfx/walkie-ring.mp3', 0.5);
   let ringTimer = 0;
   const showCalls = () => {
     answerBox.hidden = !incoming.length;
@@ -1034,7 +1034,7 @@ try {
     const c = incoming[0];
     answerBox.querySelector('small').textContent = `${c.from} ${pad2(c.n)} calling${c.urgent ? ' · URGENT' : ''}${incoming.length > 1 ? ` · ${incoming.length - 1} more waiting` : ''}`;
     answerBox.classList.toggle('urgent', incoming.some((x) => x.urgent));
-    if (!ringTimer) { const ring = () => { ringTone(); setTimeout(ringTone, 160); }; ring(); ringTimer = setInterval(ring, 5000); }
+    if (!ringTimer) { ringTone(); ringTimer = setInterval(ringTone, 4000); } // the 1.6 s ring, then a pause
   };
   const hear = (ev) => {
     const same = incoming.findIndex((x) => x.id === ev.id);
@@ -1089,7 +1089,7 @@ try {
     pump();
   };
   // The blur only runs while the view really changes: at the end of the zoom range it stays sharp.
-  const zoomSound = sfx('./sfx/map-zoom.mp3', 0.45);
+  const zoomSound = sfx('./sfx/map-zoom.mp3', 0.5);
   let zoomSoundAt = 0;
   mapCanvas.addEventListener('wheel', notches((d) => {
     if (!onMap(() => v.wheel(d))) return;
