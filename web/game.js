@@ -1358,7 +1358,7 @@ try {
     if (scene !== 'ground') { v.set_scene('ground'); scene = 'ground'; }
     const soldiers = v.bench_army(squads);
     const box = document.getElementById('benchBox') || Object.assign(document.createElement('div'), { id: 'benchBox' });
-    box.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:60;background:#0d1410e6;color:#d8e6d0;border:1px solid #5d7a52;padding:10px 14px;font:13px/1.5 system-ui,sans-serif;white-space:pre;pointer-events:auto';
+    box.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:100000;background:#0d1410e6;color:#d8e6d0;border:1px solid #5d7a52;padding:10px 14px;font:13px/1.5 system-ui,sans-serif;white-space:pre;pointer-events:auto';
     document.body.appendChild(box);
     box.textContent = `Benchmark: ${soldiers} soldiers, warming up…`;
     bench = { start: performance.now(), warm: 3000, run: 20000, soldiers, cap: capIndex, box, frames: [], cpu: [], gpu: [], prev: 0 };
