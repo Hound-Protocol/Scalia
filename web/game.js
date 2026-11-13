@@ -2,7 +2,7 @@
 import init, * as wasm from './pkg/scalia_wasm.js';
 
 const $ = (id) => document.getElementById(id);
-const canvas = $('view'), hud = $('hud'), help = $('help');
+const canvas = $('view'), hud = $('hud');
 
 function showError(msg) {
   const e = $('error');
@@ -81,8 +81,6 @@ try {
   // Full resolution for now (the chunky pixel look is switched off; R brings it back).
   let fullres = true, outline = false;
   v.set_full(true);
-  const toggleHelp = () => { help.classList.toggle('hidden'); store.set('scalia.help', help.classList.contains('hidden') ? '0' : '1'); };
-  if (store.get('scalia.help') === '0') help.classList.add('hidden');
 
   // Mouse: wheel zooms, drag pans.
   // One mouse-wheel notch (about 100 px) is one zoom step; trackpads send many small deltas, summed into steps.
@@ -167,7 +165,7 @@ try {
   // the roster lists the units, the comms hub is a placeholder for talking to other commanders.
   let tabletUp = false, page = 'home';
   const tablet = $('tablet');
-  const PAGE_NAME = { home: 'Home', map: 'Map', roster: 'Roster', comms: 'Comms hub', settings: 'Settings' };
+  const PAGE_NAME = { home: 'Home', map: 'Map', roster: 'Roster', comms: 'Comms hub', settings: 'Settings', manual: 'Field Manual' };
   // The header: who you are and how many you lead (the name and battalion are yours to set in Settings).
   const ident = { cmdr: store.get('cmdr.name') || 'Commander', batt: store.get('batt.name') || '1st Battalion' };
   const showIdent = () => { $('pdaCmdr').textContent = ident.cmdr; $('pdaBatt').textContent = ident.batt; };
@@ -327,6 +325,7 @@ try {
     $('roster').hidden = p !== 'roster';
     $('comms').hidden = p !== 'comms';
     $('settings').hidden = p !== 'settings';
+    $('manual').hidden = p !== 'manual';
     if (p === 'roster') drawRoster();
     pdaStatus();
   };
@@ -715,7 +714,6 @@ try {
     else if (k === ' ') { e.preventDefault(); v.launch(performance.now()); }
     else if (k === 'c' && tabletUp && page === 'map') { v.map_center_commander(); pdaTap(); }
     else if (k === 'f') v.follow();
-    else if (k === 'h') toggleHelp();
     else if (k === 'o') { outline = !outline; v.set_outline(outline); }
     else if (k === 'r') { fullres = !fullres; v.set_full(fullres); }
     else if (k === 't') flash(v.cycle_day_speed(performance.now()));

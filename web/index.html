@@ -12,11 +12,6 @@
   .panel { position: fixed; background: rgba(10, 12, 16, 0.78); border: 1px solid #2a313c; padding: 6px 8px; }
   body.pda .panel { visibility: hidden; }
   #hud { bottom: 8px; left: 8px; max-width: calc(100vw - 340px); }
-  #help { top: 8px; right: 8px; max-width: 320px; }
-  #help h3 { margin: 0 0 4px; font-size: 13px; }
-  #help table { border-collapse: collapse; }
-  #help td { padding: 1px 6px 1px 0; vertical-align: top; }
-  #help td:first-child { color: #e9c46a; white-space: nowrap; }
   #help.hidden { display: none; }
   #perf { bottom: 8px; right: 8px; width: 300px; font-size: 12px; }
   #perf .row { display: grid; grid-template-columns: 34px 1fr 62px; gap: 6px; align-items: center; margin: 3px 0; }
@@ -291,6 +286,13 @@
   #comms .note { margin-top: 14px; }
 
   /* Settings. */
+  #manual .group { padding: 4px 16px; margin-bottom: 14px; max-width: 640px; }
+  #manual table { border-collapse: collapse; width: 100%; }
+  #manual td { padding: 5px 0; font-size: 14px; color: var(--sand); border-bottom: 1px solid var(--line); vertical-align: top; }
+  #manual tr:last-child td { border-bottom: 0; }
+  #manual td:first-child { width: 190px; padding-right: 14px; white-space: nowrap; }
+  #manual kbd { font: 700 12.5px 'Saira', sans-serif; letter-spacing: 0.06em; color: var(--amber); background: rgba(224,165,38,0.08); border: 1px solid rgba(224,165,38,0.4); padding: 1px 7px; }
+  #manual a { color: var(--amber); }
   #settings .group { padding: 6px 16px; margin-bottom: 14px; max-width: 560px; }
   #tablet .set-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); }
   #tablet .set-row:last-child { border-bottom: 0; }
@@ -336,27 +338,6 @@
 </head>
 <body>
 <canvas id="view"></canvas>
-<div id="help" class="panel">
-  <h3>Controls</h3>
-  <table>
-    <tr><td>1 2 3 4</td><td>Ships, ground, planet, star system</td></tr>
-    <tr><td>Wheel</td><td>Zoom; past the limit it moves ground, planet, system</td></tr>
-    <tr><td>Click</td><td>Select a group (Ground)</td></tr>
-    <tr><td>Shift + drag</td><td>Box-select groups</td></tr>
-    <tr><td>Right click</td><td>March the selection there (Shift: sprint)</td></tr>
-    <tr><td>P</td><td>Stance of the selected group: stand, crouch, cover, cover aim, prone, aim</td></tr>
-    <tr><td>Drag / WASD</td><td>Pan (turn the ship in Ships)</td></tr>
-    <tr><td>Q / E</td><td>Rotate the camera</td></tr>
-    <tr><td>F</td><td>Follow the units again</td></tr>
-    <tr><td>Space</td><td>Launch to the other planet (System)</td></tr>
-    <tr><td>O / R</td><td>Outlines / chunky pixels</td></tr>
-    <tr><td>T</td><td>Day speed: normal, fast, paused</td></tr>
-    <tr><td>L</td><td>Frame cap: off, 60, 30</td></tr>
-    <tr><td>N</td><td>Army size: 2k, 20k, 100k, 500k (Ground)</td></tr>
-    <tr><td>H</td><td>Hide this help</td></tr>
-  </table>
-  <p style="margin:6px 0 0"><a href="./debug.html">Debug page</a> (blueprints, terrain chunks)</p>
-</div>
 <div id="hud" class="panel" hidden></div>
 <div id="perf" class="panel">
   <div class="top"><span><b id="pFps">--</b> fps</span><span id="pInfo"></span></div>
@@ -392,6 +373,8 @@
   <span class="hwl" style="top:54.43%">Comms</span>
   <button class="hw" data-hw="settings" style="top:65.76%" title="Settings"></button>
   <span class="hwl" style="top:63.56%">Settings</span>
+  <button class="hw" data-hw="manual" style="left:4.2%;top:56.19%" title="Field Manual"></button>
+  <span class="hwl" style="left:2.2%;top:54.0%">Field Manual</span>
   <div class="display">
   <div class="scan"></div>
   <pre class="term" id="pdaTerm" aria-hidden="true"></pre>
@@ -418,6 +401,15 @@
       <label class="set-row"><span>Music volume</span><span class="ctl"><input id="musicVol" type="range" min="0" max="100" value="25"><b id="musicVolTxt">25%</b></span></label>
     </div>
     <p class="note">The music is a placeholder track.</p>
+  </div>
+  <div class="screen page" id="manual" hidden>
+    <h3>On foot</h3>
+    <div class="group bk"><table><tr><td><kbd>Tab</kbd></td><td>Open or put away the Commander PDA</td></tr><tr><td><kbd>W A S D</kbd></td><td>Walk the commander</td></tr><tr><td><kbd>Shift</kbd></td><td>Sprint while walking</td></tr><tr><td><kbd>Q / E</kbd></td><td>Turn the camera</td></tr><tr><td><kbd>Mouse wheel</kbd></td><td>Zoom the view</td></tr><tr><td><kbd>F</kbd></td><td>Camera follows the commander again</td></tr></table></div>
+    <h3>Commander PDA</h3>
+    <div class="group bk"><table><tr><td><kbd>Map: click a unit</kbd></td><td>Select it; click a place to open its orders</td></tr><tr><td><kbd>Map: Shift + drag</kbd></td><td>Box-select several units</td></tr><tr><td><kbd>Map: wheel / drag</kbd></td><td>Zoom and pan the map</td></tr><tr><td><kbd>C</kbd></td><td>Centre the map on the commander</td></tr><tr><td><kbd>Map: right click</kbd></td><td>March the selection there (Shift: sprint)</td></tr></table></div>
+    <h3>Other keys</h3>
+    <div class="group bk"><table><tr><td><kbd>P</kbd></td><td>Stance of the selected group</td></tr><tr><td><kbd>T</kbd></td><td>Day speed: normal, fast, paused</td></tr><tr><td><kbd>N</kbd></td><td>Army size: 2k, 20k, 100k, 500k</td></tr><tr><td><kbd>L</kbd></td><td>Frame cap: off, 60, 30</td></tr><tr><td><kbd>1 2 3 4</kbd></td><td>Ships, ground, planet, star system (debug)</td></tr><tr><td><kbd>Space</kbd></td><td>Launch to the other planet (star system view)</td></tr><tr><td><kbd>O / R</kbd></td><td>Outlines / chunky pixels (debug)</td></tr></table></div>
+    <p class="note"><a href="./debug.html">Debug page</a> (blueprints, terrain chunks)</p>
   </div>
   <div class="screen page" id="comms" hidden>
     <div class="channels">
