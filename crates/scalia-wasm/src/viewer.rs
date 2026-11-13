@@ -185,6 +185,8 @@ pub struct Viewer {
     agent_anim: HashMap<u32, (f32, f64)>,
     /// The stance each unit takes once its soldiers reach the ordered place.
     arrive_stance: HashMap<u32, Pose>,
+    /// Units sent to a point that will call the commander when they get there: the grid and the order's kind.
+    arrive_report: HashMap<u32, (String, u8)>,
     /// The commander's gait phase (0..1; -1 standing).
     cmd_phase: f32,
     /// The commander's instance record from this frame's main pass (the map draws him from it, solid).
@@ -328,6 +330,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_ms: 0.0,
         agent_anim: HashMap::new(),
         arrive_stance: HashMap::new(),
+        arrive_report: HashMap::new(),
         cmd_phase: -1.0,
         cmd_rec: [0.0; 12],
         tablet_fit: 0.6,
@@ -564,6 +567,7 @@ impl Viewer {
         self.agents.clear();
         self.agent_prev.clear();
         self.arrive_stance.clear();
+        self.arrive_report.clear();
         format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
     }
     /// Left click on the ground: selects the group under the cursor (or clears the selection).
@@ -700,8 +704,10 @@ impl Viewer {
             _ => Pose::Stand,
         };
         let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
+        let spot = grid(x, y);
         for g in &groups {
             self.arrive_stance.insert(*g, stance);
+            self.arrive_report.insert(*g, (spot.clone(), action));
         }
         self.command_world(Vec3::new(x as f32, y as f32, 0.0), now_ms, run)
     }
@@ -1698,6 +1704,7 @@ impl Viewer {
         while t - self.agent_clock >= 50.0 {
             self.agent_clock += 50.0;
             let keys: Vec<u32> = self.agents.keys().copied().collect();
+            let mut reports: Vec<(u32, String, u8)> = Vec::new();
             for g in keys {
                 let a = self.agents.get_mut(&g).expect("present");
                 self.agent_prev.insert(g, a.positions().to_vec());
@@ -1706,12 +1713,34 @@ impl Viewer {
                     if let Some(p) = self.arrive_stance.remove(&g) {
                         self.stance.insert(g, p);
                     }
+                    if let Some((spot, kind)) = self.arrive_report.remove(&g) {
+                        reports.push((g, spot, kind));
+                    }
                 }
                 // Keep the group's own record where its soldiers are: any later order starts from here, so the
                 // squad never jumps back to where it stood before walking as agents.
                 let (cx, cy) = a.centre();
                 self.world.groups.set_process(GroupId(g), scalia_core::process::Process::idle());
                 self.world.groups.set_pos(GroupId(g), Pos { region: RegionId(1), x: cx, y: cy, z: 0 });
+            }
+            for (g, spot, kind) in reports {
+                let me = self.call_sign(g);
+                let pick = (g as usize + self.radio_out.len() + (t as usize / 50)) % 3;
+                let text = match (kind, pick) {
+                    (1, 0) => format!("Actual, {me}. Dug in at grid {spot}, holding. Over."),
+                    (1, 1) => format!("Actual, {me}. Grid {spot} secured, we hold here. Out."),
+                    (1, _) => format!("Actual, {me}. In cover at {spot}, watching our front. Over."),
+                    (2, 0) => format!("Actual, {me}. Assault element on grid {spot}. Awaiting orders. Over."),
+                    (2, 1) => format!("Actual, {me}. Reached {spot}, area clear. Over."),
+                    (2, _) => format!("Actual, {me}. At objective {spot}, ready. Out."),
+                    (3, 0) => format!("Actual, {me}. Support set at grid {spot}. Over."),
+                    (3, 1) => format!("Actual, {me}. In position at {spot}, eyes on. Out."),
+                    (3, _) => format!("Actual, {me}. Overwatch established, grid {spot}. Over."),
+                    (_, 0) => format!("Actual, {me}. Arrived at grid {spot}. Over."),
+                    (_, 1) => format!("Actual, {me}. We are at {spot}, awaiting orders. Over."),
+                    (_, _) => format!("Actual, {me}. At position, grid {spot}. Out."),
+                };
+                self.radio(g, text, false);
             }
         }
         self.run_captains(self.frame_ms);
