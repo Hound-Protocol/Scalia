@@ -113,7 +113,9 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     let head = spine * Affine3A::from_rotation_z(p.look) * pitch_at(NECK_Z, p.head);
     let h = hand(p, Side::Right);
     let g = Vec3::new(0.0, RIFLE_GRIP.y, RIFLE_GRIP.z);
-    let held = Affine3A::from_translation(h - RIFLE_GRIP) * Affine3A::from_translation(g) * Affine3A::from_rotation_x(p.rifle) * Affine3A::from_translation(-g);
+    // Pitch around the grip's x line, then turn around the vertical through the grip, then into the palm.
+    let held = Affine3A::from_translation(h) * Affine3A::from_rotation_z(p.rifle_yaw) * Affine3A::from_translation(-RIFLE_GRIP)
+        * Affine3A::from_translation(g) * Affine3A::from_rotation_x(p.rifle) * Affine3A::from_translation(-g);
     let rifle = if p.sling > 0.0 { lerp_affine(held, slung_affine(), p.sling) } else { held };
     let thigh = |i: usize| body * pitch_at(HIP_Z, p.hip[i]);
     let shin = |i: usize| body * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);

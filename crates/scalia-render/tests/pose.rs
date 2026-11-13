@@ -132,7 +132,14 @@ fn aiming_tucks_the_firing_elbow_and_reaches_across_with_the_other() {
     let pp = params(Pose::StandAim, 0.0);
     // The right (firing) elbow is tucked and bent; the left arm reaches nearly straight to the rifle and swings in.
     assert!(pp.elbow[1] > 1.0, "firing elbow not bent: {:?}", pp.elbow);
-    assert!(pp.reach[0] > 0.3, "support arm does not reach across: {:?}", pp.reach);
+    let left = hand(&pp, Side::Left);
+    // In front of the chest, well in from the left shoulder (x = -0.238).
+    assert!(left.x > -0.238 + 0.15, "support hand does not reach across the body: {left}");
+    // Right-handed: the stock sits out at the right shoulder and the rifle points straight ahead once the
+    // upper body turns (bladed stance).
+    let butt = held(Vec3::new(0.238, -0.171, 0.887), &pp);
+    assert!(butt.x > 0.17, "stock not at the right shoulder: {butt}");
+    assert!((pp.rifle_yaw + pp.twist).abs() < 0.01, "rifle not pointing ahead: yaw {} twist {}", pp.rifle_yaw, pp.twist);
 }
 
 
@@ -375,7 +382,7 @@ fn standing_soldiers_breathe_shift_and_look_around() {
     let aim = params(Pose::StandAim, 0.0);
     for k in 0..30 {
         let p = idle(&aim, Pose::StandAim, k as f32, 0.5);
-        assert!(p.look.abs() < 0.08);
+        assert!((p.look - aim.look).abs() < 0.08);
         assert_eq!(p.rifle, aim.rifle, "the sight picture stays steady");
     }
 }

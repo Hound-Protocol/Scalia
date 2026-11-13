@@ -91,6 +91,9 @@ pub struct PoseParams {
     pub look: f32,
     /// Each upper arm raised out to the side (radians, positive away from the body), left then right.
     pub abduct: [f32; 2],
+    /// Rifle turn around the vertical through the grip (positive swings the muzzle to the left, across the
+    /// body, and the stock out to the right shoulder), applied after `rifle` pitch.
+    pub rifle_yaw: f32,
 }
 
 /// The rifle slung on the back: rolled flat (magazine inwards), muzzle down, hung diagonally from the right
@@ -158,7 +161,9 @@ pub fn elbow(p: &PoseParams, side: Side) -> Vec3 {
 
 /// Where a rest-pose rifle point goes when the rifle is held in the right palm at the pose's pitch.
 pub fn held(v: Vec3, p: &PoseParams) -> Vec3 {
-    rot(v, RIFLE_GRIP.y, RIFLE_GRIP.z, p.rifle) + (hand(p, Side::Right) - RIFLE_GRIP)
+    let d = rot(v, RIFLE_GRIP.y, RIFLE_GRIP.z, p.rifle) - RIFLE_GRIP;
+    let (s, c) = p.rifle_yaw.sin_cos();
+    hand(p, Side::Right) + Vec3::new(d.x * c - d.y * s, d.x * s + d.y * c, d.z)
 }
 
 /// Puts the left palm back on the handguard after blends and idle motion have pulled it off: a closed-form
@@ -174,7 +179,7 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     // First tilt the rifle (around the right hand) just enough to bring the handguard within the left arm's
     // reach; then the arm alone can always get there.
     let mut p0 = *p;
-    p0.rifle += reach_pitch(p) * 0.5 * w;
+    p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
     // Unknowns: left shoulder, elbow and reach.
     let apply = |q: &PoseParams, x: [f32; 3]| {
@@ -224,12 +229,15 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
 const GRIP_STEPS: usize = 6;
 pub const GRIP_DAMP: f32 = 0.05;
 /// About the smallest extra rifle pitch (radians) that brings the handguard within GRIP_REACH of the left shoulder.
-/// The handguard turns on a circle around the x axis through the right palm; the squared distance to the
+/// The handguard turns on a circle around the rifle's (turned) x axis through the right palm; the squared distance to the
 /// shoulder along it is k + m cos(d + phi), so the answer is closed-form.
 pub fn reach_pitch(p: &PoseParams) -> f32 {
+    // Work in the rifle's turned frame, where pitch is a turn around x.
     let h = hand(p, Side::Right);
-    let v = held(RIFLE_GUARD, p) - h;
+    let v = rot(RIFLE_GUARD, RIFLE_GRIP.y, RIFLE_GRIP.z, p.rifle) - RIFLE_GRIP;
     let a = h - Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z);
+    let (sy, cy) = (-p.rifle_yaw).sin_cos();
+    let a = Vec3::new(a.x * cy - a.y * sy, a.x * sy + a.y * cy, a.z);
     let k = a.length_squared() + v.length_squared() + 2.0 * a.x * v.x;
     if k + 2.0 * (a.y * v.y + a.z * v.z) <= GRIP_REACH * GRIP_REACH {
         return 0.0;
@@ -417,7 +425,7 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
 /// Two layers (motion guide rule 1): the legs of one pose (gait, crouch) under the upper body of another (aim,
 /// carry), so a soldier can walk while aiming.
 pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
-    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, head: upper.head, sling: upper.sling, look: upper.look, abduct: upper.abduct, ..*legs }
+    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, rifle_yaw: upper.rifle_yaw, twist: legs.twist + upper.twist, head: upper.head, sling: upper.sling, look: upper.look, abduct: upper.abduct, ..*legs }
 }
 
 /// The life a stride puts into the body: a rise and fall twice per cycle, the upper body turning against the legs,
@@ -487,26 +495,32 @@ pub enum Carry {
 }
 
 pub fn carry(p: &mut PoseParams, c: Carry) {
-    let (shoulder, elbow, reach, abduct, rifle) = match c {
-        // Solved by examples/carry_ik: right hand on the pistol grip, left on the handguard under the barrel,
-        // elbows out to the side and below the hands, arms clear of the torso.
-        Carry::SafeHang => ([0.43, 0.48], [0.75, 1.89], [0.89, 0.86], [0.55, 0.67], -1.2),
-        Carry::LowReady => ([0.89, 0.33], [0.40, 1.60], [0.18, 1.32], [0.02, 0.94], -0.5),
-        Carry::Collapsed => ([0.70, 0.84], [0.97, 1.68], [0.21, 0.87], [0.12, 1.04], -0.75),
-        Carry::HighReady => ([1.15, -0.31], [0.95, 1.80], [0.62, 1.19], [0.64, 0.72], 0.85),
-        Carry::ReadyUp => ([1.45, 0.58], [0.29, 2.23], [0.44, 0.56], [0.28, 1.15], 0.0),
+    let (shoulder, elbow, reach, abduct, rifle, rifle_yaw) = match c {
+        // Solved by examples/carry_ik: right hand on the pistol grip on the right side of the chest, the rifle
+        // turned across the body (stock out to the right shoulder, muzzle to the left), left hand reaching
+        // across to the handguard, elbows bent and out to the side, arms clear of the torso.
+        Carry::SafeHang => ([0.32, 0.01], [0.48, 2.19], [1.40, 0.49], [0.67, 0.32], -1.20, 0.75),
+        Carry::LowReady => ([0.78, -0.10], [0.47, 1.98], [0.24, 0.80], [-0.01, 0.76], -0.50, 0.75),
+        Carry::Collapsed => ([0.64, -0.10], [0.45, 2.05], [0.69, 0.82], [0.46, 0.74], -0.75, 0.75),
+        Carry::HighReady => ([1.18, 0.23], [0.86, 1.49], [0.41, 0.37], [0.20, 0.39], 0.85, 0.75),
+        Carry::ReadyUp => ([1.22, 0.37], [0.46, 1.89], [0.20, 0.40], [-0.09, 0.92], 0.00, 0.75),
     };
     p.shoulder = shoulder;
     p.elbow = elbow;
     p.reach = reach;
     p.abduct = abduct;
     p.rifle = rifle;
+    p.rifle_yaw = rifle_yaw;
 }
 
 /// Shouldered rifle: right elbow low with the grip by the chest, left arm reaching across to hold the rifle in
 /// front of the magazine (angles found by search; `both_hands_hold_the_rifle_when_aiming` checks them).
 fn aim_arms(p: &mut PoseParams) {
     carry(p, Carry::ReadyUp);
+    // Bladed stance: the upper body turns right (left shoulder forward) by the rifle's turn across the chest,
+    // so the muzzle points straight ahead; the head turns back to look along it.
+    p.twist = -p.rifle_yaw;
+    p.look = p.rifle_yaw;
 }
 
 /// Vertical shift that puts the lowest heel or toe of either leg on the ground.
@@ -586,6 +600,7 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         reach: m2(a.reach, b.reach),
         head: m(a.head, b.head),
         rifle: m(a.rifle, b.rifle),
+        rifle_yaw: m(a.rifle_yaw, b.rifle_yaw),
         prone: m(a.prone, b.prone),
         drop,
         sling: m(a.sling, b.sling),
