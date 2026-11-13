@@ -455,3 +455,17 @@ fn crouched_walk_stays_low_and_holds_the_rifle() {
         assert!(miss < 0.03, "phase {ph}: left hand {miss:.3} m off the handguard");
     }
 }
+
+#[test]
+fn layer_and_direction_share_one_instance_value() {
+    use scalia_render::pose::{pack_layer, unpack_layer};
+    for upper in [None, Some(Pose::StandAim), Some(Pose::CrouchWalk)] {
+        for dir in [0.0f32, 1.5707964, -1.5707964, 3.1, -3.1, 0.3] {
+            let (whole, d) = unpack_layer(pack_layer(upper, dir));
+            assert_eq!(whole, upper.map_or(0.0, |p| p as u32 as f32 + 1.0));
+            assert!((d - dir).abs() < 1e-3, "{upper:?} {dir} -> {d}");
+        }
+    }
+    // A plain whole number (what instances without a direction carry) means straight ahead.
+    assert_eq!(unpack_layer(7.0), (7.0, 0.0));
+}

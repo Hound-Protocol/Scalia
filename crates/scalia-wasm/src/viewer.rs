@@ -1586,7 +1586,7 @@ impl Viewer {
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
             let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
             let colour = VARIANTS[self.model_variant as usize % VARIANTS.len()].1;
-            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), if walk_aim { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 }, dir]));
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), scalia_render::pose::pack_layer(walk_aim.then_some(Pose::StandAim), dir), 0.0]));
             meshes.push("plinth".into());
             let (mesh, tris, detail) = match self.model_detail {
                 1 => ("figure_lo", figure_lo().vertices.len() / 3, "mid detail, 70-250 m"),

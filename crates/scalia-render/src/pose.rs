@@ -417,6 +417,22 @@ pub fn stride_scale(dir: f32) -> f32 {
     1.0 - 0.45 * dir.sin().abs()
 }
 
+/// Instance value c.z for the shader: the upper-body pose layered over the legs (whole part: id + 1, 0 for none)
+/// and the way the soldier moves from his facing (fractional part: `dir` as a share of a turn). Every instance
+/// slot is taken, so the two share one float; a whole number alone still means "moving straight ahead".
+pub fn pack_layer(upper: Option<Pose>, dir: f32) -> f32 {
+    let whole = upper.map_or(0.0, |p| p as u32 as f32 + 1.0);
+    let turn = (dir / std::f32::consts::TAU).rem_euclid(1.0);
+    whole + if turn >= 0.9999 { 0.0 } else { turn }
+}
+
+/// The inverse of `pack_layer` (as common.wgsl reads it): (upper pose id + 1 or 0, dir in -pi..pi).
+pub fn unpack_layer(v: f32) -> (f32, f32) {
+    let whole = v.floor();
+    let d = (v - whole) * std::f32::consts::TAU;
+    (whole, if d > std::f32::consts::PI { d - std::f32::consts::TAU } else { d })
+}
+
 /// Ground covered per gait cycle moving in direction `dir` (see `stride_m`); the cadence is speed / this.
 pub fn stride_m_dir(pose: Pose, dir: f32) -> f32 {
     stride_m(pose) * stride_scale(dir)

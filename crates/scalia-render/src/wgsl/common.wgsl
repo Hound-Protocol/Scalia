@@ -419,12 +419,16 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
   } else if (part != 0u) {
     let phase = select(0.0, fract(time * b.z + b.y), b.z > 0.0);
     let w = clamp((time - d.y) / 0.35, 0.0, 1.0);
-    // Instance d.w: the way the soldier moves, from his facing towards the left (strafe, backpedal).
-    var pp = pose_params(u32(b.w), phase, d.w);
-    if (w < 1.0) { pp = blend(pose_params(u32(d.x), phase, d.w), pp, w); }
+    // Instance c.z (pose.rs `pack_layer`): whole part the upper-body pose id + 1 (0 none), fractional part the way
+    // the soldier moves from his facing towards the left, as a share of a turn (strafe, backpedal).
+    let layer = floor(d.z);
+    let turn = fract(d.z) * 6.2831853;
+    let dir = select(turn, turn - 6.2831853, turn > 3.1415927);
+    var pp = pose_params(u32(b.w), phase, dir);
+    if (w < 1.0) { pp = blend(pose_params(u32(d.x), phase, dir), pp, w); }
     // Instance c.z: an upper-body stance (pose id + 1) over these legs, e.g. walking while aiming.
-    if (d.z > 0.5) {
-      let up = pose_params(u32(d.z - 1.0), phase, 0.0);
+    if (layer >= 1.0) {
+      let up = pose_params(u32(layer - 1.0), phase, 0.0);
       pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.twist = pp.twist + up.twist; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
     }
     // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
@@ -432,8 +436,8 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     // Left palm onto the handguard (only the left arm and the rifle move, so only they pay for it).
     // The shadow pass skips it: a few centimetres in an arm's shadow cannot be seen.
     if (hands && (part == 3u || part == 11u || part == 9u)) {
-      let hold = select(two_handed(u32(b.w)), two_handed(u32(d.z - 1.0)), d.z > 0.5);
-      let gw = select(hold, grip_weight(u32(d.x), u32(b.w), w), w < 1.0 && d.z <= 0.5);
+      let hold = select(two_handed(u32(b.w)), two_handed(u32(layer - 1.0)), layer >= 1.0);
+      let gw = select(hold, grip_weight(u32(d.x), u32(b.w), w), w < 1.0 && layer < 1.0);
       pp = grip(pp, gw);
     }
     q = pose_vertex(v, part, pp);
