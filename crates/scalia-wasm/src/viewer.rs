@@ -92,7 +92,7 @@ const STEP_PLANET: usize = 13;
 const STEP_HANDOFF: usize = 14;
 const STEP_SYSTEM: usize = 19;
 /// Furthest zoom on foot, with the tablet away (the tablet's map zooms all the way).
-const STEP_FIELD_MAX: usize = 4;
+const STEP_FIELD_MAX: usize = 2;
 /// The commander's walking and sprinting speeds (m/s), and how long radioing an order takes (ms).
 const CMD_WALK: f32 = 1.7;
 const CMD_SPRINT: f32 = 4.6;
