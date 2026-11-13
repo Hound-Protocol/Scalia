@@ -337,9 +337,51 @@ try {
     tabletShown = false;
     document.body.classList.remove('pda');
     tablet.classList.remove('up');
+    dockRadio(false);
     closeActions();
     setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 220);
   };
+  // ---- Hands on the tablet ----
+  // The walkie-talkie: while the tablet is up, the handset lives in the left hand beside it (scaled from its
+  // field size to the hand's), and the left hand leaves the tablet to raise it whenever the radio is up.
+  const radioEl = $('radio');
+  const wkSlot = tablet.querySelector('.wkslot'), radioHome = radioEl.parentNode, radioNext = radioEl.nextSibling;
+  const fitRadio = () => { if (radioEl.parentNode === wkSlot) radioEl.style.transform = `scale(${wkSlot.clientHeight / radioEl.offsetHeight})`; };
+  const dockRadio = (inHand) => {
+    if (inHand && radioEl.parentNode !== wkSlot) { wkSlot.appendChild(radioEl); fitRadio(); }
+    if (!inHand && radioEl.parentNode === wkSlot) { radioEl.style.transform = ''; radioHome.insertBefore(radioEl, radioNext); }
+  };
+  addEventListener('resize', fitRadio);
+  const walkieUp = () => {
+    const on = radioEl.classList.contains('up');
+    tablet.classList.toggle('walkie', on);
+    // Room for the handset left of the tablet (it reaches 24.5% of the tablet's width past its left edge).
+    const w = tablet.offsetWidth, right = (innerWidth + w) / 2, need = w * 1.245 + innerWidth * 0.015;
+    tablet.style.scale = on && need > right ? (right / need).toFixed(3) : '';
+  };
+  addEventListener('resize', walkieUp);
+  new MutationObserver(walkieUp).observe(radioEl, { attributes: true, attributeFilter: ['class'] });
+  // The right thumb rests on the frame below the buttons, follows the one under the mouse and presses it.
+  const thumb = tablet.querySelector('.thumb');
+  const ASPECT = 2164 / 1139, TIP = [92.126, 53.934], REST = [93.0, 74.5];
+  let thumbRest = 0;
+  const thumbTo = (x, y) => {
+    const dx = x - TIP[0], dy = (y - TIP[1]) / ASPECT; // in cqw (percent of the tablet's width)
+    thumb.style.translate = `${dx.toFixed(2)}cqw ${dy.toFixed(2)}cqw`;
+    thumb.style.rotate = `${(-dy * 0.9).toFixed(2)}deg`;
+  };
+  thumbTo(...REST);
+  for (const b of tablet.querySelectorAll('.hw')) {
+    if (parseFloat(b.style.left || '91.99') < 50) continue; // the right-hand buttons only
+    const at = () => [91.99 + 0.9, parseFloat(b.style.top) + 6.15 / 2];
+    b.addEventListener('pointerenter', () => { clearTimeout(thumbRest); thumbTo(...at()); });
+    b.addEventListener('pointerleave', () => { clearTimeout(thumbRest); thumbRest = setTimeout(() => thumbTo(...REST), 450); });
+    b.addEventListener('pointerdown', () => {
+      thumbTo(...at()); thumb.classList.add('press');
+      tablet.style.rotate = '0.25deg'; setTimeout(() => { tablet.style.rotate = ''; }, 120);
+    });
+  }
+  addEventListener('pointerup', () => thumb.classList.remove('press'));
   // The commander's footsteps on grass: one step each time a foot lands (gait phase 0.25 and 0.75), a little
   // different every time.
   const stepSound = new Audio('./sfx/steps-grass.mp3'); stepSound.preload = 'auto';
@@ -364,6 +406,7 @@ try {
       pdaOpen();
       document.body.classList.add('pda');
       tablet.classList.add('up');
+      dockRadio(true);
       const disp = tablet.querySelector('.display');
       disp.classList.remove('boot');
       bootTerminal().then(() => { if (tabletShown) { void disp.offsetWidth; disp.classList.add('boot'); } });
