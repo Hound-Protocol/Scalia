@@ -184,6 +184,11 @@
   #answerCall.urgent button { border-color: #e2483d; } #answerCall.urgent .led { background: #e2483d; box-shadow: 0 0 8px #e2483d; }
   @keyframes call-led { 50% { opacity: 0.25; } }
   @keyframes call-in { from { transform: translateX(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
+  #tablet .closeHint { position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -1.2cqw); white-space: nowrap; pointer-events: none;
+    font: 600 1.05cqw/1 'Saira Condensed', sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: #cfd8e3;
+    padding: 0.45cqw 1.1cqw; background: rgba(10,12,16,0.72); border: 1px solid rgba(224,165,38,0.45); }
+  #tablet .closeHint kbd { font: 700 1cqw 'Saira', sans-serif; color: #14100a; background: #e0a526; padding: 0.1cqw 0.5cqw; border-radius: 2px; }
+  #tablet .closeHint b { color: #e0a526; font-weight: 600; }
   /* The arms are separate layers so they can move: the left hand leaves the tablet to raise the walkie-talkie
      beside it (the tablet stays), and the right thumb follows the side buttons and presses them. */
   /* (No visibility transition here: the arm would appear late when the whole tablet becomes visible.) */
@@ -497,6 +502,7 @@
   <span class="hwl" style="top:63.56%">Settings</span>
   <button class="hw" data-hw="manual" style="left:4.83%;top:60.58%" title="Field Manual"></button>
   <span class="hwl" style="left:3.47%;width:6%;top:56.4%;white-space:normal;line-height:1.15;font-size:0.85cqw">Field<br>Manual</span>
+  <div class="closeHint">Press <kbd>Tab</kbd> or the <b>Close</b> button on the PDA to close the PDA</div>
   <img class="thumb" src="./img/fp_thumb.webp" alt="" draggable="false">
   <div class="display">
   <div class="scan"></div>

@@ -119,7 +119,7 @@ def refs(kokoro_dir):
 def gen(limit):
     import torchaudio as ta
     from chatterbox.tts import ChatterboxTTS
-    todo = plan()[:limit]
+    todo = sorted(plan(), key=lambda l: l[0] != 'cmd')[:limit]  # the commander's lines first: his voice must never fall back
     if not todo:
         return
     m = ChatterboxTTS.from_pretrained(device='cpu')
