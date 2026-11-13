@@ -498,3 +498,19 @@ fn crouched_aim_pops_up_over_a_low_wall() {
     assert!(crouch_aim > kneel + 0.1 && crouch_aim < stand - 0.15, "hips {crouch_aim} (kneel {kneel}, stand {stand})");
     assert!(head_at(Pose::CrouchAim).z > 1.15, "eyes clear a 1 m wall: {}", head_at(Pose::CrouchAim).z);
 }
+
+#[test]
+fn the_stock_sits_in_the_right_shoulder_pocket() {
+    // The rifle's rearmost point (rest pose) and the shoulder pocket between chest and deltoid (figure frame,
+    // before twist and lean), as examples/carry_ik places them. High ready (cover) carries the stock low under
+    // the arm on purpose, so it is not in this list.
+    let butt = Vec3::new(0.238, -0.171, 0.887);
+    let pocket = Vec3::new(0.17, 0.12, 1.36);
+    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::StandAim, Pose::CoverAim, Pose::CrouchAim, Pose::LeanLeft, Pose::LeanRight] {
+        for k in 0..8 {
+            let pp = params(pose, k as f32 / 8.0);
+            let off = held(butt, &pp).distance(pocket);
+            assert!(off < 0.04, "{pose:?} phase {k}/8: stock {off:.3} m from the shoulder pocket");
+        }
+    }
+}
