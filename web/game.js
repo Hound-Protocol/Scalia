@@ -1349,6 +1349,58 @@ try {
   const CAPS = [0, 60, 30];
   let capIndex = Number(store.get('scalia.cap') || 0) % CAPS.length;
   let cpuMs = 0, last = performance.now(), lastDraw = 0;
+
+  // Benchmark: ~1,000 soldiers around the commander, the camera turns one full circle in 20 s
+  // after a 3 s warm-up; reports frame, CPU and GPU times. Start with ?bench in the URL or scaliaBench().
+  let bench = null;
+  function runBench(squads = 84) {
+    if (bench) return;
+    if (scene !== 'ground') { v.set_scene('ground'); scene = 'ground'; }
+    const soldiers = v.bench_army(squads);
+    const box = document.getElementById('benchBox') || Object.assign(document.createElement('div'), { id: 'benchBox' });
+    box.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:60;background:#0d1410e6;color:#d8e6d0;border:1px solid #5d7a52;padding:10px 14px;font:13px/1.5 system-ui,sans-serif;white-space:pre;pointer-events:auto';
+    document.body.appendChild(box);
+    box.textContent = `Benchmark: ${soldiers} soldiers, warming up…`;
+    bench = { start: performance.now(), warm: 3000, run: 20000, soldiers, cap: capIndex, box, frames: [], cpu: [], gpu: [], prev: 0 };
+    capIndex = 0; // uncapped while measuring
+  }
+  function pct(a, q) { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; }
+  function benchTick(now, cpu) {
+    const t = now - bench.start;
+    if (t < bench.warm) { bench.prev = now; return; }
+    if (t < bench.warm + bench.run) {
+      bench.frames.push(now - bench.prev); bench.prev = now;
+      bench.cpu.push(cpu);
+      const p = v.perf();
+      if (p[3] >= 0) bench.gpu.push(p[3] + p[4] + p[5]);
+      bench.box.textContent = `Benchmark: ${bench.soldiers} soldiers, measuring ${((t - bench.warm) / 1000).toFixed(0)} / ${bench.run / 1000} s`;
+      return;
+    }
+    const avg = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+    const f = bench.frames, c = bench.cpu, g = bench.gpu;
+    const p = v.perf();
+    const r = {
+      soldiers: bench.soldiers, frames: f.length, resolution: `${p[1]}x${p[2]}`,
+      fps: 1000 / avg(f), frame_avg: avg(f), frame_p95: pct(f, 0.95), frame_worst: Math.max(...f),
+      cpu_avg: avg(c), cpu_p95: pct(c, 0.95), cpu_worst: Math.max(...c),
+      gpu_avg: g.length ? avg(g) : null, gpu_p95: g.length ? pct(g, 0.95) : null, gpu_worst: g.length ? Math.max(...g) : null, ua: navigator.userAgent,
+    };
+    console.log('Scalia benchmark', JSON.stringify(r));
+    const ms = (x) => (x == null ? 'n/a' : `${x.toFixed(2)} ms`);
+    bench.box.textContent = `Benchmark result: ${r.soldiers} soldiers, ${r.resolution} internal, ${r.frames} frames
+Average ${r.fps.toFixed(1)} fps
+Frame   avg ${ms(r.frame_avg)}   95% ${ms(r.frame_p95)}   worst ${ms(r.frame_worst)}
+CPU     avg ${ms(r.cpu_avg)}   95% ${ms(r.cpu_p95)}   worst ${ms(r.cpu_worst)}
+GPU     avg ${ms(r.gpu_avg)}   95% ${ms(r.gpu_p95)}   worst ${ms(r.gpu_worst)}
+Click to copy and close.`;
+    bench.box.onclick = () => { navigator.clipboard?.writeText(JSON.stringify(r)).catch(() => {}); bench.box.remove(); };
+    window.scaliaBenchResult = r;
+    capIndex = bench.cap;
+    bench = null;
+  }
+  window.scaliaBench = runBench;
+  if (new URLSearchParams(location.search).has('bench')) setTimeout(() => runBench(), 1500);
+
   function loop(now) {
     const cap = CAPS[capIndex];
     if (cap && now - lastDraw < 1000 / cap - 2) { requestAnimationFrame(loop); return; }
@@ -1376,13 +1428,16 @@ try {
       }
       if (held.has('q')) v.rotate(-1.5 * dt);
       if (held.has('e')) v.rotate(1.5 * dt);
+      if (bench) v.rotate((Math.PI * 2 / 20) * dt);
       const t0 = performance.now();
       const line = v.frame(now);
       syncTablet();
       drawFieldLabels();
       drawMapMarks(); drawScan();
       footsteps();
-      cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
+      const cpuFrame = performance.now() - t0;
+      cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
+      if (bench) benchTick(now, cpuFrame);
       const showNote = now < noteUntil;
       hud.hidden = !showNote || tabletUp;
       if (showNote) hud.textContent = note;

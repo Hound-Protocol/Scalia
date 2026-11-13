@@ -426,6 +426,31 @@ fn build_army(groups: u32, per_group: u32) -> World {
     w
 }
 
+/// Benchmark army: `squads` squads of 12 in a grid around the commander's start (16 m apart),
+/// every third one marching, so the near renderer draws every soldier at full detail.
+fn bench_army(squads: u32) -> World {
+    let mut w = World::new(42);
+    let side = (squads as f64 + 1.0).sqrt().ceil() as i64;
+    let (cx, cy) = (90_000i64, 20_000i64);
+    let mut g = 0;
+    let mut k = 0i64;
+    while g < squads {
+        let (i, j) = (k % side - side / 2, k / side - side / 2);
+        k += 1;
+        if i == 0 && j == 0 {
+            continue; // leave the commander's square free
+        }
+        let pos = Pos { region: RegionId(1), x: cx + i * 16_000, y: cy + j * 16_000, z: 0 };
+        let spec = GroupSpec { pos, composition: Composition([12, 0, 0, 0]), needs: Needs::full() };
+        let id = w.groups.spawn(spec, &mut w.roster);
+        if g % 3 == 0 {
+            let _ = w.start_march(id, pos.offset(60_000, 0, 0), MARCH_SPEED_MM_S, WorldMs(0));
+        }
+        g += 1;
+    }
+    w
+}
+
 /// Grass tufts for one chunk: about one per 2 m^2 on green bands, none on bare (brown) ground.
 /// Deterministic per chunk, so the same field grows back in the same places.
 fn grass_for(hm: &[f32], cx: i64, cy: i64, origin: (f64, f64)) -> Vec<f32> {
@@ -577,6 +602,26 @@ impl Viewer {
         self.arrive_stance.clear();
         self.arrive_report.clear();
         format!("army: {} soldiers in {g} groups", g as u64 * n as u64)
+    }
+    /// Benchmark scene: `squads` squads of 12 around the commander (see `bench_army`). Returns the soldier count.
+    pub fn bench_army(&mut self, squads: u32) -> u32 {
+        self.world = bench_army(squads);
+        self.chain = Command::default();
+        self.tasks.clear();
+        self.derived.clear();
+        self.ground_cam = None;
+        self.selected = None;
+        self.selection.clear();
+        self.follow_group = 0;
+        self.group_pose.clear();
+        self.stance.clear();
+        self.order_dest = None;
+        self.agents.clear();
+        self.agent_prev.clear();
+        self.arrive_stance.clear();
+        self.arrive_report.clear();
+        self.cmd = (90.0, 20.0);
+        squads * 12
     }
     /// Left click on the ground: selects the group under the cursor (or clears the selection).
     pub fn click(&mut self, px: f64, py: f64, now_ms: f64) -> String {
