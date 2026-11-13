@@ -82,12 +82,13 @@ fn gait(p: ptr<function, PP>, phase: f32, swing: f32, forward: f32, lift: f32, b
 }
 
 // Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
-// 4 ready up. Sets both arms and the rifle angle.
+// 4 ready up, 5 rush (combat run). Sets both arms and the rifle angle.
 fn carry(p: ptr<function, PP>, c: u32) {
   if (c == 0u) { (*p).sh = vec2f(0.32, 0.01); (*p).el = vec2f(0.48, 2.19); (*p).reach = vec2f(1.40, 0.49); (*p).abd = vec2f(0.67, 0.32); (*p).rifle = -1.2; }
   else if (c == 1u) { (*p).sh = vec2f(0.78, -0.10); (*p).el = vec2f(0.47, 1.98); (*p).reach = vec2f(0.24, 0.80); (*p).abd = vec2f(-0.01, 0.76); (*p).rifle = -0.5; }
   else if (c == 2u) { (*p).sh = vec2f(0.64, -0.10); (*p).el = vec2f(0.45, 2.05); (*p).reach = vec2f(0.69, 0.82); (*p).abd = vec2f(0.46, 0.74); (*p).rifle = -0.75; }
   else if (c == 3u) { (*p).sh = vec2f(1.18, 0.23); (*p).el = vec2f(0.86, 1.49); (*p).reach = vec2f(0.41, 0.37); (*p).abd = vec2f(0.20, 0.39); (*p).rifle = 0.85; }
+  else if (c == 5u) { (*p).sh = vec2f(0.73, 0.01); (*p).el = vec2f(0.96, 2.06); (*p).reach = vec2f(0.29, 0.43); (*p).abd = vec2f(0.16, 0.37); (*p).rifle = -0.2; }
   else {
     (*p).sh = vec2f(1.22, 0.37); (*p).el = vec2f(0.46, 1.89); (*p).reach = vec2f(0.20, 0.40); (*p).abd = vec2f(-0.09, 0.92); (*p).rifle = 0.0;
     // Ready up is the aim (pose.rs `aim_arms`): bladed stance, muzzle straight ahead, head looking along it.
@@ -150,10 +151,10 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     carry(&p, 1u);
     stride(&p, phase, 0.018, 0.06, 0.035, 0.025, 0.04);
   } else if (pose == 2u) {
-    gait(&p, phase, 0.6, 0.08, 1.15, 0.15, 0.45);
-    p.lean = 0.25;
-    carry(&p, 2u);
-    p.head = 0.2;
+    gait(&p, phase, 0.6, 0.2, 1.15, 0.4, 0.45);
+    p.lean = 0.32;
+    carry(&p, 5u);
+    p.head = 0.28;
     stride(&p, phase, 0.03, 0.2, 0.08, 0.06, 0.16);
   } else if (pose == 7u) {
     gait(&p, phase, 0.56, 0.1, 1.45, 0.2, 0.36);

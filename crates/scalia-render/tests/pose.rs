@@ -169,7 +169,9 @@ fn sprinting_leans_further_and_carries_the_rifle_muzzle_down() {
     assert!(sprint.rifle < 0.0, "rifle angled down across the body");
     let walk = params(Pose::Walk, 0.0);
     assert!(walk.rifle < 0.0, "walking carries the rifle at low ready");
-    assert!(run.rifle < -0.7, "running holds it in collapsed low ready, muzzle down");
+    // Combat run (BF3 reference): rifle nearly level across the chest, muzzle a little down; low, knees bent.
+    assert!((-0.4..0.0).contains(&run.rifle), "combat run holds the rifle nearly level: {}", run.rifle);
+    assert!(run.knee.iter().cloned().fold(f32::MAX, f32::min) > 0.3, "combat run keeps the planted knee bent");
 }
 
 #[test]
@@ -222,8 +224,8 @@ fn every_carry_holds_the_rifle_in_both_hands() {
         (Pose::Stand, -1.4, -1.0),
         (Pose::Walk, -0.7, -0.3),
         (Pose::Crouch, -0.7, -0.3),
-        // Running and sprinting: muzzle down at about 40 degrees, not hanging straight down.
-        (Pose::Run, -0.95, -0.5),
+        // Combat run: nearly level (the stride sways it a little); sprinting: muzzle down at about 40 degrees.
+        (Pose::Run, -0.35, -0.05),
         (Pose::Sprint, -0.95, -0.5),
         (Pose::Cover, 0.6, 1.1),
         (Pose::StandAim, -0.1, 0.1),

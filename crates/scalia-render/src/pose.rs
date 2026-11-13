@@ -368,10 +368,12 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             stride(&mut p, phase, 0.018, 0.06, 0.035, 0.025, 0.04);
         }
         Pose::Run => {
-            (p.hip, p.knee) = gait(phase, 0.6, 0.08, 1.15, 0.15, 0.45);
-            p.lean = 0.25;
-            carry(&mut p, Carry::Collapsed);
-            p.head = 0.2;
+            // Combat run (reference: BF3 E3 trailer, the squad rushing the street): low, knees well bent, torso
+            // pitched forward, rifle nearly level across the chest.
+            (p.hip, p.knee) = gait(phase, 0.6, 0.2, 1.15, 0.4, 0.45);
+            p.lean = 0.32;
+            carry(&mut p, Carry::Rush);
+            p.head = 0.28;
             stride(&mut p, phase, 0.03, 0.2, 0.08, 0.06, 0.16);
         }
         Pose::Sprint => {
@@ -494,6 +496,8 @@ pub enum Carry {
     Collapsed,
     /// Behind cover: muzzle up, ready to bring down onto a target.
     HighReady,
+    /// Combat run: rifle nearly level across the chest, muzzle forward and a little down.
+    Rush,
     /// Shooting: shouldered and level.
     ReadyUp,
 }
@@ -507,6 +511,7 @@ pub fn carry(p: &mut PoseParams, c: Carry) {
         Carry::LowReady => ([0.78, -0.10], [0.47, 1.98], [0.24, 0.80], [-0.01, 0.76], -0.50, 0.75),
         Carry::Collapsed => ([0.64, -0.10], [0.45, 2.05], [0.69, 0.82], [0.46, 0.74], -0.75, 0.75),
         Carry::HighReady => ([1.18, 0.23], [0.86, 1.49], [0.41, 0.37], [0.20, 0.39], 0.85, 0.75),
+        Carry::Rush => ([0.73, 0.01], [0.96, 2.06], [0.29, 0.43], [0.16, 0.37], -0.20, 0.75),
         Carry::ReadyUp => ([1.22, 0.37], [0.46, 1.89], [0.20, 0.40], [-0.09, 0.92], 0.00, 0.75),
     };
     p.shoulder = shoulder;

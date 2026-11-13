@@ -41,6 +41,7 @@ fn main() {
         Target { name: "LowReady", grip: Vec3::new(0.15, 0.31, 1.16), pitch: -0.5, along: 0.16, elbow_r: Vec3::new(0.29, 0.04, 1.12), elbow_l: Vec3::new(-0.10, 0.28, 1.06) },
         Target { name: "Collapsed", grip: Vec3::new(0.15, 0.29, 1.16), pitch: -0.75, along: 0.15, elbow_r: Vec3::new(0.29, 0.03, 1.12), elbow_l: Vec3::new(-0.11, 0.25, 1.06) },
         Target { name: "HighReady", grip: Vec3::new(0.15, 0.35, 1.14), pitch: 0.85, along: 0.21, elbow_r: Vec3::new(0.30, 0.08, 1.06), elbow_l: Vec3::new(-0.06, 0.30, 1.02) },
+        Target { name: "Rush", grip: Vec3::new(0.14, 0.24, 1.22), pitch: -0.2, along: 0.16, elbow_r: Vec3::new(0.29, 0.04, 1.12), elbow_l: Vec3::new(-0.10, 0.28, 1.08) },
         Target { name: "ReadyUp", grip: Vec3::new(0.15, 0.33, 1.29), pitch: 0.0, along: 0.21, elbow_r: Vec3::new(0.32, 0.12, 1.16), elbow_l: Vec3::new(-0.02, 0.34, 1.14) },
     ];
     for t in &targets {

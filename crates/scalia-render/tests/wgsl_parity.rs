@@ -33,7 +33,7 @@ fn carry_table_matches() {
         rows.push(ryaw);
         i += 1;
     }
-    assert_eq!(i, 5, "five carries in the shader ({wg:?})");
+    assert_eq!(i, 6, "six carries in the shader ({wg:?})");
     assert_eq!(rs, rows);
 }
 
