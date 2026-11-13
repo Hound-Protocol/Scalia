@@ -132,16 +132,17 @@
   #tablet .device { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
     filter: drop-shadow(0 18px 40px rgba(0,0,0,0.65)); }
   #tablet .hw { z-index: 3; position: absolute; left: 91.99%; width: 3.28%; height: 6.15%; border: 0; border-radius: 22%; background: transparent; cursor: pointer; pointer-events: auto; }
-  #tablet .hwl { position: absolute; z-index: 3; left: 90.2%; width: 7.2%; text-align: center; font: 700 clamp(8px, 1.05vw, 15px)/1 'Saira Condensed', sans-serif; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(205,191,148,0.82); text-shadow: 0 1px 0 rgba(0,0,0,0.7); pointer-events: none; }
+  #tablet .hwl { position: absolute; z-index: 3; left: 90.2%; width: 7.2%; text-align: center; font: 700 clamp(8px, 1.05vw, 15px)/1 'Saira Condensed', sans-serif; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(205,191,148,0.82); text-shadow: 0 1px 0 rgba(0,0,0,0.7); pointer-events: none; white-space: nowrap; }
   #tablet .hw:hover { box-shadow: 0 0 0 2px rgba(150, 220, 160, 0.55); }
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; pointer-events: none; font-family: 'Saira', system-ui, sans-serif; }
+  #fieldHint[hidden] { display: none; }
   #fieldHint .fh-text { display: flex; align-items: center; gap: 10px; padding: 3px 11px 3px 6px; background: linear-gradient(90deg, rgba(10,12,16,0.82), rgba(18,24,20,0.82)); border: 1px solid rgba(224,165,38,0.45); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); color: #cfd8e3; font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; animation: fhPulse 2.4s ease-in-out infinite; }
   #fieldHint kbd { font: 700 11px 'Saira', sans-serif; letter-spacing: 0.1em; color: #14100a; background: #e0a526; padding: 1px 7px; border-radius: 2px; box-shadow: 0 2px 0 #8a6414; }
   #fieldHint b { color: #e0a526; font-weight: 600; }
   #fieldHint .fh-dev { position: relative; width: 46px; height: 24px; overflow: hidden; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.7)); animation: fhBob 3.2s ease-in-out infinite; }
-  #fieldHint .fh-dev img { width: 100%; display: block; }
+  #fieldHint .fh-dev img { width: 100%; display: block; filter: brightness(1.5) contrast(1.1); }
   @keyframes fhPulse { 0%, 100% { border-color: rgba(224,165,38,0.35); } 50% { border-color: rgba(224,165,38,0.9); } }
   @keyframes fhBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
   @media (prefers-reduced-motion: reduce) { #fieldHint *, #fieldHint { animation: none !important; } }
@@ -373,7 +374,7 @@
   <button class="hw" data-hw="settings" style="top:65.76%" title="Settings"></button>
   <span class="hwl" style="top:63.56%">Settings</span>
   <button class="hw" data-hw="manual" style="left:4.2%;top:56.19%" title="Field Manual"></button>
-  <span class="hwl" style="left:2.2%;top:54.0%">Field Manual</span>
+  <span class="hwl" style="left:1.3%;width:9%;top:54.0%">Field Manual</span>
   <div class="display">
   <div class="scan"></div>
   <pre class="term" id="pdaTerm" aria-hidden="true"></pre>
