@@ -268,7 +268,6 @@ try {
     setTimeout(() => box.remove(), 260);
     if (onGlitch) onGlitch();
   };
-  // Zooming the map glitches the glass for as long as the wheel moves (and while the new detail settles), hiding the pop-in.
   // Zooming the map: a very fast blur while the wheel moves, hiding the detail popping in. No glitch effects.
   let zoomBlurTimer = 0;
   const zoomGlitch = () => {
@@ -276,6 +275,16 @@ try {
     cv.classList.add('zoomblur');
     clearTimeout(zoomBlurTimer);
     zoomBlurTimer = setTimeout(() => cv.classList.remove('zoomblur'), 170);
+  };
+  // The changelog is written at deploy time from the commit history (changelog.json).
+  let chgLoaded = false;
+  const drawChangelog = async () => {
+    if (chgLoaded) return;
+    try {
+      const list = await (await fetch('./changelog.json', { cache: 'no-cache' })).json();
+      $('chgList').innerHTML = list.map((e) => `<div class="ver"><b>${e.n}</b><span>${e.text}<small>${e.date}</small></span></div>`).join('') || '<p class="note">Nothing recorded yet.</p>';
+      chgLoaded = true;
+    } catch { $('chgList').innerHTML = '<p class="note">The changelog is not available right now.</p>'; }
   };
   const setPage = (p) => {
     // The page that comes in wipes across the glass (only when the page changes, not on a redraw).
