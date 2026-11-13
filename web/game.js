@@ -964,14 +964,58 @@ try {
   // One net, one speaker at a time: the commander's orders and the units' own calls queue up; urgent calls go first.
   let onAir = false;
   const net = [];
-  const voiceOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return { pitch: 0.6 + (h % 50) / 100, rate: 1.0 + (h % 7) / 40 }; };
+  // Who speaks with which recorded voice (scripts/radio_voices.py): four squad voices, one per captain.
+  const VOICE_ID = { Alpha: 's1', Echo: 's1', Bravo: 's2', Foxtrot: 's2', Charlie: 's3', Golf: 's3', Delta: 's4', Hotel: 's4', Reyes: 'c1', Okafor: 'c2' };
+  const voiceOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return { id: VOICE_ID[name.split(' ')[0]], pitch: 0.6 + (h % 50) / 100, rate: 1.0 + (h % 7) / 40 }; };
+  // Recorded lines: the manifest maps each voice's exact line text to its clip. Clips load on first use and stay
+  // decoded; they play through the handset's radio chain (narrow band, overdriven speaker, compression) into the
+  // analyser, so the trace follows the real voice. A line with no clip falls back to the browser's speech voice.
+  let voiceManifest = null;
+  fetch('./voice/manifest.json', { cache: 'no-cache' }).then((r) => r.json()).then((m) => { voiceManifest = m; }).catch(() => {});
+  const clipCache = new Map();
+  const clipFor = (vid, text) => {
+    const f = voiceManifest && voiceManifest[vid] && voiceManifest[vid][text];
+    const c = audioGraph();
+    if (!f || !c) return Promise.resolve(null);
+    if (!clipCache.has(f)) {
+      clipCache.set(f, fetch(`./voice/${f}`).then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then((b) => c.decodeAudioData(b)).catch(() => { clipCache.delete(f); return null; }));
+    }
+    return clipCache.get(f);
+  };
+  let chainIn = null;
+  const radioChain = () => {
+    if (chainIn) return chainIn;
+    const c = audioGraph();
+    const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 330; hp.Q.value = 0.7;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3100; lp.Q.value = 0.9;
+    const mid = c.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1700; mid.gain.value = 5; mid.Q.value = 1.1;
+    const drive = c.createWaveShaper(); const curve = new Float32Array(1024);
+    for (let i = 0; i < curve.length; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(x * 2.6) / Math.tanh(2.6); }
+    drive.curve = curve; drive.oversample = '2x';
+    const comp = c.createDynamicsCompressor(); comp.threshold.value = -24; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.12;
+    const out = c.createGain(); out.gain.value = 0.85;
+    hp.connect(lp).connect(mid).connect(drive).connect(comp).connect(out).connect(analyser);
+    chainIn = hp;
+    return chainIn;
+  };
+  const playClip = (buf) => new Promise((done) => {
+    const c = audioGraph();
+    if (c.state === 'suspended') c.resume().catch(() => {});
+    const src = c.createBufferSource(); src.buffer = buf; src.connect(radioChain());
+    let over = false; const end = () => { if (!over) { over = true; done(); } };
+    src.onended = end; setTimeout(end, buf.duration * 1000 + 600);
+    src.start();
+  });
   const keyUp = async () => { radio.classList.add('up'); await new Promise((r) => setTimeout(r, 450)); };
   const transmit = async (cls, who, name, text, voice) => {
     await click(); radio.classList.add(cls); radioState(cls === 'tx' ? 'TRANSMITTING' : 'RECEIVING'); line(who, name, text);
     traffic.unshift({ when: $('pdaClock').textContent.slice(0, 5), name: cls === 'tx' ? ident.cmdr : name, text, me: cls === 'tx' });
     traffic.length = Math.min(traffic.length, 20);
     startBed();
-    await say(text.replace(/(\d)/g, '$1 '), voice.pitch, voice.rate);
+    const clip = voice.id ? await clipFor(voice.id, text) : null;
+    if (clip) await playClip(clip);
+    else { if (voiceManifest && voice.id) console.debug('radio: no recorded clip for', voice.id, JSON.stringify(text)); await say(text.replace(/(\d)/g, '$1 '), voice.pitch, voice.rate); }
     stopBed();
     await click(); radio.classList.remove(cls); radioState('ONLINE');
   };
@@ -993,7 +1037,7 @@ try {
   const pad2 = (n) => String(n).padStart(2, '0');
   const csOf = (u) => `${u.cs} ${pad2(u.n)}`;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const ME = { pitch: 1.0, rate: 1.05 };
+  const ME = { id: 'cmd', pitch: 1.0, rate: 1.05 };
   const sayTx = (text) => transmit('tx', 'cmd', 'Commander', text, ME);
   const sayRx = (name, text) => transmit('rx', 'unit', name, text, voiceOf(name));
   const busy = (u) => /Assault/.test(u.task || '');
@@ -1062,15 +1106,16 @@ try {
     const ev = incoming.shift(); showCalls();
     if (!ev) return;
     const name = `${ev.from} ${pad2(ev.n)}`;
-    const body = ev.text.replace(/^(Actual|Commander),\s*[^.!]*\.\s*/, '').replace(/\s*(Over|Out)\.?\s*$/, '').replace(/[.!]\s*$/, '');
+    const body = ev.text.replace(/^(Actual|Commander),\s*[^.!]*\.\s*/, '').replace(/\s*(Over|Out)[.!]?\s*$/, '').replace(/[.!]\s*$/, '');
     net.unshift(async () => {
       $('radioLog').innerHTML = ''; v.set_radio(true); await keyUp();
       talkingTo('INCOMING FROM', name);
-      await sayRx(name, `${ACTUAL}, this is ${name}. Over.`);
-      await wait(400 + Math.random() * 400);
-      await sayTx(`${name}, ${ACTUAL}. Send it. Over.`);
-      await wait(500 + Math.random() * 500);
-      await sayRx(name, `${body}. Over.`);
+      const end = ev.urgent ? '! Over!' : '. Over.';
+      await sayRx(name, `${ACTUAL}, this is ${name}${end}`);
+      await wait(ev.urgent ? 150 : 400 + Math.random() * 400);
+      await sayTx(ev.urgent ? `${name}, ${ACTUAL}. Send it! Over!` : `${name}, ${ACTUAL}. Send it. Over.`);
+      await wait(ev.urgent ? 200 : 500 + Math.random() * 500);
+      await sayRx(name, `${body}${end}`);
       await sayTx(`${ACTUAL} copies. Out.`);
       await wait(300); v.set_radio(false);
     });

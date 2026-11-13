@@ -1404,13 +1404,11 @@ impl Viewer {
         if (post.0 - here.0).abs() + (post.1 - here.1).abs() > 3_000 && self.move_group(c, Vec3::new(post.0 as f32 / 1000.0, post.1 as f32 / 1000.0, 0.0), MARCH_SPEED_MM_S, now) {
             self.arrive_stance.insert(c, Pose::Crouch);
         }
-        let names: Vec<String> = self.chain.squads_of(GroupId(c)).iter().map(|g| self.call_sign(g.0)).collect();
         let _g = grid(task.objective.0 as f64 / 1000.0, task.objective.1 as f64 / 1000.0);
-        let support = names.first().cloned().unwrap_or_default();
         let report = match (step, task.at) {
             (Step::Approach, 0) | (Step::Occupy, 0) => None, // the acknowledgement covers it
             (Step::Advance, _) => Some((format!("Commander, {{me}}. At the line of departure, no contact. Advancing on the coordinates. Out."), false)),
-            (Step::Suppress, _) => Some((format!("Commander, {{me}}. Contact at the coordinates. {support} laying down fire, assault going in. Out."), true)),
+            (Step::Suppress, _) => Some((format!("Commander, {{me}}. Contact at the coordinates! Support element laying down fire, assault going in! Out!"), true)),
             (Step::Assault, _) => Some(("Assaulting now!".to_string(), true)),
             (Step::DigIn, _) => Some((format!("Commander, {{me}}. On the objective. Digging in at the coordinates. Out."), false)),
             _ => None,
@@ -2102,7 +2100,10 @@ impl Viewer {
             } else if e < CINE_OPEN_MS {
                 mix(behind, close, ease((e - CINE_TURN_MS - CINE_HOLD_MS) / (CINE_OPEN_MS - CINE_TURN_MS - CINE_HOLD_MS)))
             } else {
-                close
+                // Behind the tablet once it is up: the ground under him (blurred by the page), not the sky the
+                // face-on framing would see.
+                let ground = (base, h, 9.0, 1.2);
+                mix(close, ground, ease((e - CINE_OPEN_MS - 450.0) / 700.0))
             })
         } else if e < CINE_CLOSE_MS {
             Some(mix(from, (live.0, live.1, live.2, el), ease(e / CINE_CLOSE_MS)))

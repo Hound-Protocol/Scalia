@@ -101,6 +101,7 @@
     font: 13px/1.55 ui-monospace, 'SFMono-Regular', Menlo, monospace; animation: proto-in .5s cubic-bezier(.2,.9,.25,1.1) both; }
   #proto .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 7px;
     background: repeating-linear-gradient(-45deg, #e0a526 0 7px, #16180f 7px 14px); }
+  #proto .owner { text-align: center; color: #9aa58a; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; margin: -6px 0 12px; }
   #proto .tag { color: #e0a526; letter-spacing: .3em; font-size: 11px; }
   #proto h2 { margin: 6px 0 12px; font-size: 22px; letter-spacing: .12em; color: #f2f4ee; }
   #proto p { margin: 0 0 10px; color: #c3cab6; }
@@ -239,10 +240,10 @@
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; pointer-events: none; font-family: 'Saira', system-ui, sans-serif; }
   #fieldHint[hidden] { display: none; }
-  #fieldHint .fh-text { display: flex; align-items: center; gap: 10px; padding: 3px 11px 3px 6px; background: linear-gradient(90deg, rgba(10,12,16,0.82), rgba(18,24,20,0.82)); border: 1px solid rgba(224,165,38,0.45); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); color: #cfd8e3; font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; animation: fhPulse 2.4s ease-in-out infinite; }
-  #fieldHint kbd { font: 700 11px 'Saira', sans-serif; letter-spacing: 0.1em; color: #14100a; background: #e0a526; padding: 1px 7px; border-radius: 2px; box-shadow: 0 2px 0 #8a6414; }
+  #fieldHint .fh-text { display: flex; align-items: center; gap: 10px; padding: 5px 16px 5px 9px; background: linear-gradient(90deg, rgba(10,12,16,0.82), rgba(18,24,20,0.82)); border: 1px solid rgba(224,165,38,0.45); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); color: #cfd8e3; font-size: 17px; letter-spacing: 0.12em; text-transform: uppercase; animation: fhPulse 2.4s ease-in-out infinite; }
+  #fieldHint kbd { font: 700 16px 'Saira', sans-serif; letter-spacing: 0.1em; color: #14100a; background: #e0a526; padding: 2px 10px; border-radius: 2px; box-shadow: 0 2px 0 #8a6414; }
   #fieldHint b { color: #e0a526; font-weight: 600; }
-  #fieldHint .fh-dev { position: relative; width: 46px; height: 24px; overflow: hidden; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.7)); animation: fhBob 3.2s ease-in-out infinite; }
+  #fieldHint .fh-dev { position: relative; width: 92px; height: 48px; overflow: hidden; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.7)); animation: fhBob 3.2s ease-in-out infinite; }
   #fieldHint .fh-dev img { width: 100%; display: block; filter: brightness(1.5) contrast(1.1); }
   @keyframes fhPulse { 0%, 100% { border-color: rgba(224,165,38,0.35); } 50% { border-color: rgba(224,165,38,0.9); } }
   @keyframes fhBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
@@ -549,6 +550,7 @@
 </div>
 </div>
 <div id="proto"><div class="card">
+  <div class="owner">Courtesy and property of Erik J. aka TrueMan</div>
   <div class="tag">⚠ PROTOTYPE</div>
   <h2>PROJECT SCALIA</h2>
   <p>You are playing an early prototype of Scalia. The gameplay is a heavy subject of change: what you see today may work differently, or be gone, tomorrow.</p>
