@@ -529,7 +529,9 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     let gust = sin(time * 1.7 + a.x * 0.35 + a.y * 0.21 + b.y * 6.28) * 0.5 + 0.5;
     q = q + vec3f(0.09, 0.04, 0.0) * gust * q.z * 2.5;
   } else if (part != 0u) {
-    let phase = select(0.0, fract(time * b.z + b.y), b.z > 0.0);
+    // Instance b.z: cadence (strides/s, phase from the clock) or, when negative, the phase is b.y itself: the CPU
+    // integrates it for figures whose pace changes (winding up, braking), so the legs never jump.
+    let phase = select(select(0.0, fract(time * b.z + b.y), b.z > 0.0), fract(b.y), b.z < 0.0);
     let w = clamp((time - d.y) / 0.35, 0.0, 1.0);
     // Instance c.z (pose.rs `pack_layer`): whole part the upper-body pose id + 1 (0 none), fractional part the way
     // the soldier moves from his facing towards the left, as a share of a turn (strafe, backpedal).
@@ -544,7 +546,7 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
       pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.tilt = up.tilt; pp.twist = pp.twist + up.twist; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
     }
     // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
-    if (b.z <= 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
+    if (b.z == 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
     // Left palm onto the handguard (only the left arm and the rifle move, so only they pay for it).
     // The shadow pass skips it: a few centimetres in an arm's shadow cannot be seen.
     if (hands && (part == 3u || part == 11u || part == 9u)) {

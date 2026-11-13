@@ -60,6 +60,13 @@ const BODY_MM: i64 = 250;
 /// Within this of where he is going he has arrived.
 const ARRIVE_MM: i64 = 150;
 const PERSONAL_MM: i64 = 700;
+/// Two men are never sent to stand closer than this: a shared destination is spread into separate spots.
+pub const SPACING_MM: i64 = 900;
+/// Once there, a man stays put until pushed this far off his spot.
+const SETTLE_MM: i64 = 600;
+/// Winding up and braking (mm/s²): about a second from standing to a run, a little less to stop.
+const ACCEL: i64 = 4_000;
+const BRAKE: i64 = 5_000;
 /// Suppression at which he looks for cover, and below which (with nothing to shoot for a while) he leaves it.
 const SEEK_COVER: i32 = 400;
 const LEAVE_COVER: i32 = 150;
@@ -172,12 +179,18 @@ pub struct Soldier {
     pub act: Option<(Act, i64)>,
     path: Vec<(i64, i64)>,
     path_to: Option<(i64, i64)>,
+    /// Where he is really going: the ordered spot, moved aside if another man already has it.
+    goal: Option<(i64, i64)>,
+    /// Arrived at his goal: he stands still until his goal changes or he is pushed well off it.
+    settled: bool,
+    /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
+    speed: i64,
     calm_ms: i32,
 }
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, path: Vec::new(), path_to: None, calm_ms: 0 }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, path: Vec::new(), path_to: None, goal: None, settled: false, speed: 0, calm_ms: 0 }
     }
     pub fn alive(&self) -> bool {
         self.health > 0
@@ -257,6 +270,30 @@ impl Battle {
         }
     }
 
+    /// The spot nearest `to` (on rings 1 m apart) that is walkable and at least SPACING_MM from every other
+    /// living man's goal or, for men without one, where he stands.
+    fn free_spot(&self, i: usize, to: (i64, i64)) -> (i64, i64) {
+        let taken: Vec<(i64, i64)> = self.soldiers.iter().enumerate().filter(|(j, o)| *j != i && o.alive()).map(|(_, o)| if o.path_to.is_some() && o.task != Task::Idle { o.goal.unwrap_or(o.pos) } else { o.pos }).collect();
+        let ok = |p: (i64, i64)| {
+            self.nav.as_ref().is_none_or(|n| n.walkable_at(p.0, p.1, 0)) && taken.iter().all(|&t| isqrt((t.0 - p.0).pow(2) + (t.1 - p.1).pow(2)) >= SPACING_MM)
+        };
+        if ok(to) {
+            return to;
+        }
+        for ring in 1..=4i64 {
+            let r = ring * SPACING_MM;
+            let n = 6 * ring;
+            for k in 0..n {
+                let a = std::f64::consts::TAU * k as f64 / n as f64;
+                let p = (to.0 + (r as f64 * a.cos()) as i64, to.1 + (r as f64 * a.sin()) as i64);
+                if ok(p) {
+                    return p;
+                }
+            }
+        }
+        to
+    }
+
     /// Moves everyone a step along their paths, keeping personal space; sets stance and pace.
     fn move_soldiers(&mut self, dt_ms: i32) {
         let before: Vec<(i64, i64)> = self.soldiers.iter().map(|s| s.pos).collect();
@@ -272,29 +309,45 @@ impl Battle {
                 dest = None;
             }
             let mut step = (0i64, 0i64);
+            if dest.is_none() {
+                self.soldiers[i].settled = false;
+            }
             if let Some((to, gait)) = dest {
                 self.soldiers[i].gait = gait;
                 let pos = self.soldiers[i].pos;
-                let (dx, dy) = (to.0 - pos.0, to.1 - pos.1);
-                let left = isqrt(dx * dx + dy * dy);
-                // Near the spot with someone already beside him: close enough (the push sorts out the rest).
-                let crowded = left <= 1_500 && before.iter().enumerate().any(|(j, &o)| j != i && self.soldiers[j].alive() && isqrt((o.0 - pos.0).pow(2) + (o.1 - pos.1).pow(2)) < PERSONAL_MM);
-                if left > ARRIVE_MM && !crowded {
-                    if self.soldiers[i].path_to != Some(to) {
-                        let path = self.nav.as_ref().and_then(|n| find_path(n, pos, to, BODY_MM)).unwrap_or_else(|| vec![to]);
-                        let s = &mut self.soldiers[i];
-                        s.path = path;
-                        s.path_to = Some(to);
-                    }
+                if self.soldiers[i].path_to != Some(to) {
+                    let goal = self.free_spot(i, to);
+                    let path = self.nav.as_ref().and_then(|n| find_path(n, pos, goal, BODY_MM)).unwrap_or_else(|| vec![goal]);
                     let s = &mut self.soldiers[i];
+                    s.path = path;
+                    s.path_to = Some(to);
+                    s.goal = Some(goal);
+                    s.settled = false;
+                }
+                let goal = self.soldiers[i].goal.unwrap_or(to);
+                let left = isqrt((goal.0 - pos.0).pow(2) + (goal.1 - pos.1).pow(2));
+                let s = &mut self.soldiers[i];
+                if left <= 20 {
+                    s.settled = true;
+                } else if s.settled && left > SETTLE_MM {
+                    // Shoved well off his spot: walk back to it.
+                    s.settled = false;
+                    s.path = vec![goal];
+                }
+                if !s.settled {
                     while s.path.len() > 1 && isqrt((s.path[0].0 - pos.0).pow(2) + (s.path[0].1 - pos.1).pow(2)) <= ARRIVE_MM {
                         s.path.remove(0);
                     }
-                    let aim = s.path.first().copied().unwrap_or(to);
+                    let aim = s.path.first().copied().unwrap_or(goal);
                     let (ax, ay) = (aim.0 - pos.0, aim.1 - pos.1);
                     let d = isqrt(ax * ax + ay * ay);
                     if d > 0 {
-                        let len = (gait.speed_mm_s() * dt_ms as i64 / 1_000).min(d);
+                        // Wind up towards the pace; brake so he stops on the spot (v² = 2·a·d), never below a shuffle.
+                        let brake_cap = isqrt(BRAKE * left).max(250);
+                        let want = gait.speed_mm_s().min(brake_cap);
+                        let dv = if want > s.speed { ACCEL } else { BRAKE } * dt_ms as i64 / 1_000;
+                        s.speed = if want > s.speed { (s.speed + dv).min(want) } else { (s.speed - dv).max(want) };
+                        let len = (s.speed * dt_ms as i64 / 1_000).max(1).min(d);
                         step = (ax * len / d, ay * len / d);
                     }
                 }
@@ -308,9 +361,11 @@ impl Battle {
                 }
                 let (dx, dy) = (p.0 - o.0, p.1 - o.1);
                 let d = isqrt(dx * dx + dy * dy);
-                if d < PERSONAL_MM {
+                // Walking men brush past each other; standing men only make room when someone is really close.
+                let near = if step != (0, 0) { BODY_MM * 2 } else { PERSONAL_MM - 150 };
+                if d < near {
                     let (ux, uy) = if d == 0 { if i < j { (-1, 0) } else { (1, 0) } } else { (dx * 1_000 / d, dy * 1_000 / d) };
-                    let k = (PERSONAL_MM - d) * dt_ms as i64 / 100;
+                    let k = (near - d) * dt_ms as i64 / 100;
                     push = (push.0 + ux * k / 1_000, push.1 + uy * k / 1_000);
                 }
             }
@@ -323,7 +378,10 @@ impl Battle {
             let s = &mut self.soldiers[i];
             s.vel = (next.0 - p.0, next.1 - p.1);
             s.pos = next;
-            s.moving = s.vel != (0, 0) && (step != (0, 0));
+            s.moving = step != (0, 0);
+            if !s.moving {
+                s.speed = 0;
+            }
             // Low behind low cover and when moving crouched; standing otherwise.
             let low_cover = s.cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| m.spots[c].height == Height::Low);
             // (Without a task or cover he keeps the stance he was given.)

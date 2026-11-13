@@ -337,7 +337,9 @@ pub fn find_path(grid: &NavGrid, from: (i64, i64), to: (i64, i64), radius_mm: i6
     }
     cells.reverse();
     let mut points: Vec<(i64, i64)> = vec![from];
-    points.extend(cells[1..cells.len().saturating_sub(1)].iter().map(|&c| grid.centre(c % w, c / w)));
+    if cells.len() > 2 {
+        points.extend(cells[1..cells.len() - 1].iter().map(|&c| grid.centre(c % w, c / w)));
+    }
     points.push(to);
     let mut out = vec![points[0]];
     let mut k = 0;

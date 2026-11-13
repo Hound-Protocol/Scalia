@@ -96,6 +96,9 @@ const STEP_FIELD_MAX: usize = 2;
 /// The commander's walking and sprinting speeds (m/s), and how long radioing an order takes (ms).
 const CMD_WALK: f32 = 1.7;
 const CMD_SPRINT: f32 = 4.6;
+/// The commander winds up (m/s²) and brakes.
+const CMD_ACCEL: f32 = 4.2;
+const CMD_BRAKE: f32 = 6.0;
 
 /// How quickly the camera glides to the next step (time constant, ms).
 const GLIDE_MS: f64 = 90.0;
@@ -170,6 +173,11 @@ pub struct Viewer {
     cmd_heading: f32,
     cmd_input: (f32, f32, bool),
     cmd_moving: bool,
+    /// His real pace (m/s), winding up to the walk or sprint and braking to a stop; the way he last moved; and his
+    /// gait phase, integrated from the cadence so the legs never jump as the pace changes.
+    cmd_speed: f32,
+    cmd_dir: (f32, f32),
+    cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
     /// The live killhouse assault, when one is running (replaces the static enemy posts).
     assault: Option<crate::assault::Assault>,
@@ -309,6 +317,9 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_heading: 0.0,
         cmd_input: (0.0, 0.0, false),
         cmd_moving: false,
+        cmd_speed: 0.0,
+        cmd_dir: (0.0, 1.0),
+        cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         assault: None,
         radio_until: -1.0,
@@ -904,11 +915,7 @@ impl Viewer {
     }
     /// The commander's gait for his footsteps: 0 standing, 1 walking, 2 sprinting.
     pub fn commander_gait(&self) -> u8 {
-        match (self.cmd_moving, self.cmd_input.2) {
-            (false, _) => 0,
-            (true, false) => 1,
-            (true, true) => 2,
-        }
+        if !self.cmd_moving { 0 } else if self.cmd_speed > 3.0 { 2 } else { 1 }
     }
     /// The fraction of the screen's height the tablet close-up's box covers: the dive frames the tablet to match.
     pub fn set_tablet_fit(&mut self, f: f32) {
@@ -2155,11 +2162,24 @@ impl Viewer {
         let (mut vx, mut vy) = (right.0 * ix + fwd.0 * iy, right.1 * ix + fwd.1 * iy);
         let len = (vx * vx + vy * vy).sqrt();
         let holding = self.tablet || self.cine.is_some();
-        self.cmd_moving = len > 0.01 && t >= self.radio_until && !holding;
+        let wants = len > 0.01 && t >= self.radio_until && !holding;
+        // Like a person, not a cursor: about half a second up to a walk, a second up to a sprint, and a few
+        // steps to brake (GTA-style). Changing direction keeps most of the pace.
+        let target = if wants { if sprint { CMD_SPRINT } else { CMD_WALK } } else { 0.0 };
+        let rate = if target > self.cmd_speed { CMD_ACCEL } else { CMD_BRAKE };
+        self.cmd_speed = if target > self.cmd_speed { (self.cmd_speed + rate * dt).min(target) } else { (self.cmd_speed - rate * dt).max(target) };
+        if wants {
+            let (ux, uy) = (vx / len, vy / len);
+            // Turning eases the heading of travel round rather than snapping it.
+            let k = (10.0 * dt).min(1.0);
+            let (dx, dy) = (self.cmd_dir.0 + (ux - self.cmd_dir.0) * k, self.cmd_dir.1 + (uy - self.cmd_dir.1) * k);
+            let l = (dx * dx + dy * dy).sqrt().max(1e-4);
+            self.cmd_dir = (dx / l, dy / l);
+        }
+        self.cmd_moving = self.cmd_speed > 0.05;
         if self.cmd_moving {
-            let speed = if sprint { CMD_SPRINT } else { CMD_WALK };
-            vx = vx / len * speed * dt;
-            vy = vy / len * speed * dt;
+            vx = self.cmd_dir.0 * self.cmd_speed * dt;
+            vy = self.cmd_dir.1 * self.cmd_speed * dt;
             let (nx, ny) = (self.cmd.0 + vx as f64, self.cmd.1 + vy as f64);
             let free = |x: f64, y: f64| !in_base(x as f32, y as f32) || self.base_grid.walkable_at((x * 1000.0) as i64, (y * 1000.0) as i64, 300);
             if free(nx, ny) {
@@ -2168,6 +2188,8 @@ impl Viewer {
                 self.cmd.0 = nx;
             } else if free(self.cmd.0, ny) {
                 self.cmd.1 = ny;
+            } else {
+                self.cmd_speed = 0.0;
             }
             // Turn smoothly towards where he walks.
             let want = (-vx).atan2(vy);
@@ -2176,17 +2198,19 @@ impl Viewer {
             while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
             self.cmd_heading += d.clamp(-8.0 * dt, 8.0 * dt);
         }
-        let pose = if holding { Pose::Tablet } else if t < self.radio_until { Pose::Radio } else if self.cmd_moving && sprint { Pose::Sprint } else if self.cmd_moving { Pose::Walk } else { Pose::Stand };
+        // Legs by his real pace: walking while he winds up, the sprint only once he is really going.
+        let pose = if holding { Pose::Tablet } else if t < self.radio_until { Pose::Radio } else if self.cmd_speed > 3.0 { Pose::Sprint } else if self.cmd_moving { Pose::Walk } else { Pose::Stand };
         if self.cmd_pose.0 != pose {
             self.cmd_pose = (pose, self.cmd_pose.0, ts);
         }
-        // Cadence from his real speed: the planted foot then keeps pace with the ground.
-        let steps = match pose { Pose::Sprint => CMD_SPRINT / stride_m(pose), Pose::Walk => CMD_WALK / stride_m(pose), _ => 0.0 };
-        // His gait phase, exactly as the shader computes it (instance phase offset 0.37), for the footsteps.
-        self.cmd_phase = if steps > 0.0 { (ts * steps + 0.37).fract() } else { -1.0 };
+        // Cadence from his real speed, integrated into the phase here: the planted foot keeps pace with the ground.
+        let steps = match pose { Pose::Sprint | Pose::Walk => self.cmd_speed / stride_m(pose), _ => 0.0 };
+        self.cmd_gait = (self.cmd_gait + (steps * dt) as f64).fract();
+        // His gait phase (exactly what the shader is handed), for the footsteps.
+        self.cmd_phase = if steps > 0.0 { self.cmd_gait as f32 } else { -1.0 };
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
-        let rec = [rx, ry, z, 9.0, self.cmd_heading, 0.37, steps, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
+        let rec = [rx, ry, z, 9.0, self.cmd_heading, self.cmd_gait as f32, if steps > 0.0 { -1.0 } else { 0.0 }, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
         let mut me = rec;

@@ -87,3 +87,50 @@ fn a_moving_fight_is_deterministic() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn a_group_sent_to_one_spot_settles_apart_and_stops_fidgeting() {
+    let men: Vec<Soldier> = (0..6).map(|i| man(0, 0, 40_000 + i * 600, 40_000)).collect();
+    let mut b = battle(&[], men, 2);
+    for i in 0..6 {
+        b.order(i, Task::Move { to: (50_000, 50_000), gait: Gait::Run });
+    }
+    for _ in 0..400 {
+        b.step(50);
+    }
+    let settled: Vec<(i64, i64)> = b.soldiers.iter().map(|s| s.pos).collect();
+    for i in 0..6 {
+        for j in i + 1..6 {
+            assert!(dist(settled[i], settled[j]) >= 850, "{i} and {j} only {} mm apart", dist(settled[i], settled[j]));
+        }
+        assert!(dist(settled[i], (50_000, 50_000)) < 3_500, "{i} stayed near the spot");
+    }
+    // Five more seconds: nobody shuffles.
+    let mut steps = 0;
+    for _ in 0..100 {
+        b.step(50);
+        steps += b.soldiers.iter().filter(|s| s.moving || s.vel != (0, 0)).count();
+    }
+    assert_eq!(steps, 0, "men still fidgeting once settled");
+}
+
+#[test]
+fn he_winds_up_to_speed_and_slows_down_before_stopping() {
+    let mut b = battle(&[], vec![man(0, 0, 40_000, 40_000)], 1);
+    b.order(0, Task::Move { to: (40_000, 60_000), gait: Gait::Run });
+    let mut speeds = Vec::new();
+    for _ in 0..200 {
+        let y = b.soldiers[0].pos.1;
+        b.step(50);
+        speeds.push((b.soldiers[0].pos.1 - y) * 20); // mm/s
+    }
+    let full = Gait::Run.speed_mm_s();
+    assert!(speeds[0] < full / 3, "no instant start: {} mm/s after 50 ms", speeds[0]);
+    assert!(speeds[5] < full * 3 / 4, "still winding up at 0.3 s: {}", speeds[5]);
+    assert!(speeds[20] >= full * 95 / 100, "up to speed by 1 s: {}", speeds[20]);
+    // Braking: the last steps before the stop get slower, never a full-speed stop.
+    let last = speeds.iter().rposition(|&v| v > 0).unwrap();
+    assert!(speeds[last] < full / 4, "eases into the stop: {} mm/s on the last step", speeds[last]);
+    assert!(speeds[last - 8] < full && speeds[last - 8] > speeds[last], "{:?}", &speeds[last - 10..=last]);
+    assert!(dist(b.soldiers[0].pos, (40_000, 60_000)) < 50);
+}
