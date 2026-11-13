@@ -1223,7 +1223,15 @@ try {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     held.add(k);
-    if (k === 'tab') { e.preventDefault(); if (tabletUp && tabletShown) pressOff(); else setTablet(!tabletUp); return; }
+    if (k === 'tab') {
+      e.preventDefault();
+      if (e.repeat) return;
+      // One thing at a time: the tablet finishes opening before it can close, and is fully put away (camera
+      // back) before it can open again, however fast Tab is pressed.
+      if (tabletUp && tabletShown) pressOff();
+      else if (!tabletUp && v.tablet_view() === 0 && !pressingOff) setTablet(true);
+      return;
+    }
     if (k === 'e' && !$('answerCall').hidden) { answer(); return; }
     if (k === '1') setScene('ships');
     else if (k === '2') setScene('ground');

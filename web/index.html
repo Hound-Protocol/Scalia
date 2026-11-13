@@ -245,6 +245,9 @@
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; pointer-events: none; font-family: 'Saira', system-ui, sans-serif; }
   #fieldHint[hidden] { display: none; }
+  #wipMark { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 20; pointer-events: none; font: 600 15px/1 'Saira Condensed', sans-serif;
+    letter-spacing: 0.3em; text-transform: uppercase; color: rgba(255,255,255,0.28); text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+  body.pda #wipMark { display: none; }
   #fieldHint .fh-text { display: flex; align-items: center; gap: 10px; padding: 5px 16px 5px 9px; background: linear-gradient(90deg, rgba(10,12,16,0.82), rgba(18,24,20,0.82)); border: 1px solid rgba(224,165,38,0.45); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); color: #cfd8e3; font-size: 17px; letter-spacing: 0.12em; text-transform: uppercase; animation: fhPulse 2.4s ease-in-out infinite; }
   #fieldHint kbd { font: 700 16px 'Saira', sans-serif; letter-spacing: 0.1em; color: #14100a; background: #e0a526; padding: 2px 10px; border-radius: 2px; box-shadow: 0 2px 0 #8a6414; }
   #fieldHint b { color: #e0a526; font-weight: 600; }
@@ -470,6 +473,7 @@
   <div class="warn" id="pWarn" hidden></div>
 </div>
 <div id="error" class="panel"></div>
+<div id="wipMark">Prototype Content - Work in Progress</div>
 <div id="fieldHint"><div class="fh-text"><kbd>Tab</kbd><span>to open <b>Commander PDA</b></span></div><div class="fh-dev"><img src="./img/pda_front.webp" alt="" draggable="false"></div></div>
 <div id="actions" hidden></div>
 <div id="answerCall" hidden><button><i class="led"></i><span><b>Answer Transmission</b><small></small></span><kbd>E</kbd></button></div>
