@@ -130,7 +130,7 @@
   #tablet .fp { position: absolute; width: 238.232%; height: 273.386%; left: -69.116%; top: -84.139%; max-width: none;
     pointer-events: none; user-select: none; }
   /* Cursor helper (above-left of the cursor), the right-button hold ring, the about panel and the structure scan. */
-  #tablet #mapTip { position: absolute; z-index: 6; pointer-events: none; transform: translate(-100%, -100%); max-width: 260px;
+  #tablet #mapTip { position: absolute; left: 0; top: 0; z-index: 6; pointer-events: none; transform: translate(-100%, -100%); max-width: 260px; will-change: transform;
     padding: 6px 9px; background: rgba(10, 13, 8, 0.88); border: 1px solid var(--drab); border-left: 2px solid var(--amber);
     font: 500 12px/1.35 'Saira Condensed', sans-serif; color: var(--sand); white-space: nowrap; }
   #tablet #mapTip[hidden], #tablet #aboutPanel[hidden], #tablet #holdRing[hidden], #tablet #scanOverlay[hidden] { display: none; }
@@ -509,7 +509,7 @@
     <div class="ph-right"><button class="ph-btn" data-page="changelog" id="chgBtn" title="What changed in each update">Changelog</button><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
   </header>
   <div class="screen page" id="home"></div>
-  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div id="mapMarks"></div><svg id="scanOverlay" viewBox="0 0 1 1" preserveAspectRatio="none" hidden></svg><div id="mapBox" hidden></div><div id="mapTip" hidden></div><div id="holdRing" hidden></div><div id="aboutPanel" hidden></div><div id="unitPanel" hidden></div><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">left click: select · drag: select a square · right click: commands · hold right: about · middle drag/WASD: pan · wheel: zoom</div></div>
+  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div id="mapMarks"></div><svg id="scanOverlay" viewBox="0 0 1 1" preserveAspectRatio="none" hidden></svg><div id="mapBox" hidden></div><div id="mapTip" hidden></div><div id="holdRing" hidden></div><div id="aboutPanel" hidden></div><div id="unitPanel" hidden></div><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">left click: select · drag: select a square · right click: commands · hold right: about · hold S: scan building · middle drag/WASD: pan · wheel: zoom</div></div>
   <div class="screen page" id="roster" hidden></div>
   <div class="screen page" id="settings" hidden>
     <h3>Identity</h3>

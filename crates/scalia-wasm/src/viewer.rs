@@ -192,6 +192,8 @@ pub struct Viewer {
     cmd_rec: [f32; 12],
     /// How much of the screen's height the tablet close-up covers (set by the page).
     tablet_fit: f32,
+    /// The tablet map's camera flying to a point: (from, to, start ms, duration ms, zoom step on arrival).
+    map_fly: Option<(Vec3, Vec3, f64, f64, usize)>,
     /// The close-up's extra scale and sideways shift (fraction of the screen width), matching the overlay when it
     /// makes room for the walkie-talkie.
     tablet_frame: (f32, f32),
@@ -336,6 +338,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_phase: -1.0,
         cmd_rec: [0.0; 12],
         tablet_fit: 0.6,
+        map_fly: None,
         tablet_frame: (1.0, 0.0),
         cine: None,
         chain: Command::default(),
@@ -999,11 +1002,27 @@ impl Viewer {
     pub fn map_center_commander(&mut self) {
         let was = self.map_active;
         self.use_map(true);
-        self.ground_cam = Some(Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0));
+        let to = Vec3::new(self.cmd.0 as f32, self.cmd.1 as f32, 0.0);
         self.sys_follow = Some(HOME_BODY);
-        // Close enough to see him standing in his ring (25 m across).
-        self.zoom_step = 1;
+        self.fly_map_to(to);
         self.use_map(was);
+    }
+    /// The tablet map's camera travels fast to a point, then zooms all the way in (on the ground; from the planet
+    /// or the star system it cuts straight there as before).
+    fn fly_map_to(&mut self, to: Vec3) {
+        let from = self.cam_smooth.or(self.ground_cam);
+        match from {
+            Some(f) if self.scene == Scene::Ground => {
+                let f = Vec3::new(f.x, f.y, 0.0);
+                let dur = (300.0 + (to - f).length() as f64 * 2.5).min(900.0);
+                self.map_fly = Some((f, to, self.frame_ms, dur, 0));
+                self.ground_cam = Some(to);
+            }
+            _ => {
+                self.ground_cam = Some(to);
+                self.zoom_step = 0;
+            }
+        }
     }
     /// Takes command from a unit: the commander moves to stand with it, facing the way it faces.
     pub fn command_unit(&mut self, id: u32) -> String {
@@ -1021,7 +1040,7 @@ impl Viewer {
             self.selected = Some(id);
             self.selection = vec![id];
             let c = self.group_centre(id, self.world.now);
-            self.ground_cam = Some(c);
+            if self.map_active { self.fly_map_to(Vec3::new(c.x, c.y, 0.0)) } else { self.ground_cam = Some(c) }
         }
     }
     /// Model viewer: spin on a turntable (true) or hold the angle it was left at.
@@ -1821,10 +1840,23 @@ impl Viewer {
         let dt = (t - self.cam_ms).clamp(0.0, 100.0);
         self.cam_ms = t;
         let k = 1.0 - (-dt / 140.0).exp() as f32;
-        let smooth = match self.cam_smooth {
+        let mut smooth = match self.cam_smooth {
             Some(c) if (c - target).length() < self.ground_view * 3.0 => c + (target - c) * k,
             _ => target, // a jump (new army, far pan): cut straight there
         };
+        // The tablet map flying to a unit or the commander: fast and eased, then the zoom glides all the way in.
+        if self.map_active {
+            if let Some((from, to, start, dur, zoom)) = self.map_fly {
+                let p = ((t - start) / dur).clamp(0.0, 1.0) as f32;
+                let e = p * p * p * (p * (p * 6.0 - 15.0) + 10.0);
+                let at = from + (to - from) * e;
+                smooth = Vec3::new(at.x, at.y, target.z);
+                if p >= 1.0 {
+                    self.map_fly = None;
+                    self.zoom_step = zoom;
+                }
+            }
+        }
         self.cam_smooth = Some(smooth);
         let target = smooth;
         let target = Vec3::new((target.x as f64 - self.origin.0) as f32, (target.y as f64 - self.origin.1) as f32, target.z);

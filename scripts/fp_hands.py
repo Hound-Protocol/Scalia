@@ -18,6 +18,16 @@ save = lambda im, name: im.save(f'{out}/{name}.webp', 'WEBP', quality=90, method
 for name, m in (('fp_left', arm & (xx < W // 2)), ('fp_right', arm & (xx >= W // 2))):
     a = o.copy(); a[..., 3] = np.where(m, o[..., 3], 0)
     save(Image.fromarray(a), name)
+# The right hand's own thumb is taken out (painted over in the glove's shade, as if bent away behind the
+# tablet): the separate blocky thumb (fp_thumb, first_person.py) does the pressing.
+from PIL import ImageDraw
+right = Image.open(f'{out}/fp_right.webp')
+rgba = np.asarray(right).copy()
+mask = Image.new('L', right.size, 0)
+ImageDraw.Draw(mask).polygon([(1308, 492), (1376, 482), (1400, 580), (1312, 596), (1296, 590), (1277, 536)], fill=255)
+m = (np.asarray(mask) > 0) & (rgba[..., 3] > 0)
+rgba[m, :3] = (31, 33, 35)
+save(Image.fromarray(rgba), 'fp_right')
 # The walkie hand: the same left hand moved under the handset's lower left. It holds the handset from behind:
 # only the fingers that wrap round its left edge are drawn in front of it.
 left = Image.open(f'{out}/fp_left.webp')

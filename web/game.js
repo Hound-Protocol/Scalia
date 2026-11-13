@@ -613,11 +613,24 @@ try {
     o.kind === 'ground' ? (o.inside ? 'Testing ground' : 'Open ground') : ABOUT[o.kind]?.type.split(' · ').pop().replace(/^./, (c) => c.toUpperCase()) || o.kind;
   const infoOf = (o) => o.kind === 'unit' && o.captain ? ABOUT.captain : ABOUT[o.kind] || ABOUT.ground;
   const objectAt = (x, y) => { try { return JSON.parse(onMap(() => v.object_at(x * dpr(), y * dpr()))); } catch (_) { return { kind: 'none' }; } };
-  let tipAt = 0;
+  // The helper hangs off the cursor on a soft spring: it trails the mouse and settles, never jumps.
+  let tipAt = 0, tipObj = null, tipGoal = null, tipPos = null, mouseAt = { offsetX: 0, offsetY: 0 };
+  const tipLoop = () => {
+    if (tipGoal && !mapTip.hidden) {
+      tipPos = tipPos || { ...tipGoal };
+      tipPos.x += (tipGoal.x - tipPos.x) * 0.22; tipPos.y += (tipGoal.y - tipPos.y) * 0.22;
+      mapTip.style.transform = `translate(${tipPos.x.toFixed(1)}px, ${tipPos.y.toFixed(1)}px) translate(-100%, -100%)`;
+    }
+    requestAnimationFrame(tipLoop);
+  };
+  requestAnimationFrame(tipLoop);
   const showTip = (e) => {
-    if (performance.now() - tipAt < 50) return; tipAt = performance.now();
+    mouseAt = { offsetX: e.offsetX, offsetY: e.offsetY };
+    tipGoal = { x: e.offsetX - 14, y: e.offsetY - 14 };
+    if (performance.now() - tipAt < 60) return; tipAt = performance.now();
     const o = objectAt(e.offsetX, e.offsetY);
-    if (o.kind === 'none') { mapTip.hidden = true; return; }
+    tipObj = o;
+    if (o.kind === 'none') { mapTip.hidden = true; tipPos = null; return; }
     const sel = onMap(() => v.selection_name());
     const hints = [];
     if (o.kind === 'unit') hints.push(`Click: select ${o.captain ? 'captain' : 'squad'}`);
@@ -625,13 +638,24 @@ try {
     else if (o.kind === 'tank' || o.kind === 'truck') hints.push('Click: select armored vehicle');
     else if (!sel) hints.push('Click a unit to select it');
     if (sel) hints.push(`Right-click: order ${sel.split(',')[0]}${sel.includes(',') ? ' +' : ''} here`);
-    hints.push(`Hold right-click: ${infoOf(o).scan ? 'scan structure' : 'about'}`);
+    hints.push(infoOf(o).scan ? 'Hold S: scan structure' : 'Hold right-click: about');
     const sub = o.kind === 'unit' ? `${infoOf(o).type} · ${o.soldiers}` : infoOf(o).type;
-    mapTip.innerHTML = `<b>${nameOf(o)}</b><span>${sub} · grid ${o.grid}</span>${hints.map((h) => `<i>${h}</i>`).join('')}`;
-    mapTip.hidden = false;
-    // Above and to the left of the cursor.
-    mapTip.style.left = `${e.offsetX - 14}px`; mapTip.style.top = `${e.offsetY - 14}px`;
+    const html = `<b>${nameOf(o)}</b><span>${sub} · grid ${o.grid}</span>${hints.map((h) => `<i>${h}</i>`).join('')}`;
+    if (mapTip.innerHTML !== html) mapTip.innerHTML = html;
+    if (mapTip.hidden) { mapTip.hidden = false; tipPos = null; }
   };
+  // Hold S over a building: scan it (S does not pan while it is held for a scan).
+  let sHold = null;
+  const scanHolding = () => !!sHold;
+  addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 's' || e.repeat || !(tabletUp && page === 'map') || !tipObj || !infoOf(tipObj).scan || mapTip.hidden) return;
+    const at = { ...mouseAt };
+    holdRing(at.offsetX, at.offsetY, true);
+    sHold = setTimeout(() => { sHold = null; holdRing(0, 0, false); openAbout(at); }, HOLD_MS);
+  });
+  addEventListener('keyup', (e) => {
+    if (e.key.toLowerCase() === 's' && sHold) { clearTimeout(sHold); sHold = null; holdRing(0, 0, false); }
+  });
   let scanId = null, scanStart = 0;
   const closeAbout = () => { about.hidden = true; scanId = null; scanSvg.innerHTML = ''; scanSvg.hidden = true; };
   const openAbout = (at) => {
@@ -1050,7 +1074,7 @@ try {
         const u = JSON.parse(v.roster()).find((q) => q.id === uid);
         if (!u || !(await callUp(u))) continue;
         const name = csOf(u);
-        await sayTx(`${verb.charAt(0).toUpperCase() + verb.slice(1)} these coordinates. I've transmitted you the coordinates. Over.`);
+        await sayTx(`${verb.charAt(0).toUpperCase() + verb.slice(1)} the coordinates transmitted. Over.`);
         await wait(500 + Math.random() * 700);
         await sayRx(name, `Roger, coordinates received, ${ing}. Over.`);
         await sayTx(`${ACTUAL}, out.`);
@@ -1217,7 +1241,7 @@ try {
       if (held.has('a') || held.has('arrowleft')) px += speed;
       if (held.has('d') || held.has('arrowright')) px -= speed;
       if (held.has('w') || held.has('arrowup')) py += speed;
-      if (held.has('s') || held.has('arrowdown')) py -= speed;
+      if ((held.has('s') && !scanHolding()) || held.has('arrowdown')) py -= speed;
       if (tabletUp && page === 'map') {
         if (px || py) onMap(() => v.pan(px, py));
         v.move_commander(0, 0, false);
