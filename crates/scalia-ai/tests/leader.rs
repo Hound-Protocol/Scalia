@@ -86,3 +86,35 @@ fn the_approach_bounds_one_team_moving_while_the_other_watches() {
     assert!(samples > 20, "an approach happened");
     assert!(both_moving * 4 < samples, "mostly one team moves at a time: {both_moving}/{samples}");
 }
+
+#[test]
+fn an_outnumbered_defender_falls_back_to_the_next_room() {
+    let k = Killhouse::new(80_000, 62_000);
+    let props = k.props();
+    let mut nav = NavGrid::new(40_000, 20_000, 200, 160);
+    nav.rebuild(&props);
+    let sight = SightGrid::build(40_000, 20_000, 400, 320, &props);
+    let cover = CoverMap::build(&props, &nav);
+    let at = |x: i64, y: i64| (80_000 + x, 62_000 + y);
+    // Two attackers already inside room A (they do not shoot), one defender there, his mate in room C.
+    let mut soldiers = vec![Soldier::new(0, 0, at(6_500, 2_000), Stance::Stand), Soldier::new(0, 0, at(6_500, 5_000), Stance::Stand)];
+    for s in &mut soldiers {
+        s.passive = true;
+    }
+    soldiers.push(Soldier::new(1, 1, at(2_000, 3_500), Stance::Stand));
+    soldiers.push(Soldier::new(1, 1, at(3_000, 11_000), Stance::Stand));
+    soldiers[2].facing = (1_000, 0);
+    let mut b = Battle::with_map(nav, sight, cover, soldiers, 3);
+    b.set_building(k.clone());
+    b.command(1, Order::Hold);
+    for _ in 0..(8_000 / 50) {
+        b.step(50);
+    }
+    let me = &b.soldiers[2];
+    assert!(me.alive());
+    let room_c = k.room_at(at(3_000, 11_000).0, at(3_000, 11_000).1);
+    assert_eq!(k.room_at(me.pos.0, me.pos.1), room_c, "defender at {:?}, task {:?}", me.pos, me.task);
+    assert!(b.log.iter().any(|e| matches!(e, Event::Order { squad: 1, step: "fall back" })));
+    // His mate who was not threatened holds where he was.
+    assert_eq!(k.room_at(b.soldiers[3].pos.0, b.soldiers[3].pos.1), room_c);
+}

@@ -277,11 +277,64 @@ impl Battle {
 
     /// Defenders: each man holds where he stands, watching the way he faced when told.
     fn lead_hold(&mut self, squad: usize) {
-        for i in self.members(squad) {
+        let ms = self.members(squad);
+        for &i in &ms {
             if self.soldiers[i].task == Task::Idle {
                 let (p, f) = (self.soldiers[i].pos, self.soldiers[i].facing);
                 self.soldiers[i].task = Task::Hold { at: p, face: (p.0 + f.0 * 5, p.1 + f.1 * 5) };
             }
+        }
+        self.fall_back(squad, &ms);
+    }
+
+    /// A defender whose room holds more known enemies than friends gives it up: he runs through an
+    /// inner door into a neighbouring room with no known enemy (the one with most friends) and
+    /// holds just inside it, rifle on the door he came through.
+    fn fall_back(&mut self, squad: usize, ms: &[usize]) {
+        let Some((k, _)) = self.building.as_ref() else { return };
+        let foes_in = |b: &Battle, r: usize| b.contacts[squad].iter().filter(|c| b.soldiers[c.enemy].alive() && k.room_at(c.pos.0, c.pos.1) == Some(r)).count();
+        let friends_in = |b: &Battle, r: usize| ms.iter().filter(|&&j| k.room_at(b.soldiers[j].pos.0, b.soldiers[j].pos.1) == Some(r)).count();
+        let mut moves = Vec::new();
+        for &i in ms {
+            let s = &self.soldiers[i];
+            let Some(r) = k.room_at(s.pos.0, s.pos.1) else { continue };
+            // Already on his way out of this room.
+            if let Task::Hold { at, .. } = s.task {
+                if k.room_at(at.0, at.1) != Some(r) {
+                    continue;
+                }
+            }
+            let foes = foes_in(self, r);
+            if foes == 0 || friends_in(self, r) > foes {
+                continue;
+            }
+            let mut best: Option<(usize, (i64, i64), usize)> = None;
+            for d in &k.doors {
+                let (Some(a), Some(b2)) = d.rooms else { continue };
+                let next = if a == r { b2 } else if b2 == r { a } else { continue };
+                if foes_in(self, next) > 0 {
+                    continue;
+                }
+                let f = friends_in(self, next);
+                if best.is_none_or(|b| f > b.2) {
+                    best = Some((next, (d.x_mm, d.y_mm), f));
+                }
+            }
+            let Some((next, door, _)) = best else { continue };
+            let c = k.rooms[next].centre();
+            let (dx, dy) = (c.0 - door.0, c.1 - door.1);
+            let len = dist(c, door).max(1);
+            let at = (door.0 + dx * 1_800.min(len) / len, door.1 + dy * 1_800.min(len) / len);
+            moves.push((i, at, door));
+        }
+        if !moves.is_empty() {
+            self.log.push(Event::Order { squad, step: "fall back" });
+        }
+        for (i, at, door) in moves {
+            let s = &mut self.soldiers[i];
+            s.task = Task::Hold { at, face: door };
+            s.gait = Gait::Run;
+            s.cover = None;
         }
     }
 

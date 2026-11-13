@@ -253,7 +253,7 @@ impl Battle {
         match s.task {
             Task::Idle => None,
             Task::Move { to, gait } => Some((to, gait)),
-            Task::Hold { at, .. } => Some((at, Gait::Walk)),
+            Task::Hold { at, .. } => Some((at, if s.gait == Gait::Run { Gait::Run } else { Gait::Walk })),
         }
     }
 
