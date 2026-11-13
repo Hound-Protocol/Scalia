@@ -1037,6 +1037,8 @@ try {
   const incoming = [];
   const answerBox = $('answerCall');
   const ringTone = sfx('./sfx/walkie-ring.mp3', 0.5);
+  // Urgent calls (under fire, casualties, supplies gone: things that cannot wait) add an alarm over the ring.
+  const urgentTone = sfx('./sfx/urgent-alert.mp3', 0.6);
   let ringTimer = 0;
   const showCalls = () => {
     answerBox.hidden = !incoming.length;
@@ -1044,7 +1046,10 @@ try {
     const c = incoming[0];
     answerBox.querySelector('small').textContent = `${c.from} ${pad2(c.n)} calling${c.urgent ? ' · URGENT' : ''}${incoming.length > 1 ? ` · ${incoming.length - 1} more waiting` : ''}`;
     answerBox.classList.toggle('urgent', incoming.some((x) => x.urgent));
-    if (!ringTimer) { ringTone(); ringTimer = setInterval(ringTone, 4000); } // the 1.6 s ring, then a pause
+    const ring = () => { ringTone(); if (incoming.some((x) => x.urgent)) urgentTone(); };
+    if (!ringTimer) { ring(); ringTimer = setInterval(ring, 4000); } // the 1.6 s ring, then a pause
+    else if (incoming[0].urgent && !incoming[0].alerted) urgentTone(); // a new urgent call alarms at once
+    incoming.forEach((x) => { x.alerted = true; });
   };
   const hear = (ev) => {
     const same = incoming.findIndex((x) => x.id === ev.id);
