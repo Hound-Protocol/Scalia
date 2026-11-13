@@ -5,13 +5,14 @@
 
 use crate::sight::{isqrt, Point, SightGrid};
 use crate::leader::{Brain, LEAD_MS};
+use crate::save::{decode, encode, frame, unframe, Command, MapSpec};
 use crate::tactics::{Building, CoverMap, Height};
 use scalia_core::killhouse::Killhouse;
 use scalia_core::hash::mix64;
 use scalia_core::nav::{find_path, NavGrid};
 
 /// How he moves: pace and how low.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Gait {
     Walk,
     Run,
@@ -31,7 +32,7 @@ impl Gait {
 }
 
 /// What his squad leader has told him to do.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Task {
     Idle,
     Move { to: (i64, i64), gait: Gait },
@@ -49,7 +50,7 @@ pub enum Bark {
 }
 
 /// Something a soldier is busy doing with his hands (the animation plays it; he does not shoot meanwhile).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Act {
     Throw,
     Drone,
@@ -64,6 +65,8 @@ const PERSONAL_MM: i64 = 700;
 pub const SPACING_MM: i64 = 900;
 /// Once there, a man stays put until pushed this far off his spot.
 const SETTLE_MM: i64 = 600;
+/// 24 directions, 15° apart, as unit vectors ×1000.
+const DIRS_24: [(i64, i64); 24] = [(1000, 0), (966, 259), (866, 500), (707, 707), (500, 866), (259, 966), (0, 1000), (-259, 966), (-500, 866), (-707, 707), (-866, 500), (-966, 259), (-1000, 0), (-966, -259), (-866, -500), (-707, -707), (-500, -866), (-259, -966), (0, -1000), (259, -966), (500, -866), (707, -707), (866, -500), (966, -259)];
 /// Winding up and braking (mm/s²): about a second from standing to a run, a little less to stop.
 const ACCEL: i64 = 4_000;
 const BRAKE: i64 = 5_000;
@@ -73,7 +76,7 @@ const LEAVE_COVER: i32 = 150;
 const CALM_MS: i32 = 3_000;
 const COVER_REACH_MM: i64 = 12_000;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Stance {
     Stand,
     Crouch,
@@ -136,7 +139,7 @@ const TURN_COS: i64 = 980;
 const TURN_SIN: i64 = 199;
 
 /// What a squad knows of one enemy.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Contact {
     pub enemy: usize,
     /// Last known position (where he was when last seen, shot from or heard).
@@ -146,7 +149,7 @@ pub struct Contact {
     pub confidence: i32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Soldier {
     pub team: u8,
     pub squad: u16,
@@ -231,13 +234,41 @@ pub struct Battle {
     pub(crate) brains: Vec<Brain>,
     pub(crate) dead_logged: Vec<bool>,
     lead_ms: i64,
+    /// The map the grids were built from (a battle without one cannot be saved).
+    map: Option<MapSpec>,
+    /// Commands waiting for their time, in submission order.
+    queue: Vec<(i64, Command)>,
+    /// Commands as they took effect: (battle ms of the step, command). Replaying these reproduces the battle.
+    history: Vec<(i64, Command)>,
+    /// Dice rolled so far: salts each roll (state, so a restored battle rolls the same dice).
+    rolls: u64,
+}
+
+/// What a save holds: the map and every piece of state that decides what happens next (not the event log,
+/// which is output, nor the grids, which are rebuilt from the map).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct State {
+    map: Option<MapSpec>,
+    soldiers: Vec<Soldier>,
+    seed: u64,
+    time_ms: i64,
+    contacts: Vec<Vec<Contact>>,
+    heard: Vec<Option<((i64, i64), i64)>>,
+    visible: Vec<Vec<bool>>,
+    perceive_ms: i32,
+    brains: Vec<Brain>,
+    dead_logged: Vec<bool>,
+    lead_ms: i64,
+    queue: Vec<(i64, Command)>,
+    history: Vec<(i64, Command)>,
+    rolls: u64,
 }
 
 impl Battle {
     pub fn new(sight: SightGrid, soldiers: Vec<Soldier>, seed: u64) -> Battle {
         let squads = soldiers.iter().map(|s| s.squad as usize + 1).max().unwrap_or(0);
         let n = soldiers.len();
-        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0 }
+        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
     }
 
     /// A battle on a real map: soldiers path around obstacles and take cover.
@@ -246,6 +277,96 @@ impl Battle {
         b.nav = Some(nav);
         b.cover = Some(cover);
         b
+    }
+
+    /// A battle on a described map (the grids built from it, the training house set if it has one): the kind
+    /// of battle that can be saved, restored and replayed.
+    pub fn on_map(map: MapSpec, soldiers: Vec<Soldier>, seed: u64) -> Battle {
+        let (nav, sight, cover) = map.grids();
+        let mut b = Battle::with_map(nav, sight, cover, soldiers, seed);
+        if let Some(o) = map.killhouse {
+            b.set_building(Killhouse::new(o.0, o.1));
+        }
+        b.map = Some(map);
+        b
+    }
+
+    /// Queues a command to take effect at the first step at or after `at_ms` (a late one, at the next step).
+    pub fn submit(&mut self, at_ms: i64, c: Command) {
+        self.queue.push((at_ms, c));
+    }
+
+    /// The commands as they took effect, with the step's time.
+    pub fn history(&self) -> &[(i64, Command)] {
+        &self.history
+    }
+
+    /// Applies the commands that are due, in submission order; ones naming no such soldier are dropped.
+    fn apply_commands(&mut self) {
+        let now = self.time_ms;
+        let (due, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.queue).into_iter().partition(|c| c.0 <= now);
+        self.queue = wait;
+        for (_, c) in due {
+            match c {
+                Command::Task { soldier, task } if soldier < self.soldiers.len() && self.soldiers[soldier].alive() => self.order(soldier, task),
+                Command::Squad { squad, order } if squad < 1 << 16 => self.command(squad, order),
+                _ => continue,
+            }
+            self.history.push((now, c));
+        }
+    }
+
+    fn state(&self) -> State {
+        State {
+            map: self.map.clone(),
+            soldiers: self.soldiers.clone(),
+            seed: self.seed,
+            time_ms: self.time_ms,
+            contacts: self.contacts.clone(),
+            heard: self.heard.clone(),
+            visible: self.visible.clone(),
+            perceive_ms: self.perceive_ms,
+            brains: self.brains.clone(),
+            dead_logged: self.dead_logged.clone(),
+            lead_ms: self.lead_ms,
+            queue: self.queue.clone(),
+            history: self.history.clone(),
+            rolls: self.rolls,
+        }
+    }
+
+    /// The battle as bytes: versioned, checksummed, restorable with `load`. Panics for a battle built without a
+    /// map (`on_map`), which could not be rebuilt.
+    pub fn save(&self) -> Vec<u8> {
+        assert!(self.map.is_some(), "only a battle built with on_map can be saved");
+        frame(&encode(&self.state()))
+    }
+
+    /// A battle from `save` bytes; refuses damaged saves and other format versions.
+    pub fn load(bytes: &[u8]) -> Result<Battle, String> {
+        let st: State = decode(unframe(bytes)?)?;
+        let map = st.map.clone().ok_or("save has no map")?;
+        let mut b = Battle::on_map(map, st.soldiers, st.seed);
+        let n = b.soldiers.len();
+        if st.visible.len() != n || st.dead_logged.len() != n {
+            return Err("save is inconsistent (soldier tables differ in size)".into());
+        }
+        b.time_ms = st.time_ms;
+        b.contacts = st.contacts;
+        b.heard = st.heard;
+        b.visible = st.visible;
+        b.perceive_ms = st.perceive_ms;
+        b.brains = st.brains;
+        b.dead_logged = st.dead_logged;
+        b.lead_ms = st.lead_ms;
+        b.queue = st.queue;
+        b.history = st.history;
+        b.rolls = st.rolls;
+        Ok(b)
+    }
+
+    pub(crate) fn state_bytes(&self) -> Vec<u8> {
+        encode(&self.state())
     }
 
     pub fn nav(&self) -> Option<&NavGrid> {
@@ -280,12 +401,12 @@ impl Battle {
         if ok(to) {
             return to;
         }
-        for ring in 1..=4i64 {
+        // Rings of 6, 12, 24 and 24 spots, from a fixed table of 24 directions (no platform trigonometry).
+        for (ring, n) in [(1i64, 6usize), (2, 12), (3, 24), (4, 24)] {
             let r = ring * SPACING_MM;
-            let n = 6 * ring;
             for k in 0..n {
-                let a = std::f64::consts::TAU * k as f64 / n as f64;
-                let p = (to.0 + (r as f64 * a.cos()) as i64, to.1 + (r as f64 * a.sin()) as i64);
+                let (c, s) = DIRS_24[k * 24 / n];
+                let p = (to.0 + r * c / 1_000, to.1 + r * s / 1_000);
                 if ok(p) {
                     return p;
                 }
@@ -515,6 +636,7 @@ impl Battle {
     /// One fixed step of `dt_ms`.
     pub fn step(&mut self, dt_ms: i32) {
         self.time_ms += dt_ms as i64;
+        self.apply_commands();
         let fade = SUPPRESS_FADE_S * dt_ms / 1_000;
         for s in &mut self.soldiers {
             s.suppression = (s.suppression - fade).max(0);
@@ -597,7 +719,8 @@ impl Battle {
                 continue;
             }
             let p = self.hit_permille(i, j);
-            let hit = self.roll(i, self.log.len() as u64) < p;
+            self.rolls += 1;
+            let hit = self.roll(i, self.rolls) < p;
             let (from, t) = (self.soldiers[i].eye(), &self.soldiers[j]);
             let to = Point { x: t.pos.0, y: t.pos.1, z: t.stance.body()[1] };
             self.soldiers[i].ammo -= 1;

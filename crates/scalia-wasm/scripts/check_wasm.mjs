@@ -21,6 +21,10 @@ const native = BigInt(
 );
 const fromWasm = wasm.scenario_hash(42n);
 check('native and wasm scenario hash match', native === fromWasm, `native=${native} wasm=${fromWasm}`);
+// (a2) the battle AI too: the killhouse assault, 60 s in, hashes the same natively and in WebAssembly.
+const battleNative = execSync('cargo run -q --release -p scalia-bench --bin hash_battle -- 42 60000', { cwd: root }).toString().trim();
+const battleWasm = wasm.battle_hash(42n, 60000).toString();
+check('native and wasm battle hash match', battleNative === battleWasm, `native=${battleNative} wasm=${battleWasm}`);
 
 // (b) a ticked Sim derives a sane, finite set of individuals.
 const sim = new wasm.Sim(42n, 200, 150);

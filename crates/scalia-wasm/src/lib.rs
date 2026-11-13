@@ -94,6 +94,12 @@ fn to_mm(v: f64) -> i64 {
     if v.is_finite() { v as i64 } else { 0 }
 }
 
+/// The killhouse battle hash after `ms`: the same computation as the native `hash_battle` binary.
+#[wasm_bindgen]
+pub fn battle_hash(seed: u64, ms: u32) -> u64 {
+    scalia_ai::scenario::killhouse_hash(seed, ms as i64)
+}
+
 /// Same computation as the native `hash_scenario` binary.
 #[wasm_bindgen]
 pub fn scenario_hash(seed: u64) -> u64 {

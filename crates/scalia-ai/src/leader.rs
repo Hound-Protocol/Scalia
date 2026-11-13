@@ -14,7 +14,7 @@ use crate::tactics::Building;
 use scalia_core::killhouse::Killhouse;
 
 /// The commander's intent for a squad.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Order {
     None,
     /// Take the building and hold it.
@@ -24,7 +24,7 @@ pub enum Order {
 }
 
 /// One step of a building assault.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Method {
     Approach,
     Drone,
@@ -119,7 +119,7 @@ pub fn choose(s: &Situation) -> Vec<Method> {
 }
 
 /// A squad leader's working state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Brain {
     pub order: Order,
     plan: Vec<Method>,

@@ -109,7 +109,7 @@ pub fn isqrt(v: i64) -> i64 {
     if v <= 0 {
         return 0;
     }
-    let mut x = (v as f64).sqrt() as i64;
+    let mut x = (v as f64).sqrt() as i64; // float-ok: only a first guess; the integer loops below make it exact
     while x * x > v {
         x -= 1;
     }

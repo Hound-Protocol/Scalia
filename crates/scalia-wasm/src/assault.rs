@@ -1,19 +1,13 @@
 //! The killhouse assault, live: a `scalia_ai` battle run at the training house, and how its soldiers are drawn
 //! (pose, gait cadence, aim layer) and heard (shots, grenades, the leader's steps).
 use scalia_ai::battle::{Act, Battle, Event, Gait, Soldier, Stance};
-use scalia_ai::leader::Order;
-use scalia_ai::sight::SightGrid;
-use scalia_ai::tactics::CoverMap;
-use scalia_core::killhouse::Killhouse;
-use scalia_core::nav::NavGrid;
+pub use scalia_ai::scenario::KILLHOUSE_ATTACKERS as ATTACKERS;
 use scalia_render::pose::{stride_m_dir, Pose};
 
 /// Battle steps are fixed, 50 ms; drawing interpolates between the last two.
 pub const STEP_MS: f64 = 50.0;
 
 /// Where the enemy stands inside the house (mm from its south-west corner), as in the static scene.
-pub const DEFENDERS: [(i64, i64); 8] = [(12_500, 3_500), (16_000, 2_000), (5_000, 2_000), (2_500, 5_000), (3_000, 10_600), (6_500, 12_000), (16_500, 10_200), (13_000, 12_500)];
-pub const ATTACKERS: usize = 12;
 
 /// Something to play: a shot or a blast, where it happened (absolute metres).
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -47,23 +41,8 @@ impl Assault {
     /// The attackers form up 27 m south of the house; the defenders hold their posts. `origin` is the house's
     /// south-west corner (mm).
     pub fn new(origin: (i64, i64), seed: u64, now_ms: f64) -> Assault {
-        let k = Killhouse::new(origin.0, origin.1);
-        let props = k.props();
-        // The battlefield: 100 × 80 m around the house.
-        let (x0, y0) = (origin.0 - 40_000, origin.1 - 42_000);
-        let mut nav = NavGrid::new(x0, y0, 200, 160);
-        nav.rebuild(&props);
-        let sight = SightGrid::build(x0, y0, 400, 320, &props);
-        let cover = CoverMap::build(&props, &nav);
-        let mut soldiers: Vec<Soldier> = (0..ATTACKERS).map(|i| Soldier::new(0, 0, (origin.0 + 6_000 + (i as i64 % 4) * 1_500, origin.1 - 27_000 + (i as i64 / 4) * 1_500), Stance::Stand)).collect();
-        for (x, y) in DEFENDERS {
-            soldiers.push(Soldier::new(1, 1, (origin.0 + x, origin.1 + y), Stance::Stand));
-        }
-        let n = soldiers.len();
-        let mut battle = Battle::with_map(nav, sight, cover, soldiers, seed);
-        battle.set_building(k);
-        battle.command(0, Order::Capture);
-        battle.command(1, Order::Hold);
+        let battle = scalia_ai::scenario::killhouse_assault(origin, seed);
+        let n = battle.soldiers.len();
         let prev = battle.soldiers.iter().map(|s| s.pos).collect();
         Assault { battle, prev, clock: now_ms, now: now_ms, seen: 0, anim: vec![(0.0, Pose::Stand, Pose::Stand, -1000.0); n], motion: vec![(0.0, 0.0, -1.0); n], gait: (0..n).map(|i| ((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, now_ms)).collect(), sounds: Vec::new(), steps: Vec::new(), over: false }
     }
