@@ -47,6 +47,14 @@ const worldAudio = (() => {
   };
 })();
 
+// Ambience: wind through the trees, looping under everything (a world sound, so it is muffled with the tablet up).
+const ambience = () => {
+  const el = new Audio('./sfx/ambience-wind.mp3');
+  el.loop = true; el.volume = 0.35;
+  worldAudio.add(el);
+  el.play().catch(() => {});
+};
+
 // Background music (placeholder track): starts at 25% once the player enters the game, loops, and can be turned
 // off or turned down on the tablet's settings page. The choice is remembered.
 const music = (() => {
@@ -1348,7 +1356,7 @@ const UPDATE = '__UPDATE__';
   const box = document.getElementById('proto');
   if (!box) return;
   document.getElementById('protoVer').textContent = UPDATE.startsWith('__') ? 'Local build' : UPDATE;
-  const go = () => { box.hidden = true; removeEventListener('keydown', key, true); music.start(); };
+  const go = () => { box.hidden = true; removeEventListener('keydown', key, true); music.start(); ambience(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
   const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };
   document.getElementById('protoGo').addEventListener('click', go);
