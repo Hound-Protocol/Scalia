@@ -161,6 +161,119 @@ pub fn held(v: Vec3, p: &PoseParams) -> Vec3 {
     rot(v, RIFLE_GRIP.y, RIFLE_GRIP.z, p.rifle) + (hand(p, Side::Right) - RIFLE_GRIP)
 }
 
+/// Puts the left palm back on the handguard after blends and idle motion have pulled it off: a closed-form
+/// rifle tilt for the moments a blend swings the handguard out of the arm's reach, then damped least-squares
+/// steps on the left shoulder, elbow and reach. `w` is how much the pose holds the rifle in both hands
+/// (`two_handed`, blended like the pose itself), so the hand lets go and grabs as smoothly as the blend runs.
+/// Mirrored in common.wgsl `grip`.
+pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
+    let w = w * (1.0 - p.sling);
+    if w <= 0.0 {
+        return *p;
+    }
+    // First tilt the rifle (around the right hand) just enough to bring the handguard within the left arm's
+    // reach; then the arm alone can always get there.
+    let mut p0 = *p;
+    p0.rifle += reach_pitch(p) * 0.5 * w;
+    let p = &p0;
+    // Unknowns: left shoulder, elbow and reach.
+    let apply = |q: &PoseParams, x: [f32; 3]| {
+        let mut t = *q;
+        t.shoulder[0] += x[0];
+        t.elbow[0] += x[1];
+        t.reach[0] += x[2];
+        t
+    };
+    let res = |q: &PoseParams| held(RIFLE_GUARD, q) - hand(q, Side::Left);
+    // Out of reach even after the tilt (going prone, say): damp harder the further it is, so the arm only
+    // stretches towards it instead of flailing.
+    let excess = (held(RIFLE_GUARD, p).distance(Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z)) - GRIP_REACH).max(0.0);
+    let damp = GRIP_DAMP + 2.0 * excess;
+    let mut q = *p;
+    for _ in 0..GRIP_STEPS {
+        let r = res(&q);
+        let d = 0.01;
+        let j: [Vec3; 3] = std::array::from_fn(|k| {
+            let mut x = [0.0; 3];
+            x[k] = d;
+            (res(&apply(&q, x)) - r) / d
+        });
+        // x = -J^T (J J^T + l^2 I)^-1 r
+        let mut m = glam::Mat3::from_diagonal(Vec3::splat(damp * damp));
+        for c in &j {
+            m += glam::Mat3::from_cols(*c * c.x, *c * c.y, *c * c.z);
+        }
+        if m.determinant().abs() < 1e-9 {
+            break;
+        }
+        let y = m.inverse() * r;
+        let x: [f32; 3] = std::array::from_fn(|k| (-j[k].dot(y)).clamp(-0.5, 0.5));
+        q = apply(&q, x);
+    }
+    // Soft cap on each joint's total correction.
+    let cap = |d: f32| GRIP_MAX * (d / GRIP_MAX).tanh() * w;
+    let mut out = *p;
+    out.shoulder[0] += cap(q.shoulder[0] - p.shoulder[0]);
+    out.elbow[0] += cap(q.elbow[0] - p.elbow[0]);
+    out.reach[0] += cap(q.reach[0] - p.reach[0]);
+    out
+}
+const GRIP_STEPS: usize = 6;
+pub const GRIP_DAMP: f32 = 0.05;
+/// About the smallest extra rifle pitch (radians) that brings the handguard within GRIP_REACH of the left shoulder.
+/// The handguard turns on a circle around the x axis through the right palm; the squared distance to the
+/// shoulder along it is k + m cos(d + phi), so the answer is closed-form.
+pub fn reach_pitch(p: &PoseParams) -> f32 {
+    let h = hand(p, Side::Right);
+    let v = held(RIFLE_GUARD, p) - h;
+    let a = h - Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z);
+    let k = a.length_squared() + v.length_squared() + 2.0 * a.x * v.x;
+    if k + 2.0 * (a.y * v.y + a.z * v.z) <= GRIP_REACH * GRIP_REACH {
+        return 0.0;
+    }
+    // (a.y, a.z) . rot(d) (v.y, v.z) = ra rv cos(d + phi)
+    let (ra, rv) = ((a.y * a.y + a.z * a.z).sqrt(), (v.y * v.y + v.z * v.z).sqrt());
+    if ra * rv < 1e-6 {
+        return 0.0;
+    }
+    let phi = v.z.atan2(v.y) - a.z.atan2(a.y);
+    let c = ((GRIP_REACH * GRIP_REACH - k) / (2.0 * ra * rv)).clamp(-1.0, 1.0);
+    let base = c.acos();
+    let wrap = |x: f32| (x + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let (d1, d2) = (wrap(base - phi), wrap(-base - phi));
+    // Both roots, weighted towards the smaller: continuous where they swap (the rifle crossing the band in
+    // front where neither tilt reaches; there the hand comes off the handguard for a moment).
+    let (q1, q2) = (d1 * d1, d2 * d2);
+    if q1 + q2 < 1e-9 { 0.0 } else { (d1 * q2 + d2 * q1) / (q1 + q2) }
+}
+/// How far the left palm can get from the shoulder pivot with a slightly bent elbow (m).
+pub const GRIP_REACH: f32 = 0.595;
+/// Share of `reach_pitch` the rifle actually tilts (the arm stretches for the rest), so a blend that flips the
+/// rifle does not whip it round.
+const GRIP_TILT: f32 = 0.6;
+/// Largest correction `grip` makes to any one joint (radians, soft).
+const GRIP_MAX: f32 = 0.7;
+
+/// `grip`'s weight while blending pose `a` into `b` (`w0` as given to `blend`, eased the same way).
+pub fn grip_weight(a: Pose, b: Pose, w0: f32) -> f32 {
+    let (ha, hb) = (two_handed(a), two_handed(b));
+    // Let go early when leaving a two-handed hold, grab late when coming into one: the hand moves while the
+    // body is still close to the holding pose, where the correction is small.
+    let w = if ha > hb { (w0 / GRIP_SWAP).clamp(0.0, 1.0) } else { ((w0 - (1.0 - GRIP_SWAP)) / GRIP_SWAP).clamp(0.0, 1.0) };
+    let w = w * w * (3.0 - 2.0 * w);
+    ha + (hb - ha) * w
+}
+/// Share of a blend over which the hand lets go of or grabs the handguard.
+pub const GRIP_SWAP: f32 = 0.6;
+
+/// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
+pub fn two_handed(pose: Pose) -> f32 {
+    match pose {
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim => 1.0,
+        _ => 0.0,
+    }
+}
+
 fn leg(q: Vec3, hip: f32, knee: f32) -> Vec3 {
     rot(rot(q, 0.0, KNEE_Z, -knee), 0.0, HIP_Z, hip)
 }

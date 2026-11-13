@@ -71,6 +71,20 @@ fn main() {
         println!("{:<10} guard {:>6.3}", format!("{pose:?}"), guard);
         if guard > 0.03 { println!("  !! {pose:?}: the left hand is off the handguard"); bad += 1; }
     }
+    println!("\nLeft palm to the handguard through idle motion and blends, after grip()");
+    let holds = [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim];
+    let gap = |p: &PoseParams| { let q = grip(p, 1.0); hand(&q, Side::Left).distance(held(RIFLE_GUARD, &q)) };
+    for &pose in &holds {
+        let m = (0..3000).map(|i| gap(&idle(&params(pose, 0.25), pose, i as f32 * 0.02, 0.37))).fold(0.0, f32::max);
+        if m > 0.03 { println!("  !! {pose:?} idle: the left hand leaves the handguard by {m:.3} m"); bad += 1; }
+    }
+    let mut worst = (0.0f32, Pose::Stand, Pose::Stand);
+    for &a in &holds { for &b in &holds { if a == b { continue; }
+        let (pa, pb) = (params(a, 0.25), params(b, 0.25));
+        for i in 0..=50 { let d = gap(&blend(&pa, &pb, i as f32 / 50.0)); if d > worst.0 { worst = (d, a, b); } }
+    } }
+    println!("worst blend gap {:.3} m ({:?} -> {:?})", worst.0, worst.1, worst.2);
+    if worst.0 > 0.05 { println!("  !! the left hand leaves the handguard during a blend"); bad += 1; }
     println!("\nBlend between poses: fastest joint (rad/s) over {BLEND_S}s");
     let ids = 0..=10u32;
     let mut worst = (0.0f32, 0, 0);

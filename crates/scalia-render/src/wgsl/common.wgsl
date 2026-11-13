@@ -213,6 +213,85 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   return p;
 }
 
+// Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
+fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
+fn guard(p: PP) -> vec3f {
+  let hand = arm(vec3f(0.18, 0.0, 0.80), p.sh.y, p.el.y, p.reach.y, p.abd.y, 0.238);
+  return rot(vec3f(0.238, 0.34, 0.82), 0.03, 0.78, p.rifle) + hand - vec3f(0.238, 0.03, 0.78);
+}
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u); }
+// Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
+fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
+  let ha = two_handed(a);
+  let hb = two_handed(b);
+  var w = clamp((w0 - 0.4) / 0.6, 0.0, 1.0);
+  if (ha > hb) { w = clamp(w0 / 0.6, 0.0, 1.0); }
+  w = w * w * (3.0 - 2.0 * w);
+  return mix(ha, hb, w);
+}
+// Port of pose.rs `reach_pitch` (GRIP_REACH 0.595).
+fn reach_pitch(p: PP) -> f32 {
+  let h = arm(vec3f(0.18, 0.0, 0.80), p.sh.y, p.el.y, p.reach.y, p.abd.y, 0.238);
+  let v = guard(p) - h;
+  let a = h - vec3f(-0.238, 0.0, 1.40);
+  let k = dot(a, a) + dot(v, v) + 2.0 * a.x * v.x;
+  let r2 = 0.595 * 0.595;
+  if (k + 2.0 * (a.y * v.y + a.z * v.z) <= r2) { return 0.0; }
+  let ra = length(a.yz);
+  let rv = length(v.yz);
+  if (ra * rv < 1e-6) { return 0.0; }
+  let phi = atan2(v.z, v.y) - atan2(a.z, a.y);
+  let c = clamp((r2 - k) / (2.0 * ra * rv), -1.0, 1.0);
+  let base = acos(c);
+  let tau = 6.2831853;
+  let d1 = (base - phi + 3.1415927) - floor((base - phi + 3.1415927) / tau) * tau - 3.1415927;
+  let d2 = (-base - phi + 3.1415927) - floor((-base - phi + 3.1415927) / tau) * tau - 3.1415927;
+  let q1 = d1 * d1;
+  let q2 = d2 * d2;
+  if (q1 + q2 < 1e-9) { return 0.0; }
+  return (d1 * q2 + d2 * q1) / (q1 + q2);
+}
+fn grip_res(p: PP) -> vec3f { return guard(p) - hand_l(p); }
+fn grip_try(p: PP, x: vec4f) -> PP {
+  var t = p;
+  t.sh.x = t.sh.x + x.x; t.el.x = t.el.x + x.y; t.reach.x = t.reach.x + x.z; t.rifle = t.rifle + x.w;
+  return t;
+}
+// Port of pose.rs `grip`: puts the left palm back on the handguard (GRIP_TILT 0.6, GRIP_DAMP 0.05,
+// GRIP_STEPS 6, GRIP_MAX 0.7; GRIP_RIFLE_COST 0 so the rifle unknown never moves).
+fn grip(p_in: PP, w_in: f32) -> PP {
+  let w = w_in * (1.0 - p_in.sling);
+  if (w <= 0.0) { return p_in; }
+  var p = p_in;
+  p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
+  let excess = max(distance(guard(p), vec3f(-0.238, 0.0, 1.40)) - 0.595, 0.0);
+  let damp = 0.05 + 2.0 * excess;
+  var q = p;
+  for (var it = 0; it < 6; it = it + 1) {
+    let r = grip_res(q);
+    let d = 0.01;
+    let j0 = (grip_res(grip_try(q, vec4f(d, 0.0, 0.0, 0.0))) - r) / d;
+    let j1 = (grip_res(grip_try(q, vec4f(0.0, d, 0.0, 0.0))) - r) / d;
+    let j2 = (grip_res(grip_try(q, vec4f(0.0, 0.0, d, 0.0))) - r) / d;
+    let jm = mat3x3f(j0, j1, j2);
+    let m = jm * transpose(jm) + mat3x3f(damp * damp, 0.0, 0.0, 0.0, damp * damp, 0.0, 0.0, 0.0, damp * damp);
+    let det = determinant(m);
+    if (abs(det) < 1e-9) { break; }
+    // Inverse by cofactors (columns of m are c0, c1, c2).
+    let c0 = m[0]; let c1 = m[1]; let c2 = m[2];
+    let inv = transpose(mat3x3f(cross(c1, c2), cross(c2, c0), cross(c0, c1))) * (1.0 / det);
+    let y = inv * r;
+    let x = clamp(-vec3f(dot(j0, y), dot(j1, y), dot(j2, y)), vec3f(-0.5), vec3f(0.5));
+    q = grip_try(q, vec4f(x, 0.0));
+  }
+  var out = p;
+  let cap = 0.7;
+  out.sh.x = out.sh.x + cap * tanh((q.sh.x - p.sh.x) / cap) * w;
+  out.el.x = out.el.x + cap * tanh((q.el.x - p.el.x) / cap) * w;
+  out.reach.x = out.reach.x + cap * tanh((q.reach.x - p.reach.x) / cap) * w;
+  return out;
+}
+
 fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   var q = v;
   if (part == 1u) { q = rot(v, 0.0, 0.88, p.hip.x); }
@@ -262,6 +341,12 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32) -> vec3f {
     }
     // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
     if (b.z <= 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
+    // Left palm onto the handguard (only the left arm and the rifle move, so only they pay for it).
+    if (part == 3u || part == 11u || part == 9u) {
+      let hold = select(two_handed(u32(b.w)), two_handed(u32(d.z - 1.0)), d.z > 0.5);
+      let gw = select(hold, grip_weight(u32(d.x), u32(b.w), w), w < 1.0 && d.z <= 0.5);
+      pp = grip(pp, gw);
+    }
     q = pose_vertex(v, part, pp);
   }
   let ch = cos(b.x);

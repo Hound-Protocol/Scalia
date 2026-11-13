@@ -1,6 +1,6 @@
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of, Part};
-use scalia_render::pose::{params, pose_vertex, Pose};
+use scalia_render::pose::{blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, Pose, PoseParams, Side, RIFLE_GUARD};
 
 /// All figure vertices in a pose at a gait phase, in the figure's own frame (facing +y).
 fn posed(pose: Pose, phase: f32) -> Vec<(Part, Vec3)> {
@@ -380,3 +380,53 @@ fn standing_soldiers_breathe_shift_and_look_around() {
     }
 }
 
+
+fn guard_gap(p: &PoseParams) -> f32 {
+    hand(p, Side::Left).distance(held(RIFLE_GUARD, p))
+}
+
+#[test]
+fn grip_keeps_the_left_hand_on_the_handguard_while_idling_and_blending() {
+    let stand = params(Pose::Stand, 0.25);
+    let worst_idle = (0..3000).map(|i| guard_gap(&grip(&idle(&stand, Pose::Stand, i as f32 * 0.02, 0.37), 1.0))).fold(0.0, f32::max);
+    assert!(worst_idle < 0.01, "idle gap {worst_idle}");
+    let (a, b) = (params(Pose::Stand, 0.25), params(Pose::Cover, 0.25));
+    let worst_blend = (0..=50).map(|i| guard_gap(&grip(&blend(&a, &b, i as f32 / 50.0), 1.0))).fold(0.0, f32::max);
+    assert!(worst_blend < 0.05, "blend gap {worst_blend}");
+}
+
+#[test]
+fn grip_leaves_a_hand_that_is_doing_something_else() {
+    for pose in [Pose::Radio, Pose::Tablet] {
+        let p = params(pose, 0.25);
+        assert_eq!(two_handed(pose), 0.0, "{pose:?}");
+        assert_eq!(grip(&p, two_handed(pose)), p, "{pose:?}");
+    }
+}
+
+#[test]
+fn grip_moves_the_arm_and_rifle_no_faster_than_a_blend_allows() {
+    let (n, dt) = (70, 0.35 / 70.0);
+    for a in 0..=10u32 {
+        for b in 0..=10u32 {
+            if a == b {
+                continue;
+            }
+            let (ea, eb) = (Pose::from_id(a), Pose::from_id(b));
+            let (pa, pb) = (params(ea, 0.25), params(eb, 0.25));
+            let v = |w: f32| {
+                let q = grip(&blend(&pa, &pb, w), grip_weight(ea, eb, w));
+                [q.shoulder[0], q.elbow[0], q.reach[0], q.rifle]
+            };
+            let mut prev = v(0.0);
+            for i in 1..=n {
+                let c = v(i as f32 / n as f32);
+                for k in 0..4 {
+                    let s = (c[k] - prev[k]).abs() / dt;
+                    assert!(s <= 15.0, "{ea:?}->{eb:?} joint {k}: {s} rad/s");
+                }
+                prev = c;
+            }
+        }
+    }
+}
