@@ -35,6 +35,8 @@ pub enum Pose {
     Radio = 9,
     /// Holding the command tablet in both hands at the chest, looking down at it; the rifle slung on the back.
     Tablet = 10,
+    /// Crouched walk: knees deeply bent, short steps, rifle at low ready (moving low behind cover).
+    CrouchWalk = 11,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -55,6 +57,7 @@ impl Pose {
             8 => Pose::Cover,
             9 => Pose::Radio,
             10 => Pose::Tablet,
+            11 => Pose::CrouchWalk,
             _ => Pose::Stand,
         }
     }
@@ -94,6 +97,8 @@ pub struct PoseParams {
     /// Each leg swung out to the side around the front-to-back line through its hip (radians, positive moves the
     /// foot to the figure's right, +x), left then right: walking sideways and at angles while facing ahead.
     pub side: [f32; 2],
+    /// 1 keeps the planted boots flat whatever the knee bend (crouched walking); 0 lets the ankle follow the gait.
+    pub flat: f32,
     /// Rifle turn around the vertical through the grip (positive swings the muzzle to the left, across the
     /// body, and the stock out to the right shoulder), applied after `rifle` pitch.
     pub rifle_yaw: f32,
@@ -283,7 +288,7 @@ pub const GRIP_SWAP: f32 = 0.6;
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk => 1.0,
         _ => 0.0,
     }
 }
@@ -321,9 +326,51 @@ pub fn ankle(hip: f32, knee: f32) -> f32 {
     -(shin.max(0.0) + 0.4 * shin.min(0.0)) * planted
 }
 
+/// `ankle` with the boot held flat to the ground by `flat` (0..1).
+pub fn ankle_flat(hip: f32, knee: f32, flat: f32) -> f32 {
+    let a = ankle(hip, knee);
+    a + (-(hip - knee) - a) * flat
+}
+
 /// A foot point: ankle bend, then the leg.
-fn foot(q: Vec3, hip: f32, knee: f32) -> Vec3 {
-    leg(rot(q, 0.0, ANKLE_Z, ankle(hip, knee)), hip, knee)
+fn foot(q: Vec3, hip: f32, knee: f32, flat: f32) -> Vec3 {
+    leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat)), hip, knee)
+}
+
+/// Crouched gait in any direction (see `gait_dir`): each foot's target moves in a straight line at an even speed
+/// while planted (`reach` metres either side of under the hip, along the line of travel) and arcs forward in the
+/// swing, rising by `lift`; hip and knee are solved from it by two-bone IK (knee ahead of the foot), with the ankle
+/// `height` below the hip. The planted boot then stays put on the ground however deep the crouch.
+fn crouch_gait(phase: f32, reach: f32, height: f32, lift: f32, stance: f32, dir: f32) -> ([f32; 2], [f32; 2], [f32; 2]) {
+    use std::f32::consts::PI;
+    let (l1, l2) = (HIP_Z - KNEE_Z, KNEE_Z - ANKLE_Z);
+    let k = stride_scale(dir);
+    let (s, c) = dir.sin_cos();
+    let (mut hip, mut knee, mut side) = ([0.0; 2], [0.0; 2], [0.0; 2]);
+    for (i, off) in [0.0f32, 0.5].into_iter().enumerate() {
+        let u = (phase + off).fract();
+        // Along the line of travel: +reach ahead at heel strike, -reach behind at toe-off.
+        let (along, raise) = if u < stance {
+            (reach * (1.0 - 2.0 * u / stance), 0.0)
+        } else {
+            let w = (u - stance) / (1.0 - stance);
+            let m = -2.0 * reach / stance * (1.0 - stance);
+            let (w2, w3) = (w * w, w * w * w);
+            let a = (2.0 * w3 - 3.0 * w2 + 1.0) * -reach + (w3 - 2.0 * w2 + w) * m + (-2.0 * w3 + 3.0 * w2) * reach + (w3 - w2) * m;
+            (a, lift * (PI * w).sin().powi(2))
+        };
+        let out = if i == 0 { -1.0 } else { 1.0 };
+        let fy = along * k * c;
+        let fx = -along * k * s + out * 0.06 * s.abs();
+        let h = height - raise;
+        side[i] = fx.atan2(h);
+        let hz = (h * h + fx * fx).sqrt();
+        let d = (fy * fy + hz * hz).sqrt().min(l1 + l2 - 1e-3);
+        let bend = ((d * d - l1 * l1 - l2 * l2) / (2.0 * l1 * l2)).clamp(-1.0, 1.0).acos();
+        hip[i] = fy.atan2(hz) + (l2 * bend.sin() / d).clamp(-1.0, 1.0).asin();
+        knee[i] = bend;
+    }
+    (hip, knee, side)
 }
 
 /// Gait for both legs at a phase: (hip, knee) angles. Each leg swings `swing` radians about `forward`; its knee
@@ -401,12 +448,14 @@ pub fn stride_m(pose: Pose) -> f32 {
         Pose::Walk => WALK_STRIDE,
         Pose::Run => RUN_STRIDE,
         Pose::Sprint => SPRINT_STRIDE,
+        Pose::CrouchWalk => CROUCH_STRIDE,
         _ => 1.0,
     }
 }
 pub const WALK_STRIDE: f32 = 1.21;
 pub const RUN_STRIDE: f32 = 2.12;
 pub const SPRINT_STRIDE: f32 = 2.50;
+pub const CROUCH_STRIDE: f32 = 1.0;
 
 /// Pose parameters at a gait phase (0..1; only the gaits use it). Rifle carries per pose (rule 3): low ready when
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
@@ -441,6 +490,14 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             carry(&mut p, Carry::Collapsed);
             p.head = 0.38;
             stride(&mut p, phase, 0.035, 0.3, 0.06, 0.08, 0.24);
+        }
+        Pose::CrouchWalk => {
+            (p.hip, p.knee, p.side) = crouch_gait(phase, 0.3, 0.575, 0.12, 0.6, dir);
+            p.flat = 1.0;
+            p.lean = 0.3;
+            carry(&mut p, Carry::LowReady);
+            p.head = 0.3;
+            stride(&mut p, phase, 0.012, 0.05, 0.02, 0.02, 0.03);
         }
         Pose::Crouch => {
             kneel(&mut p);
@@ -479,7 +536,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = -0.1;
         }
     }
-    p.drop = ground_drop_side(p.hip, p.knee, p.side);
+    p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat);
     p
 }
 
@@ -510,7 +567,7 @@ fn stride(p: &mut PoseParams, phase: f32, bob: f32, twist: f32, arms: f32, rifle
 /// their life from the stride instead; aiming soldiers keep their eyes and rifle on the target.
 pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
     let mut q = *p;
-    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::Prone) {
+    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::Prone | Pose::CrouchWalk) {
         return q;
     }
     let tau = std::f32::consts::TAU;
@@ -593,16 +650,16 @@ fn aim_arms(p: &mut PoseParams) {
 
 /// Vertical shift that puts the lowest heel or toe of either leg on the ground.
 pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
-    ground_drop_side(hip, knee, [0.0; 2])
+    ground_drop_side(hip, knee, [0.0; 2], 0.0)
 }
 
-/// `ground_drop` with the legs swung out to the side.
-pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2]) -> f32 {
+/// `ground_drop` with the legs swung out to the side and the boots held flat by `flat`.
+pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32) -> f32 {
     let mut low = f32::MAX;
     for i in 0..2 {
         let px = if i == 0 { -HIP_X } else { HIP_X };
         for y in [HEEL_Y, TOE_Y] {
-            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i]), side[i], px).z);
+            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i], flat), side[i], px).z);
         }
     }
     -low
@@ -616,8 +673,8 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[1]), p.side[1], HIP_X),
         Part::LeftShin => sideways(leg(v, p.hip[0], p.knee[0]), p.side[0], -HIP_X),
         Part::RightShin => sideways(leg(v, p.hip[1], p.knee[1]), p.side[1], HIP_X),
-        Part::LeftFoot => sideways(foot(v, p.hip[0], p.knee[0]), p.side[0], -HIP_X),
-        Part::RightFoot => sideways(foot(v, p.hip[1], p.knee[1]), p.side[1], HIP_X),
+        Part::LeftFoot => sideways(foot(v, p.hip[0], p.knee[0], p.flat), p.side[0], -HIP_X),
+        Part::RightFoot => sideways(foot(v, p.hip[1], p.knee[1], p.flat), p.side[1], HIP_X),
         Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
         Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
         Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
@@ -665,12 +722,14 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
     let m2 = |x: [f32; 2], y: [f32; 2]| [m(x[0], y[0]), m(x[1], y[1])];
     let (hip, knee) = (m2(a.hip, b.hip), m2(a.knee, b.knee));
     let side = m2(a.side, b.side);
-    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop_side(hip, knee, side) };
+    let flat = m(a.flat, b.flat);
+    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop_side(hip, knee, side, flat) };
     PoseParams {
         lean: m(a.lean, b.lean),
         hip,
         knee,
         side,
+        flat,
         shoulder: m2(a.shoulder, b.shoulder),
         elbow: m2(a.elbow, b.elbow),
         reach: m2(a.reach, b.reach),

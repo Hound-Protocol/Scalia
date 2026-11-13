@@ -441,3 +441,17 @@ fn grip_moves_the_arm_and_rifle_no_faster_than_a_blend_allows() {
         }
     }
 }
+
+#[test]
+fn crouched_walk_stays_low_and_holds_the_rifle() {
+    assert_eq!(Pose::from_id(11), Pose::CrouchWalk);
+    let stand = hip_height(Pose::Stand, 0.0);
+    for k in 0..8 {
+        let ph = k as f32 / 8.0;
+        let h = hip_height(Pose::CrouchWalk, ph);
+        assert!(h < stand - 0.2, "phase {ph}: hips at {h}, standing {stand}");
+        let pp = grip(&params(Pose::CrouchWalk, ph), two_handed(Pose::CrouchWalk));
+        let miss = (hand(&pp, Side::Left) - held(RIFLE_GUARD, &pp)).length();
+        assert!(miss < 0.03, "phase {ph}: left hand {miss:.3} m off the handguard");
+    }
+}

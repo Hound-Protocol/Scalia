@@ -40,7 +40,15 @@ fn carry_table_matches() {
 #[test]
 fn gait_calls_match() {
     let rs: Vec<Vec<f32>> = Regex::new(r"= gait_dir\(phase, ([^)]*), dir\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
-    let wg: Vec<Vec<f32>> = Regex::new(r"gait\(&p, phase, ([^)]*), dir\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
+    let wg: Vec<Vec<f32>> = Regex::new(r"[^_]gait\(&p, phase, ([^)]*), dir\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
+    assert!(!rs.is_empty());
+    assert_eq!(rs, wg);
+}
+
+#[test]
+fn crouch_gait_calls_match() {
+    let rs: Vec<Vec<f32>> = Regex::new(r"= crouch_gait\(phase, ([^)]*), dir\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
+    let wg: Vec<Vec<f32>> = Regex::new(r"crouch_gait\(&p, phase, ([^)]*), dir\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
     assert!(!rs.is_empty());
     assert_eq!(rs, wg);
 }

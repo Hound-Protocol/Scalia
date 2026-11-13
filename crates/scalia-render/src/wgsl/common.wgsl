@@ -4,7 +4,7 @@ struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: v
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
-struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f };
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32 };
 
 fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
   let s = sin(ang);
@@ -54,8 +54,14 @@ fn ankle(hip: f32, knee: f32) -> f32 {
   let planted = 1.0 - t * t * (3.0 - 2.0 * t);
   return -(max(shin, 0.0) + 0.4 * min(shin, 0.0)) * planted;
 }
-fn foot(q: vec3f, hip: f32, knee: f32) -> vec3f {
-  return leg(rot(q, 0.0, 0.085, ankle(hip, knee)), hip, knee);
+// Port of pose.rs `ankle_flat`: the boot held flat to the ground by `flat`.
+fn ankle_flat(hip: f32, knee: f32, flat: f32) -> f32 {
+  let a = ankle(hip, knee);
+  return a + (-(hip - knee) - a) * flat;
+}
+
+fn foot(q: vec3f, hip: f32, knee: f32, flat: f32) -> vec3f {
+  return leg(rot(q, 0.0, 0.085, ankle_flat(hip, knee, flat)), hip, knee);
 }
 
 // Gait for both legs (port of pose.rs `gait`): x = left, y = right; the right leg is half a cycle behind.
@@ -87,6 +93,39 @@ fn gait(p: ptr<function, PP>, phase: f32, swing: f32, forward: f32, lift: f32, b
   let e = (vec2f(l.x, r.x) - vec2f(forward)) * k;
   (*p).hip = vec2f(forward) + e * c;
   (*p).side = -e * s + vec2f(-1.0, 1.0) * 0.06 * abs(s);
+}
+
+// Port of pose.rs `crouch_gait`: foot targets move evenly while planted and arc forward in the swing; hip and knee
+// by two-bone IK (thigh 0.42, shin 0.375), ankle `height` below the hip.
+fn crouch_gait(p: ptr<function, PP>, phase: f32, reach: f32, height: f32, lift: f32, stance: f32, dir: f32) {
+  let l1 = 0.42;
+  let l2 = 0.375;
+  let k = 1.0 - 0.45 * abs(sin(dir));
+  let s = sin(dir);
+  let c = cos(dir);
+  for (var i = 0; i < 2; i++) {
+    let u = fract(phase + select(0.5, 0.0, i == 0));
+    var along = reach * (1.0 - 2.0 * u / stance);
+    var raise = 0.0;
+    if (u >= stance) {
+      let w = (u - stance) / (1.0 - stance);
+      let m = -2.0 * reach / stance * (1.0 - stance);
+      let w2 = w * w;
+      let w3 = w2 * w;
+      along = (2.0 * w3 - 3.0 * w2 + 1.0) * -reach + (w3 - 2.0 * w2 + w) * m + (-2.0 * w3 + 3.0 * w2) * reach + (w3 - w2) * m;
+      raise = lift * pow(sin(3.1415927 * w), 2.0);
+    }
+    let out = select(1.0, -1.0, i == 0);
+    let fy = along * k * c;
+    let fx = -along * k * s + out * 0.06 * abs(s);
+    let h = height - raise;
+    let hz = sqrt(h * h + fx * fx);
+    let d = min(sqrt(fy * fy + hz * hz), l1 + l2 - 1e-3);
+    let bend = acos(clamp((d * d - l1 * l1 - l2 * l2) / (2.0 * l1 * l2), -1.0, 1.0));
+    (*p).side[i] = atan2(fx, h);
+    (*p).hip[i] = atan2(fy, hz) + asin(clamp(l2 * sin(bend) / d, -1.0, 1.0));
+    (*p).knee[i] = bend;
+  }
 }
 
 // A leg point swung out to the side around the front-to-back line through the hip at px (port of pose.rs
@@ -131,7 +170,7 @@ fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rif
 // Idle life for soldiers standing still (port of pose.rs `idle`): breathing, weight shifts, glances, a rifle hitch.
 fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   var q = p0;
-  if (pose == 1u || pose == 2u || pose == 7u || pose == 5u) { return q; }
+  if (pose == 1u || pose == 2u || pose == 7u || pose == 5u || pose == 11u) { return q; }
   let tau = 6.2831853;
   let breathe = sin(tau * (t / 3.8 + seed));
   if (pose == 6u || pose == 4u) {
@@ -160,7 +199,7 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   let sw = sin(phase * 6.2831853);
-  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0));
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0);
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
@@ -203,6 +242,14 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.head = -0.1;
   } else if (pose == 8u) {
     carry(&p, 3u);
+  } else if (pose == 11u) {
+    // Crouched walk (pose.rs `Pose::CrouchWalk`).
+    crouch_gait(&p, phase, 0.3, 0.575, 0.12, 0.6, dir);
+    p.flat = 1.0;
+    p.lean = 0.3;
+    carry(&p, 1u);
+    p.head = 0.3;
+    stride(&p, phase, 0.012, 0.05, 0.02, 0.02, 0.03);
   } else if (pose == 10u) {
     p.sh = vec2f(0.35);
     p.el = vec2f(1.5);
@@ -216,16 +263,16 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.reach.x = 1.05;
     p.head = 0.1;
   }
-  p.drop = ground_drop(p.hip, p.knee, p.side);
+  p.drop = ground_drop(p.hip, p.knee, p.side, p.flat);
   return p;
 }
 
-fn ground_drop(hip: vec2f, knee: vec2f, side: vec2f) -> f32 {
+fn ground_drop(hip: vec2f, knee: vec2f, side: vec2f, flat: f32) -> f32 {
   var low = 1e9;
   for (var i = 0; i < 2; i++) {
     let px = select(0.1, -0.1, i == 0);
-    low = min(low, sideways(foot(vec3f(px, -0.09, 0.0), hip[i], knee[i]), side[i], px).z);
-    low = min(low, sideways(foot(vec3f(px, 0.14, 0.0), hip[i], knee[i]), side[i], px).z);
+    low = min(low, sideways(foot(vec3f(px, -0.09, 0.0), hip[i], knee[i], flat), side[i], px).z);
+    low = min(low, sideways(foot(vec3f(px, 0.14, 0.0), hip[i], knee[i], flat), side[i], px).z);
   }
   return -low;
 }
@@ -236,9 +283,10 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0,
              mix(a.reach, b.reach, w), mix(a.sling, b.sling, w), mix(a.bob, b.bob, w), mix(a.twist, b.twist, w),
-             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0));
+             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0);
   p.side = mix(a.side, b.side, w);
-  p.drop = select(select(ground_drop(p.hip, p.knee, p.side), b.drop, w >= 1.0), a.drop, w <= 0.0);
+  p.flat = mix(a.flat, b.flat, w);
+  p.drop = select(select(ground_drop(p.hip, p.knee, p.side, p.flat), b.drop, w >= 1.0), a.drop, w <= 0.0);
   return p;
 }
 
@@ -254,7 +302,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || pose == 11u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -338,8 +386,8 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   else if (part == 2u) { q = sideways(rot(v, 0.0, 0.88, p.hip.y), p.side.y, 0.1); }
   else if (part == 6u) { q = sideways(leg(v, p.hip.x, p.knee.x), p.side.x, -0.1); }
   else if (part == 7u) { q = sideways(leg(v, p.hip.y, p.knee.y), p.side.y, 0.1); }
-  else if (part == 13u) { q = sideways(foot(v, p.hip.x, p.knee.x), p.side.x, -0.1); }
-  else if (part == 14u) { q = sideways(foot(v, p.hip.y, p.knee.y), p.side.y, 0.1); }
+  else if (part == 13u) { q = sideways(foot(v, p.hip.x, p.knee.x, p.flat), p.side.x, -0.1); }
+  else if (part == 14u) { q = sideways(foot(v, p.hip.y, p.knee.y, p.flat), p.side.y, 0.1); }
   else if (part == 3u) { q = arm(v, p.sh.x, 0.0, p.reach.x, p.abd.x, -0.238); }
   else if (part == 4u) { q = arm(v, p.sh.y, 0.0, p.reach.y, p.abd.y, 0.238); }
   else if (part == 11u) { q = arm(v, p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }

@@ -36,7 +36,7 @@ fn main() {
     let mut bad = 0;
     println!("{:<10} {:>8} {:>10} {:>10} {:>10} {:>10}", "gait", "speed", "slide avg", "slide max", "seam", "jerk");
     // Each gait at its game speeds: (pose, ground speed m/s, share of the cycle a foot is planted).
-    for (pose, speed, stance) in [(Pose::Walk, 1.7f32, 0.6f32), (Pose::Walk, 1.5, 0.6), (Pose::Run, 3.0, 0.45), (Pose::Sprint, 4.6, 0.36), (Pose::Sprint, 3.5, 0.36)] {
+    for (pose, speed, stance) in [(Pose::Walk, 1.7f32, 0.6f32), (Pose::Walk, 1.5, 0.6), (Pose::Run, 3.0, 0.45), (Pose::Sprint, 4.6, 0.36), (Pose::Sprint, 3.5, 0.36), (Pose::CrouchWalk, 1.0, 0.6)] {
         let ps: Vec<PoseParams> = (0..=N).map(|k| params(pose, k as f32 / N as f32)).collect();
         // The game sets the cadence from the speed: cycles per second = speed / stride.
         let hz = speed / stride_m(pose);

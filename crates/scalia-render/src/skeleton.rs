@@ -6,7 +6,7 @@
 //! `pose::pose_vertex` puts it (the tests check this for every part), and vertices shared between bones blend.
 
 use crate::mesh::Part;
-use crate::pose::{ankle, ANKLE_Z, hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, SHOULDER_X, SHOULDER_Z};
+use crate::pose::{ankle_flat, ANKLE_Z, hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, SHOULDER_X, SHOULDER_Z};
 use glam::{Affine3A, Mat3A, Vec3, Vec3A};
 
 /// The bones, in the order of `skin_matrices`.
@@ -119,7 +119,7 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     let rifle = if p.sling > 0.0 { lerp_affine(held, slung_affine(), p.sling) } else { held };
     let thigh = |i: usize| body * pitch_at(HIP_Z, p.hip[i]);
     let shin = |i: usize| body * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);
-    let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle(p.hip[i], p.knee[i]));
+    let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle_flat(p.hip[i], p.knee[i], p.flat));
     [
         body,
         spine,
