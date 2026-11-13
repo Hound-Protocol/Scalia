@@ -84,22 +84,22 @@ try {
 
   // Mouse: wheel zooms, drag pans.
   // One mouse-wheel notch (about 100 px) is one zoom step; trackpads send many small deltas, summed into steps.
-  let wheelSum = 0, wheelAt = 0;
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    if (e.timeStamp - wheelAt > 300) wheelSum = 0; // a pause forgets leftovers
-    wheelAt = e.timeStamp;
-    const px = e.deltaMode === 1 ? e.deltaY * 33.4 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
-    // The first movement of a gesture steps at once, so a single notch never feels dead.
-    const fresh = wheelSum === 0;
-    wheelSum += px;
-    const STEP = 100;
-    if (fresh && Math.abs(wheelSum) < STEP) { v.wheel(Math.sign(wheelSum)); wheelSum = Math.sign(wheelSum) * -STEP + wheelSum; }
-    while (Math.abs(wheelSum) >= STEP) {
-      v.wheel(Math.sign(wheelSum));
-      wheelSum -= Math.sign(wheelSum) * STEP;
-    }
-  }, { passive: false });
+  // Turns wheel events into whole zoom steps: step(sign) is called once per notch (~100 px of scroll).
+  const notches = (step) => {
+    let sum = 0, at = 0;
+    return (e) => {
+      e.preventDefault();
+      if (e.timeStamp - at > 300) sum = 0; // a pause forgets leftovers
+      at = e.timeStamp;
+      const px = e.deltaMode === 1 ? e.deltaY * 33.4 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
+      // The first movement of a gesture steps at once, so a single notch never feels dead.
+      const fresh = sum === 0, STEP = 100;
+      sum += px;
+      if (fresh && Math.abs(sum) < STEP) { step(Math.sign(sum)); sum = Math.sign(sum) * -STEP + sum; }
+      while (Math.abs(sum) >= STEP) { step(Math.sign(sum)); sum -= Math.sign(sum) * STEP; }
+    };
+  };
+  canvas.addEventListener('wheel', notches((d) => v.wheel(d)), { passive: false });
   // Left button: drag pans, a click without movement selects. Right button: order the selected group.
   let drag = null, moved = 0, box = null;
   const boxEl = document.createElement('div');
@@ -738,7 +738,8 @@ try {
     });
     pump();
   };
-  mapCanvas.addEventListener('wheel', (e) => { e.preventDefault(); zoomGlitch(); onMap(() => v.wheel(Math.sign(e.deltaY))); }, { passive: false });
+  // The blur only runs while the view really changes: at the end of the zoom range it stays sharp.
+  mapCanvas.addEventListener('wheel', notches((d) => { if (onMap(() => v.wheel(d))) zoomGlitch(); }), { passive: false });
 
   const drawRoster = () => {
     const units = JSON.parse(v.roster());

@@ -1004,20 +1004,23 @@ impl Viewer {
         self.gpu.resize(self.size.0, self.size.1);
     }
     /// Mouse wheel: one call is one step of the zoom ladder (positive zooms out); the camera glides there.
-    pub fn wheel(&mut self, delta: f64) {
+    /// One zoom step in or out; true when the view actually changed (not already at the end of the ladder).
+    pub fn wheel(&mut self, delta: f64) -> bool {
         if self.scene == Scene::Ships {
             // The model viewer zooms freely.
             self.model_zoom = (self.model_zoom * if delta > 0.0 { 1.15 } else { 1.0 / 1.15 }).clamp(0.15, 6.0);
-            return;
+            return true;
         }
         if delta == 0.0 {
-            return;
+            return false;
         }
         // Away from home the ground is not under the camera: the system's closest step is as far in as it goes.
         let lowest = if self.scene == Scene::System && self.sys_follow != Some(HOME_BODY) { STEP_HANDOFF + 1 } else { 0 };
         // On foot the view stays close; the tablet's map zooms out to the stars.
         let highest = if self.map_active { LADDER.len() - 1 } else { STEP_FIELD_MAX };
+        let was = self.zoom_step;
         self.zoom_step = if delta > 0.0 { (self.zoom_step + 1).min(highest) } else { self.zoom_step.saturating_sub(1).max(lowest) };
+        self.zoom_step != was
     }
     pub fn flying(&self) -> bool {
         self.flight.is_some()
