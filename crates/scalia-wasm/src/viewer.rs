@@ -193,6 +193,9 @@ pub struct Viewer {
     cmd_rec: [f32; 12],
     /// How much of the screen's height the tablet close-up covers (set by the page).
     tablet_fit: f32,
+    /// The close-up's extra scale and sideways shift (fraction of the screen width), matching the overlay when it
+    /// makes room for the walkie-talkie.
+    tablet_frame: (f32, f32),
     /// The tablet cinematic: opening (true) or closing, when it began (ms), and the camera it started from.
     cine: Option<(bool, f64, (Vec3, f32, f32, f32))>,
     /// Who answers to whom: squads to captains, or straight to the commander.
@@ -334,6 +337,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_phase: -1.0,
         cmd_rec: [0.0; 12],
         tablet_fit: 0.6,
+        tablet_frame: (1.0, 0.0),
         cine: None,
         chain: Command::default(),
         tasks: BTreeMap::new(),
@@ -808,6 +812,10 @@ impl Viewer {
     /// The fraction of the screen's height the tablet close-up's box covers: the dive frames the tablet to match.
     pub fn set_tablet_fit(&mut self, f: f32) {
         self.tablet_fit = f.clamp(0.05, 1.0);
+    }
+    /// Scales the tablet close-up and shifts it sideways (fraction of the screen width, positive to the right).
+    pub fn set_tablet_frame(&mut self, scale: f32, shift: f32) {
+        self.tablet_frame = (scale.clamp(0.3, 1.5), shift.clamp(-0.5, 0.5));
     }
     /// Where the tablet cinematic is: 0 put away, 1 raising it (camera rising and diving), 2 in front of the eyes
     /// (show the tablet's screen), 3 putting it away.
@@ -1949,7 +1957,10 @@ impl Viewer {
         // Behind him, looking the way he faces: first the camera swings round at the player's zoom, then dives.
         let behind = (base + Vec3::Z, h, from.2, from.3);
         // Face-on to the tablet (the camera's elevation is the tablet's tilt), sized like the close-up on screen.
-        let close = (hands, h, TABLET_IMG_H / self.tablet_fit.max(0.05), scalia_render::pose::TABLET_TILT);
+        let vh = TABLET_IMG_H / (self.tablet_fit * self.tablet_frame.0).max(0.05);
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        let (r, _, _) = scalia_render::camera::basis(h);
+        let close = (hands - r * (self.tablet_frame.1 * vh * aspect), h, vh, scalia_render::pose::TABLET_TILT);
         // Smootherstep: starts slow, runs at full pace mid-way, lands slow; the duration is unchanged.
         let ease = |x: f64| { let x = x.clamp(0.0, 1.0) as f32; x * x * x * (x * (x * 6.0 - 15.0) + 10.0) };
         let mix = |a: (Vec3, f32, f32, f32), b: (Vec3, f32, f32, f32), w: f32| {

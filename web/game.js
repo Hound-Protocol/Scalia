@@ -338,7 +338,7 @@ try {
     tabletShown = false;
     document.body.classList.remove('pda');
     tablet.classList.remove('up');
-    dockRadio(false);
+    dockRadio(false); walkieUp();
     closeActions();
     setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 220);
   };
@@ -353,12 +353,29 @@ try {
     if (!inHand && radioEl.parentNode === wkSlot) { radioEl.style.transform = ''; radioHome.insertBefore(radioEl, radioNext); }
   };
   addEventListener('resize', fitRadio);
+  // On a narrow screen the tablet eases back (around its right edge) to make room for the handset; the game's
+  // camera follows so the device in the 3D scene stays exactly behind the close-up.
+  let frameS = 1, frameGoal = 1, frameRaf = 0;
+  const applyFrame = () => {
+    const w = tablet.offsetWidth;
+    tablet.style.scale = frameS === 1 ? '' : frameS.toFixed(4);
+    v.set_tablet_frame(frameS, ((1 - frameS) * w / 2) / innerWidth);
+  };
+  const stepFrame = (t0, from) => (t) => {
+    const k = Math.min(1, (t - t0) / 400), e = k * k * k * (k * (k * 6 - 15) + 10);
+    frameS = from + (frameGoal - from) * e; applyFrame();
+    frameRaf = k < 1 ? requestAnimationFrame(stepFrame(t0, from)) : 0;
+  };
   const walkieUp = () => {
-    const on = radioEl.classList.contains('up');
+    const on = radioEl.classList.contains('up') && tablet.classList.contains('up');
     tablet.classList.toggle('walkie', on);
     // Room for the handset left of the tablet (it reaches 24.5% of the tablet's width past its left edge).
     const w = tablet.offsetWidth, right = (innerWidth + w) / 2, need = w * 1.245 + innerWidth * 0.015;
-    tablet.style.scale = on && need > right ? (right / need).toFixed(3) : '';
+    frameGoal = on && need > right ? right / need : 1;
+    if (frameGoal === frameS) return;
+    cancelAnimationFrame(frameRaf);
+    const t0 = performance.now(), from = frameS;
+    frameRaf = requestAnimationFrame(stepFrame(t0, from));
   };
   addEventListener('resize', walkieUp);
   new MutationObserver(walkieUp).observe(radioEl, { attributes: true, attributeFilter: ['class'] });
@@ -407,7 +424,7 @@ try {
       pdaOpen();
       document.body.classList.add('pda');
       tablet.classList.add('up');
-      dockRadio(true);
+      dockRadio(true); walkieUp();
       const disp = tablet.querySelector('.display');
       disp.classList.remove('boot');
       bootTerminal().then(() => { if (tabletShown) { void disp.offsetWidth; disp.classList.add('boot'); } });
