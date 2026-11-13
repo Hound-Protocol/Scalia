@@ -338,11 +338,12 @@ try {
   };
   // The changelog is written at deploy time from the commit history (changelog.json).
   let chgLoaded = false;
+  if (store.get('scalia.controls') === '0') $('controls').hidden = true;
   const drawChangelog = async () => {
     if (chgLoaded) return;
     try {
       const list = await (await fetch('./changelog.json', { cache: 'no-cache' })).json();
-      $('chgList').innerHTML = list.map((e) => `<div class="ver"><b>${e.n}</b><span>${e.text}<small>${e.date}</small></span></div>`).join('') || '<p class="note">Nothing recorded yet.</p>';
+      $('chgList').innerHTML = list.map((e) => `<div class="ver"><b>${e.n}</b><span>${e.text}${e.body ? `<span class="body">${e.body.replace(/\n/g, '<br>')}</span>` : ''}<small>${e.date}</small></span></div>`).join('') || '<p class="note">Nothing recorded yet.</p>';
       chgLoaded = true;
     } catch { $('chgList').innerHTML = '<p class="note">The changelog is not available right now.</p>'; }
   };
@@ -1359,6 +1360,7 @@ try {
     const k = e.key.toLowerCase();
     held.add(k);
     if (k === 'k' && !e.repeat && !tabletUp) { toggleAssault(); return; }
+    if (k === 'h' && !e.repeat) { const c = $('controls'); c.hidden = !c.hidden; store.set('scalia.controls', c.hidden ? '0' : '1'); return; }
     if (k === 'tab') {
       e.preventDefault();
       if (e.repeat) return;

@@ -330,6 +330,13 @@
   #tablet #changelog .ver b { color: var(--amber); font-weight: 700; letter-spacing: 0.04em; }
   #tablet #changelog .ver small { display: block; color: var(--dim); font-size: 0.85cqw; margin-top: 0.15cqw; }
   #tablet #changelog { overflow: hidden auto; }
+  #tablet #changelog .ver .body { display: block; color: var(--dim); font-size: 0.85cqw; margin-top: 0.25cqw; line-height: 1.35; }
+  #controls { position: fixed; left: 10px; top: 50%; transform: translateY(-50%); z-index: 20; width: 168px; padding: 8px 10px; background: rgba(14, 17, 12, 0.62); border-left: 2px solid #8a9a5b; color: #d6dcc6; font: 11px/1.45 system-ui, sans-serif; pointer-events: none; }
+  #controls h4 { margin: 6px 0 2px; font-size: 10px; letter-spacing: 0.06em; color: #a9b48c; font-weight: 600; }
+  #controls h4:first-child { margin-top: 0; }
+  #controls div { display: flex; justify-content: space-between; gap: 8px; }
+  #controls kbd { font: 600 10px/1.4 ui-monospace, monospace; color: #f0c860; }
+  body.pda #controls { opacity: 0.35; }
   #tablet .ph-page { justify-self: start; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 14px; letter-spacing: 0.06em; }
   #tablet .ph-page::before { content: ''; width: 6px; height: 6px; background: var(--amber); transform: rotate(45deg); }
   #tablet .ph-id { text-align: center; line-height: 1; }
@@ -505,6 +512,24 @@
 <div id="fieldHint"><div class="fh-text"><kbd>Tab</kbd><span>to open <b>Commander PDA</b></span></div><div class="fh-dev"><img src="./img/pda_front.webp" alt="" draggable="false"></div></div>
 <div id="actions" hidden></div>
 <div id="answerCall" hidden><button><i class="led"></i><span><b>Answer Transmission</b><small></small></span><kbd>E</kbd></button></div>
+<div id="controls">
+  <h4>On foot</h4>
+  <div><kbd>W A S D</kbd><span>Move</span></div>
+  <div><kbd>Shift</kbd><span>Sprint</span></div>
+  <div><kbd>Q / E</kbd><span>Turn camera</span></div>
+  <div><kbd>Wheel</kbd><span>Zoom</span></div>
+  <div><kbd>F</kbd><span>Camera follows</span></div>
+  <h4>Command</h4>
+  <div><kbd>Tab</kbd><span>PDA / map</span></div>
+  <div><kbd>Left click</kbd><span>Select unit</span></div>
+  <div><kbd>Right click</kbd><span>Orders</span></div>
+  <div><kbd>Hold right</kbd><span>About</span></div>
+  <div><kbd>E</kbd><span>Answer radio</span></div>
+  <h4>Other</h4>
+  <div><kbd>K</kbd><span>Training assault</span></div>
+  <div><kbd>T</kbd><span>Day speed</span></div>
+  <div><kbd>H</kbd><span>Hide this</span></div>
+</div>
 <div id="radio"><img class="body" src="./img/walkie.webp" alt="" draggable="false"><div class="scr">
   <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
   <div class="who"><small id="rDir">STANDBY</small><b id="rWho">—</b></div>
