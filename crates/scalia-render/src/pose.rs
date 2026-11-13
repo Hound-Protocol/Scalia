@@ -43,6 +43,18 @@ pub enum Pose {
     LeanRight = 13,
     /// Half crouch with the rifle up: popping up to aim over a low wall.
     CrouchAim = 14,
+    /// Stacked at a door: half crouch, weight forward, rifle at low ready, ready to go through.
+    Stack = 15,
+    /// Clearing a room: aiming, the upper body sweeping the corners left and right over the cycle.
+    Sweep = 16,
+    /// Grenade throw over the phase: rifle on the back, overhand wind-up, release, follow-through.
+    Throw = 17,
+    /// Magazine change over the phase: the left hand to the magazine well, the chest pouch and back.
+    Reload = 18,
+    /// Hand signal with the free left hand: fist up (hold), then a forward chop (move up).
+    Signal = 19,
+    /// Kneeling drone launch: rifle on the back, both hands lift the drone overhead and let go.
+    Drone = 20,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -67,6 +79,12 @@ impl Pose {
             12 => Pose::LeanLeft,
             13 => Pose::LeanRight,
             14 => Pose::CrouchAim,
+            15 => Pose::Stack,
+            16 => Pose::Sweep,
+            17 => Pose::Throw,
+            18 => Pose::Reload,
+            19 => Pose::Signal,
+            20 => Pose::Drone,
             _ => Pose::Stand,
         }
     }
@@ -201,6 +219,25 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     let mut p0 = *p;
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
+    reach_left_capped(p, held(RIFLE_GUARD, p), w, GRIP_MAX)
+}
+
+/// Puts the left palm on `target` (figure frame): damped least-squares steps on the left shoulder, elbow and
+/// reach, blended in by `w`. `grip` uses it for the handguard; the reload for the magazine well and pouch.
+/// Mirrored in common.wgsl `reach_left`.
+pub fn reach_left(p: &PoseParams, target: Vec3, w: f32) -> PoseParams {
+    reach_left_capped(p, target, w, REACH_MAX)
+}
+
+/// `reach_left` with each joint's total correction softly capped at `max` radians.
+fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PoseParams {
+    if w <= 0.0 {
+        return *p;
+    }
+    // Out of reach even after the tilt (going prone, say): damp harder the further it is, so the arm only
+    // stretches towards it instead of flailing.
+    let excess = (target.distance(Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z)) - GRIP_REACH).max(0.0);
+    let damp = GRIP_DAMP + 2.0 * excess;
     // Unknowns: left shoulder, elbow and reach.
     let apply = |q: &PoseParams, x: [f32; 3]| {
         let mut t = *q;
@@ -209,11 +246,7 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
         t.reach[0] += x[2];
         t
     };
-    let res = |q: &PoseParams| held(RIFLE_GUARD, q) - hand(q, Side::Left);
-    // Out of reach even after the tilt (going prone, say): damp harder the further it is, so the arm only
-    // stretches towards it instead of flailing.
-    let excess = (held(RIFLE_GUARD, p).distance(Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z)) - GRIP_REACH).max(0.0);
-    let damp = GRIP_DAMP + 2.0 * excess;
+    let res = |q: &PoseParams| target - hand(q, Side::Left);
     let mut q = *p;
     for _ in 0..GRIP_STEPS {
         let r = res(&q);
@@ -239,7 +272,7 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
         q = apply(&q, x);
     }
     // Soft cap on each joint's total correction.
-    let cap = |d: f32| GRIP_MAX * (d / GRIP_MAX).tanh() * w;
+    let cap = |d: f32| max * (d / max).tanh() * w;
     let mut out = *p;
     out.shoulder[0] += cap(q.shoulder[0] - p.shoulder[0]);
     out.elbow[0] += cap(q.elbow[0] - p.elbow[0]);
@@ -247,6 +280,8 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     out
 }
 const GRIP_STEPS: usize = 6;
+/// Correction cap for reaching to points other than the handguard (actions move the arm a long way).
+const REACH_MAX: f32 = 2.0;
 pub const GRIP_DAMP: f32 = 0.05;
 /// About the smallest extra rifle pitch (radians) that brings the handguard within GRIP_REACH of the left shoulder.
 /// The handguard turns on a circle around the rifle's (turned) x axis through the right palm; the squared distance to the
@@ -297,10 +332,34 @@ pub fn grip_weight(a: Pose, b: Pose, w0: f32) -> f32 {
 /// Share of a blend over which the hand lets go of or grabs the handguard.
 pub const GRIP_SWAP: f32 = 0.6;
 
+/// Where the left hand is going during a reload at `t` (0..1): handguard, magazine well, chest pouch, and back.
+pub fn reload_target(p: &PoseParams, t: f32) -> Vec3 {
+    let guard = held(RIFLE_GUARD, p);
+    let well = held(RIFLE_WELL, p);
+    // Same times as common.wgsl `reload_target` (written inline there).
+    let kt = [0.0, 0.15, 0.4, 0.55, 0.75];
+    let path = [guard, well, RELOAD_POUCH, RELOAD_POUCH, well];
+    if t >= 0.75 {
+        let u = ((t - 0.75) / 0.25).clamp(0.0, 1.0);
+        return well.lerp(guard, u * u * (3.0 - 2.0 * u));
+    }
+    for i in 0..4 {
+        if t <= kt[i + 1] {
+            let u = ((t - kt[i]) / (kt[i + 1] - kt[i])).clamp(0.0, 1.0);
+            return path[i].lerp(path[i + 1], u * u * (3.0 - 2.0 * u));
+        }
+    }
+    well
+}
+/// The magazine well, a rifle point (rest pose): under the receiver just ahead of the grip.
+pub const RIFLE_WELL: Vec3 = Vec3::new(0.238, 0.11, 0.70);
+/// The magazine pouch on the front of the vest, left of centre (figure frame).
+pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
+
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep => 1.0,
         _ => 0.0,
     }
 }
@@ -321,6 +380,21 @@ pub fn tilt(q: Vec3, a: f32) -> Vec3 {
 
 /// Head nod while aiming: down onto the stock (cheek weld), eyes along the sights.
 pub const AIM_HEAD: f32 = -0.35;
+
+/// How far the upper body sweeps either way clearing a room (radians).
+pub const SWEEP: f32 = 0.6;
+
+/// A value through five keyframes (times `k` from 0 to 1, values `v`), eased between each pair: one-shot actions.
+pub fn keyed(t: f32, k: [f32; 5], v: [f32; 5]) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    for i in 0..4 {
+        if t <= k[i + 1] {
+            let u = ((t - k[i]) / (k[i + 1] - k[i]).max(1e-6)).clamp(0.0, 1.0);
+            return v[i] + (v[i + 1] - v[i]) * u * u * (3.0 - 2.0 * u);
+        }
+    }
+    v[4]
+}
 
 /// How far a soldier leans out around a corner (radians).
 pub const LEAN_TILT: f32 = 0.32;
@@ -560,6 +634,61 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.lean = 0.15;
             aim_arms(&mut p);
             p.head = AIM_HEAD;
+        }
+        Pose::Stack => {
+            (p.hip, p.knee, p.side) = crouch_gait(0.0, 0.12, 0.7, 0.0, 0.6, 0.0);
+            p.flat = 1.0;
+            p.lean = 0.22;
+            carry(&mut p, Carry::LowReady);
+            p.head = 0.05;
+        }
+        Pose::Sweep => {
+            aim_arms(&mut p);
+            p.head = AIM_HEAD;
+            let t = phase * std::f32::consts::TAU;
+            p.twist += SWEEP * t.sin();
+            p.look -= 0.3 * SWEEP * t.sin();
+            (p.hip, p.knee) = ([0.05, 0.05], [0.12, 0.12]);
+        }
+        Pose::Throw => {
+            p.sling = 1.0;
+            p.hip = [0.22, -0.12];
+            p.knee = [0.18, 0.12];
+            let k = [0.0, 0.35, 0.55, 0.75, 1.0];
+            p.shoulder = [keyed(phase, k, [0.9, 1.5, 0.8, 0.5, 0.9]), keyed(phase, k, [0.7, 2.6, 2.0, 0.9, 0.7])];
+            p.elbow = [keyed(phase, k, [1.4, 0.3, 1.4, 1.6, 1.4]), keyed(phase, k, [1.6, 1.9, 0.3, 0.4, 1.6])];
+            p.reach = [keyed(phase, k, [0.4, 0.2, 0.5, 0.5, 0.4]), keyed(phase, k, [0.3, 0.0, 0.2, 0.6, 0.3])];
+            p.abduct = [0.1, keyed(phase, k, [0.2, 0.6, 0.2, 0.1, 0.2])];
+            p.twist = keyed(phase, k, [0.0, -0.5, 0.4, 0.5, 0.0]);
+            p.lean = keyed(phase, k, [0.05, -0.1, 0.25, 0.3, 0.05]);
+            p.head = 0.0;
+        }
+        Pose::Reload => {
+            // The rifle comes in and up to look into the magazine well; the left hand is placed by `reach_left`
+            // on the path `reload_target` gives (the shader does the same).
+            carry(&mut p, Carry::LowReady);
+            p.rifle += 0.3 * (std::f32::consts::PI * phase).sin();
+            p.head = 0.4;
+        }
+        Pose::Signal => {
+            carry(&mut p, Carry::LowReady);
+            let k = [0.0, 0.2, 0.45, 0.7, 1.0];
+            p.shoulder[0] = keyed(phase, k, [0.8, 2.9, 2.9, 1.6, 0.8]);
+            p.elbow[0] = keyed(phase, k, [1.4, 1.9, 1.9, 0.15, 1.4]);
+            p.reach[0] = keyed(phase, k, [0.5, 0.1, 0.1, 0.1, 0.5]);
+            p.abduct[0] = keyed(phase, k, [0.0, 0.3, 0.3, 0.0, 0.0]);
+            p.head = 0.1;
+        }
+        Pose::Drone => {
+            kneel(&mut p);
+            p.sling = 1.0;
+            let k = [0.0, 0.35, 0.55, 0.8, 1.0];
+            let sh = keyed(phase, k, [0.9, 1.0, 2.7, 2.7, 0.9]);
+            let el = keyed(phase, k, [1.6, 1.6, 0.4, 0.4, 1.6]);
+            p.shoulder = [sh, sh];
+            p.elbow = [el, el];
+            p.reach = [0.45, 0.45];
+            p.head = keyed(phase, k, [0.2, 0.2, 0.6, 0.7, 0.2]);
         }
         Pose::Crouch => {
             kneel(&mut p);

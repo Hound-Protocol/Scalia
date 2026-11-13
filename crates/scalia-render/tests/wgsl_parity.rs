@@ -51,3 +51,16 @@ fn crouch_gait_calls_match() {
     let key = |v: &Vec<Vec<f32>>| { let mut s: Vec<String> = v.iter().map(|x| format!("{x:?}")).collect(); s.sort(); s };
     assert_eq!(key(&rs), key(&wg));
 }
+
+#[test]
+fn action_keyframes_match() {
+    let sorted = |v: Vec<Vec<f32>>| { let mut s: Vec<String> = v.iter().map(|x| format!("{x:?}")).collect(); s.sort(); s };
+    let rs = Regex::new(r"keyed\(phase, k, \[([^\]]*)\]\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
+    let wg = Regex::new(r"keyed\(phase, k, array<f32, 5>\(([^)]*)\)\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
+    let rk = Regex::new(r"let k = \[([^\]]*)\];").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
+    let wk = Regex::new(r"let k = array<f32, 5>\(([^)]*)\);").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
+    let (rs, wg) = (sorted(rs), sorted(wg));
+    assert!(!rs.is_empty());
+    assert_eq!(rs, wg);
+    assert_eq!(sorted(rk), sorted(wk));
+}

@@ -2,7 +2,7 @@
 //! +y), for side/top/back contact sheets. With `grip`, the left hand is put on the handguard as the shader does.
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of};
-use scalia_render::pose::{grip, layer, params, params_dir, pose_vertex, two_handed, Pose};
+use scalia_render::pose::{grip, layer, params, params_dir, pose_vertex, reach_left, reload_target, two_handed, Pose};
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let pose = Pose::from_id(a[1].parse().unwrap());
@@ -12,7 +12,7 @@ fn main() {
     let mut p = params_dir(pose, phase, dir);
     let mut hold = two_handed(pose);
     if let Some(u) = a.get(6) { let up = Pose::from_id(u.parse().unwrap()); p = layer(&p, &params(up, phase)); hold = two_handed(up); }
-    if a.get(4).is_some() { p = grip(&p, hold); }
+    if a.get(4).is_some() { p = if pose == Pose::Reload { reach_left(&p, reload_target(&p, phase), 1.0) } else { grip(&p, hold) }; }
     let fig = figure();
     let mut out = Vec::new();
     for v in &fig.vertices {

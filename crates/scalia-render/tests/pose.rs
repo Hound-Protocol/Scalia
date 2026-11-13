@@ -1,6 +1,6 @@
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of, Part};
-use scalia_render::pose::{blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, Pose, PoseParams, Side, RIFLE_GUARD};
+use scalia_render::pose::{reach_left, reload_target, blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, Pose, PoseParams, Side, RIFLE_GUARD};
 
 /// All figure vertices in a pose at a gait phase, in the figure's own frame (facing +y).
 fn posed(pose: Pose, phase: f32) -> Vec<(Part, Vec3)> {
@@ -513,4 +513,63 @@ fn the_stock_sits_in_the_right_shoulder_pocket() {
             assert!(off < 0.04, "{pose:?} phase {k}/8: stock {off:.3} m from the shoulder pocket");
         }
     }
+}
+
+#[test]
+fn close_quarters_and_action_poses_have_ids() {
+    let ids: Vec<Pose> = (15..=20).map(Pose::from_id).collect();
+    assert_eq!(ids, vec![Pose::Stack, Pose::Sweep, Pose::Throw, Pose::Reload, Pose::Signal, Pose::Drone]);
+}
+
+#[test]
+fn stacked_at_a_door_is_compact_and_ready() {
+    let (stack, stand) = (hip_height(Pose::Stack, 0.0), hip_height(Pose::Stand, 0.0));
+    assert!(stack < stand - 0.05 && stack > stand - 0.25, "half crouch: hips {stack} vs {stand}");
+    assert!(params(Pose::Stack, 0.0).lean > 0.15, "weight forward, ready to go through");
+}
+
+#[test]
+fn sweeping_turns_the_aim_left_and_right() {
+    let tw: Vec<f32> = (0..16).map(|k| params(Pose::Sweep, k as f32 / 16.0).twist).collect();
+    let (lo, hi) = tw.iter().fold((f32::MAX, f32::MIN), |(a, b), &t| (a.min(t), b.max(t)));
+    let aim = params(Pose::StandAim, 0.0).twist;
+    assert!(lo < aim - 0.35 && hi > aim + 0.35, "sweep range {lo}..{hi} around {aim}");
+}
+
+#[test]
+fn throwing_winds_up_overhead_and_releases_forward() {
+    let p = params(Pose::Throw, 0.35);
+    assert_eq!(p.sling, 1.0, "rifle on the back to throw");
+    assert!(hand(&p, Side::Right).z > 1.6, "wind-up: hand high {:?}", hand(&p, Side::Right));
+    let r = params(Pose::Throw, 0.55);
+    assert!(hand(&r, Side::Right).y > 0.3, "release: hand out in front {:?}", hand(&r, Side::Right));
+}
+
+#[test]
+fn reloading_goes_to_the_pouch_and_back_to_the_handguard() {
+    let at = |t: f32| {
+        let p = params(Pose::Reload, t);
+        let q = reach_left(&p, reload_target(&p, t), 1.0);
+        (hand(&q, Side::Left), held(RIFLE_GUARD, &q), q)
+    };
+    let (h0, g0, _) = at(0.0);
+    assert!(h0.distance(g0) < 0.03, "starts on the handguard");
+    let (h1, _, q1) = at(0.47);
+    assert!(h1.distance(reload_target(&q1, 0.47)) < 0.04 && h1.y < 0.3, "at the pouch: {h1}");
+    let (h2, g2, _) = at(1.0);
+    assert!(h2.distance(g2) < 0.03, "ends on the handguard");
+}
+
+#[test]
+fn hand_signal_raises_the_free_hand() {
+    assert!(hand(&params(Pose::Signal, 0.25), Side::Left).z > 1.5);
+    assert_eq!(two_handed(Pose::Signal), 0.0);
+}
+
+#[test]
+fn drone_launch_kneels_and_lifts_it_overhead() {
+    let p = params(Pose::Drone, 0.5);
+    assert!(hand(&p, Side::Left).z > 1.4 && hand(&p, Side::Right).z > 1.4, "both hands up");
+    assert!(hip_height(Pose::Drone, 0.5) < 0.7, "kneeling");
+    assert_eq!(p.sling, 1.0);
 }

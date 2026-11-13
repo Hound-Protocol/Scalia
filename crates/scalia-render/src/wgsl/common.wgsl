@@ -247,6 +247,62 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.head = -0.35;
   } else if (pose == 8u) {
     carry(&p, 3u);
+  } else if (pose == 15u) {
+    // Stacked at a door (pose.rs `Pose::Stack`).
+    crouch_gait(&p, 0.0, 0.12, 0.7, 0.0, 0.6, 0.0);
+    p.flat = 1.0;
+    p.lean = 0.22;
+    carry(&p, 1u);
+    p.head = 0.05;
+  } else if (pose == 16u) {
+    // Sweeping a room (pose.rs `Pose::Sweep`, SWEEP 0.6).
+    carry(&p, 4u);
+    p.head = -0.35;
+    let st = sin(phase * 6.2831853);
+    p.twist = p.twist + 0.6 * st;
+    p.look = p.look - 0.3 * 0.6 * st;
+    p.hip = vec2f(0.05);
+    p.knee = vec2f(0.12);
+  } else if (pose == 17u) {
+    // Grenade throw (pose.rs `Pose::Throw`).
+    p.sling = 1.0;
+    p.hip = vec2f(0.22, -0.12);
+    p.knee = vec2f(0.18, 0.12);
+    let k = array<f32, 5>(0.0, 0.35, 0.55, 0.75, 1.0);
+    p.sh = vec2f(keyed(phase, k, array<f32, 5>(0.9, 1.5, 0.8, 0.5, 0.9)), keyed(phase, k, array<f32, 5>(0.7, 2.6, 2.0, 0.9, 0.7)));
+    p.el = vec2f(keyed(phase, k, array<f32, 5>(1.4, 0.3, 1.4, 1.6, 1.4)), keyed(phase, k, array<f32, 5>(1.6, 1.9, 0.3, 0.4, 1.6)));
+    p.reach = vec2f(keyed(phase, k, array<f32, 5>(0.4, 0.2, 0.5, 0.5, 0.4)), keyed(phase, k, array<f32, 5>(0.3, 0.0, 0.2, 0.6, 0.3)));
+    p.abd = vec2f(0.1, keyed(phase, k, array<f32, 5>(0.2, 0.6, 0.2, 0.1, 0.2)));
+    p.twist = keyed(phase, k, array<f32, 5>(0.0, -0.5, 0.4, 0.5, 0.0));
+    p.lean = keyed(phase, k, array<f32, 5>(0.05, -0.1, 0.25, 0.3, 0.05));
+    p.head = 0.0;
+  } else if (pose == 18u) {
+    // Magazine change (pose.rs `Pose::Reload`); the left hand is placed in `animate` by reach_left.
+    carry(&p, 1u);
+    p.rifle = p.rifle + 0.3 * sin(3.1415927 * phase);
+    p.head = 0.4;
+  } else if (pose == 19u) {
+    // Hand signal (pose.rs `Pose::Signal`).
+    carry(&p, 1u);
+    let k = array<f32, 5>(0.0, 0.2, 0.45, 0.7, 1.0);
+    p.sh.x = keyed(phase, k, array<f32, 5>(0.8, 2.9, 2.9, 1.6, 0.8));
+    p.el.x = keyed(phase, k, array<f32, 5>(1.4, 1.9, 1.9, 0.15, 1.4));
+    p.reach.x = keyed(phase, k, array<f32, 5>(0.5, 0.1, 0.1, 0.1, 0.5));
+    p.abd.x = keyed(phase, k, array<f32, 5>(0.0, 0.3, 0.3, 0.0, 0.0));
+    p.head = 0.1;
+  } else if (pose == 20u) {
+    // Kneeling drone launch (pose.rs `Pose::Drone`).
+    p.hip = vec2f(1.55, -0.1);
+    p.knee = vec2f(1.8, 1.75);
+    p.lean = 0.12;
+    p.sling = 1.0;
+    let k = array<f32, 5>(0.0, 0.35, 0.55, 0.8, 1.0);
+    let sh = keyed(phase, k, array<f32, 5>(0.9, 1.0, 2.7, 2.7, 0.9));
+    let el = keyed(phase, k, array<f32, 5>(1.6, 1.6, 0.4, 0.4, 1.6));
+    p.sh = vec2f(sh);
+    p.el = vec2f(el);
+    p.reach = vec2f(0.45);
+    p.head = keyed(phase, k, array<f32, 5>(0.2, 0.2, 0.6, 0.7, 0.2));
   } else if (pose == 12u || pose == 13u) {
     // Leaning out around a corner (pose.rs `Pose::LeanLeft` / `LeanRight`, LEAN_TILT 0.32).
     let g = select(-1.0, 1.0, pose == 13u);
@@ -323,7 +379,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 14u)); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u)); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -359,7 +415,31 @@ fn reach_pitch(p: PP) -> f32 {
   if (q1 + q2 < 1e-9) { return 0.0; }
   return (d1 * q2 + d2 * q1) / (q1 + q2);
 }
-fn grip_res(p: PP) -> vec3f { return guard(p) - hand_l(p); }
+// A value through five keyframes (port of pose.rs `keyed`): one-shot actions.
+fn keyed(t_in: f32, k_in: array<f32, 5>, v_in: array<f32, 5>) -> f32 {
+  var k = k_in;
+  var v = v_in;
+  let t = clamp(t_in, 0.0, 1.0);
+  for (var i = 0; i < 4; i++) {
+    if (t <= k[i + 1]) {
+      let u = clamp((t - k[i]) / max(k[i + 1] - k[i], 1e-6), 0.0, 1.0);
+      return v[i] + (v[i + 1] - v[i]) * u * u * (3.0 - 2.0 * u);
+    }
+  }
+  return v[4];
+}
+fn ease(a: vec3f, b: vec3f, u_in: f32) -> vec3f { let u = clamp(u_in, 0.0, 1.0); return mix(a, b, u * u * (3.0 - 2.0 * u)); }
+// Port of pose.rs `reload_target`: handguard, magazine well (RIFLE_WELL), chest pouch (RELOAD_POUCH), and back.
+fn reload_target(p: PP, t: f32) -> vec3f {
+  let g = guard(p);
+  let well = held(vec3f(0.238, 0.11, 0.70), p);
+  let pouch = vec3f(-0.04, 0.17, 1.08);
+  if (t >= 0.75) { return ease(well, g, (t - 0.75) / 0.25); }
+  if (t >= 0.55) { return ease(pouch, well, (t - 0.55) / 0.2); }
+  if (t >= 0.4) { return pouch; }
+  if (t >= 0.15) { return ease(well, pouch, (t - 0.15) / 0.25); }
+  return ease(g, well, t / 0.15);
+}
 fn grip_try(p: PP, x: vec4f) -> PP {
   var t = p;
   t.sh.x = t.sh.x + x.x; t.el.x = t.el.x + x.y; t.reach.x = t.reach.x + x.z; t.rifle = t.rifle + x.w;
@@ -372,16 +452,23 @@ fn grip(p_in: PP, w_in: f32) -> PP {
   if (w <= 0.0) { return p_in; }
   var p = p_in;
   p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
-  let excess = max(distance(guard(p), vec3f(-0.238, 0.0, 1.40)) - 0.595, 0.0);
+  return reach_left(p, guard(p), w, 0.7);
+}
+
+// Port of pose.rs `reach_left_capped`: the left palm onto `goal`, each joint's correction softly capped at
+// `cap` (0.7 for the handguard, REACH_MAX 2.0 for actions).
+fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
+  if (w <= 0.0) { return p; }
+  let excess = max(distance(goal, vec3f(-0.238, 0.0, 1.40)) - 0.595, 0.0);
   let damp = 0.05 + 2.0 * excess;
   var q = p;
   for (var it = 0; it < 6; it = it + 1) {
-    let r = grip_res(q);
+    let r = goal - hand_l(q);
     if (dot(r, r) < 1e-6) { break; }
     let d = 0.01;
-    let j0 = (grip_res(grip_try(q, vec4f(d, 0.0, 0.0, 0.0))) - r) / d;
-    let j1 = (grip_res(grip_try(q, vec4f(0.0, d, 0.0, 0.0))) - r) / d;
-    let j2 = (grip_res(grip_try(q, vec4f(0.0, 0.0, d, 0.0))) - r) / d;
+    let j0 = (goal - hand_l(grip_try(q, vec4f(d, 0.0, 0.0, 0.0))) - r) / d;
+    let j1 = (goal - hand_l(grip_try(q, vec4f(0.0, d, 0.0, 0.0))) - r) / d;
+    let j2 = (goal - hand_l(grip_try(q, vec4f(0.0, 0.0, d, 0.0))) - r) / d;
     let jm = mat3x3f(j0, j1, j2);
     let m = jm * transpose(jm) + mat3x3f(damp * damp, 0.0, 0.0, 0.0, damp * damp, 0.0, 0.0, 0.0, damp * damp);
     let det = determinant(m);
@@ -394,7 +481,6 @@ fn grip(p_in: PP, w_in: f32) -> PP {
     q = grip_try(q, vec4f(x, 0.0));
   }
   var out = p;
-  let cap = 0.7;
   out.sh.x = out.sh.x + cap * tanh((q.sh.x - p.sh.x) / cap) * w;
   out.el.x = out.el.x + cap * tanh((q.el.x - p.el.x) / cap) * w;
   out.reach.x = out.reach.x + cap * tanh((q.reach.x - p.reach.x) / cap) * w;
@@ -465,6 +551,8 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
       let hold = select(two_handed(u32(b.w)), two_handed(u32(layer - 1.0)), layer >= 1.0);
       let gw = select(hold, grip_weight(u32(d.x), u32(b.w), w), w < 1.0 && layer < 1.0);
       pp = grip(pp, gw);
+      // Reload: the left hand follows its path to the magazine well and pouch (fading in with the blend).
+      if (u32(b.w) == 18u && layer < 1.0) { pp = reach_left(pp, reload_target(pp, phase), min(w, 1.0), 2.0); }
     }
     q = pose_vertex(v, part, pp);
   }

@@ -1570,25 +1570,41 @@ impl Viewer {
                 (Pose::Cover, 0.0),
             ];
             // Entry 9 is "walk while aiming": the walk with an aiming upper body layered on top.
-            // Previews past the pose list: 9 walk while aiming, 10/11 strafe left/right while aiming, 12 backpedal
-            // while aiming (the legs walk that way, the upper body stays on the target).
-            let moving_dir = match self.preview_pose { Some(9) => Some(0.0f32), Some(10) => Some(std::f32::consts::FRAC_PI_2), Some(11) => Some(-std::f32::consts::FRAC_PI_2), Some(12) => Some(std::f32::consts::PI), _ => None };
-            let walk_aim = moving_dir.is_some();
-            let dir = moving_dir.unwrap_or(0.0);
-            let (pose, steps) = if walk_aim {
-                (Pose::Walk, 1.2 / scalia_render::pose::stride_m_dir(Pose::Walk, dir))
-            } else if self.preview_pose == Some(13) {
-                (Pose::CrouchWalk, 1.0 / stride_m(Pose::CrouchWalk))
-            } else if let Some(i @ 14..=16) = self.preview_pose {
-                ([Pose::LeanLeft, Pose::LeanRight, Pose::CrouchAim][i - 14], 0.0)
-            } else {
-                SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()]
+            // Previews past the pose list (legs pose, cycles a second, upper body layered on top, moving direction):
+            // walking and strafing while aiming, crouched walk, cover, close-quarters moves and actions, and two
+            // combinations the AI will use (checking a corner: crouched sidestep with the aim on top; dynamic entry:
+            // combat-run legs under the aim).
+            use std::f32::consts::{FRAC_PI_2, PI};
+            use scalia_render::pose::stride_m_dir;
+            let walk = |dir: f32| 1.2 / stride_m_dir(Pose::Walk, dir);
+            let combo: Option<(Pose, f32, Option<Pose>, f32)> = match self.preview_pose {
+                Some(9) => Some((Pose::Walk, walk(0.0), Some(Pose::StandAim), 0.0)),
+                Some(10) => Some((Pose::Walk, walk(FRAC_PI_2), Some(Pose::StandAim), FRAC_PI_2)),
+                Some(11) => Some((Pose::Walk, walk(-FRAC_PI_2), Some(Pose::StandAim), -FRAC_PI_2)),
+                Some(12) => Some((Pose::Walk, walk(PI), Some(Pose::StandAim), PI)),
+                Some(13) => Some((Pose::CrouchWalk, 1.0 / stride_m(Pose::CrouchWalk), None, 0.0)),
+                Some(14) => Some((Pose::LeanLeft, 0.0, None, 0.0)),
+                Some(15) => Some((Pose::LeanRight, 0.0, None, 0.0)),
+                Some(16) => Some((Pose::CrouchAim, 0.0, None, 0.0)),
+                Some(17) => Some((Pose::Stack, 0.0, None, 0.0)),
+                Some(18) => Some((Pose::Sweep, 0.3, None, 0.0)),
+                Some(19) => Some((Pose::Throw, 0.6, None, 0.0)),
+                Some(20) => Some((Pose::Reload, 0.4, None, 0.0)),
+                Some(21) => Some((Pose::Signal, 0.5, None, 0.0)),
+                Some(22) => Some((Pose::Drone, 0.4, None, 0.0)),
+                Some(23) => Some((Pose::CrouchWalk, 0.6 / stride_m_dir(Pose::CrouchWalk, -FRAC_PI_2), Some(Pose::StandAim), -FRAC_PI_2)),
+                Some(24) => Some((Pose::Run, 3.0 / stride_m(Pose::Run), Some(Pose::StandAim), 0.0)),
+                _ => None,
             };
+            let (pose, steps, upper, dir) = combo.unwrap_or_else(|| {
+                let (p, st) = SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()];
+                (p, st, None, 0.0)
+            });
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
             let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
             let colour = VARIANTS[self.model_variant as usize % VARIANTS.len()].1;
-            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), scalia_render::pose::pack_layer(walk_aim.then_some(Pose::StandAim), dir), 0.0]));
+            self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), scalia_render::pose::pack_layer(upper, dir), 0.0]));
             meshes.push("plinth".into());
             let (mesh, tris, detail) = match self.model_detail {
                 1 => ("figure_lo", figure_lo().vertices.len() / 3, "mid detail, 70-250 m"),
