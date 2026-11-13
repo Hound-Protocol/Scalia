@@ -63,11 +63,16 @@ fn foot(q: vec3f, hip: f32, knee: f32) -> vec3f {
 fn gait_leg(u: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32) -> vec2f {
   if (u < stance) {
     let s = u / stance;
-    return vec2f(forward + swing * (1.0 - 2.0 * s), base + 0.08 * sin(3.14159265 * s));
+    let ks = sin(3.14159265 * s);
+    return vec2f(forward + swing * (1.0 - 2.0 * s), base + 0.03 * ks * ks);
   }
   let w = (u - stance) / (1.0 - stance);
-  let e = w * w * (3.0 - 2.0 * w);
-  return vec2f(forward - swing + 2.0 * swing * e, base + lift * sin(3.14159265 * w));
+  let m = -2.0 * swing / stance * (1.0 - stance);
+  let w2 = w * w;
+  let w3 = w2 * w;
+  let hip = (2.0 * w3 - 3.0 * w2 + 1.0) * -swing + (w3 - 2.0 * w2 + w) * m + (-2.0 * w3 + 3.0 * w2) * swing + (w3 - w2) * m;
+  let kw = sin(3.14159265 * w);
+  return vec2f(forward + hip, base + lift * kw * kw);
 }
 fn gait(p: ptr<function, PP>, phase: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32) {
   let l = gait_leg(fract(phase), swing, forward, lift, base, stance);

@@ -205,11 +205,15 @@ pub fn gait_leg(u: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: 
     use std::f32::consts::PI;
     if u < stance {
         let s = u / stance;
-        (forward + swing * (1.0 - 2.0 * s), base + 0.08 * (PI * s).sin())
+        (forward + swing * (1.0 - 2.0 * s), base + 0.03 * (PI * s).sin().powi(2))
     } else {
+        // Hermite from back to front whose end speeds match the stance sweep, so the leg never snaps at toe-off
+        // or heel strike.
         let w = (u - stance) / (1.0 - stance);
-        let e = w * w * (3.0 - 2.0 * w);
-        (forward - swing + 2.0 * swing * e, base + lift * (PI * w).sin())
+        let m = -2.0 * swing / stance * (1.0 - stance);
+        let (w2, w3) = (w * w, w * w * w);
+        let hip = (2.0 * w3 - 3.0 * w2 + 1.0) * -swing + (w3 - 2.0 * w2 + w) * m + (-2.0 * w3 + 3.0 * w2) * swing + (w3 - w2) * m;
+        (forward + hip, base + lift * (PI * w).sin().powi(2))
     }
 }
 
@@ -223,9 +227,9 @@ pub fn stride_m(pose: Pose) -> f32 {
         _ => 1.0,
     }
 }
-pub const WALK_STRIDE: f32 = 1.22;
-pub const RUN_STRIDE: f32 = 2.14;
-pub const SPRINT_STRIDE: f32 = 2.85;
+pub const WALK_STRIDE: f32 = 1.21;
+pub const RUN_STRIDE: f32 = 2.12;
+pub const SPRINT_STRIDE: f32 = 2.84;
 
 /// Pose parameters at a gait phase (0..1; only the gaits use it). Rifle carries per pose (rule 3): low ready when
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
