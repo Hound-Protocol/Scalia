@@ -1,5 +1,6 @@
 pub mod battle;
 pub mod goap;
+pub mod grid;
 pub mod leader;
 pub mod save;
 pub mod scenario;

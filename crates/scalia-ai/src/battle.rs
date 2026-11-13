@@ -4,6 +4,7 @@
 //! happens when they meet.
 
 use crate::sight::{isqrt, Point, SightGrid};
+use crate::grid::SoldierGrid;
 use crate::leader::{Brain, LEAD_MS};
 use crate::save::{decode, encode, frame, unframe, Command, MapSpec};
 use crate::tactics::{Building, CoverMap, Height};
@@ -121,6 +122,13 @@ const SUPPRESS_HIT: i32 = 300;
 const SUPPRESS_FADE_S: i32 = 400;
 /// Perception runs this often.
 const PERCEIVE_MS: i32 = 250;
+/// The step the perception schedule assumes (each man looks on one step in PERCEIVE_MS / STEP_HINT_MS).
+const STEP_HINT_MS: i32 = 50;
+/// Per look: at most this many enemies tested for sight (nearest first), and this many kept as seen.
+const RAYS_MAX: usize = 24;
+const SEE_MAX: usize = 8;
+/// Route searches (A*) started per step; more wait a step. Straight walks need none.
+const PATHS_PER_STEP: u32 = 8;
 /// Half the view cone, as its cosine (per mille): 120 degrees across.
 const CONE_COS: i64 = 500;
 /// Anyone this close is noticed whichever way he faces (heard, felt).
@@ -225,8 +233,13 @@ pub struct Battle {
     pub contacts: Vec<Vec<Contact>>,
     /// Where each squad last heard friendly gunfire (a fight going on), and when.
     pub heard: Vec<Option<((i64, i64), i64)>>,
-    /// Who sees whom right now (row: watcher), refreshed by perception.
-    visible: Vec<Vec<bool>>,
+    /// The enemies each soldier sees right now, nearest first (at most SEE_MAX), refreshed by perception.
+    visible: Vec<Vec<u32>>,
+    /// Where everyone is (rebuilt each step; not state).
+    grid: SoldierGrid,
+    scratch: Vec<u32>,
+    /// Route searches started this step (a budget, so a thousand new orders do not land on one step).
+    paths_this_step: u32,
     perceive_ms: i32,
     nav: Option<NavGrid>,
     pub cover: Option<CoverMap>,
@@ -254,7 +267,7 @@ struct State {
     time_ms: i64,
     contacts: Vec<Vec<Contact>>,
     heard: Vec<Option<((i64, i64), i64)>>,
-    visible: Vec<Vec<bool>>,
+    visible: Vec<Vec<u32>>,
     perceive_ms: i32,
     brains: Vec<Brain>,
     dead_logged: Vec<bool>,
@@ -266,9 +279,10 @@ struct State {
 
 impl Battle {
     pub fn new(sight: SightGrid, soldiers: Vec<Soldier>, seed: u64) -> Battle {
+        let (sight_x0, sight_y0, sight_w, sight_h) = (sight.x_mm, sight.y_mm, sight.w as i64 * 250, sight.h as i64 * 250);
         let squads = soldiers.iter().map(|s| s.squad as usize + 1).max().unwrap_or(0);
         let n = soldiers.len();
-        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
+        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![Vec::new(); n], grid: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), scratch: Vec::new(), paths_this_step: 0, perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
     }
 
     /// A battle on a real map: soldiers path around obstacles and take cover.
@@ -394,7 +408,14 @@ impl Battle {
     /// The spot nearest `to` (on rings 1 m apart) that is walkable and at least SPACING_MM from every other
     /// living man's goal or, for men without one, where he stands.
     fn free_spot(&self, i: usize, to: (i64, i64)) -> (i64, i64) {
-        let taken: Vec<(i64, i64)> = self.soldiers.iter().enumerate().filter(|(j, o)| *j != i && o.alive()).map(|(_, o)| if o.path_to.is_some() && o.task != Task::Idle { o.goal.unwrap_or(o.pos) } else { o.pos }).collect();
+        // Men whose spot could clash: those standing or heading near `to` (goals are near where men are going,
+        // and a man is never far from the cell he is in relative to a 4 m ring; check everyone heading near too).
+        let mut near = Vec::new();
+        self.grid.near(to, 5 * SPACING_MM + crate::grid::CELL_MM, &mut near);
+        let goal_of = |o: &Soldier| if o.path_to.is_some() && o.task != Task::Idle { o.goal.unwrap_or(o.pos) } else { o.pos };
+        let mut taken: Vec<(i64, i64)> = near.iter().map(|&j| j as usize).filter(|&j| j != i && self.soldiers[j].alive()).map(|j| goal_of(&self.soldiers[j])).collect();
+        // Men still walking towards a spot near `to` from further away.
+        taken.extend(self.soldiers.iter().enumerate().filter(|(j, o)| *j != i && o.alive() && !o.settled && o.goal.is_some_and(|g| crate::grid::dist(g, to) <= 5 * SPACING_MM)).map(|(_, o)| goal_of(o)));
         let ok = |p: (i64, i64)| {
             self.nav.as_ref().is_none_or(|n| n.walkable_at(p.0, p.1, 0)) && taken.iter().all(|&t| isqrt((t.0 - p.0).pow(2) + (t.1 - p.1).pow(2)) >= SPACING_MM)
         };
@@ -438,7 +459,19 @@ impl Battle {
                 let pos = self.soldiers[i].pos;
                 if self.soldiers[i].path_to != Some(to) {
                     let goal = self.free_spot(i, to);
-                    let path = self.nav.as_ref().and_then(|n| find_path(n, pos, goal, BODY_MM)).unwrap_or_else(|| vec![goal]);
+                    let straight = self.nav.as_ref().is_none_or(|n| walk_line(n, pos, goal));
+                    if !straight && self.paths_this_step >= PATHS_PER_STEP {
+                        // Over this step's route budget: he starts next step.
+                        self.soldiers[i].vel = (0, 0);
+                        self.soldiers[i].moving = false;
+                        continue;
+                    }
+                    let path = if straight {
+                        vec![goal]
+                    } else {
+                        self.paths_this_step += 1;
+                        self.nav.as_ref().and_then(|n| find_path(n, pos, goal, BODY_MM)).unwrap_or_else(|| vec![goal])
+                    };
                     let s = &mut self.soldiers[i];
                     s.path = path;
                     s.path_to = Some(to);
@@ -476,7 +509,10 @@ impl Battle {
             // Personal space: ease away from anyone too close (positions as they were at the start of the step).
             let p = self.soldiers[i].pos;
             let mut push = (0i64, 0i64);
-            for (j, &o) in before.iter().enumerate() {
+            let mut near = std::mem::take(&mut self.scratch);
+            self.grid.near(p, PERSONAL_MM, &mut near);
+            for &j in &near {
+                let (j, o) = (j as usize, before[j as usize]);
                 if j == i || !self.soldiers[j].alive() {
                     continue;
                 }
@@ -490,6 +526,7 @@ impl Battle {
                     push = (push.0 + ux * k / 1_000, push.1 + uy * k / 1_000);
                 }
             }
+            self.scratch = near;
             let mut next = (p.0 + step.0 + push.0, p.1 + step.1 + push.1);
             if let Some(n) = &self.nav {
                 // Blocked: drop the push, then slide along the obstacle (x part, then y part of the step).
@@ -522,7 +559,10 @@ impl Battle {
                 continue;
             }
             if s.cover.is_none() && s.suppression >= SEEK_COVER {
-                let threats: Vec<(i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| c.pos).collect();
+                // The four nearest known threats (a big fight has hundreds of contacts).
+                let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();
+                threats.sort_unstable();
+                let threats: Vec<(i64, i64)> = threats.iter().take(4).map(|t| (t.1, t.2)).collect();
                 if threats.is_empty() {
                     continue;
                 }
@@ -545,12 +585,13 @@ impl Battle {
 
     /// Whether soldier `i` sees enemy `j` right now (as of the last perception pass).
     pub fn sees(&self, i: usize, j: usize) -> bool {
-        self.visible[i][j]
+        self.visible[i].contains(&(j as u32))
     }
 
     /// What soldier `i`'s squad knows of enemy `j`.
     pub fn contact(&self, i: usize, j: usize) -> Option<&Contact> {
-        self.contacts[self.soldiers[i].squad as usize].iter().find(|c| c.enemy == j)
+        let list = &self.contacts[self.soldiers[i].squad as usize];
+        list.binary_search_by_key(&j, |c| c.enemy).ok().map(|k| &list[k])
     }
 
     /// Where soldier `i`'s squad last heard friendly gunfire.
@@ -566,48 +607,83 @@ impl Battle {
     fn report(&mut self, squad: usize, enemy: usize, pos: (i64, i64), confidence: i32) {
         let now = self.time_ms;
         let list = &mut self.contacts[squad];
-        match list.iter_mut().find(|c| c.enemy == enemy) {
-            Some(c) => {
+        // Kept sorted by enemy: a big fight has hundreds of contacts per squad.
+        match list.binary_search_by_key(&enemy, |c| c.enemy) {
+            Ok(k) => {
+                let c = &mut list[k];
                 if confidence >= c.confidence {
                     *c = Contact { enemy, pos, seen_ms: now, confidence };
                 }
             }
-            None => list.push(Contact { enemy, pos, seen_ms: now, confidence }),
+            Err(k) => list.insert(k, Contact { enemy, pos, seen_ms: now, confidence }),
         }
     }
 
-    /// Who notices whom: inside the view cone (or very close) and in sight. Sightings go to the squad.
+    /// Who notices whom: inside the view cone (or very close) and in sight. Each man looks once per
+    /// PERCEIVE_MS, on his own step (the work is spread over the steps), nearest enemies first: he tests at most
+    /// RAYS_MAX of them and keeps the SEE_MAX nearest he sees. Sightings go to the squad.
     fn perceive(&mut self) {
         let n = self.soldiers.len();
-        // Confirmed dead: off the list.
-        let alive: Vec<bool> = self.soldiers.iter().map(|s| s.alive()).collect();
-        for list in &mut self.contacts {
-            list.retain(|c| alive[c.enemy]);
-        }
+        let slots = (PERCEIVE_MS / STEP_HINT_MS).max(1) as i64;
+        let slot = self.time_ms / STEP_HINT_MS as i64 % slots;
+        let mut near = std::mem::take(&mut self.scratch);
+        let mut cands: Vec<(i64, u32)> = Vec::new();
         for i in 0..n {
-            for j in 0..n {
-                let (me, t) = (&self.soldiers[i], &self.soldiers[j]);
-                let mut v = false;
-                if me.alive() && t.alive() && me.team != t.team {
-                    let (dx, dy) = (t.pos.0 - me.pos.0, t.pos.1 - me.pos.1);
-                    let d2 = dx * dx + dy * dy;
-                    if d2 <= RANGE_MM * RANGE_MM {
-                        let d = isqrt(d2).max(1);
-                        let ahead = me.facing.0 * dx + me.facing.1 * dy >= d * CONE_COS;
-                        v = (ahead || d2 <= CLOSE_MM * CLOSE_MM) && self.exposure(i, j) > 0;
+            if (i as i64) % slots != slot {
+                continue;
+            }
+            let me = &self.soldiers[i];
+            if !me.alive() {
+                self.visible[i].clear();
+                continue;
+            }
+            self.grid.near(me.pos, RANGE_MM, &mut near);
+            cands.clear();
+            for &j in &near {
+                let t = &self.soldiers[j as usize];
+                if t.team == me.team {
+                    continue;
+                }
+                let (dx, dy) = (t.pos.0 - me.pos.0, t.pos.1 - me.pos.1);
+                let d2 = dx * dx + dy * dy;
+                if d2 > RANGE_MM * RANGE_MM {
+                    continue;
+                }
+                let d = isqrt(d2).max(1);
+                if me.facing.0 * dx + me.facing.1 * dy >= d * CONE_COS || d2 <= CLOSE_MM * CLOSE_MM {
+                    cands.push((d2, j));
+                }
+            }
+            cands.sort_unstable();
+            let mut seen = std::mem::take(&mut self.visible[i]);
+            seen.clear();
+            for &(_, j) in cands.iter().take(RAYS_MAX) {
+                if self.in_sight(i, j as usize) {
+                    seen.push(j);
+                    if seen.len() >= SEE_MAX {
+                        break;
                     }
                 }
-                self.visible[i][j] = v;
             }
-        }
-        for i in 0..n {
-            for j in 0..n {
-                if self.visible[i][j] {
-                    let (sq, pos) = (self.soldiers[i].squad as usize, self.soldiers[j].pos);
-                    self.report(sq, j, pos, CONF_SEEN);
-                }
+            let sq = self.soldiers[i].squad as usize;
+            for &j in &seen {
+                let pos = self.soldiers[j as usize].pos;
+                self.report(sq, j as usize, pos, CONF_SEEN);
             }
+            self.visible[i] = seen;
         }
+        self.scratch = near;
+    }
+
+    fn rebuild_grid(&mut self) {
+        let soldiers = &self.soldiers;
+        self.grid.rebuild(soldiers.iter().map(|s| (s.pos, s.alive())));
+    }
+
+    /// Whether any of the target's body points is in the shooter's sight (stops at the first).
+    fn in_sight(&self, shooter: usize, target: usize) -> bool {
+        let (s, t) = (&self.soldiers[shooter], &self.soldiers[target]);
+        t.stance.body().iter().any(|&z| self.sight.clear(s.eye(), Point { x: t.pos.0, y: t.pos.1, z }))
     }
 
     /// How many of the target's three body points the shooter can see (0..3).
@@ -648,10 +724,19 @@ impl Battle {
                 c.confidence = (c.confidence - cfade).max(CONF_FLOOR);
             }
         }
+        self.rebuild_grid();
+        self.paths_this_step = 0;
+        // Confirmed dead: off the contact lists.
+        if self.dead_logged.iter().any(|&d| d) {
+            let soldiers = &self.soldiers;
+            for list in &mut self.contacts {
+                list.retain(|c| soldiers[c.enemy].alive());
+            }
+        }
+        self.perceive();
         self.perceive_ms -= dt_ms;
         if self.perceive_ms <= 0 {
             self.perceive_ms += PERCEIVE_MS;
-            self.perceive();
             self.seek_cover();
         }
         self.lead_ms += dt_ms as i64;
@@ -680,8 +765,9 @@ impl Battle {
             // Engage the nearest enemy he sees.
             let me = &self.soldiers[i];
             let mut best: Option<(i64, usize)> = None;
-            for (j, t) in self.soldiers.iter().enumerate() {
-                if !self.visible[i][j] || !t.alive() {
+            for &j in &self.visible[i] {
+                let (j, t) = (j as usize, &self.soldiers[j as usize]);
+                if !t.alive() {
                     continue;
                 }
                 let (dx, dy) = (t.pos.0 - me.pos.0, t.pos.1 - me.pos.1);
@@ -730,19 +816,25 @@ impl Battle {
             let (shooter_pos, shooter_team) = (self.soldiers[i].pos, self.soldiers[i].team);
             let tsq = self.soldiers[j].squad as usize;
             self.report(tsq, i, shooter_pos, CONF_SHOT_AT);
-            for k in 0..self.soldiers.len() {
-                let o = &self.soldiers[k];
+            // Each squad within earshot hears it once.
+            let mut near = std::mem::take(&mut self.scratch);
+            self.grid.near(shooter_pos, HEAR_MM, &mut near);
+            let mut told: Vec<usize> = Vec::new();
+            for &k in &near {
+                let o = &self.soldiers[k as usize];
                 let (dx, dy) = (o.pos.0 - shooter_pos.0, o.pos.1 - shooter_pos.1);
-                if !o.alive() || dx * dx + dy * dy > HEAR_MM * HEAR_MM {
+                let sq = o.squad as usize;
+                if !o.alive() || dx * dx + dy * dy > HEAR_MM * HEAR_MM || told.contains(&sq) {
                     continue;
                 }
-                let sq = o.squad as usize;
+                told.push(sq);
                 if o.team == shooter_team {
                     self.heard[sq] = Some((shooter_pos, self.time_ms));
                 } else {
                     self.report(sq, i, shooter_pos, CONF_HEARD);
                 }
             }
+            self.scratch = near;
             let t = &mut self.soldiers[j];
             t.suppression = (t.suppression + if hit { SUPPRESS_HIT } else { SUPPRESS_MISS }).min(1_000);
             if hit {
@@ -754,6 +846,13 @@ impl Battle {
             }
         }
     }
+}
+
+/// Whether a man can walk straight from `a` to `b` (checked every 250 mm with his body's clearance).
+fn walk_line(n: &NavGrid, a: (i64, i64), b: (i64, i64)) -> bool {
+    let len = crate::grid::dist(a, b);
+    let k = (len / 250).max(1);
+    (0..=k).all(|t| n.walkable_at(a.0 + (b.0 - a.0) * t / k, a.1 + (b.1 - a.1) * t / k, BODY_MM))
 }
 
 /// Turns a facing (unit vector x1000) toward a direction by at most one step's worth (4 rad/s at 50 ms).
