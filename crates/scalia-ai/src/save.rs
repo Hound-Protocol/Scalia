@@ -16,6 +16,8 @@ pub enum Command {
     Task { soldier: usize, task: Task },
     /// A squad is given the commander's intent; its leader plans from it.
     Squad { squad: usize, order: Order },
+    /// A soldier joins the battle (a squad arriving on this ground).
+    Spawn { team: u8, squad: u16, pos: (i64, i64), stance: crate::battle::Stance },
 }
 
 /// The ground a battle is fought on: its area (mm), its props, and the training house if there is one.

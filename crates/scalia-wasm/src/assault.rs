@@ -50,16 +50,84 @@ pub struct Assault {
     /// The leader's steps as they start, for the radio.
     pub steps: Vec<(usize, &'static str)>,
     pub over: bool,
+    /// A training assault on its own (the K demo): it ends when one side is gone. The testing ground's
+    /// field battle never ends.
+    demo: bool,
+    /// Squads on this ground (spawned), and squads whose order is done (once each, for radio reports).
+    squads: Vec<u16>,
+    pub done: Vec<u16>,
+    reported: Vec<(u16, bool)>,
 }
+
+/// The enemy squad stationed in the training house.
+pub const ENEMY_SQUAD: u16 = 200;
+/// The K demo's attacking squad.
+pub const DEMO_SQUAD: u16 = 199;
 
 impl Assault {
     /// The attackers form up 27 m south of the house; the defenders hold their posts. `origin` is the house's
     /// south-west corner (mm).
     pub fn new(origin: (i64, i64), seed: u64, now_ms: f64) -> Assault {
-        let battle = scalia_ai::scenario::killhouse_assault(origin, seed);
-        let n = battle.soldiers.len();
-        let prev = battle.soldiers.iter().map(|s| s.pos).collect();
-        Assault { battle, prev, clock: now_ms, now: now_ms, seen: 0, anim: vec![(0.0, Pose::Stand, Pose::Stand, -1000.0); n], motion: vec![(0.0, 0.0, -1.0); n], gait: (0..n).map(|i| ((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, now_ms)).collect(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false }
+        let mut a = Assault::from_battle(scalia_ai::scenario::killhouse_assault(origin, seed), now_ms);
+        a.demo = true;
+        a
+    }
+
+    /// The testing ground: its map, the enemy squad on its posts in the training house (holding), no one else
+    /// until squads are spawned.
+    pub fn field(map: scalia_ai::save::MapSpec, house: (i64, i64), seed: u64, now_ms: f64) -> Assault {
+        let soldiers = scalia_ai::scenario::KILLHOUSE_DEFENDERS.iter().map(|&(x, y)| Soldier::new(1, ENEMY_SQUAD, (house.0 + x, house.1 + y), Stance::Stand)).collect();
+        let mut b = Battle::on_map(map, soldiers, seed);
+        b.submit(0, scalia_ai::save::Command::Squad { squad: ENEMY_SQUAD as usize, order: scalia_ai::leader::Order::Hold });
+        let mut a = Assault::from_battle(b, now_ms);
+        a.squads.push(ENEMY_SQUAD);
+        a
+    }
+
+    fn from_battle(battle: Battle, now_ms: f64) -> Assault {
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        a.sync_tables();
+        a
+    }
+
+    /// Grows the per-soldier drawing tables to the battle's soldiers (new ones join between steps).
+    fn sync_tables(&mut self) {
+        for i in self.prev.len()..self.battle.soldiers.len() {
+            self.prev.push(self.battle.soldiers[i].pos);
+            self.anim.push((0.0, Pose::Stand, Pose::Stand, -1000.0));
+            self.motion.push((0.0, 0.0, -1.0));
+            self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
+        }
+    }
+
+    /// Brings a squad onto this ground: a soldier at each position (they join at the next step).
+    pub fn spawn_squad(&mut self, squad: u16, team: u8, at: &[(i64, i64)]) {
+        let t = self.battle.time_ms;
+        for &pos in at {
+            self.battle.submit(t, scalia_ai::save::Command::Spawn { team, squad, pos, stance: Stance::Stand });
+        }
+        self.squads.push(squad);
+    }
+
+    pub fn has_squad(&self, squad: u16) -> bool {
+        self.squads.contains(&squad)
+    }
+
+    /// Gives a squad an order (at the next step).
+    pub fn order(&mut self, squad: u16, order: scalia_ai::leader::Order) {
+        self.battle.submit(self.battle.time_ms, scalia_ai::save::Command::Squad { squad: squad as usize, order });
+        self.reported.retain(|r| r.0 != squad);
+    }
+
+    /// Where a squad's living soldiers are, on average (mm).
+    pub fn centre(&self, squad: u16) -> Option<(i64, i64)> {
+        let ms: Vec<(i64, i64)> = self.battle.soldiers.iter().filter(|s| s.squad == squad && s.alive()).map(|s| s.pos).collect();
+        (!ms.is_empty()).then(|| (ms.iter().map(|p| p.0).sum::<i64>() / ms.len() as i64, ms.iter().map(|p| p.1).sum::<i64>() / ms.len() as i64))
+    }
+
+    /// Living soldiers of a squad.
+    pub fn squad_alive(&self, squad: u16) -> usize {
+        self.battle.soldiers.iter().filter(|s| s.squad == squad && s.alive()).count()
     }
 
     /// Runs the battle up to `now_ms` (at most half a second of catching up per frame).
@@ -71,6 +139,24 @@ impl Assault {
         while self.now - self.clock >= STEP_MS && !self.over {
             self.prev = self.battle.soldiers.iter().map(|s| s.pos).collect();
             self.battle.step(STEP_MS as i32);
+            self.sync_tables();
+            for &sq in &self.squads {
+                let done = self.battle.squad_done(sq as usize);
+                match self.reported.iter_mut().find(|r| r.0 == sq) {
+                    Some(r) => {
+                        if done && !r.1 {
+                            self.done.push(sq);
+                        }
+                        r.1 = done;
+                    }
+                    None => {
+                        if done {
+                            self.done.push(sq);
+                        }
+                        self.reported.push((sq, done));
+                    }
+                }
+            }
             self.clock += STEP_MS;
             // Battle time T is drawn at viewer time T + offset (drawing runs one step behind, interpolating).
             let offset = self.clock - self.battle.time_ms as f64 + STEP_MS;
@@ -112,7 +198,7 @@ impl Assault {
             }
             self.seen = self.battle.log.len();
             let alive = |team| self.battle.soldiers.iter().any(|s| s.team == team && s.alive());
-            if !alive(0) || !alive(1) {
+            if self.demo && (!alive(0) || !alive(1)) {
                 self.over = true;
             }
         }
@@ -127,7 +213,7 @@ impl Assault {
 
     /// Instance records (12 floats each) for one team. `place` turns absolute metres into the renderer's
     /// (x, y, z), or None when off screen; `ts` is the shader clock (seconds); `body` the palette colour.
-    pub fn instances(&mut self, team: u8, ts: f32, body: f32, mut place: impl FnMut(f64, f64) -> Option<(f32, f32, f32)>) -> Vec<f32> {
+    pub fn instances(&mut self, team: u8, ts: f32, body: impl Fn(u16) -> f32, mut place: impl FnMut(f64, f64) -> Option<(f32, f32, f32)>) -> Vec<f32> {
         let mut out = Vec::new();
         for i in 0..self.battle.soldiers.len() {
             if self.battle.soldiers[i].team != team {
@@ -136,6 +222,7 @@ impl Assault {
             let (x, y) = self.position(i);
             let Some((rx, ry, z)) = place(x / 1000.0, y / 1000.0) else { continue };
             let s = &self.battle.soldiers[i];
+            let s_squad = s.squad;
             let m = &mut self.motion[i];
             let raw = ((s.vel.0 * s.vel.0 + s.vel.1 * s.vel.1) as f64).sqrt() as f32 / STEP_MS as f32;
             if s.moving {
@@ -158,7 +245,7 @@ impl Assault {
             let dt = ((self.now - g.1) / 1000.0).clamp(0.0, 0.1);
             *g = ((g.0 + steps as f64 * dt).fract(), self.now);
             let (phase, cadence) = (g.0 as f32, if steps > 0.0 { -1.0 } else { 0.0 });
-            out.extend_from_slice(&[rx, ry, z, body, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
+            out.extend_from_slice(&[rx, ry, z, body(s_squad), a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
         out
     }
@@ -242,6 +329,28 @@ mod tests {
     }
 
     #[test]
+    fn a_squad_spawned_on_the_field_goes_where_it_is_told_and_reports_once() {
+        use scalia_ai::leader::{Mode, Order};
+        let map = scalia_ai::save::MapSpec::killhouse((80_000, 62_000));
+        let mut a = Assault::field(map, (80_000, 62_000), 3, 0.0);
+        let start: Vec<(i64, i64)> = (0..6).map(|k| (60_000 + k * 1_200, 30_000)).collect();
+        a.spawn_squad(4, 0, &start);
+        a.order(4, Order::Move { to: (60_000, 50_000), mode: Mode::Plain });
+        let mut t = 0.0;
+        while t < 60_000.0 {
+            t += 16.7;
+            a.advance(t);
+        }
+        assert_eq!(a.squad_alive(4), 6);
+        assert_eq!(a.done, vec![4], "one report, from the squad that arrived");
+        let c = a.centre(4).unwrap();
+        assert!((c.0 - 60_000).abs() < 2_500 && (c.1 - 50_000).abs() < 2_500, "{c:?}");
+        let inst = a.instances(0, 1.0, |sq| sq as f32, |x, y| Some((x as f32, y as f32, 0.0)));
+        assert_eq!(inst.len(), 6 * 12);
+        assert_eq!(inst[3], 4.0, "colour by squad");
+    }
+
+    #[test]
     fn a_settled_man_keeps_still_legs() {
         // Once arrived he stops moving in the battle; his drawn legs must come to a stand and stay there.
         let mut a = Assault::new((80_000, 62_000), 21, 0.0);
@@ -250,7 +359,7 @@ mod tests {
         while t < 60_000.0 {
             t += 16.7;
             a.advance(t);
-            let _ = a.instances(1, (t / 1000.0) as f32, 9.0, |x, y| Some((x as f32, y as f32, 0.0)));
+            let _ = a.instances(1, (t / 1000.0) as f32, |_| 9.0, |x, y| Some((x as f32, y as f32, 0.0)));
             poses.push(a.anim[ATTACKERS + 7].1);
         }
         // A defender who never moves before contact: never a walking pose in the first 10 s.
@@ -268,7 +377,7 @@ mod tests {
         assert!(a.over && a.alive(1) == 0, "attackers {} defenders {}", a.alive(0), a.alive(1));
         assert!(a.sounds.iter().filter(|s| !s.blast).count() > 20);
         assert!(a.steps.iter().any(|s| s.1 == "stack"), "{:?}", a.steps);
-        let mut inst = a.instances(0, 1.0, 6.0, |x, y| Some((x as f32, y as f32, 0.0)));
+        let mut inst = a.instances(0, 1.0, |_| 6.0, |x, y| Some((x as f32, y as f32, 0.0)));
         assert_eq!(inst.len(), ATTACKERS * 12);
         inst.truncate(12);
         assert!(inst.iter().all(|v| v.is_finite()));

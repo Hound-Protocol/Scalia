@@ -181,6 +181,10 @@ pub struct Viewer {
     cmd_pose: (Pose, Pose, f32),
     /// The live killhouse assault, when one is running (replaces the static enemy posts).
     assault: Option<crate::assault::Assault>,
+    /// The K training assault is running on the field.
+    demo: bool,
+    /// How the next squad move is to be made (chosen on the radio).
+    order_mode: Option<scalia_ai::leader::Mode>,
     /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
     fx: crate::effects::Effects,
     fx_lights: Vec<scalia_render::gpu::PointLight>,
@@ -325,6 +329,8 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         assault: None,
+        demo: false,
+        order_mode: None,
         fx: crate::effects::Effects::default(),
         fx_lights: Vec::new(),
         radio_until: -1.0,
@@ -627,18 +633,45 @@ impl Viewer {
     }
     /// Starts the training assault: a squad of 12 forms up south of the killhouse and takes it from the 8
     /// enemy soldiers inside, all on the battle AI. Starting again restarts it.
-    pub fn start_assault(&mut self, seed: u32) {
-        self.assault = Some(crate::assault::Assault::new(KILLHOUSE_MM, seed as u64, self.frame_ms));
+    pub fn start_assault(&mut self, _seed: u32) {
+        if self.assault.as_ref().is_some_and(|a| a.has_squad(crate::assault::DEMO_SQUAD)) {
+            self.stop_assault();
+        }
+        let a = self.assault.get_or_insert_with(|| unreachable!("the field exists once the base is built"));
+        let at: Vec<(i64, i64)> = (0..12i64).map(|i| (KILLHOUSE_MM.0 + 6_000 + (i % 4) * 1_500, KILLHOUSE_MM.1 - 27_000 + (i / 4) * 1_500)).collect();
+        a.spawn_squad(crate::assault::DEMO_SQUAD, 0, &at);
+        a.order(crate::assault::DEMO_SQUAD, scalia_ai::leader::Order::Capture);
+        self.demo = true;
     }
-    /// Ends the assault and puts the enemy back on their posts.
+    /// Ends the assault: the testing ground starts over (the enemy back on their posts).
     pub fn stop_assault(&mut self) {
-        self.assault = None;
+        self.assault = Some(self.new_field());
+        self.demo = false;
+    }
+
+    /// The testing ground's battle: the whole compound and its props, the enemy squad in the training house.
+    fn new_field(&self) -> crate::assault::Assault {
+        let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
+        let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
+        map.killhouse = Some(KILLHOUSE_MM);
+        crate::assault::Assault::field(map, KILLHOUSE_MM, 7, self.frame_ms)
     }
     /// The assault as JSON: running, who is alive, and the leader's steps since the last call.
     pub fn assault_state(&mut self) -> String {
+        use crate::assault::{DEMO_SQUAD, ENEMY_SQUAD};
+        let demo = self.demo;
         let Some(a) = self.assault.as_mut() else { return "{\"running\":false}".into() };
-        let steps: Vec<String> = a.steps.drain(..).map(|(squad, step)| format!("{{\"squad\":{squad},\"step\":\"{step}\"}}")).collect();
-        format!("{{\"running\":true,\"over\":{},\"attackers\":{},\"defenders\":{},\"steps\":[{}]}}", a.over, a.alive(0), a.alive(1), steps.join(","))
+        if !demo {
+            a.steps.clear();
+            return "{\"running\":false}".into();
+        }
+        let (att, def) = (a.squad_alive(DEMO_SQUAD), a.squad_alive(ENEMY_SQUAD));
+        let steps: Vec<String> = a.steps.drain(..).filter(|(sq, _)| *sq == DEMO_SQUAD as usize || *sq == ENEMY_SQUAD as usize).map(|(squad, step)| format!("{{\"squad\":{},\"step\":\"{step}\"}}", if squad == DEMO_SQUAD as usize { 0 } else { 1 })).collect();
+        let over = att == 0 || def == 0;
+        if over {
+            self.demo = false;
+        }
+        format!("{{\"running\":true,\"over\":{over},\"attackers\":{att},\"defenders\":{def},\"steps\":[{}]}}", steps.join(","))
     }
     /// Sounds since the last call, four floats each: distance from the commander (m), pan (-1 left .. 1 right
     /// on screen), 1 for a blast or 0 for a shot, and how long from now it happens (s; rounds of a burst).
@@ -1408,6 +1441,36 @@ impl Viewer {
     /// Sends one group to a point (metres), as agents inside the testing ground, marching outside it.
     fn move_group(&mut self, i: u32, d: Vec3, speed: u32, now: WorldMs) -> bool {
         let to = Pos { region: RegionId(1), x: (d.x as f64 * 1000.0) as i64, y: (d.y as f64 * 1000.0) as i64, z: 0 };
+        // Inside the testing ground the squad fights on the field battle: it routes round walls and through doors,
+        // takes cover and makes the place safe when it gets there.
+        let gp = self.world.groups.pos(GroupId(i));
+        let on_ground = |x: i64, y: i64| (BASE_LO..BASE_HI).contains(&(x as f32 / 1000.0)) && (BASE_LO..BASE_HI).contains(&(y as f32 / 1000.0));
+        let has = self.assault.as_ref().is_some_and(|a| a.has_squad(i as u16));
+        if in_base(d.x, d.y) && self.assault.is_some() && (has || on_ground(gp.x, gp.y)) {
+            if !has {
+                let mut mine: Vec<&Derived> = self.derived.iter().filter(|s| s.group.0 == i).collect();
+                mine.sort_by_key(|s| s.slot);
+                let mut starts: Vec<(i64, i64)> = match self.agents.get(&i) {
+                    Some(a) => a.positions().to_vec(),
+                    None => mine.iter().map(|s| (s.pos.x, s.pos.y)).collect(),
+                };
+                if starts.is_empty() {
+                    // Not drawn right now: everyone at the group's place (they spread out as they go).
+                    let p = self.world.groups.pos(GroupId(i));
+                    let n = self.world.groups.people(GroupId(i)).max(1) as i64;
+                    starts = (0..n).map(|k| (p.x + (k % 4) * 1_200, p.y + (k / 4) * 1_200)).collect();
+                }
+                self.agents.remove(&i);
+                if let Some(a) = self.assault.as_mut() {
+                    a.spawn_squad(i as u16, 0, &starts);
+                }
+            }
+            let mode = self.order_mode.take().unwrap_or(scalia_ai::leader::Mode::Plain);
+            if let Some(a) = self.assault.as_mut() {
+                a.order(i as u16, scalia_ai::leader::Order::Move { to: (to.x, to.y), mode });
+            }
+            return true;
+        }
         // Inside the testing ground the soldiers walk as agents round the obstacles.
         if in_base(d.x, d.y) {
             let starts: Vec<(i64, i64)> = match self.agents.get(&i) {
@@ -1770,7 +1833,7 @@ impl Viewer {
         let mut inst = Vec::with_capacity(n * 12);
         self.step_agents(t);
         for d in &out {
-            if self.agents.contains_key(&d.group.0) {
+            if self.agents.contains_key(&d.group.0) || self.assault.as_ref().is_some_and(|a| a.has_squad(d.group.0 as u16)) {
                 continue; // drawn from their agents below
             }
             let (ax, ay) = (d.pos.x as f64 / 1000.0, d.pos.y as f64 / 1000.0);
@@ -1931,13 +1994,15 @@ impl Viewer {
             a.advance(self.frame_ms);
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let origin = self.origin;
+            // Our squads keep their roster colours: selected, captain, or plain.
+            let colours: Vec<(u16, f32)> = (0..self.world.groups.len() as u32).map(|g| (g as u16, if self.selection.contains(&g) { 14.0 } else if self.chain.is_captain(GroupId(g)) { 4.0 } else { 6.0 })).collect();
             let mut place = |x: f64, y: f64| {
                 let z = self.height_at(x as f32, y as f32);
                 let (rx, ry) = ((x - origin.0) as f32, (y - origin.1) as f32);
                 self.on_screen(rx, ry, z, 3.0).then_some((rx, ry, z))
             };
-            foes = a.instances(1, ts, ENEMY_RED as f32, &mut place);
-            assaulters = a.instances(0, ts, 6.0, &mut place);
+            foes = a.instances(1, ts, |_| ENEMY_RED as f32, &mut place);
+            assaulters = a.instances(0, ts, |sq| colours.iter().find(|c| c.0 == sq).map_or(6.0, |c| c.1), &mut place);
             for f in a.fx.drain(..) {
                 let ground = |me: &mut Self, p: (i64, i64, i64)| {
                     let (x, y) = (p.0 as f64 / 1000.0, p.1 as f64 / 1000.0);
@@ -2045,6 +2110,7 @@ impl Viewer {
     fn build_base(&mut self) {
         self.base_h = self.planet.height_mm(100_000, (100_000.0 + HALF_DEPTH as f64 * 1000.0) as i64) as f32 / 1000.0;
         self.base_grid.rebuild(&self.base_props);
+        self.assault = Some(self.new_field());
         let m = base_mesh(&self.base_props, self.base_h);
         self.gpu.upload("base", m.bytes());
         self.base_built = true;
@@ -2077,6 +2143,25 @@ impl Viewer {
                 let (cx, cy) = a.centre();
                 self.world.groups.set_process(GroupId(g), scalia_core::process::Process::idle());
                 self.world.groups.set_pos(GroupId(g), Pos { region: RegionId(1), x: cx, y: cy, z: 0 });
+            }
+            // Squads on the field battle: their group record follows them; arrival (secured) reports.
+            if let Some(a) = self.assault.as_mut() {
+                for sq in a.done.drain(..).collect::<Vec<u16>>() {
+                    let g = sq as u32;
+                    if let Some(p) = self.arrive_stance.remove(&g) {
+                        self.stance.insert(g, p);
+                    }
+                    if let Some((spot, kind)) = self.arrive_report.remove(&g) {
+                        reports.push((g, spot, kind));
+                    }
+                }
+                let n = self.world.groups.len() as u32;
+                for g in 0..n {
+                    if let Some((cx, cy)) = a.has_squad(g as u16).then(|| a.centre(g as u16)).flatten() {
+                        self.world.groups.set_process(GroupId(g), scalia_core::process::Process::idle());
+                        self.world.groups.set_pos(GroupId(g), Pos { region: RegionId(1), x: cx, y: cy, z: 0 });
+                    }
+                }
             }
             for (g, _spot, kind) in reports {
                 let me = self.call_sign(g);

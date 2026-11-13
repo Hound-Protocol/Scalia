@@ -306,6 +306,19 @@ impl Battle {
         Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![Vec::new(); n], grid: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), goals: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), scratch: Vec::new(), paths_this_step: 0, perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
     }
 
+    /// Adds a soldier (use `Command::Spawn` for a battle that is replayed or saved). Returns his index.
+    pub fn join(&mut self, s: Soldier) -> usize {
+        let sq = s.squad as usize;
+        if self.contacts.len() <= sq {
+            self.contacts.resize(sq + 1, Vec::new());
+            self.heard.resize(sq + 1, None);
+        }
+        self.soldiers.push(s);
+        self.visible.push(Vec::new());
+        self.dead_logged.push(false);
+        self.soldiers.len() - 1
+    }
+
     /// A battle on a real map: soldiers path around obstacles and take cover.
     pub fn with_map(nav: NavGrid, sight: SightGrid, cover: CoverMap, soldiers: Vec<Soldier>, seed: u64) -> Battle {
         let mut b = Battle::new(sight, soldiers, seed);
@@ -345,6 +358,9 @@ impl Battle {
             match c {
                 Command::Task { soldier, task } if soldier < self.soldiers.len() && self.soldiers[soldier].alive() => self.order(soldier, task),
                 Command::Squad { squad, order } if squad < 1 << 16 => self.command(squad, order),
+                Command::Spawn { team, squad, pos, stance } => {
+                    self.join(Soldier::new(team, squad, pos, stance));
+                }
                 _ => continue,
             }
             self.history.push((now, c));

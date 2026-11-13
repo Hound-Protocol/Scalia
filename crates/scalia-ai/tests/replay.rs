@@ -92,3 +92,23 @@ fn a_damaged_save_is_refused() {
     saved.truncate(saved.len() / 2);
     assert!(Battle::load(&saved).is_err());
 }
+
+#[test]
+fn soldiers_joining_later_are_part_of_the_replay() {
+    use scalia_ai::leader::Mode;
+    let mut a = killhouse(5);
+    script(&mut a);
+    for k in 0..4 {
+        a.submit(10_000, Command::Spawn { team: 0, squad: 7, pos: (HOUSE.0 - 10_000 + k * 1_000, HOUSE.1 - 10_000), stance: Stance::Stand });
+    }
+    a.submit(10_000, Command::Squad { squad: 7, order: Order::Move { to: (HOUSE.0 - 15_000, HOUSE.1), mode: Mode::Plain } });
+    let first = run(&mut a, 60_000);
+    assert_eq!(a.soldiers.len(), 24);
+    let mut b = killhouse(5);
+    for (at, c) in a.history().to_vec() {
+        b.submit(at, c);
+    }
+    assert_eq!(run(&mut b, 60_000), first);
+    let saved = a.save();
+    assert_eq!(Battle::load(&saved).unwrap().hash(), a.hash());
+}
