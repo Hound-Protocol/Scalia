@@ -23,7 +23,6 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use scalia_render::bend::{globe_point, Bend};
 use scalia_render::gpu::{FrameDesc, Gpu};
-use scalia_render::mesh::pda_held;
 use scalia_render::mesh::{figure, figure_far, figure_lo, grass_tuft, MeshBuilder};
 use scalia_render::pose::Pose;
 use scalia_render::sky::{clock, sky};
@@ -363,7 +362,8 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         ship_yaw: None,
         pixel_scale: 2,
         day_start: 0.3,
-        day_rate: DAY_RATE,
+        // The day stands still for now (the time of day is not part of the game yet); T cycles it.
+        day_rate: 0.0,
         day_at: 0.0,
         last_view: (60.0, 1.0),
         last_internal: (1, 1),
@@ -717,6 +717,24 @@ impl Viewer {
     }
 
     /// Names of the selected units (for the radio).
+    /// The selected units' ids, as JSON.
+    pub fn selection_ids(&self) -> String {
+        let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
+        format!("{groups:?}")
+    }
+    /// Replaces the selection (the radio hands each answering unit its order on its own).
+    pub fn set_selection(&mut self, ids: Vec<u32>) {
+        let n = self.world.groups.len() as u32;
+        self.selection = ids.into_iter().filter(|&g| g < n).collect();
+        self.selected = self.selection.first().copied();
+    }
+    /// Drops one unit from the selection (it did not answer the radio).
+    pub fn deselect(&mut self, id: u32) {
+        self.selection.retain(|&g| g != id);
+        if self.selected == Some(id) {
+            self.selected = self.selection.first().copied();
+        }
+    }
     pub fn selection_name(&self) -> String {
         let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
         let n: Vec<String> = groups.iter().map(|&g| self.call_sign(g)).collect();
@@ -869,8 +887,11 @@ impl Viewer {
                 _ => "holding",
             };
             let stance = format!("{:?}", self.stance.get(&i).copied().unwrap_or(Pose::Stand)).to_lowercase();
+            let c = self.group_centre(i, self.world.now);
+            let (cs, at) = (self.call_sign(i), grid(c.x as f64, c.y as f64));
             out.push(format!(
-                "{{\"id\":{i},\"name\":\"{name}\",\"captain\":{captain},\"boss\":{boss},\"task\":\"{task}\",\"soldiers\":{soldiers},\"status\":\"{status}\",\"stance\":\"{stance}\",\"selected\":{}}}",
+                "{{\"id\":{i},\"cs\":\"{cs}\",\"n\":{},\"grid\":\"{at}\",\"name\":\"{name}\",\"captain\":{captain},\"boss\":{boss},\"task\":\"{task}\",\"soldiers\":{soldiers},\"status\":\"{status}\",\"stance\":\"{stance}\",\"selected\":{}}}",
+                i + 1,
                 self.selection.contains(&i)
             ));
         }
@@ -1194,8 +1215,9 @@ impl Viewer {
     }
 
     fn radio(&mut self, from: u32, text: String, urgent: bool) {
+        let id = from;
         let from = self.call_sign(from);
-        self.radio_out.push(format!("{{\"from\":\"{from}\",\"text\":\"{}\",\"urgent\":{urgent}}}", text.replace('"', "'")));
+        self.radio_out.push(format!("{{\"id\":{id},\"n\":{},\"from\":\"{from}\",\"text\":\"{}\",\"urgent\":{urgent}}}", id + 1, text.replace('"', "'")));
     }
 
     /// Sends one group to a point (metres), as agents inside the testing ground, marching outside it.
@@ -1925,13 +1947,8 @@ impl Viewer {
         self.gpu.upload_instances("commander_at", bytes(&me));
         instanced.push(("commander".into(), "commander_at".into()));
         // The tablet appears in his hands once they have come up to hold it.
-        if pose == Pose::Tablet && ts - self.cmd_pose.2 >= scalia_render::pose::BLEND_S {
-            if !self.gpu.has("pda") {
-                self.gpu.upload("pda", pda_held().bytes());
-            }
-            self.gpu.upload_instances("pda_at", bytes(&rec));
-            instanced.push(("pda".into(), "pda_at".into()));
-        }
+        // The tablet itself is the page's close-up, which slides up once the camera is in place: the 3D model
+        // is not drawn (it would show behind the close-up whenever that moves).
     }
 
     /// How far the commander has dissolved for the tablet close-up (0 solid, 1 gone).

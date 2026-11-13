@@ -18,7 +18,12 @@ save = lambda im, name: im.save(f'{out}/{name}.webp', 'WEBP', quality=90, method
 for name, m in (('fp_left', arm & (xx < W // 2)), ('fp_right', arm & (xx >= W // 2))):
     a = o.copy(); a[..., 3] = np.where(m, o[..., 3], 0)
     save(Image.fromarray(a), name)
-# The walkie hand: the same left hand, 178 px left and 75 px down, in front of the handset.
+# The walkie hand: the same left hand moved under the handset's lower left. It holds the handset from behind:
+# only the fingers that wrap round its left edge are drawn in front of it.
 left = Image.open(f'{out}/fp_left.webp')
-moved = Image.new('RGBA', left.size, (0, 0, 0, 0)); moved.paste(left, (-178, 75), left)
-save(moved, 'fp_lwalkie_back'); save(moved, 'fp_lwalkie_front')
+moved = Image.new('RGBA', left.size, (0, 0, 0, 0)); moved.paste(left, (-150, 100), left)
+save(moved, 'fp_lwalkie_back')
+WALKIE_LEFT_PX = 557.0 - 0.23756 * 806.0  # the handset's left edge in the render (first_person.py: walkie css)
+front = np.asarray(moved).copy()
+front[..., 3] = np.where(xx < WALKIE_LEFT_PX + 14, front[..., 3], 0)
+save(Image.fromarray(front), 'fp_lwalkie_front')

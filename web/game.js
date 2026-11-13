@@ -15,6 +15,38 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
 };
 
+// World sounds (music, footsteps) go through one bus; with the tablet up it is muffled (low-passed and a little
+// quieter), as if the commander's attention has gone to the device. The tablet's own sounds and the radio stay clear.
+const worldAudio = (() => {
+  let ctx = null, filt = null, gain = null;
+  const routed = new WeakSet();
+  const graph = () => {
+    if (ctx) return ctx;
+    try {
+      ctx = new AudioContext();
+      filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 20000; filt.Q.value = 0.6;
+      gain = ctx.createGain(); filt.connect(gain).connect(ctx.destination);
+    } catch (_) { ctx = null; }
+    return ctx;
+  };
+  return {
+    // Sends an audio element through the bus (once per element).
+    add(el) {
+      const c = graph(); if (!c) return;
+      if (c.state === 'suspended') c.resume().catch(() => {});
+      if (routed.has(el)) return;
+      try { c.createMediaElementSource(el).connect(filt); routed.add(el); } catch (_) { /* plays unfiltered */ }
+    },
+    muffle(on) {
+      const c = graph(); if (!c) return;
+      const t = c.currentTime;
+      filt.frequency.cancelScheduledValues(t); gain.gain.cancelScheduledValues(t);
+      filt.frequency.setTargetAtTime(on ? 600 : 20000, t, 0.12);
+      gain.gain.setTargetAtTime(on ? 0.55 : 1, t, 0.12);
+    },
+  };
+})();
+
 // Background music (placeholder track): starts at 25% once the player enters the game, loops, and can be turned
 // off or turned down on the tablet's settings page. The choice is remembered.
 const music = (() => {
@@ -29,6 +61,7 @@ const music = (() => {
     start() { m.started = true; m.apply(); },
     apply() {
       el.volume = m.vol;
+      if (m.on && m.started && m.vol > 0) worldAudio.add(el);
       if (m.on && m.started && m.vol > 0) el.play().catch(() => { /* blocked until a click */ });
       else el.pause();
     },
@@ -337,10 +370,11 @@ try {
     if (tabletShown) pdaClose();
     tabletShown = false;
     document.body.classList.remove('pda');
+    worldAudio.muffle(false);
     tablet.classList.remove('up');
     dockRadio(false); walkieUp();
     closeActions();
-    setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 220);
+    setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 380); // slide down first, then zoom out
   };
   // ---- Hands on the tablet ----
   // The walkie-talkie: while the tablet is up, the handset lives in the left hand beside it (scaled from its
@@ -353,13 +387,10 @@ try {
     if (!inHand && radioEl.parentNode === wkSlot) { radioEl.style.transform = ''; radioHome.insertBefore(radioEl, radioNext); }
   };
   addEventListener('resize', fitRadio);
-  // On a narrow screen the tablet eases back (around its right edge) to make room for the handset; the game's
-  // camera follows so the device in the 3D scene stays exactly behind the close-up.
+  // On a narrow screen the tablet eases back (around its right edge) to make room for the handset.
   let frameS = 1, frameGoal = 1, frameRaf = 0;
   const applyFrame = () => {
-    const w = tablet.offsetWidth;
     tablet.style.scale = frameS === 1 ? '' : frameS.toFixed(4);
-    v.set_tablet_frame(frameS, ((1 - frameS) * w / 2) / innerWidth);
   };
   const stepFrame = (t0, from) => (t) => {
     const k = Math.min(1, (t - t0) / 400), e = k * k * k * (k * (k * 6 - 15) + 10);
@@ -380,23 +411,21 @@ try {
   addEventListener('resize', walkieUp);
   new MutationObserver(walkieUp).observe(radioEl, { attributes: true, attributeFilter: ['class'] });
   // The right thumb rests on the frame below the buttons, follows the one under the mouse and presses it.
-  const thumb = tablet.querySelector('.thumb');
-  const ASPECT = 2164 / 1139, TIP = [92.126, 53.934], REST = [93.0, 74.5];
-  let thumbRest = 0;
-  const thumbTo = (x, y) => {
-    const dx = x - TIP[0], dy = (y - TIP[1]) / ASPECT; // in cqw (percent of the tablet's width)
-    thumb.style.translate = `${dx.toFixed(2)}cqw ${dy.toFixed(2)}cqw`;
-    thumb.style.rotate = `${(-dy * 0.9).toFixed(2)}deg`;
+  const thumb = tablet.querySelector('.thumb'), armR = tablet.querySelector('.arm-r');
+  // The thumb rests just right of a button; the whole right hand slides along the edge to the one under the mouse.
+  const ASPECT = 2164 / 1139, TIP_Y = 54.036;
+  const handTo = (y) => {
+    const dy = `0 ${((y - TIP_Y) / ASPECT).toFixed(2)}cqw`; // percent of the tablet's height, in cqw
+    thumb.style.translate = dy; armR.style.translate = dy;
   };
-  thumbTo(...REST);
+  const btnY = (b) => parseFloat(b.style.top) + 6.15 / 2;
+  handTo(btnY(tablet.querySelector('.hw[data-hw="map"]')));
   for (const b of tablet.querySelectorAll('.hw')) {
     if (parseFloat(b.style.left || '91.99') < 50) continue; // the right-hand buttons only
-    const at = () => [91.99 + 0.9, parseFloat(b.style.top) + 6.15 / 2];
-    b.addEventListener('pointerenter', () => { clearTimeout(thumbRest); thumbTo(...at()); });
-    b.addEventListener('pointerleave', () => { clearTimeout(thumbRest); thumbRest = setTimeout(() => thumbTo(...REST), 450); });
+    b.addEventListener('pointerenter', () => handTo(btnY(b)));
     b.addEventListener('pointerdown', () => {
-      thumbTo(...at()); thumb.classList.add('press');
-      tablet.style.rotate = '0.25deg'; setTimeout(() => { tablet.style.rotate = ''; }, 120);
+      handTo(btnY(b)); thumb.classList.add('press');
+      tablet.style.rotate = '0.2deg'; setTimeout(() => { tablet.style.rotate = ''; }, 120);
     });
   }
   addEventListener('pointerup', () => thumb.classList.remove('press'));
@@ -409,7 +438,7 @@ try {
     if (ph >= 0 && lastPhase >= 0) {
       const crossed = (at) => (lastPhase < at && ph >= at) || (lastPhase > ph && (lastPhase < at || ph >= at));
       if (crossed(0.25) || crossed(0.75)) {
-        const a = stepSound.cloneNode();
+        const a = stepSound.cloneNode(); worldAudio.add(a);
         a.volume = (v.commander_gait() === 2 ? 0.7 : 0.5) * (0.85 + Math.random() * 0.3);
         a.playbackRate = 0.9 + Math.random() * 0.2;
         a.play().catch(() => {});
@@ -423,6 +452,7 @@ try {
       tabletShown = true;
       pdaOpen();
       document.body.classList.add('pda');
+      worldAudio.muffle(true);
       tablet.classList.add('up');
       dockRadio(true); walkieUp();
       const disp = tablet.querySelector('.display');
@@ -626,7 +656,7 @@ try {
     const grid = `${g4(x)} ${g4(y)}`;
     actionsBox.innerHTML = `<div class="head">${onMap(() => v.selection_name())} → grid ${grid}</div>` + acts.map((a) =>
       `<button data-id="${a.id}" ${a.ok ? '' : 'disabled'} title="${a.reason}">${a.label}${a.ok ? '' : ` <small>${a.reason}</small>`}</button>`).join('') +
-      '<button class="cancel">Cancel</button>';
+      '<button class="sitrep">Radio check · sitrep</button><button class="cancel">Cancel</button>';
     const r = mapCanvas.getBoundingClientRect();
     actionsBox.style.left = `${r.left + e.offsetX + 8}px`; actionsBox.style.top = `${r.top + e.offsetY + 8}px`;
     actionsBox.hidden = false;
@@ -635,10 +665,11 @@ try {
       closeActions(); radioOrder(Number(b.dataset.id), b.textContent.trim(), x, y, grid);
     });
     actionsBox.querySelector('.cancel').addEventListener('click', closeActions);
+    actionsBox.querySelector('.sitrep').addEventListener('click', () => { closeActions(); sitrep(JSON.parse(v.selection_ids())); });
   };
   // The walkie-talkie: comes up on screen, the commander speaks the order, waits for the unit, then it moves.
   const radio = $('radio');
-  const VERB = { 0: ['move to', 'moving'], 1: ['defend', 'defending'], 2: ['assault', 'assaulting'], 3: ['support at', 'supporting'], 10: ['take', 'taking'], 11: ['hold', 'holding'] };
+  const VERB = { 0: ['move to', 'moving to'], 1: ['defend', 'defending'], 2: ['assault', 'assaulting'], 3: ['support at', 'supporting at'], 10: ['take', 'taking'], 11: ['hold', 'holding'] };
   // The handset's spectrum: 20 bars, log-spaced from 40 Hz to 10 kHz. Every sound the game plays itself goes
   // through an analyser (radio clicks now; recorded voices later) and drives them for real. The browser's speech
   // voice cannot be listened to by the page, so while it talks the bars pulse on each word it reports, in the
@@ -770,35 +801,117 @@ try {
       if (net.length) pump(); else setTimeout(() => { if (!onAir && !net.length) radio.classList.remove('up'); }, 1500);
     }
   };
-  // Calls from the units (captains' reports): the commander listens without stopping.
-  const hear = (ev) => {
-    const job = async () => {
-      if (!radio.classList.contains('up')) { $('radioLog').innerHTML = ''; await keyUp(); }
-      talkingTo('INCOMING FROM', ev.from);
-      await transmit('rx', 'unit', ev.from, ev.text, voiceOf(ev.from));
-    };
-    if (ev.urgent) net.unshift(job); else net.push(job);
+  // ---- Radio procedure ----
+  // Nothing is said without a call-up first, as on a real net. A unit that wants to report calls "Actual" and
+  // waits: the call shows as an Answer Transmission button (E) and the handset stays down until it is answered.
+  // To give an order or ask for a sitrep the commander calls the unit and waits for "send it"; a unit that is busy
+  // or misses the call gets a second call, then the commander gives up on it.
+  const ACTUAL = 'Actual';
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const csOf = (u) => `${u.cs} ${pad2(u.n)}`;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const ME = { pitch: 1.0, rate: 1.05 };
+  const sayTx = (text) => transmit('tx', 'cmd', 'Actual', text, ME);
+  const sayRx = (name, text) => transmit('rx', 'unit', name, text, voiceOf(name));
+  const busy = (u) => /Assault/.test(u.task || '');
+  // Call a unit up; true once it answers "send it".
+  const callUp = async (u) => {
+    const name = csOf(u);
+    talkingTo('CALLING', name);
+    await sayTx(`${name}, this is ${ACTUAL}. Over.`);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await wait(900 + Math.random() * 800);
+      if (!busy(u) && (attempt > 0 || Math.random() > 0.12)) {
+        talkingTo('TALKING TO', name);
+        await sayRx(name, `${ACTUAL}, ${name}. Send it. Over.`);
+        return true;
+      }
+      radioState('NO REPLY');
+      if (attempt === 0) { await wait(1300); await sayTx(`${name}, ${name}, this is ${ACTUAL}. Over.`); }
+    }
+    await wait(1200); radioState('ONLINE');
+    flash(`${name} does not answer`);
+    return false;
+  };
+  // Radio check and situation report from each selected unit (or one unit from the roster).
+  const sitrep = (ids) => {
+    net.push(async () => {
+      $('radioLog').innerHTML = ''; v.set_radio(true); await keyUp();
+      for (const id of ids) {
+        const u = JSON.parse(v.roster()).find((x) => x.id === id);
+        if (!u || !(await callUp(u))) continue;
+        await sayTx('Send sitrep. Over.');
+        await wait(600 + Math.random() * 600);
+        const doing = u.status === 'holding' ? 'holding, no contact' : u.status === 'moving' || u.status === 'marching' ? 'on the move' : u.status;
+        await sayRx(csOf(u), `At grid ${u.grid}. ${u.soldiers} effective, ${doing}. Over.`);
+        await sayTx(`${ACTUAL} copies. Out.`);
+      }
+      await wait(300); v.set_radio(false);
+    });
     pump();
   };
+  // Incoming calls: wait for the commander to answer (urgent ones first, at most a few waiting).
+  const incoming = [];
+  const answerBox = $('answerCall');
+  const ringTone = sfx('./sfx/radio-key.mp3', 0.55);
+  let ringTimer = 0;
+  const showCalls = () => {
+    answerBox.hidden = !incoming.length;
+    if (!incoming.length) { clearInterval(ringTimer); ringTimer = 0; return; }
+    const c = incoming[0];
+    answerBox.querySelector('small').textContent = `${c.from} ${pad2(c.n)} calling${c.urgent ? ' · URGENT' : ''}${incoming.length > 1 ? ` · ${incoming.length - 1} more waiting` : ''}`;
+    answerBox.classList.toggle('urgent', incoming.some((x) => x.urgent));
+    if (!ringTimer) { const ring = () => { ringTone(); setTimeout(ringTone, 160); }; ring(); ringTimer = setInterval(ring, 5000); }
+  };
+  const hear = (ev) => {
+    const same = incoming.findIndex((x) => x.id === ev.id);
+    if (same >= 0) incoming.splice(same, 1); // a newer report from the same unit replaces the old one
+    if (ev.urgent) incoming.unshift(ev); else incoming.push(ev);
+    while (incoming.length > 5) incoming.splice(incoming.findLastIndex((x) => !x.urgent), 1);
+    showCalls();
+  };
+  const answer = () => {
+    const ev = incoming.shift(); showCalls();
+    if (!ev) return;
+    const name = `${ev.from} ${pad2(ev.n)}`;
+    const body = ev.text.replace(/^Actual,\s*[^.!]*\.\s*/, '').replace(/\s*(Over|Out)\.?\s*$/, '').replace(/[.!]\s*$/, '');
+    net.unshift(async () => {
+      $('radioLog').innerHTML = ''; v.set_radio(true); await keyUp();
+      talkingTo('INCOMING FROM', name);
+      await sayRx(name, `${ACTUAL}, this is ${name}. Over.`);
+      await wait(400 + Math.random() * 400);
+      await sayTx(`${name}, ${ACTUAL}. Send it. Over.`);
+      await wait(500 + Math.random() * 500);
+      await sayRx(name, `${body}. Over.`);
+      await sayTx(`${ACTUAL} copies. Out.`);
+      await wait(300); v.set_radio(false);
+    });
+    pump();
+  };
+  answerBox.querySelector('button').addEventListener('click', answer);
   setInterval(() => { try { for (const ev of JSON.parse(v.radio_events())) hear(ev); } catch (e) { /* viewer busy */ } }, 400);
-  // The roster keeps up with the units' status while it is open (not while a picker is in use).
+  // Orders: call each selected unit up; the ones that answer get the order and read it back.
   const radioOrder = (id, label, x, y, grid) => {
-    const who = v.selection_name(), first = who.split(',')[0];
     const [verb, ing] = VERB[id] || VERB[0];
-    if (onAir) flash('net busy: your order goes out next');
+    const ids = JSON.parse(v.selection_ids());
+    if (onAir) flash('net busy: your call goes out next');
     net.push(async () => {
-      $('radioLog').innerHTML = '';
-      talkingTo('TALKING TO', who);
-      v.set_radio(true); await keyUp();
-      const order = `${who}, ${verb} grid ${grid}. Over.`;
-      await transmit('tx', 'cmd', 'Commander', order, { pitch: 1.0, rate: 1.05 });
-      await new Promise((r) => setTimeout(r, 500 + Math.random() * 700)); // the unit keys up
-      const reply = `${first} copies, ${ing} grid ${grid}. Out.`;
-      await transmit('rx', 'unit', first, reply, voiceOf(first));
-      const msg = v.issue_at(id, x, y, performance.now()); if (msg) flash(msg);
-      if (page === 'roster') drawRoster();
-      await new Promise((r) => setTimeout(r, 400));
-      v.set_radio(false);
+      $('radioLog').innerHTML = ''; v.set_radio(true); await keyUp();
+      for (const uid of ids) {
+        const u = JSON.parse(v.roster()).find((q) => q.id === uid);
+        if (!u || !(await callUp(u))) continue;
+        const name = csOf(u);
+        await sayTx(`${verb.charAt(0).toUpperCase() + verb.slice(1)} grid ${grid}. Over.`);
+        await wait(500 + Math.random() * 700);
+        await sayRx(name, `Roger, ${ing} grid ${grid}. Over.`);
+        await sayTx(`${ACTUAL}, out.`);
+        const keep = new Uint32Array(JSON.parse(v.selection_ids()));
+        v.set_selection(new Uint32Array([uid]));
+        const msg = v.issue_at(id, x, y, performance.now()); if (msg) flash(msg);
+        v.set_selection(keep);
+        if (page === 'roster') drawRoster();
+      }
+      await wait(400); v.set_radio(false);
     });
     pump();
   };
@@ -812,7 +925,7 @@ try {
       `<select class="boss" data-id="${u.id}"><option value="-1"${u.boss < 0 ? ' selected' : ''}>You</option>${
         captains.map((c) => `<option value="${c.id}"${u.boss === c.id ? ' selected' : ''}>${c.name}</option>`).join('')}</select>`;
     const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
-    const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td class="num">${u.soldiers}</td><td class="st-${u.status}">${u.task || cap(u.status)}</td><td>${cap(u.stance)}</td><td><button class="cmdu" data-id="${u.id}">Command Unit</button></td></tr>`;
+    const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td class="num">${u.soldiers}</td><td class="st-${u.status}">${u.task || cap(u.status)}</td><td>${cap(u.stance)}</td><td><button class="cmdu call" data-id="${u.id}">Call</button> <button class="cmdu" data-id="${u.id}">Command Unit</button></td></tr>`;
     $('roster').innerHTML = `<table><tr><th>Unit</th><th>Answers to</th><th>Manpower</th><th>Status</th><th>Stance</th><th></th></tr>${
       captains.map(row).join('')}${units.filter((u) => !u.captain).map(row).join('')
     }</table><p class="note">Click a unit to find it on the map. Attach squads to a captain and give him a goal: he plans the rest and leads them.</p>`;
@@ -820,7 +933,8 @@ try {
       if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION' || e.target.closest('button')) return;
       onMap(() => v.select_unit(Number(r.dataset.id))); setPage('map');
     });
-    for (const b of $('roster').querySelectorAll('button.cmdu')) b.addEventListener('click', () => {
+    for (const b of $('roster').querySelectorAll('button.cmdu.call')) b.addEventListener('click', () => sitrep([Number(b.dataset.id)]));
+    for (const b of $('roster').querySelectorAll('button.cmdu:not(.call)')) b.addEventListener('click', () => {
       flash(v.command_unit(Number(b.dataset.id))); setTablet(false);
     });
     for (const sel of $('roster').querySelectorAll('select.boss')) sel.addEventListener('change', () => {
@@ -862,6 +976,7 @@ try {
     const k = e.key.toLowerCase();
     held.add(k);
     if (k === 'tab') { e.preventDefault(); setTablet(!tabletUp); return; }
+    if (k === 'e' && !$('answerCall').hidden) { answer(); return; }
     if (k === '1') setScene('ships');
     else if (k === '2') setScene('ground');
     else if (k === '3') setScene('planet');

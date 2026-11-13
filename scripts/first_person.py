@@ -1,4 +1,7 @@
-"""Renders what the commander sees looking down at his tablet: his own body, arms and gloved hands, from his eyes,
+"""(The arm layers shipped are the earlier hand render, rebuilt by scripts/fp_hands.py after this script; only
+fp_body and fp_thumb are taken from here.)
+
+Renders what the commander sees looking down at his tablet: his own body, arms and gloved hands, from his eyes,
 in two layers split by the tablet's plane. The back layer goes behind the high-resolution tablet close-up and the
 front layer (fingers and thumbs over its edges) on top. Prints where the tablet's image falls, as CSS.
 
@@ -99,13 +102,13 @@ def box(c, ax, ay, az, hx, hy, hz):
     return np.array([[v[a], v[b], v[c2]] for a, b, c2, d in q for (a, b, c2) in ((a, b, c2), (a, c2, d))])
 
 
-def prism(a, b, ra, rb, n=8):
+def prism(a, b, ra, rb, n=8, phase=0.0):
     """Triangles of a tapered n-sided tube from a (radius ra) to b (radius rb), capped."""
     ax = b - a; ax = ax / np.linalg.norm(ax)
     u = np.cross(ax, [0, 0, 1.0]);
     if np.linalg.norm(u) < 1e-6: u = np.cross(ax, [1.0, 0, 0])
     u /= np.linalg.norm(u); w = np.cross(ax, u)
-    ring = lambda c, r: [c + r * (np.cos(k * 2 * np.pi / n) * u + np.sin(k * 2 * np.pi / n) * w) for k in range(n)]
+    ring = lambda c, r: [c + r * (np.cos(phase + k * 2 * np.pi / n) * u + np.sin(phase + k * 2 * np.pi / n) * w) for k in range(n)]
     A, B = ring(a, ra), ring(b, rb)
     t = []
     for k in range(n):
@@ -159,20 +162,23 @@ def main():
     hw = WK_H * WK_ASPECT / 2 * (1 + 2 * WK_PAD / WK_ASPECT * 0)
     q = np.array([project(face_c + a * rt + b * up, cam) for a in (-hw, hw) for b in (-WK_H / 2, WK_H / 2)])
     wx0, wy0, wx1, wy1 = q[:, 0].min(), q[:, 1].min(), q[:, 0].max(), q[:, 1].max()
-    # The right thumb over the frame: a gloved segment then a bare tip, lying on the face, pointing left.
+    # The right thumb over the frame: blocky like the hand's fingers (square, a gloved segment then a bare tip),
+    # lying on the frame just right of the side buttons, ready to tap them.
     pd = np.frombuffer(open(pda, 'rb').read(), np.float32).reshape(-1, 4)[:, :3].astype(float)
     lo, hi = pd.min(0), pd.max(0)
     width = hi[0] - lo[0]
     mx = width * IMG_MARGIN_PX / (IMG_W_PX - 2 * IMG_MARGIN_PX)
     at = lambda xf, uf, h: TABLET_AT + R * (lo[0] - mx + xf * (width + 2 * mx)) + U * uf + N * h
-    base, mid, tip = at(1.03, -0.012, 0.016), at(0.975, -0.004, 0.017), at(0.938, 0.0, 0.014)
-    th = np.concatenate([prism(base, mid, 0.0125, 0.0115), prism(mid, tip, 0.0105, 0.0085)])
+    TIP_X = 0.973
+    base, mid, tip = at(1.05, -0.006, 0.016), at(0.99, 0.0, 0.017), at(TIP_X, 0.0, 0.015)
+    sq = np.pi / 4
+    th = np.concatenate([prism(base, mid, 0.0175, 0.0165, 4, sq), prism(mid, tip, 0.0155, 0.0145, 4, sq)])
     tc = np.array([22.0 + 32 * 12] * (len(th) // 2) + [27.0 + 32 * 12] * (len(th) // 2))
     rgb, alpha, _ = raster(th, tc, cam, light)
     ys, xs = np.nonzero(alpha)
     tx0, tx1, ty0, ty1 = xs.min() - 2, xs.max() + 3, ys.min() - 2, ys.max() + 3
     save(np.dstack([rgb, alpha])[ty0:ty1, tx0:tx1], f'{out}/fp_thumb.webp')
-    tipp = project(at(0.930, 0.0, 0.014), cam)
+    tipp = project(at(TIP_X - 0.012, 0.0, 0.015), cam)
     # CSS for layers placed inside #tablet (whose box is the tablet image): size and offset in % of that box.
     corners = [(lo[0] - mx, hi[1] + mx), (hi[0] + mx, hi[1] + mx), (hi[0] + mx, lo[1] - mx), (lo[0] - mx, lo[1] - mx)]
     pts = np.array([project(TABLET_AT + R * a + U * b, cam) for a, b in corners])

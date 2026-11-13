@@ -118,18 +118,34 @@
   /* The commander's tablet: the rugged PDA in his hands. The game's camera dives onto it (see the viewer), then
      this close-up takes over: the device render as the frame, our UI inside its screen, its side buttons live. */
   #tablet { position: fixed; left: 50%; top: 50%; width: min(80vw, calc(84vh * 2164 / 1139)); aspect-ratio: 2164 / 1139;
-    z-index: 30; pointer-events: none; opacity: 0; transform: translate(-50%, -50%);
-    /* No scale or tilt: the game's camera already frames the tablet exactly here, so the close-up only fades in. */
-    transition: opacity 0.22s ease; }
+    z-index: 30; pointer-events: none; opacity: 1; transform: translate(-50%, -50%); }
   /* Put away, nothing of it may catch the mouse: it would eat the field's zoom and clicks. */
   #tablet:not(.up), #tablet:not(.up) * { pointer-events: none !important; }
   #tablet { container-type: inline-size; }
-  #tablet:not(.up) .display { visibility: hidden; }
+  /* The tablet slides up into view once the camera has zoomed in, and slides down out of view before it zooms out. */
+  #tablet:not(.up) { top: calc(50% + 100vh); visibility: hidden; transition: top 0.36s cubic-bezier(0.55, 0, 0.8, 0.3), visibility 0s 0.36s, rotate 0.3s; }
   #tablet.up { opacity: 1; }
   /* What the commander sees around the tablet: his arms and body behind it, his fingers over its frame. Rendered
      from his eyes (scripts/first_person.py), placed so the tablet in that view lands exactly on this box. */
   #tablet .fp { position: absolute; width: 238.232%; height: 273.386%; left: -69.116%; top: -84.139%; max-width: none;
     pointer-events: none; user-select: none; }
+  /* With the tablet up, the world behind it goes out of focus. */
+  #view { transition: filter 0.35s ease; }
+  body.pda #view { filter: blur(7px) brightness(0.8) saturate(0.85); }
+  /* A unit calling the commander: the handset stays down until the call is answered. */
+  #answerCall { position: fixed; left: 1.5vw; top: 22vh; z-index: 50; animation: call-in 0.3s cubic-bezier(0.2, 0.9, 0.25, 1.1) both; }
+  #answerCall[hidden] { display: none; }
+  #answerCall button { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; text-align: left;
+    background: rgba(16, 20, 13, 0.92); border: 1px solid #e0a526; color: #e9e4cf; font: 600 15px/1.2 'Saira Condensed', sans-serif;
+    letter-spacing: 0.06em; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  #answerCall button:hover { background: rgba(40, 34, 14, 0.95); }
+  #answerCall b { display: block; text-transform: uppercase; letter-spacing: 0.12em; color: #f2c14e; }
+  #answerCall small { display: block; font-size: 12px; color: #b9b394; letter-spacing: 0.08em; text-transform: uppercase; }
+  #answerCall kbd { font: 700 12px/1 'Saira Condensed', sans-serif; padding: 4px 7px; border: 1px solid #6b6447; color: #e9e4cf; }
+  #answerCall .led { width: 10px; height: 10px; border-radius: 50%; background: #f2c14e; box-shadow: 0 0 8px #f2c14e; animation: call-led 1s steps(2, end) infinite; }
+  #answerCall.urgent button { border-color: #e2483d; } #answerCall.urgent .led { background: #e2483d; box-shadow: 0 0 8px #e2483d; }
+  @keyframes call-led { 50% { opacity: 0.25; } }
+  @keyframes call-in { from { transform: translateX(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
   /* The arms are separate layers so they can move: the left hand leaves the tablet to raise the walkie-talkie
      beside it (the tablet stays), and the right thumb follows the side buttons and presses them. */
   #tablet .arm-l { transition: translate 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) 0.26s, visibility 0s 0.26s; }
@@ -141,13 +157,14 @@
   #tablet .wkslot { position: absolute; pointer-events: none; }
   #tablet .wkslot #radio { position: absolute; left: 0; top: 0; right: auto; bottom: auto !important; height: 46vh; transition: none;
     filter: none; transform-origin: 0 0; }
-  #tablet .thumb { position: absolute; z-index: 4; left: 91.939%; top: 49.517%; width: 12.284%; height: 16.201%; pointer-events: none;
-    transform-origin: 85% 60%; filter: drop-shadow(0.25cqw 0.35cqw 0.3cqw rgba(0,0,0,0.45));
-    transition: translate 0.2s cubic-bezier(0.3, 0.75, 0.3, 1), rotate 0.2s cubic-bezier(0.3, 0.75, 0.3, 1), scale 0.07s ease-out, filter 0.07s; }
-  #tablet .thumb.press { scale: 0.92; filter: drop-shadow(0.1cqw 0.12cqw 0.12cqw rgba(0,0,0,0.5)); }
+  #tablet .thumb { position: absolute; z-index: 4; left: 95.661%; top: 46.226%; width: 10.919%; height: 18.985%; pointer-events: none;
+    filter: drop-shadow(0.2cqw 0.3cqw 0.25cqw rgba(0,0,0,0.45)); transition: translate 0.32s cubic-bezier(0.3, 0.75, 0.3, 1), transform 0.07s ease-out; }
+  /* The hand slides along the tablet's edge with the thumb; a tap is a small push onto the button's edge. */
+  #tablet .arm-r { transition: translate 0.32s cubic-bezier(0.3, 0.75, 0.3, 1); }
+  #tablet .thumb.press { transform: translateX(-0.75cqw); }
   /* Held in two hands, the tablet is never quite still: a slow breath, and a small give when it is used. */
   #tablet.up { animation: pda-breath 5.2s ease-in-out infinite; }
-  #tablet { transition: opacity 0.22s ease, rotate 0.3s cubic-bezier(0.3, 0.7, 0.3, 1); }
+  #tablet { transition: top 0.45s cubic-bezier(0.2, 0.85, 0.25, 1), visibility 0s, rotate 0.3s cubic-bezier(0.3, 0.7, 0.3, 1); }
   @keyframes pda-breath { 0%, 100% { translate: 0 0; } 30% { translate: 0.04cqw 0.12cqw; } 65% { translate: -0.03cqw 0.05cqw; } }
   @media (prefers-reduced-motion: reduce) { #tablet.up { animation: none; } #tablet .thumb, #tablet .arm-l, #tablet .wk { transition-duration: 0s; } }
   #tablet .device { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
@@ -411,6 +428,7 @@
 <div id="error" class="panel"></div>
 <div id="fieldHint"><div class="fh-text"><kbd>Tab</kbd><span>to open <b>Commander PDA</b></span></div><div class="fh-dev"><img src="./img/pda_front.webp" alt="" draggable="false"></div></div>
 <div id="actions" hidden></div>
+<div id="answerCall" hidden><button><i class="led"></i><span><b>Answer Transmission</b><small></small></span><kbd>E</kbd></button></div>
 <div id="radio"><img class="body" src="./img/walkie.webp" alt="" draggable="false"><div class="scr">
   <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
   <div class="who"><small id="rDir">STANDBY</small><b id="rWho">—</b></div>
