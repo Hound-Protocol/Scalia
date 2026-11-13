@@ -131,9 +131,9 @@ try {
   const setScene = (name) => {
     scene = name;
     v.set_scene(name);
-    store.set('scalia.scene', name);
   };
-  setScene(store.get('scalia.scene') || 'ground');
+  // The game always opens on the ground: the model viewer and the space views are tools, not where play starts.
+  setScene('ground');
 
   // Toggles and actions.
   // Full resolution for now (the chunky pixel look is switched off; R brings it back).
@@ -1443,7 +1443,7 @@ Click to copy and close.`;
       if (showNote) hud.textContent = note;
       perfPanel(v.perf(), cpuMs, now, cap);
       const now_scene = v.scene_name();
-      if (now_scene !== scene) { scene = now_scene; store.set('scalia.scene', scene); }
+      if (now_scene !== scene) scene = now_scene;
     }
     requestAnimationFrame(loop);
   }
