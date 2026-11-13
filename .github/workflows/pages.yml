@@ -53,6 +53,19 @@ jobs:
           title=""
           sed -i "s#__UPDATE__#$n#" web/game.js
           python3 -c 'import json,sys; print(json.dumps({"v": sys.argv[1], "n": sys.argv[2], "title": sys.argv[3]}))' "$v" "$n" "$title" > web/version.json
+          python3 - <<'PY' > web/changelog.json
+          import json, subprocess
+          out = subprocess.run(['git', 'log', '--reverse', '--format=%x1e%ad%x1f%s%x1f%(trailers:key=Update,valueonly)', '--date=format:%d %b %Y'], capture_output=True, text=True).stdout
+          count, rows = {}, []
+          for rec in out.split('\x1e')[1:]:
+              date, subj, area = (rec.split('\x1f') + ['', '', ''])[:3]
+              area = area.strip().splitlines()[0].strip() if area.strip() else ''
+              if not area:
+                  continue
+              count[area] = count.get(area, 0) + 1
+              rows.append({'n': '%s update V %03d' % (area, count[area]), 'text': subj.strip().replace('<', '&lt;'), 'date': date.strip()})
+          print(json.dumps(rows[::-1][:60]))
+          PY
           grep -c "v=$v" web/game.js web/pkg/scalia_wasm.js web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:

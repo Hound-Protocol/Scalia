@@ -165,7 +165,7 @@ try {
   // the roster lists the units, the comms hub is a placeholder for talking to other commanders.
   let tabletUp = false, page = 'home';
   const tablet = $('tablet');
-  const PAGE_NAME = { home: 'Home', map: 'Map', roster: 'Roster', comms: 'Comms hub', settings: 'Settings', manual: 'Field Manual' };
+  const PAGE_NAME = { home: 'Home', map: 'Map', roster: 'Roster', comms: 'Comms hub', settings: 'Settings', manual: 'Field Manual', changelog: 'Changelog' };
   // The header: who you are and how many you lead (the name and battalion are yours to set in Settings).
   const ident = { cmdr: store.get('cmdr.name') || 'Commander', batt: store.get('batt.name') || '1st Battalion' };
   const showIdent = () => { $('pdaCmdr').textContent = ident.cmdr; $('pdaBatt').textContent = ident.batt; };
@@ -309,6 +309,16 @@ try {
       breakup();
     }, 70);
   };
+  // The changelog is written at deploy time from the commit history (changelog.json).
+  let chgLoaded = false;
+  const drawChangelog = async () => {
+    if (chgLoaded) return;
+    try {
+      const list = await (await fetch('./changelog.json', { cache: 'no-cache' })).json();
+      $('chgList').innerHTML = list.map((e) => `<div class="ver"><b>${e.n}</b><span>${e.text}<small>${e.date}</small></span></div>`).join('') || '<p class="note">Nothing recorded yet.</p>';
+      chgLoaded = true;
+    } catch { $('chgList').innerHTML = '<p class="note">The changelog is not available right now.</p>'; }
+  };
   const setPage = (p) => {
     // The page that comes in wipes across the glass (only when the page changes, not on a redraw).
     if (p !== page) {
@@ -326,6 +336,8 @@ try {
     $('comms').hidden = p !== 'comms';
     $('settings').hidden = p !== 'settings';
     $('manual').hidden = p !== 'manual';
+    $('changelog').hidden = p !== 'changelog';
+    if (p === 'changelog') drawChangelog();
     if (p === 'roster') drawRoster();
     pdaStatus();
   };
@@ -661,7 +673,7 @@ try {
         captains.map((c) => `<option value="${c.id}"${u.boss === c.id ? ' selected' : ''}>${c.name}</option>`).join('')}</select>`;
     const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
     const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td class="num">${u.soldiers}</td><td class="st-${u.status}">${u.task || cap(u.status)}</td><td>${cap(u.stance)}</td></tr>`;
-    $('roster').innerHTML = `<table><tr><th>Unit</th><th>Answers to</th><th>Soldiers</th><th>Status</th><th>Stance</th></tr>${
+    $('roster').innerHTML = `<table><tr><th>Unit</th><th>Answers to</th><th>Manpower</th><th>Status</th><th>Stance</th></tr>${
       captains.map(row).join('')}${units.filter((u) => !u.captain).map(row).join('')
     }</table><p class="note">Click a unit to find it on the map. Attach squads to a captain and give him a goal: he plans the rest and leads them.</p>`;
     for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', (e) => {

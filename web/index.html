@@ -133,11 +133,10 @@
   #tablet .device { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
     filter: drop-shadow(0 18px 40px rgba(0,0,0,0.65)); }
   #tablet .hw { z-index: 3; position: absolute; left: 91.99%; width: 3.28%; height: 6.15%; border: 0; border-radius: 22%; background: transparent; cursor: pointer; pointer-events: auto; }
-  /* Side labels look printed on the plate: faded stencil paint, worn in places, sized by the device width. */
+  /* Side labels look printed on the plate: black stencil ink, slightly worn, sized by the device width. */
   #tablet .hwl { position: absolute; z-index: 3; left: 90.2%; width: 7.2%; text-align: center; white-space: nowrap; overflow: visible; pointer-events: none;
-    font: 700 0.82cqw/1 'Saira Condensed', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(190,184,140,0.5);
-    text-shadow: 0 -0.08cqw 0 rgba(0,0,0,0.45), 0 0.08cqw 0 rgba(255,255,220,0.07); mix-blend-mode: hard-light;
-    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='60'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 2.2 -.55'/></filter><rect width='160' height='60' filter='url(%23n)'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='60'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 2.2 -.55'/></filter><rect width='160' height='60' filter='url(%23n)'/></svg>"); }
+    font: 700 0.9cqw/1 'Saira Condensed', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(8,10,4,0.88);
+    text-shadow: 0 0.07cqw 0 rgba(200,210,150,0.14); }
   #tablet .hw:hover { box-shadow: 0 0 0 2px rgba(150, 220, 160, 0.55); }
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
@@ -193,6 +192,12 @@
     background: linear-gradient(180deg, rgba(205,191,148,0.07), transparent); border-bottom: 1px solid var(--line); }
   #tablet .pda-head::after { content: ''; position: absolute; left: 50%; bottom: -1px; width: 220px; height: 1px; transform: translateX(-50%);
     background: linear-gradient(90deg, transparent, var(--amber), transparent); }
+  #tablet .ph-btn { margin-right: 14px; background: rgba(224,165,38,0.08); color: var(--amber); border: 1px solid rgba(224,165,38,0.45); padding: 4px 11px; font: 700 12px 'Saira Condensed', sans-serif; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
+  #tablet .ph-btn:hover, #tablet .ph-btn.on { background: rgba(224,165,38,0.2); color: #f0e2b4; }
+  #tablet #changelog .ver { display: grid; grid-template-columns: 11cqw 1fr; gap: 0.8cqw; padding: 0.55cqw 0; border-bottom: 1px solid var(--line); font-size: 1cqw; color: var(--sand); }
+  #tablet #changelog .ver b { color: var(--amber); font-weight: 700; letter-spacing: 0.04em; }
+  #tablet #changelog .ver small { display: block; color: var(--dim); font-size: 0.85cqw; margin-top: 0.15cqw; }
+  #tablet #changelog { overflow: hidden auto; }
   #tablet .ph-page { justify-self: start; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 14px; letter-spacing: 0.06em; }
   #tablet .ph-page::before { content: ''; width: 6px; height: 6px; background: var(--amber); transform: rotate(45deg); }
   #tablet .ph-id { text-align: center; line-height: 1; }
@@ -392,9 +397,9 @@
     <span class="ph-page" id="pdaStatus">HOME</span>
     <div class="ph-id">
       <div class="ph-batt" id="pdaBatt">1st Battalion</div>
-      <div class="ph-meta"><span class="ph-cmdr"><i class="band"></i><span id="pdaCmdr">Commander</span></span><i class="ph-sep"></i><span><b id="pdaSoldiers">0</b> soldiers</span></div>
+      <div class="ph-meta"><span class="ph-cmdr"><i class="band"></i><span id="pdaCmdr">Commander</span></span><i class="ph-sep"></i><span><b id="pdaSoldiers">0</b> manpower</span></div>
     </div>
-    <div class="ph-right"><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
+    <div class="ph-right"><button class="ph-btn" data-page="changelog" id="chgBtn" title="What changed in each update">Changelog</button><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
   </header>
   <div class="screen page" id="home"></div>
   <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">click a unit, then click a place to give it an order · Shift + drag: box · drag/WASD: pan · wheel: zoom</div></div>
@@ -425,6 +430,7 @@
     <p class="note"><a href="./debug.html">Debug page</a> (blueprints, terrain chunks)</p>
     </div>
   </div>
+  <div class="screen page" id="changelog" hidden><h3>Changelog</h3><div id="chgList"><p class="note">Loading…</p></div></div>
   <div class="screen page" id="comms" hidden>
     <div class="channels">
       <div class="box bk"><h3>Channels</h3><ul><li class="on">Battalion net</li><li>Allied commanders</li><li>Theatre command</li></ul></div>
