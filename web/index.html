@@ -143,15 +143,13 @@
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; pointer-events: none; font-family: 'Saira', system-ui, sans-serif; }
-  #fieldHint .fh-text { display: flex; align-items: center; gap: 10px; padding: 5px 14px 5px 8px; background: linear-gradient(90deg, rgba(10,12,16,0.82), rgba(18,24,20,0.82)); border: 1px solid rgba(224,165,38,0.45); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); color: #cfd8e3; font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; animation: fhPulse 2.4s ease-in-out infinite; }
-  #fieldHint kbd { font: 700 14px 'Saira', sans-serif; letter-spacing: 0.1em; color: #14100a; background: #e0a526; padding: 2px 9px; border-radius: 2px; box-shadow: 0 2px 0 #8a6414; }
+  #fieldHint .fh-text { display: flex; align-items: center; gap: 10px; padding: 3px 11px 3px 6px; background: linear-gradient(90deg, rgba(10,12,16,0.82), rgba(18,24,20,0.82)); border: 1px solid rgba(224,165,38,0.45); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); color: #cfd8e3; font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; animation: fhPulse 2.4s ease-in-out infinite; }
+  #fieldHint kbd { font: 700 11px 'Saira', sans-serif; letter-spacing: 0.1em; color: #14100a; background: #e0a526; padding: 1px 7px; border-radius: 2px; box-shadow: 0 2px 0 #8a6414; }
   #fieldHint b { color: #e0a526; font-weight: 600; }
-  #fieldHint .fh-dev { position: relative; width: 64px; height: 46px; overflow: hidden; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.7)); animation: fhBob 3.2s ease-in-out infinite; }
+  #fieldHint .fh-dev { position: relative; width: 46px; height: 24px; overflow: hidden; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.7)); animation: fhBob 3.2s ease-in-out infinite; }
   #fieldHint .fh-dev img { width: 100%; display: block; }
-  #fieldHint .fh-dev i { position: absolute; left: 0; right: 0; height: 2px; top: 0; background: rgba(120,255,170,0.55); animation: fhScan 2.2s linear infinite; }
   @keyframes fhPulse { 0%, 100% { border-color: rgba(224,165,38,0.35); } 50% { border-color: rgba(224,165,38,0.9); } }
   @keyframes fhBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-  @keyframes fhScan { from { top: 0; } to { top: 100%; } }
   @media (prefers-reduced-motion: reduce) { #fieldHint *, #fieldHint { animation: none !important; } }
   /* Actions window for an order, and the commander's walkie-talkie. */
   #actions { position: fixed; z-index: 40; background: #12171c; border: 1px solid #3d4752; border-radius: 6px; padding: 6px; min-width: 170px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
@@ -365,7 +363,7 @@
   <div class="warn" id="pWarn" hidden></div>
 </div>
 <div id="error" class="panel"></div>
-<div id="fieldHint"><div class="fh-text"><kbd>Tab</kbd><span>to open <b>Commander PDA</b></span></div><div class="fh-dev"><img src="./img/pda_front.webp" alt="" draggable="false"><i></i></div></div>
+<div id="fieldHint"><div class="fh-text"><kbd>Tab</kbd><span>to open <b>Commander PDA</b></span></div><div class="fh-dev"><img src="./img/pda_front.webp" alt="" draggable="false"></div></div>
 <div id="actions" hidden></div>
 <div id="radio"><img class="body" src="./img/walkie.webp" alt="" draggable="false"><div class="scr">
   <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
