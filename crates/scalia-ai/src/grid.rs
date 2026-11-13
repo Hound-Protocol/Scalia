@@ -37,6 +37,12 @@ impl SoldierGrid {
         }
     }
 
+    /// Adds soldier `i` at `p` (for grids filled during a step, such as spots just handed out).
+    pub fn insert(&mut self, i: usize, p: (i64, i64)) {
+        let (cx, cy) = self.cell(p);
+        self.cells[(cy * self.w + cx) as usize].push(i as u32);
+    }
+
     /// Everyone in the cells touching the square of half-size `r_mm` around `p` (a superset of those within
     /// `r_mm`; callers check the distance). Cells in row order, each in index order.
     pub fn near(&self, p: (i64, i64), r_mm: i64, out: &mut Vec<u32>) {
@@ -47,6 +53,36 @@ impl SoldierGrid {
                 out.extend_from_slice(&self.cells[(cy * self.w + cx) as usize]);
             }
         }
+    }
+}
+
+impl SoldierGrid {
+    /// Everyone in the ring of cells `r` steps (Chebyshev) from `p`'s cell; ring 0 is the cell itself.
+    /// Anyone in ring r + 1 or beyond is at least r × CELL_MM from `p`.
+    pub fn ring(&self, p: (i64, i64), r: i64, out: &mut Vec<u32>) {
+        let (cx, cy) = self.cell(p);
+        let mut add = |x: i64, y: i64| {
+            if x >= 0 && y >= 0 && x < self.w && y < self.h {
+                out.extend_from_slice(&self.cells[(y * self.w + x) as usize]);
+            }
+        };
+        if r == 0 {
+            add(cx, cy);
+            return;
+        }
+        for x in cx - r..=cx + r {
+            add(x, cy - r);
+            add(x, cy + r);
+        }
+        for y in cy - r + 1..cy + r {
+            add(cx - r, y);
+            add(cx + r, y);
+        }
+    }
+
+    /// Rings needed to cover `r_mm` around a point.
+    pub fn rings_for(&self, r_mm: i64) -> i64 {
+        r_mm / CELL_MM + 1
     }
 }
 

@@ -78,7 +78,8 @@ fn skipping_empty_ground_never_changes_what_is_seen() {
     }
     let g = SightGrid::build(0, 0, 400, 320, &props);
     let mut blocked = 0;
-    for k in 0..20_000u64 {
+    let rays: u64 = std::env::var("SIGHT_RAYS").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000);
+    for k in 0..rays {
         let r = mix64(k ^ 0xbeef);
         let r2 = mix64(r);
         // Points from 10 m outside the grid to inside it, eye or body heights.
@@ -88,5 +89,5 @@ fn skipping_empty_ground_never_changes_what_is_seen() {
         assert_eq!(fast, clear_slow(&g, a, b), "ray {a:?} -> {b:?}");
         blocked += !fast as u32;
     }
-    assert!(blocked > 2_000, "the test map blocks a good share of rays ({blocked})");
+    assert!(blocked as u64 > rays / 10, "the test map blocks a good share of rays ({blocked})");
 }
