@@ -1579,6 +1579,8 @@ impl Viewer {
                 (Pose::Walk, 1.2 / scalia_render::pose::stride_m_dir(Pose::Walk, dir))
             } else if self.preview_pose == Some(13) {
                 (Pose::CrouchWalk, 1.0 / stride_m(Pose::CrouchWalk))
+            } else if let Some(i @ 14..=16) = self.preview_pose {
+                ([Pose::LeanLeft, Pose::LeanRight, Pose::CrouchAim][i - 14], 0.0)
             } else {
                 SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()]
             };

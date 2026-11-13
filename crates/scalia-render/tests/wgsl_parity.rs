@@ -22,19 +22,16 @@ fn carry_table_matches() {
     let rs: Vec<f32> = Regex::new(r"Carry::\w+ => \((.*)\),").unwrap().captures_iter(RS).flat_map(|c| nums(&c[1])).collect();
     let body = &WGSL[WGSL.find("fn carry(").unwrap()..];
     let body = &body[..body.find("\n}\n").unwrap()];
-    // Per carry in the shader: sh, el, reach, abd (pairs), rifle; the turn across the body is shared.
-    let wg = nums(body);
-    let ryaw = Regex::new(r"\(\*p\)\.ryaw = (-?\d+\.\d+)").unwrap().captures(body).unwrap()[1].parse::<f32>().unwrap();
+    // Per carry in the shader: sh, el, reach, abd (pairs), rifle, ryaw on one line, in carry-index order.
     let mut rows = Vec::new();
-    let mut i = 0;
     for line in body.lines().filter(|l| l.contains("(*p).sh = vec2f(")) {
-        let n = nums(line);
-        rows.extend_from_slice(&n[..9]);
-        rows.push(ryaw);
-        i += 1;
+        rows.extend_from_slice(&nums(line)[..10]);
     }
-    assert_eq!(i, 6, "six carries in the shader ({wg:?})");
-    assert_eq!(rs, rows);
+    assert_eq!(rows.len(), 60, "six carries in the shader");
+    // pose.rs lists Rush after HighReady and before ReadyUp; the shader orders by index (ReadyUp 4, Rush 5).
+    let mut rs_rows: Vec<&[f32]> = rs.chunks(10).collect();
+    rs_rows.swap(4, 5);
+    assert_eq!(rs_rows.concat(), rows);
 }
 
 #[test]
@@ -47,8 +44,10 @@ fn gait_calls_match() {
 
 #[test]
 fn crouch_gait_calls_match() {
-    let rs: Vec<Vec<f32>> = Regex::new(r"= crouch_gait\(phase, ([^)]*), dir\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
-    let wg: Vec<Vec<f32>> = Regex::new(r"crouch_gait\(&p, phase, ([^)]*), dir\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
+    let rs: Vec<Vec<f32>> = Regex::new(r"= crouch_gait\((?:phase|0\.0), ([^)]*), (?:dir|0\.0)\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
+    let wg: Vec<Vec<f32>> = Regex::new(r"crouch_gait\(&p, (?:phase|0\.0), ([^)]*), (?:dir|0\.0)\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
     assert!(!rs.is_empty());
-    assert_eq!(rs, wg);
+    // The two files list the poses in different orders: compare as sets.
+    let key = |v: &Vec<Vec<f32>>| { let mut s: Vec<String> = v.iter().map(|x| format!("{x:?}")).collect(); s.sort(); s };
+    assert_eq!(key(&rs), key(&wg));
 }

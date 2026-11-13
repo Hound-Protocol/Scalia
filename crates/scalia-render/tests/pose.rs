@@ -134,7 +134,7 @@ fn aiming_tucks_the_firing_elbow_and_reaches_across_with_the_other() {
     assert!(pp.elbow[1] > 1.0, "firing elbow not bent: {:?}", pp.elbow);
     let left = hand(&pp, Side::Left);
     // In front of the chest, well in from the left shoulder (x = -0.238).
-    assert!(left.x > -0.238 + 0.15, "support hand does not reach across the body: {left}");
+    assert!(left.x > -0.238 + 0.12, "support hand does not reach across the body: {left}");
     // Right-handed: the stock sits out at the right shoulder and the rifle points straight ahead once the
     // upper body turns (bladed stance).
     let butt = held(Vec3::new(0.238, -0.171, 0.887), &pp);
@@ -468,4 +468,33 @@ fn layer_and_direction_share_one_instance_value() {
     }
     // A plain whole number (what instances without a direction carry) means straight ahead.
     assert_eq!(unpack_layer(7.0), (7.0, 0.0));
+}
+
+/// Where the head is in a pose (its rest point near the eyes, posed).
+fn head_at(pose: Pose) -> Vec3 {
+    let pp = params(pose, 0.0);
+    pose_vertex(Vec3::new(0.0, 0.05, 1.62), Part::Head, &pp)
+}
+
+#[test]
+fn leaning_out_moves_the_head_and_rifle_past_the_corner_and_keeps_the_aim() {
+    assert_eq!((Pose::from_id(12), Pose::from_id(13), Pose::from_id(14)), (Pose::LeanLeft, Pose::LeanRight, Pose::CrouchAim));
+    let aim = head_at(Pose::StandAim);
+    let (l, r) = (head_at(Pose::LeanLeft), head_at(Pose::LeanRight));
+    assert!(l.x < aim.x - 0.15, "lean left moves the head out to the left: {l} vs {aim}");
+    assert!(r.x > aim.x + 0.15, "lean right moves the head out to the right: {r} vs {aim}");
+    for pose in [Pose::LeanLeft, Pose::LeanRight, Pose::CrouchAim] {
+        let pp = grip(&params(pose, 0.0), two_handed(pose));
+        let miss = (hand(&pp, Side::Left) - held(RIFLE_GUARD, &pp)).length();
+        assert!(miss < 0.03, "{pose:?}: left hand {miss:.3} m off the handguard");
+        assert!((pp.rifle_yaw + pp.twist).abs() < 0.01, "{pose:?}: rifle not pointing ahead");
+    }
+}
+
+#[test]
+fn crouched_aim_pops_up_over_a_low_wall() {
+    // Higher than kneeling, lower than standing: eyes over a 1 m wall.
+    let (kneel, crouch_aim, stand) = (hip_height(Pose::CoverAim, 0.0), hip_height(Pose::CrouchAim, 0.0), hip_height(Pose::Stand, 0.0));
+    assert!(crouch_aim > kneel + 0.1 && crouch_aim < stand - 0.15, "hips {crouch_aim} (kneel {kneel}, stand {stand})");
+    assert!(head_at(Pose::CrouchAim).z > 1.15, "eyes clear a 1 m wall: {}", head_at(Pose::CrouchAim).z);
 }

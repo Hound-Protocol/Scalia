@@ -4,7 +4,7 @@ struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: v
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
-struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32 };
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32 };
 
 fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
   let s = sin(ang);
@@ -141,18 +141,22 @@ fn sideways(q: vec3f, a: f32, px: f32) -> vec3f {
 // Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
 // 4 ready up, 5 rush (combat run). Sets both arms and the rifle angle.
 fn carry(p: ptr<function, PP>, c: u32) {
-  if (c == 0u) { (*p).sh = vec2f(0.32, 0.01); (*p).el = vec2f(0.48, 2.19); (*p).reach = vec2f(1.40, 0.49); (*p).abd = vec2f(0.67, 0.32); (*p).rifle = -1.2; }
-  else if (c == 1u) { (*p).sh = vec2f(0.78, -0.10); (*p).el = vec2f(0.47, 1.98); (*p).reach = vec2f(0.24, 0.80); (*p).abd = vec2f(-0.01, 0.76); (*p).rifle = -0.5; }
-  else if (c == 2u) { (*p).sh = vec2f(0.64, -0.10); (*p).el = vec2f(0.45, 2.05); (*p).reach = vec2f(0.69, 0.82); (*p).abd = vec2f(0.46, 0.74); (*p).rifle = -0.75; }
-  else if (c == 3u) { (*p).sh = vec2f(1.18, 0.23); (*p).el = vec2f(0.86, 1.49); (*p).reach = vec2f(0.41, 0.37); (*p).abd = vec2f(0.20, 0.39); (*p).rifle = 0.85; }
-  else if (c == 5u) { (*p).sh = vec2f(0.73, 0.01); (*p).el = vec2f(0.96, 2.06); (*p).reach = vec2f(0.29, 0.43); (*p).abd = vec2f(0.16, 0.37); (*p).rifle = -0.2; }
-  else {
-    (*p).sh = vec2f(1.22, 0.37); (*p).el = vec2f(0.46, 1.89); (*p).reach = vec2f(0.20, 0.40); (*p).abd = vec2f(-0.09, 0.92); (*p).rifle = 0.0;
+  // Each carry turns the rifle across the body (ryaw): stock out to the right shoulder, muzzle to the left.
+  if (c == 0u) {
+    (*p).sh = vec2f(0.32, 0.01); (*p).el = vec2f(0.48, 2.19); (*p).reach = vec2f(1.40, 0.49); (*p).abd = vec2f(0.67, 0.32); (*p).rifle = -1.20; (*p).ryaw = 0.75;
+  } else if (c == 1u) {
+    (*p).sh = vec2f(0.78, -0.10); (*p).el = vec2f(0.47, 1.98); (*p).reach = vec2f(0.24, 0.80); (*p).abd = vec2f(-0.01, 0.76); (*p).rifle = -0.50; (*p).ryaw = 0.75;
+  } else if (c == 2u) {
+    (*p).sh = vec2f(0.64, -0.10); (*p).el = vec2f(0.45, 2.05); (*p).reach = vec2f(0.69, 0.82); (*p).abd = vec2f(0.46, 0.74); (*p).rifle = -0.75; (*p).ryaw = 0.75;
+  } else if (c == 3u) {
+    (*p).sh = vec2f(1.18, 0.23); (*p).el = vec2f(0.86, 1.49); (*p).reach = vec2f(0.41, 0.37); (*p).abd = vec2f(0.20, 0.39); (*p).rifle = 0.85; (*p).ryaw = 0.75;
+  } else if (c == 4u) {
+    (*p).sh = vec2f(1.13, 0.31); (*p).el = vec2f(0.51, 1.84); (*p).reach = vec2f(0.14, 0.58); (*p).abd = vec2f(-0.03, 0.50); (*p).rifle = 0.00; (*p).ryaw = 0.55;
     // Ready up is the aim (pose.rs `aim_arms`): bladed stance, muzzle straight ahead, head looking along it.
-    (*p).twist = -0.75; (*p).look = 0.75;
+    (*p).twist = -0.55; (*p).look = 0.55;
+  } else if (c == 5u) {
+    (*p).sh = vec2f(0.73, 0.01); (*p).el = vec2f(0.96, 2.06); (*p).reach = vec2f(0.29, 0.43); (*p).abd = vec2f(0.16, 0.37); (*p).rifle = -0.20; (*p).ryaw = 0.75;
   }
-  // The rifle turned across the body: stock out to the right shoulder, muzzle to the left.
-  (*p).ryaw = 0.75;
 }
 
 // The stride's life (port of pose.rs `stride`): rise and fall, upper body turning against the legs, rifle sway.
@@ -173,7 +177,7 @@ fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   if (pose == 1u || pose == 2u || pose == 7u || pose == 5u || pose == 11u) { return q; }
   let tau = 6.2831853;
   let breathe = sin(tau * (t / 3.8 + seed));
-  if (pose == 6u || pose == 4u) {
+  if (pose == 6u || pose == 4u || pose == 12u || pose == 13u || pose == 14u) {
     q.sh = q.sh + vec2f(0.008 * breathe);
     q.look = q.look + 0.03 * sin(tau * (t / 7.0 + seed));
     return q;
@@ -199,7 +203,7 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   let sw = sin(phase * 6.2831853);
-  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0);
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0);
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
@@ -230,7 +234,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.knee = vec2f(1.8, 1.75);
     p.lean = 0.12;
     carry(&p, 4u);
-    p.head = 0.05;
+    p.head = -0.25;
   } else if (pose == 5u) {
     p.prone = 1.0;
     p.sh = vec2f(2.8);
@@ -239,9 +243,25 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.head = 1.0;
   } else if (pose == 6u) {
     carry(&p, 4u);
-    p.head = -0.1;
+    p.head = -0.35;
   } else if (pose == 8u) {
     carry(&p, 3u);
+  } else if (pose == 12u || pose == 13u) {
+    // Leaning out around a corner (pose.rs `Pose::LeanLeft` / `LeanRight`, LEAN_TILT 0.32).
+    let g = select(-1.0, 1.0, pose == 13u);
+    carry(&p, 4u);
+    p.head = -0.35;
+    p.tilt = 0.32 * g;
+    p.side = vec2f(-0.06 + 0.04 * g, 0.06 + 0.04 * g);
+    p.knee = vec2f(0.12);
+    p.hip = vec2f(0.06);
+  } else if (pose == 14u) {
+    // Half crouch aiming over a low wall (pose.rs `Pose::CrouchAim`).
+    crouch_gait(&p, 0.0, 0.15, 0.6, 0.0, 0.6, 0.0);
+    p.flat = 1.0;
+    p.lean = 0.15;
+    carry(&p, 4u);
+    p.head = -0.35;
   } else if (pose == 11u) {
     // Crouched walk (pose.rs `Pose::CrouchWalk`).
     crouch_gait(&p, phase, 0.3, 0.575, 0.12, 0.6, dir);
@@ -283,7 +303,7 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0,
              mix(a.reach, b.reach, w), mix(a.sling, b.sling, w), mix(a.bob, b.bob, w), mix(a.twist, b.twist, w),
-             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0);
+             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w));
   p.side = mix(a.side, b.side, w);
   p.flat = mix(a.flat, b.flat, w);
   p.drop = select(select(ground_drop(p.hip, p.knee, p.side, p.flat), b.drop, w >= 1.0), a.drop, w <= 0.0);
@@ -302,7 +322,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || pose == 11u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 14u)); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -400,6 +420,11 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   }
   if (part != 1u && part != 2u && part != 6u && part != 7u && part != 13u && part != 14u) {
     q = rot(turn(q, p.twist), 0.0, 0.88, -p.lean);
+    // Sideways lean around the hips (pose.rs `tilt`), positive to +x.
+    let ts = sin(p.tilt);
+    let tc = cos(p.tilt);
+    let tz = q.z - 0.88;
+    q = vec3f(q.x * tc + tz * ts, q.y, 0.88 - q.x * ts + tz * tc);
   }
   q.z = q.z + p.drop + p.bob;
   if (p.prone > 0.0) {
@@ -429,7 +454,7 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     // Instance c.z: an upper-body stance (pose id + 1) over these legs, e.g. walking while aiming.
     if (layer >= 1.0) {
       let up = pose_params(u32(layer - 1.0), phase, 0.0);
-      pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.twist = pp.twist + up.twist; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
+      pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.tilt = up.tilt; pp.twist = pp.twist + up.twist; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
     }
     // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
     if (b.z <= 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }

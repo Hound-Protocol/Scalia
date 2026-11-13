@@ -37,6 +37,12 @@ pub enum Pose {
     Tablet = 10,
     /// Crouched walk: knees deeply bent, short steps, rifle at low ready (moving low behind cover).
     CrouchWalk = 11,
+    /// Leaning out to the left around a corner while aiming.
+    LeanLeft = 12,
+    /// Leaning out to the right around a corner while aiming.
+    LeanRight = 13,
+    /// Half crouch with the rifle up: popping up to aim over a low wall.
+    CrouchAim = 14,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -58,6 +64,9 @@ impl Pose {
             9 => Pose::Radio,
             10 => Pose::Tablet,
             11 => Pose::CrouchWalk,
+            12 => Pose::LeanLeft,
+            13 => Pose::LeanRight,
+            14 => Pose::CrouchAim,
             _ => Pose::Stand,
         }
     }
@@ -97,6 +106,9 @@ pub struct PoseParams {
     /// Each leg swung out to the side around the front-to-back line through its hip (radians, positive moves the
     /// foot to the figure's right, +x), left then right: walking sideways and at angles while facing ahead.
     pub side: [f32; 2],
+    /// Upper body leaned sideways around the front-to-back line through the hips (radians, positive to the
+    /// right, +x): leaning out around a corner.
+    pub tilt: f32,
     /// 1 keeps the planted boots flat whatever the knee bend (crouched walking); 0 lets the ankle follow the gait.
     pub flat: f32,
     /// Rifle turn around the vertical through the grip (positive swings the muzzle to the left, across the
@@ -288,7 +300,7 @@ pub const GRIP_SWAP: f32 = 0.6;
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim => 1.0,
         _ => 0.0,
     }
 }
@@ -296,6 +308,22 @@ pub fn two_handed(pose: Pose) -> f32 {
 fn leg(q: Vec3, hip: f32, knee: f32) -> Vec3 {
     rot(rot(q, 0.0, KNEE_Z, -knee), 0.0, HIP_Z, hip)
 }
+
+/// The upper body leaned sideways by `a` around the front-to-back line through the hips (positive to +x).
+pub fn tilt(q: Vec3, a: f32) -> Vec3 {
+    if a == 0.0 {
+        return q;
+    }
+    let (s, c) = a.sin_cos();
+    let dz = q.z - HIP_Z;
+    Vec3::new(q.x * c + dz * s, q.y, HIP_Z - q.x * s + dz * c)
+}
+
+/// Head nod while aiming: down onto the stock (cheek weld), eyes along the sights.
+pub const AIM_HEAD: f32 = -0.35;
+
+/// How far a soldier leans out around a corner (radians).
+pub const LEAN_TILT: f32 = 0.32;
 
 /// Where each hip joint is across the body (x), the pivot for `side`.
 pub const HIP_X: f32 = 0.1;
@@ -515,6 +543,24 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 0.3;
             stride(&mut p, phase, 0.012, 0.05, 0.02, 0.02, 0.03);
         }
+        Pose::LeanLeft | Pose::LeanRight => {
+            // Out around a corner: feet braced apart, upper body leaned over the outside foot, aim held level.
+            let g = if pose == Pose::LeanRight { 1.0 } else { -1.0 };
+            aim_arms(&mut p);
+            p.head = AIM_HEAD;
+            p.tilt = LEAN_TILT * g;
+            p.side = [-0.06 + 0.04 * g, 0.06 + 0.04 * g];
+            p.knee = [0.12, 0.12];
+            p.hip = [0.06, 0.06];
+        }
+        Pose::CrouchAim => {
+            // Half crouch, feet staggered and flat, rifle up: over a low wall.
+            (p.hip, p.knee, p.side) = crouch_gait(0.0, 0.15, 0.6, 0.0, 0.6, 0.0);
+            p.flat = 1.0;
+            p.lean = 0.15;
+            aim_arms(&mut p);
+            p.head = AIM_HEAD;
+        }
         Pose::Crouch => {
             kneel(&mut p);
             carry(&mut p, Carry::LowReady);
@@ -523,7 +569,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::CoverAim => {
             kneel(&mut p);
             aim_arms(&mut p);
-            p.head = 0.05;
+            p.head = AIM_HEAD + 0.1;
         }
         Pose::Cover => carry(&mut p, Carry::HighReady),
         Pose::Tablet => {
@@ -549,7 +595,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         }
         Pose::StandAim => {
             aim_arms(&mut p);
-            p.head = -0.1;
+            p.head = AIM_HEAD;
         }
     }
     p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat);
@@ -559,7 +605,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
 /// Two layers (motion guide rule 1): the legs of one pose (gait, crouch) under the upper body of another (aim,
 /// carry), so a soldier can walk while aiming.
 pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
-    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, rifle_yaw: upper.rifle_yaw, twist: legs.twist + upper.twist, head: upper.head, sling: upper.sling, look: upper.look, abduct: upper.abduct, ..*legs }
+    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, rifle_yaw: upper.rifle_yaw, tilt: upper.tilt, twist: legs.twist + upper.twist, head: upper.head, sling: upper.sling, look: upper.look, abduct: upper.abduct, ..*legs }
 }
 
 /// The life a stride puts into the body: a rise and fall twice per cycle, the upper body turning against the legs,
@@ -588,7 +634,7 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
     }
     let tau = std::f32::consts::TAU;
     let breathe = (tau * (t / 3.8 + seed)).sin();
-    if matches!(pose, Pose::StandAim | Pose::CoverAim) {
+    if matches!(pose, Pose::StandAim | Pose::CoverAim | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim) {
         q.shoulder[0] += 0.008 * breathe;
         q.shoulder[1] += 0.008 * breathe;
         q.look += 0.03 * (tau * (t / 7.0 + seed)).sin();
@@ -644,7 +690,7 @@ pub fn carry(p: &mut PoseParams, c: Carry) {
         Carry::Collapsed => ([0.64, -0.10], [0.45, 2.05], [0.69, 0.82], [0.46, 0.74], -0.75, 0.75),
         Carry::HighReady => ([1.18, 0.23], [0.86, 1.49], [0.41, 0.37], [0.20, 0.39], 0.85, 0.75),
         Carry::Rush => ([0.73, 0.01], [0.96, 2.06], [0.29, 0.43], [0.16, 0.37], -0.20, 0.75),
-        Carry::ReadyUp => ([1.22, 0.37], [0.46, 1.89], [0.20, 0.40], [-0.09, 0.92], 0.00, 0.75),
+        Carry::ReadyUp => ([1.13, 0.31], [0.51, 1.84], [0.14, 0.58], [-0.03, 0.50], 0.00, 0.55),
     };
     p.shoulder = shoulder;
     p.elbow = elbow;
@@ -704,6 +750,7 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
     };
     if !matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot) {
         q = rot(turn(q, p.twist), 0.0, HIP_Z, -p.lean);
+        q = tilt(q, p.tilt);
     }
     q.z += p.drop + p.bob;
     if p.prone > 0.0 {
@@ -752,6 +799,7 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         head: m(a.head, b.head),
         rifle: m(a.rifle, b.rifle),
         rifle_yaw: m(a.rifle_yaw, b.rifle_yaw),
+        tilt: m(a.tilt, b.tilt),
         prone: m(a.prone, b.prone),
         drop,
         sling: m(a.sling, b.sling),
