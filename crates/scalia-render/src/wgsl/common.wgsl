@@ -142,20 +142,21 @@ fn sideways(q: vec3f, a: f32, px: f32) -> vec3f {
 // 4 ready up, 5 rush (combat run). Sets both arms and the rifle angle.
 fn carry(p: ptr<function, PP>, c: u32) {
   // Each carry turns the rifle across the body (ryaw): stock out to the right shoulder, muzzle to the left.
+  // Generated from pose.rs `carry` (scripts: carry_ik, then copy the table).
   if (c == 0u) {
-    (*p).sh = vec2f(0.32, 0.01); (*p).el = vec2f(0.48, 2.19); (*p).reach = vec2f(1.40, 0.49); (*p).abd = vec2f(0.67, 0.32); (*p).rifle = -1.20; (*p).ryaw = 0.75;
+    (*p).sh = vec2f(0.42, -0.44); (*p).el = vec2f(0.44, 2.01); (*p).reach = vec2f(0.54, 1.22); (*p).abd = vec2f(0.12, 0.57); (*p).rifle = -0.85; (*p).ryaw = 0.90;
   } else if (c == 1u) {
-    (*p).sh = vec2f(0.78, -0.10); (*p).el = vec2f(0.47, 1.98); (*p).reach = vec2f(0.24, 0.80); (*p).abd = vec2f(-0.01, 0.76); (*p).rifle = -0.50; (*p).ryaw = 0.75;
+    (*p).sh = vec2f(0.55, -0.09); (*p).el = vec2f(0.73, 1.92); (*p).reach = vec2f(0.13, 0.87); (*p).abd = vec2f(-0.04, 0.53); (*p).rifle = -0.50; (*p).ryaw = 0.74;
   } else if (c == 2u) {
-    (*p).sh = vec2f(0.64, -0.10); (*p).el = vec2f(0.45, 2.05); (*p).reach = vec2f(0.69, 0.82); (*p).abd = vec2f(0.46, 0.74); (*p).rifle = -0.75; (*p).ryaw = 0.75;
+    (*p).sh = vec2f(0.48, -0.39); (*p).el = vec2f(0.42, 1.96); (*p).reach = vec2f(0.17, 1.24); (*p).abd = vec2f(-0.11, 0.63); (*p).rifle = -0.75; (*p).ryaw = 0.81;
   } else if (c == 3u) {
-    (*p).sh = vec2f(1.18, 0.23); (*p).el = vec2f(0.86, 1.49); (*p).reach = vec2f(0.41, 0.37); (*p).abd = vec2f(0.20, 0.39); (*p).rifle = 0.85; (*p).ryaw = 0.75;
+    (*p).sh = vec2f(1.21, 0.12); (*p).el = vec2f(0.95, 1.76); (*p).reach = vec2f(0.43, 0.57); (*p).abd = vec2f(0.18, 0.51); (*p).rifle = 0.85; (*p).ryaw = 0.41;
   } else if (c == 4u) {
     (*p).sh = vec2f(1.13, 0.31); (*p).el = vec2f(0.51, 1.84); (*p).reach = vec2f(0.14, 0.58); (*p).abd = vec2f(-0.03, 0.50); (*p).rifle = 0.00; (*p).ryaw = 0.55;
     // Ready up is the aim (pose.rs `aim_arms`): bladed stance, muzzle straight ahead, head looking along it.
     (*p).twist = -0.55; (*p).look = 0.55;
   } else if (c == 5u) {
-    (*p).sh = vec2f(0.73, 0.01); (*p).el = vec2f(0.96, 2.06); (*p).reach = vec2f(0.29, 0.43); (*p).abd = vec2f(0.16, 0.37); (*p).rifle = -0.20; (*p).ryaw = 0.75;
+    (*p).sh = vec2f(0.97, 0.13); (*p).el = vec2f(0.52, 1.86); (*p).reach = vec2f(0.24, 0.80); (*p).abd = vec2f(0.22, 0.69); (*p).rifle = -0.20; (*p).ryaw = 0.58;
   }
 }
 

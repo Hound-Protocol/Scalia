@@ -37,11 +37,11 @@ fn main() {
     // rifle cannot turn, only pitch), the stock against the chest or in the shoulder pocket, and the left
     // (support) arm reaching across to the handguard.
     let targets = [
-        Target { name: "SafeHang", grip: Vec3::new(0.13, 0.24, 1.02), pitch: -1.2, along: 0.14, elbow_r: Vec3::new(0.27, 0.0, 1.08), elbow_l: Vec3::new(-0.2, 0.10, 1.06), butt: None },
-        Target { name: "LowReady", grip: Vec3::new(0.15, 0.31, 1.16), pitch: -0.5, along: 0.16, elbow_r: Vec3::new(0.29, 0.04, 1.12), elbow_l: Vec3::new(-0.10, 0.28, 1.06), butt: None },
-        Target { name: "Collapsed", grip: Vec3::new(0.15, 0.29, 1.16), pitch: -0.75, along: 0.15, elbow_r: Vec3::new(0.29, 0.03, 1.12), elbow_l: Vec3::new(-0.11, 0.25, 1.06), butt: None },
-        Target { name: "HighReady", grip: Vec3::new(0.15, 0.35, 1.14), pitch: 0.85, along: 0.21, elbow_r: Vec3::new(0.30, 0.08, 1.06), elbow_l: Vec3::new(-0.06, 0.30, 1.02), butt: None },
-        Target { name: "Rush", grip: Vec3::new(0.14, 0.24, 1.22), pitch: -0.2, along: 0.16, elbow_r: Vec3::new(0.29, 0.04, 1.12), elbow_l: Vec3::new(-0.10, 0.28, 1.08), butt: None },
+        Target { name: "SafeHang", grip: Vec3::new(0.13, 0.24, 1.02), pitch: -0.85, along: 0.14, elbow_r: Vec3::new(0.27, 0.0, 1.08), elbow_l: Vec3::new(-0.2, 0.10, 1.06), butt: Some(Vec3::new(0.17, 0.12, 1.35)) },
+        Target { name: "LowReady", grip: Vec3::new(0.15, 0.31, 1.16), pitch: -0.5, along: 0.16, elbow_r: Vec3::new(0.29, 0.04, 1.12), elbow_l: Vec3::new(-0.10, 0.28, 1.06), butt: Some(Vec3::new(0.17, 0.12, 1.36)) },
+        Target { name: "Collapsed", grip: Vec3::new(0.15, 0.29, 1.16), pitch: -0.75, along: 0.15, elbow_r: Vec3::new(0.29, 0.03, 1.12), elbow_l: Vec3::new(-0.11, 0.25, 1.06), butt: Some(Vec3::new(0.17, 0.12, 1.35)) },
+        Target { name: "HighReady", grip: Vec3::new(0.15, 0.35, 1.14), pitch: 0.85, along: 0.21, elbow_r: Vec3::new(0.30, 0.08, 1.06), elbow_l: Vec3::new(-0.06, 0.30, 1.02), butt: Some(Vec3::new(0.20, 0.10, 1.10)) },
+        Target { name: "Rush", grip: Vec3::new(0.14, 0.24, 1.22), pitch: -0.2, along: 0.16, elbow_r: Vec3::new(0.29, 0.04, 1.12), elbow_l: Vec3::new(-0.10, 0.28, 1.08), butt: Some(Vec3::new(0.17, 0.12, 1.36)) },
         // Aim: the stock in the shoulder pocket (between chest and deltoid) is what matters; the grip follows.
         Target { name: "ReadyUp", grip: Vec3::new(0.06, 0.30, 1.26), pitch: 0.0, along: 0.21, elbow_r: Vec3::new(0.30, 0.10, 1.12), elbow_l: Vec3::new(-0.02, 0.34, 1.14), butt: Some(Vec3::new(0.17, 0.12, 1.36)) },
     ];

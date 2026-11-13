@@ -221,7 +221,7 @@ fn every_carry_holds_the_rifle_in_both_hands() {
     // The carrying positions from the reference chart: safe hang (stand), low ready (walk, crouch), collapsed
     // low ready (run, sprint), high ready (cover), ready up (aim).
     for (pose, rifle_lo, rifle_hi) in [
-        (Pose::Stand, -1.4, -1.0),
+        (Pose::Stand, -1.0, -0.7),
         (Pose::Walk, -0.7, -0.3),
         (Pose::Crouch, -0.7, -0.3),
         // Combat run: nearly level (the stride sways it a little); sprinting: muzzle down at about 40 degrees.

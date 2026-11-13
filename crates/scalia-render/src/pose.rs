@@ -685,11 +685,11 @@ pub fn carry(p: &mut PoseParams, c: Carry) {
         // Solved by examples/carry_ik: right hand on the pistol grip on the right side of the chest, the rifle
         // turned across the body (stock out to the right shoulder, muzzle to the left), left hand reaching
         // across to the handguard, elbows bent and out to the side, arms clear of the torso.
-        Carry::SafeHang => ([0.32, 0.01], [0.48, 2.19], [1.40, 0.49], [0.67, 0.32], -1.20, 0.75),
-        Carry::LowReady => ([0.78, -0.10], [0.47, 1.98], [0.24, 0.80], [-0.01, 0.76], -0.50, 0.75),
-        Carry::Collapsed => ([0.64, -0.10], [0.45, 2.05], [0.69, 0.82], [0.46, 0.74], -0.75, 0.75),
-        Carry::HighReady => ([1.18, 0.23], [0.86, 1.49], [0.41, 0.37], [0.20, 0.39], 0.85, 0.75),
-        Carry::Rush => ([0.73, 0.01], [0.96, 2.06], [0.29, 0.43], [0.16, 0.37], -0.20, 0.75),
+        Carry::SafeHang => ([0.42, -0.44], [0.44, 2.01], [0.54, 1.22], [0.12, 0.57], -0.85, 0.90),
+        Carry::LowReady => ([0.55, -0.09], [0.73, 1.92], [0.13, 0.87], [-0.04, 0.53], -0.50, 0.74),
+        Carry::Collapsed => ([0.48, -0.39], [0.42, 1.96], [0.17, 1.24], [-0.11, 0.63], -0.75, 0.81),
+        Carry::HighReady => ([1.21, 0.12], [0.95, 1.76], [0.43, 0.57], [0.18, 0.51], 0.85, 0.41),
+        Carry::Rush => ([0.97, 0.13], [0.52, 1.86], [0.24, 0.80], [0.22, 0.69], -0.20, 0.58),
         Carry::ReadyUp => ([1.13, 0.31], [0.51, 1.84], [0.14, 0.58], [-0.03, 0.50], 0.00, 0.55),
     };
     p.shoulder = shoulder;
