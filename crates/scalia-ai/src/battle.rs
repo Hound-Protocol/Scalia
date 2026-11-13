@@ -4,7 +4,57 @@
 //! happens when they meet.
 
 use crate::sight::{isqrt, Point, SightGrid};
+use crate::tactics::{CoverMap, Height};
 use scalia_core::hash::mix64;
+use scalia_core::nav::{find_path, NavGrid};
+
+/// How he moves: pace and how low.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Gait {
+    Walk,
+    Run,
+    Crouch,
+    Sprint,
+}
+
+impl Gait {
+    pub fn speed_mm_s(self) -> i64 {
+        match self {
+            Gait::Walk => 1_500,
+            Gait::Run => 3_500,
+            Gait::Crouch => 1_000,
+            Gait::Sprint => 4_600,
+        }
+    }
+}
+
+/// What his squad leader has told him to do.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Task {
+    Idle,
+    Move { to: (i64, i64), gait: Gait },
+    Hold { at: (i64, i64), face: (i64, i64) },
+}
+
+/// What a soldier calls out (the radio voices and on-screen labels pick these up).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Bark {
+    TakingCover,
+    Contact,
+    Reloading,
+    ManDown,
+}
+
+/// Radius a soldier needs to pass (doorways are 1.2 m and more).
+const BODY_MM: i64 = 250;
+/// Within this of where he is going he has arrived.
+const ARRIVE_MM: i64 = 150;
+const PERSONAL_MM: i64 = 700;
+/// Suppression at which he looks for cover, and below which (with nothing to shoot for a while) he leaves it.
+const SEEK_COVER: i32 = 400;
+const LEAVE_COVER: i32 = 150;
+const CALM_MS: i32 = 3_000;
+const COVER_REACH_MM: i64 = 12_000;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Stance {
@@ -99,11 +149,21 @@ pub struct Soldier {
     pub passive: bool,
     /// Which way he faces: a unit vector scaled to 1000 (north is (0, 1000)).
     pub facing: (i64, i64),
+    pub task: Task,
+    /// How he is moving now (from the task, or running to cover).
+    pub gait: Gait,
+    /// The cover spot he has taken or is running to (index into the cover map).
+    pub cover: Option<usize>,
+    /// How far he moved in the last step (millimetres): the animation's direction and pace.
+    pub vel: (i64, i64),
+    path: Vec<(i64, i64)>,
+    path_to: Option<(i64, i64)>,
+    calm_ms: i32,
 }
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000) }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), path: Vec::new(), path_to: None, calm_ms: 0 }
     }
     pub fn alive(&self) -> bool {
         self.health > 0
@@ -118,6 +178,7 @@ pub enum Event {
     Shot { shooter: usize, target: usize, from: Point, to: Point, hit: bool },
     Killed { soldier: usize, by: usize },
     Reload { soldier: usize },
+    Bark { soldier: usize, bark: Bark },
 }
 
 pub struct Battle {
@@ -134,13 +195,147 @@ pub struct Battle {
     /// Who sees whom right now (row: watcher), refreshed by perception.
     visible: Vec<Vec<bool>>,
     perceive_ms: i32,
+    nav: Option<NavGrid>,
+    pub cover: Option<CoverMap>,
 }
 
 impl Battle {
     pub fn new(sight: SightGrid, soldiers: Vec<Soldier>, seed: u64) -> Battle {
         let squads = soldiers.iter().map(|s| s.squad as usize + 1).max().unwrap_or(0);
         let n = soldiers.len();
-        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0 }
+        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0, nav: None, cover: None }
+    }
+
+    /// A battle on a real map: soldiers path around obstacles and take cover.
+    pub fn with_map(nav: NavGrid, sight: SightGrid, cover: CoverMap, soldiers: Vec<Soldier>, seed: u64) -> Battle {
+        let mut b = Battle::new(sight, soldiers, seed);
+        b.nav = Some(nav);
+        b.cover = Some(cover);
+        b
+    }
+
+    pub fn nav(&self) -> Option<&NavGrid> {
+        self.nav.as_ref()
+    }
+
+    /// Gives soldier `i` a task (his squad leader's job; also the tests').
+    pub fn order(&mut self, i: usize, task: Task) {
+        self.soldiers[i].task = task;
+    }
+
+    /// Where he is going now and how: to his cover if he has taken one, else his task.
+    fn destination(&self, i: usize) -> Option<((i64, i64), Gait)> {
+        let s = &self.soldiers[i];
+        if let (Some(c), Some(map)) = (s.cover, self.cover.as_ref()) {
+            return Some((map.spots[c].pos, Gait::Run));
+        }
+        match s.task {
+            Task::Idle => None,
+            Task::Move { to, gait } => Some((to, gait)),
+            Task::Hold { at, .. } => Some((at, Gait::Walk)),
+        }
+    }
+
+    /// Moves everyone a step along their paths, keeping personal space; sets stance and pace.
+    fn move_soldiers(&mut self, dt_ms: i32) {
+        let before: Vec<(i64, i64)> = self.soldiers.iter().map(|s| s.pos).collect();
+        for i in 0..self.soldiers.len() {
+            if !self.soldiers[i].alive() {
+                self.soldiers[i].vel = (0, 0);
+                continue;
+            }
+            let dest = self.destination(i);
+            let mut step = (0i64, 0i64);
+            if let Some((to, gait)) = dest {
+                self.soldiers[i].gait = gait;
+                let pos = self.soldiers[i].pos;
+                let (dx, dy) = (to.0 - pos.0, to.1 - pos.1);
+                let left = isqrt(dx * dx + dy * dy);
+                // Near the spot with someone already beside him: close enough (the push sorts out the rest).
+                let crowded = left <= 1_500 && before.iter().enumerate().any(|(j, &o)| j != i && self.soldiers[j].alive() && isqrt((o.0 - pos.0).pow(2) + (o.1 - pos.1).pow(2)) < PERSONAL_MM);
+                if left > ARRIVE_MM && !crowded {
+                    if self.soldiers[i].path_to != Some(to) {
+                        let path = self.nav.as_ref().and_then(|n| find_path(n, pos, to, BODY_MM)).unwrap_or_else(|| vec![to]);
+                        let s = &mut self.soldiers[i];
+                        s.path = path;
+                        s.path_to = Some(to);
+                    }
+                    let s = &mut self.soldiers[i];
+                    while s.path.len() > 1 && isqrt((s.path[0].0 - pos.0).pow(2) + (s.path[0].1 - pos.1).pow(2)) <= ARRIVE_MM {
+                        s.path.remove(0);
+                    }
+                    let aim = s.path.first().copied().unwrap_or(to);
+                    let (ax, ay) = (aim.0 - pos.0, aim.1 - pos.1);
+                    let d = isqrt(ax * ax + ay * ay);
+                    if d > 0 {
+                        let len = (gait.speed_mm_s() * dt_ms as i64 / 1_000).min(d);
+                        step = (ax * len / d, ay * len / d);
+                    }
+                }
+            }
+            // Personal space: ease away from anyone too close (positions as they were at the start of the step).
+            let p = self.soldiers[i].pos;
+            let mut push = (0i64, 0i64);
+            for (j, &o) in before.iter().enumerate() {
+                if j == i || !self.soldiers[j].alive() {
+                    continue;
+                }
+                let (dx, dy) = (p.0 - o.0, p.1 - o.1);
+                let d = isqrt(dx * dx + dy * dy);
+                if d < PERSONAL_MM {
+                    let (ux, uy) = if d == 0 { if i < j { (-1, 0) } else { (1, 0) } } else { (dx * 1_000 / d, dy * 1_000 / d) };
+                    let k = (PERSONAL_MM - d) * dt_ms as i64 / 100;
+                    push = (push.0 + ux * k / 1_000, push.1 + uy * k / 1_000);
+                }
+            }
+            let mut next = (p.0 + step.0 + push.0, p.1 + step.1 + push.1);
+            if let Some(n) = &self.nav {
+                // Blocked: drop the push, then slide along the obstacle (x part, then y part of the step).
+                let tries = [next, (p.0 + step.0, p.1 + step.1), (p.0 + step.0, p.1), (p.0, p.1 + step.1)];
+                next = tries.into_iter().find(|q| n.walkable_at(q.0, q.1, 0)).unwrap_or(p);
+            }
+            let s = &mut self.soldiers[i];
+            s.vel = (next.0 - p.0, next.1 - p.1);
+            s.pos = next;
+            s.moving = s.vel != (0, 0) && (step != (0, 0));
+            // Low behind low cover and when moving crouched; standing otherwise.
+            let low_cover = s.cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| m.spots[c].height == Height::Low);
+            // (Without a task or cover he keeps the stance he was given.)
+            if s.task != Task::Idle || s.cover.is_some() {
+                s.stance = if s.gait == Gait::Crouch && s.moving || low_cover && !s.moving { Stance::Crouch } else { Stance::Stand };
+            }
+        }
+    }
+
+    /// Cover decisions (with perception): pinned with known threats, run to the best cover in reach; calm again
+    /// and nothing to shoot for a while, leave it.
+    fn seek_cover(&mut self) {
+        let Some(map) = self.cover.as_ref() else { return };
+        for i in 0..self.soldiers.len() {
+            let s = &self.soldiers[i];
+            if !s.alive() {
+                continue;
+            }
+            if s.cover.is_none() && s.suppression >= SEEK_COVER {
+                let threats: Vec<(i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| c.pos).collect();
+                if threats.is_empty() {
+                    continue;
+                }
+                let taken: Vec<usize> = self.soldiers.iter().filter_map(|o| o.cover).collect();
+                if let Some(c) = map.best(s.pos, &threats, COVER_REACH_MM, &self.sight, &taken) {
+                    self.soldiers[i].cover = Some(c);
+                    self.soldiers[i].calm_ms = 0;
+                    self.log.push(Event::Bark { soldier: i, bark: Bark::TakingCover });
+                }
+            } else if s.cover.is_some() {
+                let calm = s.suppression < LEAVE_COVER && s.target.is_none();
+                let me = &mut self.soldiers[i];
+                me.calm_ms = if calm { me.calm_ms + PERCEIVE_MS } else { 0 };
+                if me.calm_ms >= CALM_MS {
+                    me.cover = None;
+                }
+            }
+        }
     }
 
     /// Whether soldier `i` sees enemy `j` right now (as of the last perception pass).
@@ -241,7 +436,9 @@ impl Battle {
         if self.perceive_ms <= 0 {
             self.perceive_ms += PERCEIVE_MS;
             self.perceive();
+            self.seek_cover();
         }
+        self.move_soldiers(dt_ms);
         for i in 0..self.soldiers.len() {
             if !self.soldiers[i].alive() || self.soldiers[i].passive {
                 continue;
@@ -272,9 +469,15 @@ impl Battle {
                 Some(j) => Some(self.soldiers[j].pos),
                 None => self.contacts[self.soldiers[i].squad as usize].iter().filter(|c| self.time_ms - c.seen_ms <= 3_000 && c.confidence >= CONF_HEARD).max_by_key(|c| (c.confidence, c.seen_ms)).map(|c| c.pos),
             };
+            let me = &mut self.soldiers[i];
             if let Some(p) = look {
-                let me = &mut self.soldiers[i];
                 me.facing = turn_toward(me.facing, (p.0 - me.pos.0, p.1 - me.pos.1));
+            } else if me.moving {
+                me.facing = turn_toward(me.facing, me.vel);
+            } else if let Some(c) = me.cover.zip(self.cover.as_ref()).map(|(c, m)| m.spots[c].toward) {
+                me.facing = turn_toward(me.facing, c);
+            } else if let Task::Hold { face, .. } = me.task {
+                me.facing = turn_toward(me.facing, (face.0 - me.pos.0, face.1 - me.pos.1));
             }
             let Some(j) = self.soldiers[i].target else { continue };
             if self.soldiers[i].cooldown_ms > 0 {
