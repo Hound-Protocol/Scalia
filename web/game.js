@@ -68,46 +68,20 @@ try {
   let note = '', noteUntil = 0;
   const flash = (msg) => { note = msg; noteUntil = performance.now() + 2500; };
 
-  // Ship list.
-  const sel = $('shipSel');
-  for (let i = 0; wasm.shipped_ron(i) !== undefined; i++) sel.append(new Option(JSON.parse(wasm.blueprint_info(wasm.shipped_ron(i))).name, i));
-  sel.append(new Option('Soldier', sel.options.length));
-  sel.value = '5';
-  $('openModels').addEventListener('click', () => window.open('models.html', 'scalia-models', 'width=1200,height=820'));
-  sel.addEventListener('change', () => { v.set_ship(Number(sel.value)); showModelOpts(); });
-
-  // Model viewer: pose, level of detail and colour variant for the soldier.
-  const poseSel = $('poseSel'), detailSel = $('detailSel'), variantSel = $('variantSel');
-  poseSel.append(new Option('all poses', -1));
-  ['walk (low ready)', 'run (collapsed low ready)', 'stand (safe hang)', 'crouch', 'cover aim (ready up)', 'prone', 'standing aim (ready up)', 'sprint', 'cover (high ready)', 'walk while aiming'].forEach((n, i) => poseSel.append(new Option(n, i)));
-  for (let i = 0; v.variant_name(i) !== undefined; i++) variantSel.append(new Option(v.variant_name(i), i));
-  poseSel.addEventListener('change', () => v.preview_pose(Number(poseSel.value)));
-  detailSel.addEventListener('change', () => v.set_model_detail(Number(detailSel.value)));
-  variantSel.addEventListener('change', () => v.set_model_variant(Number(variantSel.value)));
-  const showModelOpts = () => { $('modelOpts').hidden = !(scene === 'ships' && sel.value === String(sel.options.length - 1)); };
-
   // Scenes.
   let scene = 'ships';
   const setScene = (name) => {
     scene = name;
     v.set_scene(name);
-    for (const b of document.querySelectorAll('[data-scene]')) b.classList.toggle('on', b.dataset.scene === name);
-    showModelOpts();
     store.set('scalia.scene', name);
   };
-  for (const b of document.querySelectorAll('[data-scene]')) b.addEventListener('click', () => setScene(b.dataset.scene));
   setScene(store.get('scalia.scene') || 'ground');
 
   // Toggles and actions.
-  const fullres = $('fullres'), outline = $('outline');
-  fullres.addEventListener('change', () => v.set_full(fullres.checked));
   // Full resolution for now (the chunky pixel look is switched off; R brings it back).
-  fullres.checked = true; v.set_full(true);
-  outline.addEventListener('change', () => v.set_outline(outline.checked));
-  $('launch').addEventListener('click', () => v.launch(performance.now()));
-  $('follow').addEventListener('click', () => v.follow());
+  let fullres = true, outline = false;
+  v.set_full(true);
   const toggleHelp = () => { help.classList.toggle('hidden'); store.set('scalia.help', help.classList.contains('hidden') ? '0' : '1'); };
-  $('helpBtn').addEventListener('click', toggleHelp);
   if (store.get('scalia.help') === '0') help.classList.add('hidden');
 
   // Mouse: wheel zooms, drag pans.
@@ -701,8 +675,8 @@ try {
     else if (k === 'c' && tabletUp && page === 'map') { v.map_center_commander(); pdaTap(); }
     else if (k === 'f') v.follow();
     else if (k === 'h') toggleHelp();
-    else if (k === 'o') { outline.checked = !outline.checked; v.set_outline(outline.checked); }
-    else if (k === 'r') { fullres.checked = !fullres.checked; v.set_full(fullres.checked); }
+    else if (k === 'o') { outline = !outline; v.set_outline(outline); }
+    else if (k === 'r') { fullres = !fullres; v.set_full(fullres); }
     else if (k === 't') flash(v.cycle_day_speed(performance.now()));
     else if (k === 'n') flash(v.cycle_army());
     else if (k === 'p') flash(v.cycle_stance());
@@ -802,10 +776,7 @@ try {
       hud.textContent = `${line}${now < noteUntil ? ` | ${note}` : ''}`;
       perfPanel(v.perf(), cpuMs, now, cap);
       const now_scene = v.scene_name();
-      if (now_scene !== scene) { scene = now_scene; for (const b of document.querySelectorAll('[data-scene]')) b.classList.toggle('on', b.dataset.scene === scene); store.set('scalia.scene', scene); }
-      $('launch').hidden = scene !== 'system';
-      $('launch').disabled = v.flying();
-      sel.hidden = scene !== 'ships';
+      if (now_scene !== scene) { scene = now_scene; store.set('scalia.scene', scene); }
     }
     requestAnimationFrame(loop);
   }
