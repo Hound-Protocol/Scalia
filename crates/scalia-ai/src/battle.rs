@@ -49,6 +49,35 @@ const RANGE_MM: i64 = 200_000;
 const SUPPRESS_MISS: i32 = 150;
 const SUPPRESS_HIT: i32 = 300;
 const SUPPRESS_FADE_S: i32 = 400;
+/// Perception runs this often.
+const PERCEIVE_MS: i32 = 250;
+/// Half the view cone, as its cosine (per mille): 120 degrees across.
+const CONE_COS: i64 = 500;
+/// Anyone this close is noticed whichever way he faces (heard, felt).
+const CLOSE_MM: i64 = 3_000;
+/// Gunfire is heard this far away.
+const HEAR_MM: i64 = 60_000;
+/// Contact confidence (per mille) and its fade per second once out of sight, down to a floor (the last known
+/// position is never forgotten in a fight).
+const CONF_SEEN: i32 = 1_000;
+const CONF_SHOT_AT: i32 = 700;
+const CONF_HEARD: i32 = 300;
+const CONF_FADE_S: i32 = 100;
+const CONF_FLOOR: i32 = 100;
+/// Turning speed: 4 rad/s, as the cosine and sine (per mille) of the turn in one 50 ms step.
+const TURN_COS: i64 = 980;
+const TURN_SIN: i64 = 199;
+
+/// What a squad knows of one enemy.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Contact {
+    pub enemy: usize,
+    /// Last known position (where he was when last seen, shot from or heard).
+    pub pos: (i64, i64),
+    pub seen_ms: i64,
+    /// 1000 seen right now .. CONF_FLOOR long lost.
+    pub confidence: i32,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Soldier {
@@ -68,11 +97,13 @@ pub struct Soldier {
     pub target: Option<usize>,
     /// Never shoots (tests, and soldiers told to hold fire).
     pub passive: bool,
+    /// Which way he faces: a unit vector scaled to 1000 (north is (0, 1000)).
+    pub facing: (i64, i64),
 }
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000) }
     }
     pub fn alive(&self) -> bool {
         self.health > 0
@@ -96,11 +127,78 @@ pub struct Battle {
     pub time_ms: i64,
     /// Everything that happened, in order (the renderer and sound read new entries each frame).
     pub log: Vec<Event>,
+    /// Each squad's contacts (indexed by squad id).
+    pub contacts: Vec<Vec<Contact>>,
+    /// Where each squad last heard friendly gunfire (a fight going on), and when.
+    pub heard: Vec<Option<((i64, i64), i64)>>,
+    /// Who sees whom right now (row: watcher), refreshed by perception.
+    visible: Vec<Vec<bool>>,
+    perceive_ms: i32,
 }
 
 impl Battle {
     pub fn new(sight: SightGrid, soldiers: Vec<Soldier>, seed: u64) -> Battle {
-        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new() }
+        let squads = soldiers.iter().map(|s| s.squad as usize + 1).max().unwrap_or(0);
+        let n = soldiers.len();
+        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0 }
+    }
+
+    /// Whether soldier `i` sees enemy `j` right now (as of the last perception pass).
+    pub fn sees(&self, i: usize, j: usize) -> bool {
+        self.visible[i][j]
+    }
+
+    /// What soldier `i`'s squad knows of enemy `j`.
+    pub fn contact(&self, i: usize, j: usize) -> Option<&Contact> {
+        self.contacts[self.soldiers[i].squad as usize].iter().find(|c| c.enemy == j)
+    }
+
+    /// Where soldier `i`'s squad last heard friendly gunfire.
+    pub fn heard(&self, i: usize) -> Option<(i64, i64)> {
+        self.heard[self.soldiers[i].squad as usize].map(|h| h.0)
+    }
+
+    /// Records (or refreshes) a squad's contact; a weaker report never overwrites a stronger, fresher one.
+    fn report(&mut self, squad: usize, enemy: usize, pos: (i64, i64), confidence: i32) {
+        let now = self.time_ms;
+        let list = &mut self.contacts[squad];
+        match list.iter_mut().find(|c| c.enemy == enemy) {
+            Some(c) => {
+                if confidence >= c.confidence {
+                    *c = Contact { enemy, pos, seen_ms: now, confidence };
+                }
+            }
+            None => list.push(Contact { enemy, pos, seen_ms: now, confidence }),
+        }
+    }
+
+    /// Who notices whom: inside the view cone (or very close) and in sight. Sightings go to the squad.
+    fn perceive(&mut self) {
+        let n = self.soldiers.len();
+        for i in 0..n {
+            for j in 0..n {
+                let (me, t) = (&self.soldiers[i], &self.soldiers[j]);
+                let mut v = false;
+                if me.alive() && t.alive() && me.team != t.team {
+                    let (dx, dy) = (t.pos.0 - me.pos.0, t.pos.1 - me.pos.1);
+                    let d2 = dx * dx + dy * dy;
+                    if d2 <= RANGE_MM * RANGE_MM {
+                        let d = isqrt(d2).max(1);
+                        let ahead = me.facing.0 * dx + me.facing.1 * dy >= d * CONE_COS;
+                        v = (ahead || d2 <= CLOSE_MM * CLOSE_MM) && self.exposure(i, j) > 0;
+                    }
+                }
+                self.visible[i][j] = v;
+            }
+        }
+        for i in 0..n {
+            for j in 0..n {
+                if self.visible[i][j] {
+                    let (sq, pos) = (self.soldiers[i].squad as usize, self.soldiers[j].pos);
+                    self.report(sq, j, pos, CONF_SEEN);
+                }
+            }
+        }
     }
 
     /// How many of the target's three body points the shooter can see (0..3).
@@ -133,6 +231,17 @@ impl Battle {
             s.suppression = (s.suppression - fade).max(0);
             s.cooldown_ms -= dt_ms;
         }
+        let cfade = CONF_FADE_S * dt_ms / 1_000;
+        for list in &mut self.contacts {
+            for c in list.iter_mut() {
+                c.confidence = (c.confidence - cfade).max(CONF_FLOOR);
+            }
+        }
+        self.perceive_ms -= dt_ms;
+        if self.perceive_ms <= 0 {
+            self.perceive_ms += PERCEIVE_MS;
+            self.perceive();
+        }
         for i in 0..self.soldiers.len() {
             if !self.soldiers[i].alive() || self.soldiers[i].passive {
                 continue;
@@ -144,23 +253,29 @@ impl Battle {
                 }
                 continue;
             }
-            // Engage the nearest enemy he can see.
+            // Engage the nearest enemy he sees.
             let me = &self.soldiers[i];
             let mut best: Option<(i64, usize)> = None;
             for (j, t) in self.soldiers.iter().enumerate() {
-                if t.team == me.team || !t.alive() {
+                if !self.visible[i][j] || !t.alive() {
                     continue;
                 }
                 let (dx, dy) = (t.pos.0 - me.pos.0, t.pos.1 - me.pos.1);
                 let d2 = dx * dx + dy * dy;
-                if d2 > RANGE_MM * RANGE_MM || best.is_some_and(|(b, _)| d2 >= b) {
-                    continue;
-                }
-                if self.exposure(i, j) > 0 {
+                if best.map_or(true, |(b, _)| d2 < b) {
                     best = Some((d2, j));
                 }
             }
             self.soldiers[i].target = best.map(|b| b.1);
+            // Face the fight: the target, else the freshest contact the squad has (shots from behind).
+            let look = match self.soldiers[i].target {
+                Some(j) => Some(self.soldiers[j].pos),
+                None => self.contacts[self.soldiers[i].squad as usize].iter().filter(|c| self.time_ms - c.seen_ms <= 3_000 && c.confidence >= CONF_HEARD).max_by_key(|c| (c.confidence, c.seen_ms)).map(|c| c.pos),
+            };
+            if let Some(p) = look {
+                let me = &mut self.soldiers[i];
+                me.facing = turn_toward(me.facing, (p.0 - me.pos.0, p.1 - me.pos.1));
+            }
             let Some(j) = self.soldiers[i].target else { continue };
             if self.soldiers[i].cooldown_ms > 0 {
                 continue;
@@ -180,6 +295,23 @@ impl Battle {
             self.soldiers[i].ammo -= 1;
             self.soldiers[i].cooldown_ms = SHOT_MS;
             self.log.push(Event::Shot { shooter: i, target: j, from, to, hit });
+            // The target's squad learns where the fire came from; everyone near hears it.
+            let (shooter_pos, shooter_team) = (self.soldiers[i].pos, self.soldiers[i].team);
+            let tsq = self.soldiers[j].squad as usize;
+            self.report(tsq, i, shooter_pos, CONF_SHOT_AT);
+            for k in 0..self.soldiers.len() {
+                let o = &self.soldiers[k];
+                let (dx, dy) = (o.pos.0 - shooter_pos.0, o.pos.1 - shooter_pos.1);
+                if !o.alive() || dx * dx + dy * dy > HEAR_MM * HEAR_MM {
+                    continue;
+                }
+                let sq = o.squad as usize;
+                if o.team == shooter_team {
+                    self.heard[sq] = Some((shooter_pos, self.time_ms));
+                } else {
+                    self.report(sq, i, shooter_pos, CONF_HEARD);
+                }
+            }
             let t = &mut self.soldiers[j];
             t.suppression = (t.suppression + if hit { SUPPRESS_HIT } else { SUPPRESS_MISS }).min(1_000);
             if hit {
@@ -190,4 +322,21 @@ impl Battle {
             }
         }
     }
+}
+
+/// Turns a facing (unit vector x1000) toward a direction by at most one step's worth (4 rad/s at 50 ms).
+fn turn_toward(f: (i64, i64), d: (i64, i64)) -> (i64, i64) {
+    let len = isqrt(d.0 * d.0 + d.1 * d.1);
+    if len == 0 {
+        return f;
+    }
+    let u = (d.0 * 1_000 / len, d.1 * 1_000 / len);
+    let dot = f.0 * u.0 + f.1 * u.1; // x 1e6
+    if dot >= TURN_COS * 1_000 {
+        return u;
+    }
+    let side = if f.0 * u.1 - f.1 * u.0 >= 0 { 1 } else { -1 };
+    let r = ((f.0 * TURN_COS - side * f.1 * TURN_SIN) / 1_000, (side * f.0 * TURN_SIN + f.1 * TURN_COS) / 1_000);
+    let l = isqrt(r.0 * r.0 + r.1 * r.1).max(1);
+    (r.0 * 1_000 / l, r.1 * 1_000 / l)
 }
