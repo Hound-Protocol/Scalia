@@ -17,7 +17,7 @@ fn vnoise(p: vec2f) -> f32 {
 @group(0) @binding(2) var smp: sampler_comparison;
 struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32, @location(2) @interpolate(flat) fade: f32 };
 @vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) ia: vec4f, @location(3) ib: vec4f, @location(4) ic: vec4f) -> VO {
-  let w = bend_point(animate(p, c, ia, ib, ic, u.time.x), u.bend, u.bend2.x);
+  let w = bend_point(animate(p, c, ia, ib, ic, u.time.x, true), u.bend, u.bend2.x);
   var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
   o.ci = palette_index(c, ia);
   // Instance c.w: how far this draw has dissolved (0 solid, 1 gone); used to cross-fade terrain detail levels.

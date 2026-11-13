@@ -269,6 +269,7 @@ fn grip(p_in: PP, w_in: f32) -> PP {
   var q = p;
   for (var it = 0; it < 6; it = it + 1) {
     let r = grip_res(q);
+    if (dot(r, r) < 1e-6) { break; }
     let d = 0.01;
     let j0 = (grip_res(grip_try(q, vec4f(d, 0.0, 0.0, 0.0))) - r) / d;
     let j1 = (grip_res(grip_try(q, vec4f(0.0, d, 0.0, 0.0))) - r) / d;
@@ -322,7 +323,7 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   return q;
 }
 
-fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32) -> vec3f {
+fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: bool) -> vec3f {
   var q = v;
   let part = select(u32(floor(c / 32.0)), 8u, c < 0.0);
   if (part == 5u) {
@@ -342,7 +343,8 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32) -> vec3f {
     // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
     if (b.z <= 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
     // Left palm onto the handguard (only the left arm and the rifle move, so only they pay for it).
-    if (part == 3u || part == 11u || part == 9u) {
+    // The shadow pass skips it: a few centimetres in an arm's shadow cannot be seen.
+    if (hands && (part == 3u || part == 11u || part == 9u)) {
       let hold = select(two_handed(u32(b.w)), two_handed(u32(d.z - 1.0)), d.z > 0.5);
       let gw = select(hold, grip_weight(u32(d.x), u32(b.w), w), w < 1.0 && d.z <= 0.5);
       pp = grip(pp, gw);

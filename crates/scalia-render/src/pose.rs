@@ -192,6 +192,9 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     let mut q = *p;
     for _ in 0..GRIP_STEPS {
         let r = res(&q);
+        if r.length_squared() < 1e-6 {
+            break; // within 1 mm: most frames stop after a step or two
+        }
         let d = 0.01;
         let j: [Vec3; 3] = std::array::from_fn(|k| {
             let mut x = [0.0; 3];
