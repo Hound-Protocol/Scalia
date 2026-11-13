@@ -184,11 +184,13 @@
   #answerCall.urgent button { border-color: #e2483d; } #answerCall.urgent .led { background: #e2483d; box-shadow: 0 0 8px #e2483d; }
   @keyframes call-led { 50% { opacity: 0.25; } }
   @keyframes call-in { from { transform: translateX(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
-  #tablet .closeHint { position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -1.2cqw); white-space: nowrap; pointer-events: none;
-    font: 600 1.05cqw/1 'Saira Condensed', sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: #cfd8e3;
-    padding: 0.45cqw 1.1cqw; background: rgba(10,12,16,0.72); border: 1px solid rgba(224,165,38,0.45); }
-  #tablet .closeHint kbd { font: 700 1cqw 'Saira', sans-serif; color: #14100a; background: #e0a526; padding: 0.1cqw 0.5cqw; border-radius: 2px; }
-  #tablet .closeHint b { color: #e0a526; font-weight: 600; }
+  #closeHint { position: fixed; left: 50%; top: 14px; z-index: 40; transform: translate(-50%, -160%); opacity: 0; white-space: nowrap; pointer-events: none;
+    font: 600 15px/1 'Saira Condensed', sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: #cfd8e3;
+    padding: 7px 16px; background: rgba(10,12,16,0.78); border: 1px solid rgba(224,165,38,0.45);
+    transition: transform 0.3s cubic-bezier(0.55, 0, 0.8, 0.3), opacity 0.3s; }
+  body.pda #closeHint { transform: translate(-50%, 0); opacity: 1; transition: transform 0.45s cubic-bezier(0.2, 0.85, 0.25, 1) 0.15s, opacity 0.2s 0.15s; }
+  #closeHint kbd { font: 700 14px 'Saira', sans-serif; color: #14100a; background: #e0a526; padding: 1px 8px; border-radius: 2px; }
+  #closeHint b { color: #e0a526; font-weight: 600; }
   /* The arms are separate layers so they can move: the left hand leaves the tablet to raise the walkie-talkie
      beside it (the tablet stays), and the right thumb follows the side buttons and presses them. */
   /* (No visibility transition here: the arm would appear late when the whole tablet becomes visible.) */
@@ -210,6 +212,7 @@
   #tablet .thumb-l { left: -6.58%; scale: -1 1; transform: translateY(var(--ly, 0)) translateX(var(--lx, 0));
     transition: translate 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) 0.26s, transform 0.32s cubic-bezier(0.3, 0.75, 0.3, 1); }
   #tablet .thumb-l.press { --lx: -0.75cqw; transform: translateY(var(--ly, 0)) translateX(var(--lx)); transition: translate 0.26s, transform 0.07s ease-out; }
+  #tablet.walkie img.fp.arm-l, #tablet.walkie .thumb-l { transition: translate 0.22s cubic-bezier(0.55, 0, 0.8, 0.3) 0s, visibility 0s 0.22s, transform 0.32s; }
   #tablet img.fp.arm-l { transform: translateY(var(--ly, 0)); transition: translate 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) 0.26s, transform 0.32s cubic-bezier(0.3, 0.75, 0.3, 1); }
   /* Held in two hands, the tablet is never quite still: a slow breath, and a small give when it is used. */
   #tablet.up { animation: pda-breath 5.2s ease-in-out infinite; }
@@ -250,6 +253,19 @@
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; pointer-events: none; font-family: 'Saira', system-ui, sans-serif; }
   #fieldHint[hidden] { display: none; }
+  #reboot { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-start; justify-content: center; pointer-events: all; }
+  #reboot[hidden] { display: none; }
+  #reboot .rb { margin-top: 18vh; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 40px 16px;
+    background: linear-gradient(180deg, #7d1414, #4a0b0b); border: 1px solid #e2483d; box-shadow: 0 18px 60px rgba(0,0,0,0.65), 0 0 0 4px rgba(226,72,61,0.18);
+    color: #ffe9e6; font: 700 22px/1.1 'Saira Condensed', sans-serif; letter-spacing: 0.18em; text-transform: uppercase;
+    animation: rb-in 0.35s cubic-bezier(0.2, 0.9, 0.25, 1.25) both; }
+  #reboot .rb small { font: 500 12px 'Saira Condensed', sans-serif; letter-spacing: 0.12em; color: #f3b4ad; }
+  #reboot .rb i { width: 160px; height: 3px; background: rgba(255,255,255,0.15); position: relative; overflow: hidden; }
+  #reboot .rb i::after { content: ''; position: absolute; inset: 0; background: #ff6b5e; transform-origin: left; animation: rb-bar 1.6s linear forwards; }
+  @keyframes rb-in { from { transform: translateY(-40px) scale(0.96); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes rb-bar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  body::after { content: ''; position: fixed; inset: 0; z-index: 190; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.6s ease; }
+  body.unloading::after { opacity: 1; }
   #wipMark { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 20; pointer-events: none; font: 600 15px/1 'Saira Condensed', sans-serif;
     letter-spacing: 0.3em; text-transform: uppercase; color: rgba(255,255,255,0.28); text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
   body.pda #wipMark { display: none; }
@@ -478,6 +494,8 @@
   <div class="warn" id="pWarn" hidden></div>
 </div>
 <div id="error" class="panel"></div>
+<div id="closeHint">Press <kbd>Tab</kbd> or the <b>Close</b> button on the PDA to close the PDA</div>
+<div id="reboot" hidden><div class="rb"><i></i><b>Rebooting session</b><small>Back in a moment</small></div></div>
 <div id="wipMark">Prototype Content - Work in Progress</div>
 <div id="fieldHint"><div class="fh-text"><kbd>Tab</kbd><span>to open <b>Commander PDA</b></span></div><div class="fh-dev"><img src="./img/pda_front.webp" alt="" draggable="false"></div></div>
 <div id="actions" hidden></div>
@@ -513,7 +531,6 @@
   <span class="hwl" style="left:3.47%;width:6%;top:56.4%;white-space:normal;line-height:1.15;font-size:0.85cqw">Field<br>Manual</span>
   <button class="hw" data-hw="changelog" style="left:4.83%;top:74.45%" title="What changed in each update"></button>
   <span class="hwl" style="left:3.47%;width:6%;top:71.6%;font-size:0.85cqw">Changelog</span>
-  <div class="closeHint">Press <kbd>Tab</kbd> or the <b>Close</b> button on the PDA to close the PDA</div>
   <img class="thumb" src="./img/fp_thumb.webp" alt="" draggable="false">
   <img class="thumb thumb-l arm-l" src="./img/fp_thumb.webp" alt="" draggable="false">
   <div class="display">

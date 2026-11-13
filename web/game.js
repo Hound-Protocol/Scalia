@@ -37,6 +37,7 @@ const worldAudio = (() => {
       if (routed.has(el)) return;
       try { c.createMediaElementSource(el).connect(filt); routed.add(el); } catch (_) { /* plays unfiltered */ }
     },
+    fadeOut(sec) { const c = graph(); if (!c) return; gain.gain.cancelScheduledValues(c.currentTime); gain.gain.setTargetAtTime(0, c.currentTime, sec / 3); },
     muffle(on) {
       const c = graph(); if (!c) return;
       const t = c.currentTime;
@@ -54,6 +55,22 @@ const ambience = () => {
   worldAudio.add(el);
   el.play().catch(() => {});
 };
+
+// Reloading (F5, Ctrl+R, Ctrl+Shift+R, or the update notice's button) is never instant: a red "Rebooting
+// session" window drops in, then the game fades out (picture and sound) and only then the page reloads.
+// The browser's own reload button cannot be intercepted by a page.
+let rebooting = false;
+const reboot = () => {
+  if (rebooting) return;
+  rebooting = true;
+  const box = document.getElementById('reboot');
+  box.hidden = false;
+  setTimeout(() => { document.body.classList.add('unloading'); worldAudio.fadeOut(0.6); }, 1000);
+  setTimeout(() => location.reload(), 1700);
+};
+addEventListener('keydown', (e) => {
+  if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) { e.preventDefault(); e.stopPropagation(); reboot(); }
+}, true);
 
 // Background music (placeholder track): starts at 25% once the player enters the game, loops, and can be turned
 // off or turned down on the tablet's settings page. The choice is remembered.
@@ -355,7 +372,7 @@ try {
   const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
   const sfx = (src, vol) => { const a = new Audio(src); a.preload = 'auto'; a.volume = vol; return () => { const b = a.cloneNode(); b.volume = vol; b.play().catch(() => {}); }; };
   const unitSelect = sfx('./sfx/unit-select.mp3', 0.6), menuOpen = sfx('./sfx/context-menu.mp3', 0.6);
-  const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-leave.mp3', 0.6), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
+  const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-leave.mp3', 0.3), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
   // Every button on the tablet, on screen or on the device, taps.
   tablet.addEventListener('click', (e) => { if (e.target.closest('button')) pdaTap(); }, true);
   const DIVE_AT_MS = 550; // matches the viewer's CINE_TURN_MS + CINE_HOLD_MS: the zoom begins
@@ -380,7 +397,7 @@ try {
     document.body.classList.remove('pda');
     worldAudio.muffle(false);
     tablet.classList.remove('up');
-    dockRadio(false); walkieUp();
+    setTimeout(() => { if (!tabletShown) { dockRadio(false); walkieUp(); } }, 400); // the handset goes down with the hand first
     closeActions();
     setTimeout(() => { if (!tabletUp) v.set_tablet(false); }, 380); // slide down first, then zoom out
   };
@@ -1388,7 +1405,7 @@ const UPDATE = '__UPDATE__';
   if (!mine) return; // local build
   const bar = document.getElementById('update');
   const alert = new Audio('./sfx/update-alert.mp3'); alert.preload = 'auto'; alert.volume = 0.6;
-  document.getElementById('update-reload').addEventListener('click', () => location.reload());
+  document.getElementById('update-reload').addEventListener('click', reboot);
   let dismissed = null;
   document.getElementById('update-close').addEventListener('click', () => { bar.hidden = true; dismissed = bar.dataset.v; });
   const check = async () => {
