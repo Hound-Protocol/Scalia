@@ -434,6 +434,16 @@ try {
     });
   }
   addEventListener('pointerup', () => thumb.classList.remove('press'));
+  // Putting the tablet away with Tab: the thumb goes to the power button and presses it first, then it goes down.
+  let pressingOff = false;
+  const pressOff = () => {
+    if (pressingOff) return;
+    pressingOff = true;
+    handTo(btnY(tablet.querySelector('.hw[data-hw="close"]')));
+    setTimeout(() => { thumb.classList.add('press'); pdaTap(); }, 330);
+    setTimeout(() => { thumb.classList.remove('press'); }, 450);
+    setTimeout(() => { pressingOff = false; setTablet(false); }, 520);
+  };
   // The commander's footsteps on grass: one step each time a foot lands (gait phase 0.25 and 0.75), a little
   // different every time.
   const stepSound = new Audio('./sfx/steps-grass.mp3'); stepSound.preload = 'auto';
@@ -1154,7 +1164,7 @@ try {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     held.add(k);
-    if (k === 'tab') { e.preventDefault(); setTablet(!tabletUp); return; }
+    if (k === 'tab') { e.preventDefault(); if (tabletUp && tabletShown) pressOff(); else setTablet(!tabletUp); return; }
     if (k === 'e' && !$('answerCall').hidden) { answer(); return; }
     if (k === '1') setScene('ships');
     else if (k === '2') setScene('ground');
