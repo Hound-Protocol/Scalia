@@ -139,6 +139,8 @@
     text-shadow: 0 0.07cqw 0 rgba(200,210,150,0.14); }
   #tablet .hw:hover { box-shadow: 0 0 0 2px rgba(150, 220, 160, 0.55); }
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
+  #mapCanvas.zoomblur { filter: blur(3px) contrast(1.06); }
+  #mapCanvas { transition: filter 0.05s linear; }
   #mapCanvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fieldHint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; pointer-events: none; font-family: 'Saira', system-ui, sans-serif; }
   #fieldHint[hidden] { display: none; }

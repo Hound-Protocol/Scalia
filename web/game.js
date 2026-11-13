@@ -269,55 +269,13 @@ try {
     if (onGlitch) onGlitch();
   };
   // Zooming the map glitches the glass for as long as the wheel moves (and while the new detail settles), hiding the pop-in.
-  // The zoom glitch is a different look from the page-change one: hairline scan tears and the picture breaking up
-  // in horizontal bands (shifted, colour-split, dropped out), never big blocks.
-  const breakup = () => {
-    if (!tablet.classList.contains('up') || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const disp = tablet.querySelector('.display');
-    disp.querySelector('.glitch')?.remove();
-    const box = document.createElement('div');
-    box.className = 'glitch zoom';
-    const r = (a, b) => a + Math.random() * (b - a);
-    const cols = ['rgba(224,165,38,0.7)', 'rgba(111,207,90,0.6)', 'rgba(120,200,230,0.6)', 'rgba(255,255,255,0.65)', 'rgba(255,60,90,0.5)'];
-    const pick = () => cols[Math.floor(Math.random() * cols.length)];
-    let html = '';
-    for (let k = 0; k < 26; k++) { // pixel-thin tear lines, mostly partial width
-      const w = r(8, 70);
-      html += `<i class="hl" style="top:${r(0, 100).toFixed(1)}%;left:${r(0, 100 - w).toFixed(1)}%;width:${w.toFixed(1)}%;background:${pick()};--x:${Math.round(r(-14, 14))}px;--d:${r(0.05, 0.11).toFixed(3)}s"></i>`;
-    }
-    for (let k = 0; k < 6; k++) { // the picture splitting into shifted bands, with a colour fringe
-      const h = Math.round(r(6, 26));
-      html += `<i class="bd" style="top:${r(0, 94).toFixed(1)}%;height:${h}px;--x:${Math.round(r(-12, 12))}px;--hue:${Math.round(r(-50, 50))}deg;--d:${r(0.06, 0.12).toFixed(3)}s"></i>`;
-    }
-    for (let k = 0; k < 8; k++) { // dropped scanlines
-      html += `<i class="dr" style="top:${r(0, 100).toFixed(1)}%;height:${Math.random() < 0.5 ? 1 : 2}px;--d:${r(0.04, 0.1).toFixed(3)}s"></i>`;
-    }
-    box.innerHTML = html;
-    disp.appendChild(box);
-    const cv = $('mapCanvas');
-    cv.style.transform = `translateX(${Math.round(r(-2, 2))}px)`;
-    setTimeout(() => { box.remove(); cv.style.transform = ''; }, 120);
-    if (onGlitch) onGlitch();
-  };
-  let zoomGlitchUntil = 0, zoomGlitchTimer = 0;
+  // Zooming the map: a very fast blur while the wheel moves, hiding the detail popping in. No glitch effects.
+  let zoomBlurTimer = 0;
   const zoomGlitch = () => {
-    zoomGlitchUntil = performance.now() + 260;
-    if (zoomGlitchTimer) return;
-    breakup();
-    zoomGlitchTimer = setInterval(() => {
-      if (performance.now() > zoomGlitchUntil) { clearInterval(zoomGlitchTimer); zoomGlitchTimer = 0; return; }
-      breakup();
-    }, 70);
-  };
-  // The changelog is written at deploy time from the commit history (changelog.json).
-  let chgLoaded = false;
-  const drawChangelog = async () => {
-    if (chgLoaded) return;
-    try {
-      const list = await (await fetch('./changelog.json', { cache: 'no-cache' })).json();
-      $('chgList').innerHTML = list.map((e) => `<div class="ver"><b>${e.n}</b><span>${e.text}<small>${e.date}</small></span></div>`).join('') || '<p class="note">Nothing recorded yet.</p>';
-      chgLoaded = true;
-    } catch { $('chgList').innerHTML = '<p class="note">The changelog is not available right now.</p>'; }
+    const cv = $('mapCanvas');
+    cv.classList.add('zoomblur');
+    clearTimeout(zoomBlurTimer);
+    zoomBlurTimer = setTimeout(() => cv.classList.remove('zoomblur'), 170);
   };
   const setPage = (p) => {
     // The page that comes in wipes across the glass (only when the page changes, not on a redraw).
