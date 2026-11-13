@@ -150,6 +150,8 @@ try {
       if (e.timeStamp - at > 300) sum = 0; // a pause forgets leftovers
       at = e.timeStamp;
       const px = e.deltaMode === 1 ? e.deltaY * 33.4 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
+      // A mouse wheel notch (a big delta, however big) is exactly one step; only small trackpad deltas add up.
+      if (Math.abs(px) >= 40) { sum = 0; step(Math.sign(px)); return; }
       // The first movement of a gesture steps at once, so a single notch never feels dead.
       const fresh = sum === 0, STEP = 100;
       sum += px;
@@ -797,6 +799,14 @@ try {
     lastMarks = marks;
     const seen = new Set(), placed = [];
     const order = [...marks].sort((a, b) => (b.sel || b.you) - (a.sel || a.you));
+    // Zoomed out, units that would sit on top of each other merge into one marker labelled with the count.
+    const heads = [], under = new Map();
+    for (const m of order) {
+      if (m.you) { heads.push(m); continue; }
+      const hd = heads.find((q) => !q.you && Math.hypot((q.x - m.x) * w, (q.y - m.y) * h) < 22);
+      if (hd) under.set(hd.id, (under.get(hd.id) || 1) + 1); else heads.push(m);
+    }
+    const hidden = new Set(order.filter((m) => !heads.includes(m)).map((m) => m.id));
     for (const m of order) {
       let el = markEls.get(m.id);
       if (!el) {
@@ -804,6 +814,9 @@ try {
         const b = document.createElement('b'); b.textContent = `${m.cs} ${String(m.n).padStart(2, '0')}`;
         el.style.cssText = 'position:absolute;left:0;top:0;will-change:transform'; el.appendChild(b); box.appendChild(el); markEls.set(m.id, el);
       }
+      el.style.display = hidden.has(m.id) ? 'none' : '';
+      const n = under.get(m.id) || 1;
+      el.lastChild.textContent = n > 1 ? `${n} units` : (m.you ? 'Actual 00' : `${m.cs} ${String(m.n).padStart(2, '0')}`);
       const size = Math.max(26, m.r * h * 2);
       const svg = el.firstChild;
       svg.style.width = svg.style.height = `${size}px`; svg.style.left = svg.style.top = `${-size / 2}px`;
