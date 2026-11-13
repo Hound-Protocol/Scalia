@@ -841,7 +841,7 @@ impl Viewer {
     /// Carries out an order at a map point (after the radio exchange): 0 move, 1 defend, 2 assault, 3 support.
     /// Assaults go at a sprint; on arrival a unit takes the stance that fits the order.
     pub fn issue_at(&mut self, action: u8, x: f64, y: f64, now_ms: f64) -> String {
-        if action >= 10 {
+        if action == 10 || action == 11 {
             let Some(c) = self.selected.filter(|&c| self.chain.is_captain(GroupId(c))) else { return "select a captain first".into() };
             let kind = if action == 10 { Kind::Take } else { Kind::Hold };
             return self.assign_task(c, kind, (x, y), now_ms);
