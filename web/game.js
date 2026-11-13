@@ -313,6 +313,7 @@ try {
   let tabletShown = false;
   const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
   const sfx = (src, vol) => { const a = new Audio(src); a.preload = 'auto'; a.volume = vol; return () => { const b = a.cloneNode(); b.volume = vol; b.play().catch(() => {}); }; };
+  const unitSelect = sfx('./sfx/unit-select.mp3', 0.6), menuOpen = sfx('./sfx/context-menu.mp3', 0.6);
   const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-close.mp3', 0.7), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
   // Every button on the tablet, on screen or on the device, taps.
   tablet.addEventListener('click', (e) => { if (e.target.closest('button')) pdaTap(); }, true);
@@ -504,6 +505,7 @@ try {
     if (mMoved > 6) {
       commanderPicked = false;
       const msg = onMap(() => v.select_box(mBox[0] * dpr(), mBox[1] * dpr(), e.offsetX * dpr(), e.offsetY * dpr(), performance.now())); if (msg) flash(msg);
+      if (msg && msg !== 'nothing selected') unitSelect();
     } else mapSelect(e);
     mBox = null;
   });
@@ -590,10 +592,11 @@ try {
     const px = e.offsetX * dpr(), py = e.offsetY * dpr();
     const me = lastMarks.find((m) => m.you);
     if (me && Math.hypot(me.x * mapCanvas.clientWidth - e.offsetX, me.y * mapCanvas.clientHeight - e.offsetY) <= Math.max(16, me.r * mapCanvas.clientHeight)) {
-      commanderPicked = true; onMap(() => v.select_only(-1)); return;
+      commanderPicked = true; onMap(() => v.select_only(-1)); unitSelect(); return;
     }
     commanderPicked = false;
     const msg = onMap(() => v.click(px, py, performance.now())); if (msg) flash(msg);
+    if (msg && msg !== 'nothing selected') unitSelect();
   };
   // Right click: the commands menu for the selected unit, at the clicked place.
   const mapMenu = (e) => {
@@ -610,6 +613,7 @@ try {
     const r = mapCanvas.getBoundingClientRect();
     actionsBox.style.left = `${r.left + e.offsetX + 8}px`; actionsBox.style.top = `${r.top + e.offsetY + 8}px`;
     actionsBox.hidden = false;
+    menuOpen();
     for (const b of actionsBox.querySelectorAll('button[data-id]')) b.addEventListener('click', () => {
       closeActions(); radioOrder(Number(b.dataset.id), b.textContent.trim(), x, y, grid);
     });
@@ -982,6 +986,7 @@ const UPDATE = '__UPDATE__';
   const mine = new URL(import.meta.url).searchParams.get('v');
   if (!mine) return; // local build
   const bar = document.getElementById('update');
+  const alert = new Audio('./sfx/update-alert.mp3'); alert.preload = 'auto'; alert.volume = 0.6;
   document.getElementById('update-reload').addEventListener('click', () => location.reload());
   let dismissed = null;
   document.getElementById('update-close').addEventListener('click', () => { bar.hidden = true; dismissed = bar.dataset.v; });
@@ -994,7 +999,7 @@ const UPDATE = '__UPDATE__';
         bar.dataset.v = live;
         document.querySelector('#update .ttl').textContent = `${info.n || 'Update'} received`;
         document.getElementById('update-sub').textContent = `You run ${UPDATE.startsWith('__') ? mine.slice(0, 7) : UPDATE}`;
-        if (bar.hidden) { bar.hidden = false; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
+        if (bar.hidden) { alert.currentTime = 0; alert.play().catch(() => {}); bar.hidden = false; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
       }
     } catch (_) { /* offline: try again later */ }
   };
