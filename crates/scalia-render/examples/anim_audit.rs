@@ -69,6 +69,7 @@ fn main() {
         let p = params(pose, 0.25);
         let guard = hand(&p, Side::Left).distance(held(RIFLE_GUARD, &p));
         println!("{:<10} guard {:>6.3}", format!("{pose:?}"), guard);
+        if guard > 0.03 { println!("  !! {pose:?}: the left hand is off the handguard"); bad += 1; }
     }
     println!("\nBlend between poses: fastest joint (rad/s) over {BLEND_S}s");
     let ids = 0..=10u32;
@@ -84,5 +85,7 @@ fn main() {
         }
     } }
     println!("worst {:.1} rad/s going {:?} -> {:?}", worst.0, Pose::from_id(worst.1), Pose::from_id(worst.2));
+    // A person can whip a limb round at about 15 rad/s; faster than that a pose change reads as a snap.
+    if worst.0 > 15.0 { println!("  !! a pose change moves a joint faster than 15 rad/s"); bad += 1; }
     if bad > 0 { std::process::exit(1); }
 }
