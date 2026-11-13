@@ -146,9 +146,11 @@
   #fieldLabels i.you { color: #ffdf7a; }
   #tablet #mapMarks { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
   #tablet #mapMarks svg { position: absolute; left: 0; top: 0; overflow: visible; will-change: transform; }
-  #tablet #mapMarks path { fill: none; stroke: #e6c229; stroke-width: 5; stroke-linecap: square; vector-effect: non-scaling-stroke; transition: stroke 0.12s; }
-  #tablet #mapMarks svg.sel path { stroke: #4ae06b; stroke-width: 6; }
-  #tablet #mapMarks b { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 3px; font: 600 11px/1 'Saira Condensed', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: #e6c229; white-space: nowrap; text-shadow: 0 0 3px #000; }
+  #tablet #mapMarks path { fill: none; stroke: #e6c229; stroke-width: 1.5; stroke-linecap: butt; vector-effect: non-scaling-stroke; transition: stroke 0.12s; }
+  #tablet #mapMarks svg.sel path { stroke: #4ae06b; stroke-width: 1.5; }
+  #tablet #mapMarks b { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 3px; font: 700 14px/1 'Saira Condensed', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: #f2d34a; white-space: nowrap; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+  #tablet #mapBox { position: absolute; border: 1px solid #4ae06b; background: rgba(74,224,107,0.1); pointer-events: none; z-index: 5; }
+  #tablet #mapBox[hidden] { display: none; }
   #tablet #unitPanel { position: absolute; left: 10px; top: 10px; width: 21%; min-width: 200px; z-index: 3; pointer-events: auto; background: rgba(12,16,10,0.9); border: 1px solid var(--drab); padding: 10px 12px; color: var(--sand); animation: up-in 0.18s ease-out; }
   #tablet #unitPanel[hidden] { display: none; }
   #tablet #unitPanel h4 { margin: 0; font: 400 20px/1 'Saira Stencil One', 'Saira Condensed', sans-serif; letter-spacing: 0.06em; color: #e3d6aa; }
@@ -295,6 +297,8 @@
   #roster table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
   #roster th { text-align: left; padding: 0 10px 6px; color: var(--dim); font-weight: 500; font-size: 12px; letter-spacing: 0.12em; border-bottom: 1px solid var(--drab); }
   #roster td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  #roster button.cmdu { font: 600 11px 'Saira Condensed', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: var(--amber); background: transparent; border: 1px solid var(--amber); padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+  #roster button.cmdu:hover { background: rgba(224,165,38,0.15); }
   #roster td.num { font-variant-numeric: tabular-nums; }
   #roster tr.unit { cursor: pointer; box-shadow: inset 0 0 0 transparent; transition: box-shadow 0.12s, background 0.12s; }
   #roster tr.unit:hover { background: rgba(205,191,148,0.05); box-shadow: inset 3px 0 0 var(--drab); }
@@ -423,7 +427,7 @@
     <div class="ph-right"><button class="ph-btn" data-page="changelog" id="chgBtn" title="What changed in each update">Changelog</button><span class="sig" title="Battalion net: strong"><i></i><i></i><i></i><i></i></span><span id="pdaClock">00:00:00</span></div>
   </header>
   <div class="screen page" id="home"></div>
-  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div id="mapMarks"></div><div id="unitPanel" hidden></div><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">click a unit, then click a place to give it an order · Shift + drag: box · drag/WASD: pan · wheel: zoom</div></div>
+  <div class="screen map" id="pageMap" hidden><canvas id="mapCanvas"></canvas><div id="mapMarks"></div><div id="mapBox" hidden></div><div id="unitPanel" hidden></div><button id="mapHome" class="map-home" title="Bring the map back to you (C)"><i class="band"></i>Center on commander</button><div class="hint">left click: select · drag: select a square · right click: commands · middle drag/WASD: pan · wheel: zoom</div></div>
   <div class="screen page" id="roster" hidden></div>
   <div class="screen page" id="settings" hidden>
     <h3>Identity</h3>

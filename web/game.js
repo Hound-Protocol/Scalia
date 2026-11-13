@@ -409,25 +409,51 @@ try {
   new ResizeObserver(() => { if (tabletUp && page === 'map') sizeMap(); }).observe(mapCanvas);
   const onMap = (fn) => { v.use_map(true); try { return fn(); } finally { v.use_map(false); } };
   $('mapHome').addEventListener('click', () => v.map_center_commander());
-  let mDrag = null, mMoved = 0, mBox = null;
-  mapCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  let mDrag = null, mMoved = 0, mBox = null, hoverId = null;
+  const mapBoxEl = $('mapBox');
+  mapCanvas.addEventListener('contextmenu', (e) => { e.preventDefault(); mapMenu(e); });
   mapCanvas.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
     mapCanvas.setPointerCapture(e.pointerId);
-    if (e.shiftKey) { mBox = [e.offsetX, e.offsetY]; return; }
-    mDrag = [e.clientX, e.clientY]; mMoved = 0;
+    if (e.button === 1) { e.preventDefault(); mDrag = [e.clientX, e.clientY]; return; }   // middle button: move the camera
+    if (e.button !== 0) return;
+    closeActions();
+    mBox = [e.offsetX, e.offsetY]; mMoved = 0;                                            // left: select, or drag a square
   });
   mapCanvas.addEventListener('pointermove', (e) => {
-    if (!mDrag) return;
-    const dx = e.clientX - mDrag[0], dy = e.clientY - mDrag[1];
-    mMoved += Math.abs(dx) + Math.abs(dy);
-    if (mMoved > 4) onMap(() => v.pan(dx * dpr(), dy * dpr()));
-    mDrag = [e.clientX, e.clientY];
+    if (mDrag) {
+      const dx = e.clientX - mDrag[0], dy = e.clientY - mDrag[1];
+      onMap(() => v.pan(dx * dpr(), dy * dpr()));
+      mDrag = [e.clientX, e.clientY];
+      return;
+    }
+    if (mBox) {
+      mMoved = Math.max(mMoved, Math.abs(e.offsetX - mBox[0]) + Math.abs(e.offsetY - mBox[1]));
+      if (mMoved > 6) {
+        Object.assign(mapBoxEl.style, { left: Math.min(mBox[0], e.offsetX) + 'px', top: Math.min(mBox[1], e.offsetY) + 'px',
+          width: Math.abs(e.offsetX - mBox[0]) + 'px', height: Math.abs(e.offsetY - mBox[1]) + 'px' });
+        mapBoxEl.hidden = false;
+      }
+      return;
+    }
+    // Hover: the details panel shows the unit under the mouse.
+    const h = mapCanvas.clientHeight, w = mapCanvas.clientWidth;
+    let hit = null, best = 1e9;
+    for (const m of lastMarks) {
+      const d = Math.hypot(m.x * w - e.offsetX, m.y * h - e.offsetY);
+      if (d <= Math.max(14, m.r * h) && d < best) { best = d; hit = m.id; }
+    }
+    hoverId = hit;
   });
+  mapCanvas.addEventListener('pointerleave', () => { hoverId = null; });
   mapCanvas.addEventListener('pointerup', (e) => {
-    if (mBox) { const msg = onMap(() => v.select_box(mBox[0] * dpr(), mBox[1] * dpr(), e.offsetX * dpr(), e.offsetY * dpr(), performance.now())); if (msg) flash(msg); mBox = null; return; }
-    if (mDrag && mMoved <= 4) mapClick(e);
-    mDrag = null;
+    if (e.button === 1) { mDrag = null; return; }
+    if (e.button !== 0 || !mBox) return;
+    mapBoxEl.hidden = true;
+    if (mMoved > 6) {
+      commanderPicked = false;
+      const msg = onMap(() => v.select_box(mBox[0] * dpr(), mBox[1] * dpr(), e.offsetX * dpr(), e.offsetY * dpr(), performance.now())); if (msg) flash(msg);
+    } else mapSelect(e);
+    mBox = null;
   });
   // Orders: click a unit, then click a place. An actions window asks what the unit should do there; its AI says
   // whether it can. The order then goes out over the radio, and the unit moves once it has answered.
@@ -458,7 +484,7 @@ try {
   const drawUnitPanel = (units, marks) => {
     const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
     const panel = $('unitPanel');
-    const sel = marks.find((m) => m.sel);
+    const sel = marks.find((m) => m.id === hoverId && m.id >= 0);
     let key = '', html = '';
     if (sel) {
       const u = units.find((x) => x.id === sel.id);
@@ -469,7 +495,7 @@ try {
           <dt>Manpower</dt><dd>${u.soldiers}</dd><dt>Status</dt><dd>${cap(u.status)}${u.task ? ' · ' + u.task : ''}</dd><dt>Stance</dt><dd>${cap(u.stance)}</dd>
           <dt>Answers to</dt><dd>${boss}</dd><dt>Weapon</dt><dd>${SPEC.weapon}</dd><dt>Armor</dt><dd>${SPEC.armor}</dd><dt>Equipment</dt><dd>${SPEC.gear}</dd></dl>`;
       }
-    } else if (commanderPicked) {
+    } else if (hoverId === -1) {
       key = 'cmd';
       html = `<h4>Actual 00</h4><div class="role">Commander</div><dl><dt>Name</dt><dd>${ident.cmdr}</dd><dt>Manpower</dt><dd>1</dd><dt>Weapon</dt><dd>Rifle, slung</dd>
         <dt>Armor</dt><dd>Black uniform</dd><dt>Equipment</dt><dd>Command PDA, handheld radio</dd></dl>`;
@@ -477,7 +503,7 @@ try {
     panel.hidden = !html;
     if (key !== panelKey) { panelKey = key; if (html) panel.innerHTML = html + '<p class="note">Placeholder details until equipment is simulated.</p>'; }
   };
-  const MARK_SVG = '<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M20 2 H98 V80"/><path d="M2 20 V98 H80"/></svg>';
+  const MARK_SVG = '<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M10 0 H100 V90"/><path d="M0 10 V100 H90"/></svg>';
   const drawMapMarks = () => {
     if (!(tabletUp && tabletShown && page === 'map')) return;
     const box = $('mapMarks'), w = mapCanvas.clientWidth, h = mapCanvas.clientHeight;
@@ -498,7 +524,7 @@ try {
       svg.classList.toggle('sel', m.sel || (m.you && commanderPicked));
       el.style.transform = `translate(${(m.x * w).toFixed(1)}px, ${(m.y * h).toFixed(1)}px)`;
       const lx = m.x * w, ly = m.y * h - size / 2 - 8;
-      const clash = placed.some((q) => Math.abs(q[0] - lx) < 66 && Math.abs(q[1] - ly) < 12);
+      const clash = placed.some((q) => Math.abs(q[0] - lx) < 84 && Math.abs(q[1] - ly) < 12);
       if (!clash) placed.push([lx, ly]);
       el.lastChild.style.visibility = clash ? 'hidden' : 'visible';
       el.lastChild.style.bottom = `${size / 2}px`; el.lastChild.style.left = '0'; el.lastChild.style.marginBottom = '3px';
@@ -507,18 +533,21 @@ try {
     for (const [id, el] of markEls) if (!seen.has(id)) { el.remove(); markEls.delete(id); }
     drawUnitPanel(JSON.parse(v.roster()), marks);
   };
-  const mapClick = (e) => {
-    closeActions();
+  // Left click: select the unit under the cursor (the commander too), or clear the selection.
+  const mapSelect = (e) => {
     const px = e.offsetX * dpr(), py = e.offsetY * dpr();
     const me = lastMarks.find((m) => m.you);
     if (me && Math.hypot(me.x * mapCanvas.clientWidth - e.offsetX, me.y * mapCanvas.clientHeight - e.offsetY) <= Math.max(16, me.r * mapCanvas.clientHeight)) {
       commanderPicked = true; onMap(() => v.select_only(-1)); return;
     }
     commanderPicked = false;
-    const unit = onMap(() => v.unit_at(px, py));
-    if (unit >= 0 || !onMap(() => v.selection_name())) {
-      const msg = onMap(() => v.click(px, py, performance.now())); if (msg) flash(msg); return;
-    }
+    const msg = onMap(() => v.click(px, py, performance.now())); if (msg) flash(msg);
+  };
+  // Right click: the commands menu for the selected unit, at the clicked place.
+  const mapMenu = (e) => {
+    closeActions();
+    const px = e.offsetX * dpr(), py = e.offsetY * dpr();
+    if (!onMap(() => v.selection_name())) { flash('Select a unit first (left click)'); return; }
     const [x, y] = onMap(() => v.map_point(px, py));
     const acts = JSON.parse(v.actions_at(x, y));
     const g4 = (m) => String(((Math.round(m / 10) % 10000) + 10000) % 10000).padStart(4, '0'); // 10 m squares
@@ -709,13 +738,16 @@ try {
       `<select class="boss" data-id="${u.id}"><option value="-1"${u.boss < 0 ? ' selected' : ''}>You</option>${
         captains.map((c) => `<option value="${c.id}"${u.boss === c.id ? ' selected' : ''}>${c.name}</option>`).join('')}</select>`;
     const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
-    const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td class="num">${u.soldiers}</td><td class="st-${u.status}">${u.task || cap(u.status)}</td><td>${cap(u.stance)}</td></tr>`;
-    $('roster').innerHTML = `<table><tr><th>Unit</th><th>Answers to</th><th>Manpower</th><th>Status</th><th>Stance</th></tr>${
+    const row = (u) => `<tr class="unit${u.selected ? ' sel' : ''}${u.captain ? ' capt' : ''}" data-id="${u.id}"><td>${u.name}</td><td>${boss(u)}</td><td class="num">${u.soldiers}</td><td class="st-${u.status}">${u.task || cap(u.status)}</td><td>${cap(u.stance)}</td><td><button class="cmdu" data-id="${u.id}">Command Unit</button></td></tr>`;
+    $('roster').innerHTML = `<table><tr><th>Unit</th><th>Answers to</th><th>Manpower</th><th>Status</th><th>Stance</th><th></th></tr>${
       captains.map(row).join('')}${units.filter((u) => !u.captain).map(row).join('')
     }</table><p class="note">Click a unit to find it on the map. Attach squads to a captain and give him a goal: he plans the rest and leads them.</p>`;
     for (const r of $('roster').querySelectorAll('tr.unit')) r.addEventListener('click', (e) => {
-      if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
+      if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION' || e.target.closest('button')) return;
       onMap(() => v.select_unit(Number(r.dataset.id))); setPage('map');
+    });
+    for (const b of $('roster').querySelectorAll('button.cmdu')) b.addEventListener('click', () => {
+      flash(v.command_unit(Number(b.dataset.id))); setTablet(false);
     });
     for (const sel of $('roster').querySelectorAll('select.boss')) sel.addEventListener('change', () => {
       flash(v.attach(Number(sel.dataset.id), Number(sel.value))); drawRoster();

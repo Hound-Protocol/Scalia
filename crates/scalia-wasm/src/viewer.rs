@@ -913,6 +913,16 @@ impl Viewer {
         self.zoom_step = 1;
         self.use_map(was);
     }
+    /// Takes command from a unit: the commander moves to stand with it, facing the way it faces.
+    pub fn command_unit(&mut self, id: u32) -> String {
+        if id >= self.world.groups.len() as u32 {
+            return String::new();
+        }
+        let c = self.group_centre(id, self.world.now);
+        self.cmd = (c.x as f64, c.y as f64);
+        self.map_center_commander();
+        format!("commanding {}", self.call_sign(id))
+    }
     /// Selects one unit (from the roster) and centres the tablet's map on it.
     pub fn select_unit(&mut self, id: u32) {
         if id < self.world.groups.len() as u32 {
