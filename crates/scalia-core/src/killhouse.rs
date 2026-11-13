@@ -74,6 +74,7 @@ const LINES: [Line; 7] = [
     Line { at: 10.0, from: 7.0, to: 14.0, along_x: false, gaps: &[(10.0, 11.2, Gap::Door)] },
 ];
 
+#[derive(Clone, Debug)]
 pub struct Killhouse {
     /// South-west corner (absolute millimetres).
     pub origin: (i64, i64),

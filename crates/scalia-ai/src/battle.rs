@@ -4,7 +4,9 @@
 //! happens when they meet.
 
 use crate::sight::{isqrt, Point, SightGrid};
-use crate::tactics::{CoverMap, Height};
+use crate::leader::{Brain, LEAD_MS};
+use crate::tactics::{Building, CoverMap, Height};
+use scalia_core::killhouse::Killhouse;
 use scalia_core::hash::mix64;
 use scalia_core::nav::{find_path, NavGrid};
 
@@ -43,6 +45,14 @@ pub enum Bark {
     Contact,
     Reloading,
     ManDown,
+    Frag,
+}
+
+/// Something a soldier is busy doing with his hands (the animation plays it; he does not shoot meanwhile).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Act {
+    Throw,
+    Drone,
 }
 
 /// Radius a soldier needs to pass (doorways are 1.2 m and more).
@@ -156,6 +166,10 @@ pub struct Soldier {
     pub cover: Option<usize>,
     /// How far he moved in the last step (millimetres): the animation's direction and pace.
     pub vel: (i64, i64),
+    /// Rifle up while moving or holding (the aim layer over the legs).
+    pub aim: bool,
+    /// What he is busy with, until when (battle ms).
+    pub act: Option<(Act, i64)>,
     path: Vec<(i64, i64)>,
     path_to: Option<(i64, i64)>,
     calm_ms: i32,
@@ -163,7 +177,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), path: Vec::new(), path_to: None, calm_ms: 0 }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, path: Vec::new(), path_to: None, calm_ms: 0 }
     }
     pub fn alive(&self) -> bool {
         self.health > 0
@@ -179,6 +193,9 @@ pub enum Event {
     Killed { soldier: usize, by: usize },
     Reload { soldier: usize },
     Bark { soldier: usize, bark: Bark },
+    /// A squad leader starts a step of his plan.
+    Order { squad: usize, step: &'static str },
+    Explosion { pos: (i64, i64) },
 }
 
 pub struct Battle {
@@ -197,13 +214,17 @@ pub struct Battle {
     perceive_ms: i32,
     nav: Option<NavGrid>,
     pub cover: Option<CoverMap>,
+    pub(crate) building: Option<(Killhouse, Building)>,
+    pub(crate) brains: Vec<Brain>,
+    pub(crate) dead_logged: Vec<bool>,
+    lead_ms: i64,
 }
 
 impl Battle {
     pub fn new(sight: SightGrid, soldiers: Vec<Soldier>, seed: u64) -> Battle {
         let squads = soldiers.iter().map(|s| s.squad as usize + 1).max().unwrap_or(0);
         let n = soldiers.len();
-        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0, nav: None, cover: None }
+        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![vec![false; n]; n], perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0 }
     }
 
     /// A battle on a real map: soldiers path around obstacles and take cover.
@@ -244,7 +265,12 @@ impl Battle {
                 self.soldiers[i].vel = (0, 0);
                 continue;
             }
-            let dest = self.destination(i);
+            let mut dest = self.destination(i);
+            // Rifle up and an enemy in sight: stop and shoot, then carry on (not when running for cover).
+            let s = &self.soldiers[i];
+            if s.aim && s.target.is_some() && s.cover.is_none() && dest.is_some_and(|d| d.1 != Gait::Sprint) {
+                dest = None;
+            }
             let mut step = (0i64, 0i64);
             if let Some((to, gait)) = dest {
                 self.soldiers[i].gait = gait;
@@ -353,6 +379,10 @@ impl Battle {
         self.heard[self.soldiers[i].squad as usize].map(|h| h.0)
     }
 
+    pub(crate) fn report_pub(&mut self, squad: usize, enemy: usize, pos: (i64, i64), confidence: i32) {
+        self.report(squad, enemy, pos, confidence);
+    }
+
     /// Records (or refreshes) a squad's contact; a weaker report never overwrites a stronger, fresher one.
     fn report(&mut self, squad: usize, enemy: usize, pos: (i64, i64), confidence: i32) {
         let now = self.time_ms;
@@ -370,6 +400,11 @@ impl Battle {
     /// Who notices whom: inside the view cone (or very close) and in sight. Sightings go to the squad.
     fn perceive(&mut self) {
         let n = self.soldiers.len();
+        // Confirmed dead: off the list.
+        let alive: Vec<bool> = self.soldiers.iter().map(|s| s.alive()).collect();
+        for list in &mut self.contacts {
+            list.retain(|c| alive[c.enemy]);
+        }
         for i in 0..n {
             for j in 0..n {
                 let (me, t) = (&self.soldiers[i], &self.soldiers[j]);
@@ -409,9 +444,10 @@ impl Battle {
         let d_m = isqrt(dx * dx + dy * dy) / 1000;
         let base = (900 - (d_m - 10).max(0) * 600 / 140).clamp(80, 900);
         let moving = if s.moving { 500 } else { 1_000 };
+        let target_moving = if t.moving { 700 } else { 1_000 };
         let calm = 1_000 - s.suppression as i64 / 2;
         let shown = self.exposure(shooter, target) * 1_000 / 3;
-        base * t.stance.size() / 1_000 * moving / 1_000 * calm / 1_000 * shown / 1_000
+        base * t.stance.size() / 1_000 * moving / 1_000 * target_moving / 1_000 * calm / 1_000 * shown / 1_000
     }
 
     fn roll(&self, who: usize, n: u64) -> i64 {
@@ -438,9 +474,20 @@ impl Battle {
             self.perceive();
             self.seek_cover();
         }
+        self.lead_ms += dt_ms as i64;
+        while self.lead_ms >= LEAD_MS {
+            self.lead_ms -= LEAD_MS;
+            self.lead();
+        }
+        let now = self.time_ms;
+        for s in &mut self.soldiers {
+            if s.act.is_some_and(|(_, until)| now >= until) {
+                s.act = None;
+            }
+        }
         self.move_soldiers(dt_ms);
         for i in 0..self.soldiers.len() {
-            if !self.soldiers[i].alive() || self.soldiers[i].passive {
+            if !self.soldiers[i].alive() || self.soldiers[i].passive || self.soldiers[i].act.is_some() {
                 continue;
             }
             if self.soldiers[i].reloading_ms > 0 {
@@ -520,6 +567,7 @@ impl Battle {
             if hit {
                 t.health = t.health.saturating_sub(DAMAGE);
                 if !t.alive() {
+                    self.dead_logged[j] = true;
                     self.log.push(Event::Killed { soldier: j, by: i });
                 }
             }

@@ -172,6 +172,7 @@ pub struct Entry {
 }
 
 /// How to take a building: its entries and how its rooms connect.
+#[derive(Clone, Debug)]
 pub struct Building {
     pub entries: Vec<Entry>,
     /// Inner doors as room pairs (index into the killhouse doors, rooms).
@@ -194,8 +195,9 @@ impl Building {
                     let out = if inside.is_none() { -1 } else { 1 };
                     let (along, across) = if d.along_x { ((1, 0), (0, out)) } else { ((0, 1), (out, 0)) };
                     let stack = (0..4).map(|n| {
-                        let a = d.width_mm / 2 + 500 + n * 750;
-                        (d.x_mm - along.0 * a + across.0 * 600, d.y_mm - along.1 * a + across.1 * 600)
+                        // Hugging the wall: out of sight of anyone inside looking out through the doorway.
+                        let a = d.width_mm / 2 + 400 + n * 750;
+                        (d.x_mm - along.0 * a + across.0 * 650, d.y_mm - along.1 * a + across.1 * 650)
                     }).collect();
                     entries.push(Entry { door: i, stack });
                 }
