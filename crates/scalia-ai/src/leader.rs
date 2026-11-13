@@ -38,6 +38,21 @@ pub enum Mode {
     Garrison,
 }
 
+/// Hostiles confirmed: the length of one bound.
+const BOUND_MM: i64 = 12_000;
+/// With caution: corners this close ahead are watched.
+const CORNER_MM: i64 = 8_000;
+
+/// The way a man watches while moving with caution: by rank, front, right, left, rear, then the diagonals;
+/// each sweeps 30 degrees either side, turning every 1.5 s. (`DIRS_24` steps are 15 degrees.)
+fn sector(pos: (i64, i64), to: (i64, i64), rank: usize, time_ms: i64) -> (i64, i64) {
+    const OFFSETS: [i64; 8] = [0, -6, 6, 12, -3, 3, -9, 9];
+    let ahead = (to.0 - pos.0, to.1 - pos.1);
+    let base = (0..24).max_by_key(|&k| DIRS_24[k].0 * ahead.0 + DIRS_24[k].1 * ahead.1).unwrap_or(0) as i64;
+    let sweep = if (time_ms / 1_500 + rank as i64) % 2 == 0 { 2 } else { -2 };
+    DIRS_24[(base + OFFSETS[rank % OFFSETS.len()] + sweep).rem_euclid(24) as usize]
+}
+
 /// Around the spot they were sent to: cover within this reach is taken on arrival.
 pub const SECURE_MM: i64 = 10_000;
 /// Close enough to the spot to count as there when he cannot get onto it (it is taken or blocked).
@@ -219,6 +234,78 @@ impl Battle {
         self.brains.get(squad).is_some_and(|b| b.holding || b.secured)
     }
 
+    /// Hostiles confirmed: two teams leapfrog towards the spot in bounds of BOUND_MM, one moving while the other
+    /// is down with weapons on the objective. Returns true once the last bound is done (then all close in).
+    fn bound(&mut self, squad: usize, ms: &[usize], to: (i64, i64)) -> bool {
+        let b = &mut self.brains[squad];
+        if b.legs.is_empty() {
+            // Bound points from where the squad is to the spot.
+            let n = ms.len() as i64;
+            let c = (ms.iter().map(|&i| self.soldiers[i].pos.0).sum::<i64>() / n, ms.iter().map(|&i| self.soldiers[i].pos.1).sum::<i64>() / n);
+            let d = dist(c, to);
+            let k = (d / BOUND_MM).max(1);
+            let b = &mut self.brains[squad];
+            b.legs = (1..=k).map(|j| (c.0 + (to.0 - c.0) * j / k, c.1 + (to.1 - c.1) * j / k)).collect();
+            b.leg = 0;
+        }
+        let b = &self.brains[squad];
+        // The last leg is the spot itself: once a team has reached it, the bounding is over.
+        if b.leg >= b.legs.len() * 2 {
+            return true;
+        }
+        let (leg, team) = (b.leg / 2, b.leg % 2);
+        let goal = b.legs[leg.min(b.legs.len() - 1)];
+        let mut moved = true;
+        for (rank, &i) in ms.iter().enumerate() {
+            let s = &mut self.soldiers[i];
+            s.aim = true;
+            s.watch = None;
+            if rank % 2 == team {
+                if !matches!(s.task, Task::Move { to: t, .. } if t == goal) {
+                    s.task = Task::Move { to: goal, gait: Gait::Run };
+                    s.posture = None;
+                }
+                let there = s.settled || dist(s.pos, goal) <= ARRIVE_NEAR_MM && !s.moving;
+                // At the end of his bound he gets down and covers.
+                if there {
+                    s.posture = Some(Stance::Crouch);
+                }
+                moved &= there;
+            } else if !matches!(s.task, Task::Hold { .. }) {
+                // Down where he is, covering the bound.
+                let p = s.pos;
+                s.task = Task::Hold { at: p, face: to };
+                s.posture = Some(Stance::Crouch);
+            }
+        }
+        if moved {
+            self.brains[squad].leg += 1;
+            self.log.push(Event::Order { squad, step: "bound" });
+        }
+        false
+    }
+
+    /// The nearest high-cover corner within CORNER_MM ahead of each man (towards the spot) is watched by him.
+    fn watch_corners(&mut self, ms: &[usize], to: (i64, i64)) {
+        let Some(cover) = self.cover.as_ref() else { return };
+        let mut watched: Vec<(i64, i64)> = Vec::new();
+        for &i in ms {
+            let s = &self.soldiers[i];
+            let ahead = (to.0 - s.pos.0, to.1 - s.pos.1);
+            let corner = cover
+                .spots
+                .iter()
+                .filter_map(|sp| sp.corner)
+                .filter(|c| !watched.contains(c) && dist(*c, s.pos) <= CORNER_MM && (c.0 - s.pos.0) * ahead.0 + (c.1 - s.pos.1) * ahead.1 > 0)
+                .min_by_key(|c| (dist(*c, s.pos), c.0, c.1));
+            if let Some(c) = corner {
+                watched.push(c);
+                let p = self.soldiers[i].pos;
+                self.soldiers[i].watch = Some((c.0 - p.0, c.1 - p.1));
+            }
+        }
+    }
+
     /// Move: everyone heads for the spot (each gets his own place round it); once all are there, security:
     /// each man takes the nearest free cover within SECURE_MM of the spot, and the rest form a ring round it,
     /// low, each facing out over his own sector.
@@ -228,13 +315,17 @@ impl Battle {
             return;
         }
         let far = ms.iter().map(|&i| dist(self.soldiers[i].pos, to)).max().unwrap_or(0);
+        if mode == Mode::Confirmed && !self.bound(squad, &ms, to) {
+            return;
+        }
         let gait = match mode {
-            Mode::Caution => Gait::Walk,
-            _ if far > 40_000 => Gait::Run,
+            Mode::Caution => Gait::Careful,
+            _ if far > 40_000 && mode == Mode::Plain => Gait::Run,
             _ => Gait::Walk,
         };
         let mut all_there = true;
-        for &i in &ms {
+        for (rank, &i) in ms.iter().enumerate() {
+            let t = self.time_ms;
             let s = &mut self.soldiers[i];
             let going = matches!(s.task, Task::Move { to: t, .. } if t == to);
             if !going {
@@ -242,10 +333,24 @@ impl Battle {
                 s.posture = None;
                 s.aim = mode != Mode::Plain;
             }
-            all_there &= s.settled || dist(s.pos, to) <= ARRIVE_NEAR_MM && !s.moving;
+            // With caution each man watches his own sector (front, flanks, rear), sweeping it slowly.
+            s.watch = if mode == Mode::Caution { Some(sector(s.pos, to, rank, t)) } else { None };
+            let there = s.settled || dist(s.pos, to) <= ARRIVE_NEAR_MM && !s.moving;
+            // Expecting trouble, the first men there get down while the rest come in.
+            if there && mode != Mode::Plain {
+                s.posture = Some(Stance::Crouch);
+            }
+            all_there &= there;
+        }
+        // Moving with caution: a corner close ahead is watched by whoever is nearest it.
+        if mode == Mode::Caution {
+            self.watch_corners(&ms, to);
         }
         if !all_there {
             return;
+        }
+        for &i in &ms {
+            self.soldiers[i].watch = None;
         }
         self.brains[squad].secured = true;
         self.log.push(Event::Order { squad, step: "secure" });

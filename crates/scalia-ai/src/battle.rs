@@ -19,6 +19,8 @@ pub enum Gait {
     Run,
     Crouch,
     Sprint,
+    /// Upright but slow and deliberate: moving with caution, weapon up, watching.
+    Careful,
 }
 
 impl Gait {
@@ -28,6 +30,7 @@ impl Gait {
             Gait::Run => 3_500,
             Gait::Crouch => 1_000,
             Gait::Sprint => 4_600,
+            Gait::Careful => 1_000,
         }
     }
 }
@@ -212,6 +215,8 @@ pub struct Soldier {
     pub(crate) settled: bool,
     /// The stance his leader set for holding a position (low on a perimeter, low behind low cover).
     pub(crate) posture: Option<Stance>,
+    /// Where his leader wants him watching while he moves (a direction), instead of where he walks.
+    pub(crate) watch: Option<(i64, i64)>,
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
@@ -219,7 +224,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, speed: 0, calm_ms: 0 }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, speed: 0, calm_ms: 0 }
     }
     pub fn alive(&self) -> bool {
         self.health > 0
@@ -866,7 +871,7 @@ impl Battle {
             if let Some(p) = look {
                 me.facing = turn_toward(me.facing, (p.0 - me.pos.0, p.1 - me.pos.1));
             } else if me.moving {
-                me.facing = turn_toward(me.facing, me.vel);
+                me.facing = turn_toward(me.facing, me.watch.unwrap_or(me.vel));
             } else if let Some(c) = me.cover.zip(self.cover.as_ref()).map(|(c, m)| m.spots[c].toward) {
                 me.facing = turn_toward(me.facing, c);
             } else if let Task::Hold { face, .. } = me.task {

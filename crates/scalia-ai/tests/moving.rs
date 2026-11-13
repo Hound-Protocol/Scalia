@@ -72,3 +72,53 @@ fn they_walk_into_a_building_through_its_door() {
         assert_eq!(k.room_at(s.pos.0, s.pos.1), room, "inside room C: {:?}", s.pos);
     }
 }
+
+/// Runs a squad of 6 across open ground with `mode`; returns (ms to arrive, soldiers sampled half way).
+fn crossing(mode: Mode) -> (i64, Vec<Soldier>, Battle) {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(6, (20_000, 20_000)), 4);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: (20_000, 80_000), mode } });
+    let mut half = None;
+    while b.time_ms < 200_000 && !b.squad_done(0) {
+        b.step(50);
+        let c = b.soldiers.iter().map(|s| s.pos.1).sum::<i64>() / 6;
+        if half.is_none() && c > 45_000 {
+            half = Some(b.soldiers.clone());
+        }
+    }
+    (b.time_ms, half.expect("got half way"), b)
+}
+
+#[test]
+fn with_caution_they_go_slower_and_watch_all_round() {
+    let (plain, _, _) = crossing(Mode::Plain);
+    let (careful, mid, b) = crossing(Mode::Caution);
+    assert!(b.squad_done(0), "they get there");
+    assert!(careful > plain * 13 / 10, "slower: {careful} ms vs {plain} ms");
+    // Half way, walking north: weapons up, and someone watches each side and the rear.
+    assert!(mid.iter().all(|s| s.aim), "weapons up");
+    assert!(mid.iter().any(|s| s.facing.0 > 600), "someone watches the east");
+    assert!(mid.iter().any(|s| s.facing.0 < -600), "someone watches the west");
+    assert!(mid.iter().any(|s| s.facing.1 < -500), "someone watches the rear");
+}
+
+#[test]
+fn with_hostiles_confirmed_they_bound_in_two_teams() {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(6, (20_000, 20_000)), 5);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: (20_000, 80_000), mode: Mode::Confirmed } });
+    let (mut split, mut samples) = (0, 0);
+    while b.time_ms < 240_000 && !b.squad_done(0) {
+        b.step(50);
+        if b.time_ms % 1_000 == 0 && b.time_ms > 2_000 {
+            let moving = b.soldiers.iter().filter(|s| s.moving).count();
+            samples += 1;
+            // One team moves while the other is down covering: neither all moving nor all still.
+            if (2..=4).contains(&moving) {
+                split += 1;
+                let still: Vec<&Soldier> = b.soldiers.iter().filter(|s| !s.moving).collect();
+                assert!(still.iter().all(|s| s.stance == Stance::Crouch && s.aim), "the covering team is down, weapons up: t={} {:?}", b.time_ms, b.soldiers.iter().map(|s| (s.moving, s.stance, s.aim, s.task)).collect::<Vec<_>>());
+            }
+        }
+    }
+    assert!(b.squad_done(0), "they get there and secure it");
+    assert!(split * 2 > samples, "bounding most of the way: {split} of {samples} samples");
+}
