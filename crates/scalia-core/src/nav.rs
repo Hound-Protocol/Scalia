@@ -51,6 +51,18 @@ impl Prop {
         }
     }
 
+    /// Whether an absolute point (millimetres) is on the prop's footprint.
+    pub fn covers(&self, x_mm: i64, y_mm: i64) -> bool {
+        let (dx, dy) = (x_mm - self.x_mm, y_mm - self.y_mm);
+        match self.kind {
+            PropKind::Rock { radius_mm } => dx * dx + dy * dy <= radius_mm * radius_mm,
+            _ => {
+                let (hx, hy) = self.half_extent();
+                dx.abs() <= hx && dy.abs() <= hy
+            }
+        }
+    }
+
     /// Half the width and height of the prop's bounding box.
     fn half_extent(&self) -> (i64, i64) {
         match self.kind {
