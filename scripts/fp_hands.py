@@ -28,12 +28,9 @@ ImageDraw.Draw(mask).polygon([(1308, 492), (1376, 482), (1400, 580), (1312, 596)
 m = (np.asarray(mask) > 0) & (rgba[..., 3] > 0)
 rgba[m, :3] = (31, 33, 35)
 save(Image.fromarray(rgba), 'fp_right')
-# The walkie hand: the same left hand moved under the handset's lower left. It holds the handset from behind:
-# only the fingers that wrap round its left edge are drawn in front of it.
+# The walkie hand: the same left hand, raised so the handset sits in its palm; the handset is drawn wholly in
+# front of it (the front layer stays empty).
 left = Image.open(f'{out}/fp_left.webp')
-moved = Image.new('RGBA', left.size, (0, 0, 0, 0)); moved.paste(left, (-188, 55), left)
+moved = Image.new('RGBA', left.size, (0, 0, 0, 0)); moved.paste(left, (-188, 5), left)
 save(moved, 'fp_lwalkie_back')
-WALKIE_LEFT_PX = 557.0 - 0.23756 * 806.0  # the handset's left edge in the render (first_person.py: walkie css)
-front = np.asarray(moved).copy()
-front[..., 3] = np.where(xx < WALKIE_LEFT_PX + 14, front[..., 3], 0)
-save(Image.fromarray(front), 'fp_lwalkie_front')
+save(Image.new('RGBA', left.size, (0, 0, 0, 0)), 'fp_lwalkie_front')
