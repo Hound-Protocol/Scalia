@@ -51,7 +51,23 @@ pub struct FrameDesc<'a> {
     pub elev: f32,
     /// How far the flat planet map is bent into a globe (see `bend`).
     pub bend: crate::bend::Bend,
+    /// Point lights this frame (at most MAX_LIGHTS are used: pass the most important first).
+    pub lights: &'a [PointLight],
 }
+
+/// A short-lived light: a muzzle flash, a blast. Position in the frame's coordinates (metres), radius in metres,
+/// colour, and intensity (1 is about as bright as full daylight at the centre).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct PointLight {
+    pub pos: [f32; 3],
+    pub radius: f32,
+    pub color: [f32; 3],
+    pub intensity: f32,
+}
+
+pub const MAX_LIGHTS: usize = 16;
+/// The scene uniform block (struct U in common.wgsl): 752 bytes before the lights, then 16 + 2 × 16 × 16.
+const UNIFORM_BYTES: u64 = 752 + 16 + 2 * 16 * MAX_LIGHTS as u64;
 
 struct Targets {
     size: (u32, u32),
@@ -153,7 +169,7 @@ impl Gpu {
 
         let uni = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene uniforms"),
-            size: 752,
+            size: UNIFORM_BYTES,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -455,6 +471,17 @@ impl Gpu {
         // time.z: light depth per metre, so the shader can bias shadows in metres.
         u.extend_from_slice(&[f.time_s, if f.atmosphere && f.sky.is_day { 1.0 } else { 0.0 }, 1.0 / (2.0 * light_range), if f.atmosphere { 0.0 } else { 1.0 }]);
         u.extend_from_slice(&[f.bend.tx, f.bend.ty, f.bend.radius, f.bend.t, f.bend.lat_y, 0.0, 0.0, 0.0]);
+        let lights = &f.lights[..f.lights.len().min(MAX_LIGHTS)];
+        u.extend_from_slice(&[lights.len() as f32, 0.0, 0.0, 0.0]);
+        for k in 0..MAX_LIGHTS {
+            let l = lights.get(k).map_or([0.0; 4], |l| [l.pos[0], l.pos[1], l.pos[2], l.radius]);
+            u.extend_from_slice(&l);
+        }
+        for k in 0..MAX_LIGHTS {
+            let l = lights.get(k).map_or([0.0; 4], |l| [l.color[0], l.color[1], l.color[2], l.intensity]);
+            u.extend_from_slice(&l);
+        }
+        debug_assert_eq!(u.len() * 4, UNIFORM_BYTES as usize);
         self.queue.write_buffer(&self.uni, 0, f32_bytes(&u));
         let thresh = (f.view_height / h as f32) * 3.0 / (2.0 * f.range);
         // Orthographic depth is linear: 0.5 at the focus, 1/(2 range) per world unit away from the camera.

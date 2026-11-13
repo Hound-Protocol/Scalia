@@ -1,4 +1,5 @@
-struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f, bend: vec4f, bend2: vec4f };
+// Point lights (muzzle flashes, blasts): lcount.x of them; pl = (x, y, z, radius m), plc = (rgb, intensity).
+struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: vec4f, light_col: vec4f, ambient: vec4f, time: vec4f, bend: vec4f, bend2: vec4f, lcount: vec4f, pl: array<vec4f, 16>, plc: array<vec4f, 16> };
 
 // Instances: a = (x, y, z, palette for the body), b = (heading, phase offset, steps per second, pose id),
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
@@ -528,7 +529,7 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     // Wind: a slow gust that travels across the field, scaled by height so the roots stay put.
     let gust = sin(time * 1.7 + a.x * 0.35 + a.y * 0.21 + b.y * 6.28) * 0.5 + 0.5;
     q = q + vec3f(0.09, 0.04, 0.0) * gust * q.z * 2.5;
-  } else if (part != 0u) {
+  } else if (part != 0u && part != 15u) {
     // Instance b.z: cadence (strides/s, phase from the clock) or, when negative, the phase is b.y itself: the CPU
     // integrates it for figures whose pace changes (winding up, braking), so the legs never jump.
     let phase = select(select(0.0, fract(time * b.z + b.y), b.z > 0.0), fract(b.y), b.z < 0.0);

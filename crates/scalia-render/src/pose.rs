@@ -859,7 +859,7 @@ pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32
 /// Moves one vertex of a figure part into the pose (in the figure's frame, before heading and position).
 pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
     let mut q = match part {
-        Part::Body | Part::Sway => return v,
+        Part::Body | Part::Sway | Part::Glow => return v,
         Part::LeftThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[0]), p.side[0], -HIP_X),
         Part::RightThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[1]), p.side[1], HIP_X),
         Part::LeftShin => sideways(leg(v, p.hip[0], p.knee[0]), p.side[0], -HIP_X),

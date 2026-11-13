@@ -26,6 +26,9 @@ pub enum Part {
     /// Boots below the ankle: stay flat on the ground while the leg swings over them.
     LeftFoot = 13,
     RightFoot = 14,
+    /// Not part of a figure: glows (drawn unlit and bright, the same by night as by day): muzzle flashes,
+    /// tracers, blasts.
+    Glow = 15,
 }
 
 /// Number of palette colours (the GPU palette's length).
@@ -90,6 +93,7 @@ pub fn part_of(code: f32) -> Part {
         12 => Part::RightForearm,
         13 => Part::LeftFoot,
         14 => Part::RightFoot,
+        15 => Part::Glow,
         _ => Part::Body,
     }
 }

@@ -20,6 +20,8 @@ struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @
   let w = bend_point(animate(p, c, ia, ib, ic, u.time.x, true), u.bend, u.bend2.x);
   var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
   o.ci = palette_index(c, ia);
+  // Glowing geometry (mesh part 15): flagged for the fragment shader to draw unlit.
+  if (c >= 0.0 && floor(c / 32.0) == 15.0) { o.ci = o.ci | 256u; }
   // Instance c.w: how far this draw has dissolved (0 solid, 1 gone); used to cross-fade terrain detail levels.
   o.fade = ic.w;
   // A fading layer is nudged towards the camera so it lies over the solid one instead of fighting it for depth.
@@ -64,7 +66,24 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   // Smooth flat shading (the art reference): each facet lit by its own angle, no stepped dither.
   let q = l;
   var o: FO;
-  o.c = vec4f(u.pal[i.ci & 31u].rgb * (u.ambient.rgb + u.light_col.rgb * q), 1.0);
+  if ((i.ci & 256u) != 0u) {
+    o.c = vec4f(min(u.pal[i.ci & 31u].rgb * 2.4, vec3f(1.0)), 1.0);
+    o.n = vec4f(n * 0.5 + 0.5, 1.0);
+    return o;
+  }
+  // Point lights: a warm pool around each muzzle flash or blast, falling off to nothing at its radius.
+  var pl = vec3f(0.0);
+  for (var k = 0u; k < u32(u.lcount.x); k = k + 1u) {
+    let d = u.pl[k].xyz - i.w;
+    let dist = length(d);
+    let r = u.pl[k].w;
+    if (dist < r) {
+      let a = 1.0 - dist / r;
+      let facing = 0.35 + 0.65 * max(dot(n, d / max(dist, 0.001)), 0.0);
+      pl = pl + u.plc[k].rgb * u.plc[k].w * a * a * facing;
+    }
+  }
+  o.c = vec4f(u.pal[i.ci & 31u].rgb * (u.ambient.rgb + u.light_col.rgb * q + pl), 1.0);
   o.n = vec4f(n * 0.5 + 0.5, 1.0);
   return o;
 }

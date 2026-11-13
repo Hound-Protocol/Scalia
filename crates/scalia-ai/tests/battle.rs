@@ -79,3 +79,77 @@ fn a_rifleman_reloads_after_a_magazine() {
     }
     assert!(b.log.iter().any(|e| matches!(e, Event::Reload { soldier: 0 })));
 }
+
+/// Shooter 0's shots at a target `d_mm` away (the target cannot die or fire): their times (ms).
+fn shots_at(d_mm: i64, ms: i64) -> Vec<i64> {
+    let mut b = Battle::new(field(&[]), vec![man(0, 50_000, 10_000, Stance::Stand), man(1, 50_000, 10_000 + d_mm, Stance::Stand)], 5);
+    b.soldiers[1].passive = true;
+    b.soldiers[1].health = i32::MAX;
+    b.soldiers[0].mags = 99;
+    for _ in 0..ms / 50 {
+        b.step(50);
+    }
+    b.log.iter().filter_map(|e| match e { Event::Shot { shooter: 0, at_ms, .. } => Some(*at_ms), _ => None }).collect()
+}
+
+/// Groups shot times into bursts (a gap over 200 ms starts a new one); returns the burst sizes.
+fn bursts(times: &[i64]) -> Vec<usize> {
+    let mut out = vec![];
+    for (k, &t) in times.iter().enumerate() {
+        if k == 0 || t - times[k - 1] > 200 {
+            out.push(1);
+        } else {
+            *out.last_mut().unwrap() += 1;
+        }
+    }
+    out
+}
+
+#[test]
+fn close_up_he_fires_full_auto_bursts() {
+    let t = shots_at(8_000, 6_000);
+    let b = bursts(&t);
+    assert!(b.iter().filter(|&&n| n >= 4).count() >= 2, "bursts of 4+ at 8 m: {b:?}");
+    let gaps: Vec<i64> = t.windows(2).map(|w| w[1] - w[0]).filter(|&g| g <= 200).collect();
+    assert!(gaps.iter().all(|&g| (60..=90).contains(&g)), "about 800 rounds a minute inside a burst: {gaps:?}");
+}
+
+#[test]
+fn at_mid_range_he_fires_short_controlled_bursts() {
+    let b = bursts(&shots_at(35_000, 8_000));
+    assert!(b.len() >= 3 && b.iter().all(|&n| (2..=3).contains(&n)), "bursts of 2-3 at 35 m: {b:?}");
+}
+
+#[test]
+fn far_away_he_takes_single_aimed_shots() {
+    let t = shots_at(90_000, 8_000);
+    assert!(t.len() >= 5, "{t:?}");
+    assert!(bursts(&t).iter().all(|&n| n == 1), "single shots at 90 m: {t:?}");
+}
+
+#[test]
+fn recoil_makes_the_later_rounds_of_a_burst_less_accurate() {
+    // Many close-range bursts at a target that cannot die: hits on first rounds vs later rounds.
+    let mut first = (0, 0);
+    let mut later = (0, 0);
+    for seed in 0..40 {
+        let mut b = Battle::new(field(&[]), vec![man(0, 50_000, 10_000, Stance::Stand), man(1, 50_000, 22_000, Stance::Stand)], seed);
+        b.soldiers[1].passive = true;
+        b.soldiers[1].health = i32::MAX;
+        b.soldiers[0].mags = 99;
+        for _ in 0..60 {
+            b.step(50);
+        }
+        let mut prev = -1_000;
+        for e in &b.log {
+            if let Event::Shot { shooter: 0, at_ms, hit, .. } = e {
+                let slot = if at_ms - prev > 200 { &mut first } else { &mut later };
+                slot.0 += *hit as i32;
+                slot.1 += 1;
+                prev = *at_ms;
+            }
+        }
+    }
+    let (f, l) = (first.0 * 1000 / first.1.max(1), later.0 * 1000 / later.1.max(1));
+    assert!(f > l + 100, "first rounds hit clearly more often: first {f}‰ of {}, later {l}‰ of {}", first.1, later.1);
+}

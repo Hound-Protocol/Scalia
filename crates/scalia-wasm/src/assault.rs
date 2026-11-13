@@ -15,6 +15,20 @@ pub struct Sound {
     pub x: f64,
     pub y: f64,
     pub blast: bool,
+    /// Viewer time (ms) it happens: rounds in a burst fall between steps.
+    pub at: f64,
+}
+
+/// A round or a blast to draw: viewer time, muzzle (or blast centre) and impact, in absolute millimetres above
+/// the ground (z is height over the terrain).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Fx {
+    pub at: f64,
+    pub from: (i64, i64, i64),
+    pub to: (i64, i64, i64),
+    pub hit: bool,
+    pub blast: bool,
+    pub tracer: bool,
 }
 
 pub struct Assault {
@@ -32,6 +46,7 @@ pub struct Assault {
     /// Per soldier: gait phase integrated from his cadence (strides), and the viewer time it was last advanced.
     gait: Vec<(f64, f64)>,
     pub sounds: Vec<Sound>,
+    pub fx: Vec<Fx>,
     /// The leader's steps as they start, for the radio.
     pub steps: Vec<(usize, &'static str)>,
     pub over: bool,
@@ -44,7 +59,7 @@ impl Assault {
         let battle = scalia_ai::scenario::killhouse_assault(origin, seed);
         let n = battle.soldiers.len();
         let prev = battle.soldiers.iter().map(|s| s.pos).collect();
-        Assault { battle, prev, clock: now_ms, now: now_ms, seen: 0, anim: vec![(0.0, Pose::Stand, Pose::Stand, -1000.0); n], motion: vec![(0.0, 0.0, -1.0); n], gait: (0..n).map(|i| ((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, now_ms)).collect(), sounds: Vec::new(), steps: Vec::new(), over: false }
+        Assault { battle, prev, clock: now_ms, now: now_ms, seen: 0, anim: vec![(0.0, Pose::Stand, Pose::Stand, -1000.0); n], motion: vec![(0.0, 0.0, -1.0); n], gait: (0..n).map(|i| ((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, now_ms)).collect(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false }
     }
 
     /// Runs the battle up to `now_ms` (at most half a second of catching up per frame).
@@ -57,11 +72,30 @@ impl Assault {
             self.prev = self.battle.soldiers.iter().map(|s| s.pos).collect();
             self.battle.step(STEP_MS as i32);
             self.clock += STEP_MS;
+            // Battle time T is drawn at viewer time T + offset (drawing runs one step behind, interpolating).
+            let offset = self.clock - self.battle.time_ms as f64 + STEP_MS;
             for e in &self.battle.log[self.seen..] {
-                match e {
-                    Event::Shot { from, .. } => self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false }),
-                    Event::Explosion { pos } => self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true }),
-                    Event::Order { squad, step } => self.steps.push((*squad, step)),
+                match *e {
+                    Event::Shot { from, to, hit, at_ms, shooter, .. } => {
+                        let at = at_ms as f64 + offset;
+                        self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false, at });
+                        // The muzzle: 0.6 m out towards the target, at shoulder height.
+                        let (dx, dy) = (to.x - from.x, to.y - from.y);
+                        let d = (((dx * dx + dy * dy) as f64).sqrt() as i64).max(1);
+                        let muzzle = (from.x + dx * 600 / d, from.y + dy * 600 / d, from.z - 250);
+                        // A miss lands short, long or wide: in the dirt a few metres around him.
+                        let r = scalia_core::hash::mix64(at_ms as u64 ^ (shooter as u64) << 32);
+                        let impact = if hit { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
+                        // One round in four is a tracer.
+                        let tracer = (r >> 40) % 4 == 0;
+                        self.fx.push(Fx { at, from: muzzle, to: impact, hit, blast: false, tracer });
+                    }
+                    Event::Explosion { pos } => {
+                        let at = self.battle.time_ms as f64 + offset;
+                        self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, at });
+                        self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false });
+                    }
+                    Event::Order { squad, step } => self.steps.push((squad, step)),
                     _ => {}
                 }
             }

@@ -181,6 +181,9 @@ pub struct Viewer {
     cmd_pose: (Pose, Pose, f32),
     /// The live killhouse assault, when one is running (replaces the static enemy posts).
     assault: Option<crate::assault::Assault>,
+    /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
+    fx: crate::effects::Effects,
+    fx_lights: Vec<scalia_render::gpu::PointLight>,
     radio_until: f64,
     /// The tablet is up: the camera leaves the commander for the map, which zooms all the way.
     tablet: bool,
@@ -322,6 +325,8 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         assault: None,
+        fx: crate::effects::Effects::default(),
+        fx_lights: Vec::new(),
         radio_until: -1.0,
         tablet: false,
         manner: 0,
@@ -635,8 +640,8 @@ impl Viewer {
         let steps: Vec<String> = a.steps.drain(..).map(|(squad, step)| format!("{{\"squad\":{squad},\"step\":\"{step}\"}}")).collect();
         format!("{{\"running\":true,\"over\":{},\"attackers\":{},\"defenders\":{},\"steps\":[{}]}}", a.over, a.alive(0), a.alive(1), steps.join(","))
     }
-    /// Sounds since the last call, three floats each: distance from the commander (m), pan (-1 left .. 1 right
-    /// on screen), and 1 for a blast or 0 for a shot.
+    /// Sounds since the last call, four floats each: distance from the commander (m), pan (-1 left .. 1 right
+    /// on screen), 1 for a blast or 0 for a shot, and how long from now it happens (s; rounds of a burst).
     pub fn take_sounds(&mut self) -> Vec<f32> {
         let Some(a) = self.assault.as_mut() else { return Vec::new() };
         let (r, _, _) = scalia_render::camera::basis(self.last_cam.1);
@@ -644,7 +649,8 @@ impl Viewer {
         for snd in a.sounds.drain(..) {
             let d = Vec3::new((snd.x - self.cmd.0) as f32, (snd.y - self.cmd.1) as f32, 0.0);
             let len = d.length();
-            out.extend_from_slice(&[len, if len > 0.5 { d.dot(r) / len } else { 0.0 }, if snd.blast { 1.0 } else { 0.0 }]);
+            let delay = ((snd.at - self.frame_ms) / 1000.0).max(0.0) as f32;
+            out.extend_from_slice(&[len, if len > 0.5 { d.dot(r) / len } else { 0.0 }, if snd.blast { 1.0 } else { 0.0 }, delay]);
         }
         out
     }
@@ -1318,7 +1324,7 @@ impl Viewer {
         };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev, lights: &self.fx_lights };
         let drawn = if second { self.gpu.frame_second(&desc) } else { self.gpu.frame(&desc) };
         if let Err(e) = drawn {
             return format!("Render error: {e}");
@@ -1932,7 +1938,27 @@ impl Viewer {
             };
             foes = a.instances(1, ts, ENEMY_RED as f32, &mut place);
             assaulters = a.instances(0, ts, 6.0, &mut place);
+            for f in a.fx.drain(..) {
+                let ground = |me: &mut Self, p: (i64, i64, i64)| {
+                    let (x, y) = (p.0 as f64 / 1000.0, p.1 as f64 / 1000.0);
+                    [x, y, me.height_at(x as f32, y as f32) as f64 + p.2 as f64 / 1000.0]
+                };
+                let (from, to) = (ground(self, f.from), ground(self, f.to));
+                if f.blast {
+                    self.fx.blast(f.at, from);
+                } else {
+                    self.fx.shot(f.at, from, to, f.hit, f.tracer);
+                }
+            }
             self.assault = Some(a);
+        }
+        // Flashes, tracers and blasts: glowing geometry (no shadow) and this frame's point lights.
+        self.fx.prune(self.frame_ms);
+        self.fx_lights = self.fx.lights(self.frame_ms, self.origin);
+        if !self.fx.is_empty() {
+            self.gpu.upload("fx", self.fx.mesh(self.frame_ms, self.origin).bytes());
+            self.gpu.upload_instances("fx_at", bytes(&[0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
+            decor.push(("fx".into(), "fx_at".into()));
         }
         let (kx, ky) = (KILLHOUSE_MM.0 as f32 / 1000.0, KILLHOUSE_MM.1 as f32 / 1000.0);
         let posts: &[((f32, f32), (f32, f32), Pose)] = if self.assault.is_none() { &ENEMY_POSTS } else { &[] };

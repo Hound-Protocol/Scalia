@@ -39,7 +39,7 @@ pub const BONES: usize = 14;
 /// The bone a rigid part of the old rig moves with.
 pub fn bone_of(part: Part) -> Bone {
     match part {
-        Part::Body | Part::Sway => Bone::Root,
+        Part::Body | Part::Sway | Part::Glow => Bone::Root,
         Part::Torso => Bone::Spine,
         Part::Head => Bone::Head,
         Part::LeftArm => Bone::LeftUpperArm,

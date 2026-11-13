@@ -1278,8 +1278,8 @@ try {
     } catch (_) { fireCtx = null; }
     return fireCtx;
   };
-  const fire = (dist, pan, blast) => {
-    const c = fireGraph(); if (!c || !shotBuf || voices > 24) return;
+  const fire = (dist, pan, blast, delay = 0) => {
+    const c = fireGraph(); if (!c || !shotBuf || voices > 48) return;
     if (c.state === 'suspended') c.resume().catch(() => {});
     const src = c.createBufferSource(); src.buffer = shotBuf;
     src.playbackRate.value = blast ? 0.45 : 0.94 + Math.random() * 0.12;
@@ -1288,7 +1288,7 @@ try {
     const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan * 0.8));
     src.connect(lp).connect(g).connect(p).connect(c.destination);
     voices++; src.onended = () => { voices--; };
-    src.start(c.currentTime + dist / 343);
+    src.start(c.currentTime + delay + dist / 343);
   };
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
@@ -1296,7 +1296,7 @@ try {
   const assaultTick = (now) => {
     if (!assaultOn) return;
     const s = v.take_sounds();
-    for (let i = 0; i + 2 < s.length; i += 3) fire(s[i], s[i + 1], s[i + 2] > 0.5);
+    for (let i = 0; i + 3 < s.length; i += 4) fire(s[i], s[i + 1], s[i + 2] > 0.5, s[i + 3]);
     if (now - assaultPoll < 250) return;
     assaultPoll = now;
     let st; try { st = JSON.parse(v.assault_state()); } catch (_) { return; }

@@ -113,7 +113,16 @@ impl Stance {
 
 pub const MAG: i32 = 30;
 pub const DAMAGE: i32 = 35;
-const SHOT_MS: i32 = 330;
+/// Fire modes by range: full auto close in, controlled bursts at mid range, single aimed shots beyond.
+const AUTO_MM: i64 = 15_000;
+const BURST_MM: i64 = 60_000;
+/// Between rounds in a burst (about 800 rounds a minute), and the pause to re-aim after a burst or single shot.
+const CYCLIC_MS: i32 = 75;
+const AFTER_AUTO_MS: i32 = 300;
+const AFTER_BURST_MS: i32 = 400;
+const AFTER_SINGLE_MS: i32 = 450;
+/// Accuracy of each round in a burst relative to the first (‰): recoil climbs the muzzle.
+const RECOIL: [i64; 6] = [1_000, 700, 550, 450, 400, 400];
 const RELOAD_MS: i32 = 2_500;
 const RANGE_MM: i64 = 200_000;
 /// Suppression (0..1000) a round adds passing by, and hitting; and how fast it fades per second.
@@ -192,6 +201,9 @@ pub struct Soldier {
     pub aim: bool,
     /// What he is busy with, until when (battle ms).
     pub act: Option<(Act, i64)>,
+    /// Rounds left in the burst he is firing, and how many he has fired in it (recoil).
+    burst_left: u8,
+    burst_fired: u8,
     path: Vec<(i64, i64)>,
     path_to: Option<(i64, i64)>,
     /// Where he is really going: the ordered spot, moved aside if another man already has it.
@@ -205,7 +217,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, path: Vec::new(), path_to: None, goal: None, settled: false, speed: 0, calm_ms: 0 }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, speed: 0, calm_ms: 0 }
     }
     pub fn alive(&self) -> bool {
         self.health > 0
@@ -217,7 +229,8 @@ impl Soldier {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    Shot { shooter: usize, target: usize, from: Point, to: Point, hit: bool },
+    /// A round fired, at `at_ms` (battle time; several can fall within one step in a burst).
+    Shot { shooter: usize, target: usize, from: Point, to: Point, hit: bool, at_ms: i64 },
     Killed { soldier: usize, by: usize },
     Reload { soldier: usize },
     Bark { soldier: usize, bark: Bark },
@@ -836,57 +849,87 @@ impl Battle {
             } else if let Task::Hold { face, .. } = me.task {
                 me.facing = turn_toward(me.facing, (face.0 - me.pos.0, face.1 - me.pos.1));
             }
-            let Some(j) = self.soldiers[i].target else { continue };
-            if self.soldiers[i].cooldown_ms > 0 {
+            let Some(j) = self.soldiers[i].target else {
+                self.soldiers[i].burst_left = 0;
                 continue;
-            }
-            if self.soldiers[i].ammo <= 0 {
-                if self.soldiers[i].mags > 0 {
-                    self.soldiers[i].mags -= 1;
-                    self.soldiers[i].reloading_ms = RELOAD_MS;
-                    self.log.push(Event::Reload { soldier: i });
+            };
+            // Rounds fall at their own times inside the step; a long wait does not bank rounds.
+            let step_start = self.time_ms - dt_ms as i64;
+            self.soldiers[i].cooldown_ms = self.soldiers[i].cooldown_ms.max(-dt_ms);
+            while self.soldiers[i].cooldown_ms <= 0 && self.soldiers[j].alive() {
+                if self.soldiers[i].ammo <= 0 {
+                    self.soldiers[i].burst_left = 0;
+                    if self.soldiers[i].mags > 0 {
+                        self.soldiers[i].mags -= 1;
+                        self.soldiers[i].reloading_ms = RELOAD_MS;
+                        self.log.push(Event::Reload { soldier: i });
+                    }
+                    break;
                 }
-                continue;
-            }
-            let p = self.hit_permille(i, j);
-            self.rolls += 1;
-            let hit = self.roll(i, self.rolls) < p;
-            let (from, t) = (self.soldiers[i].eye(), &self.soldiers[j]);
-            let to = Point { x: t.pos.0, y: t.pos.1, z: t.stance.body()[1] };
-            self.soldiers[i].ammo -= 1;
-            self.soldiers[i].cooldown_ms = SHOT_MS;
-            self.log.push(Event::Shot { shooter: i, target: j, from, to, hit });
-            // The target's squad learns where the fire came from; everyone near hears it.
-            let (shooter_pos, shooter_team) = (self.soldiers[i].pos, self.soldiers[i].team);
-            let tsq = self.soldiers[j].squad as usize;
-            self.report(tsq, i, shooter_pos, CONF_SHOT_AT);
-            // Each squad within earshot hears it once.
-            let mut near = std::mem::take(&mut self.scratch);
-            self.grid.near(shooter_pos, HEAR_MM, &mut near);
-            let mut told: Vec<usize> = Vec::new();
-            for &k in &near {
-                let o = &self.soldiers[k as usize];
-                let (dx, dy) = (o.pos.0 - shooter_pos.0, o.pos.1 - shooter_pos.1);
-                let sq = o.squad as usize;
-                if !o.alive() || dx * dx + dy * dy > HEAR_MM * HEAR_MM || told.contains(&sq) {
-                    continue;
+                let d = crate::grid::dist(self.soldiers[i].pos, self.soldiers[j].pos);
+                if self.soldiers[i].burst_left == 0 {
+                    // A new burst: how many rounds by range.
+                    self.rolls += 1;
+                    let r = self.roll(i, self.rolls);
+                    let n = if d < AUTO_MM { 4 + r % 3 } else if d < BURST_MM { 2 + r % 2 } else { 1 };
+                    self.soldiers[i].burst_left = n as u8;
+                    self.soldiers[i].burst_fired = 0;
                 }
-                told.push(sq);
-                if o.team == shooter_team {
-                    self.heard[sq] = Some((shooter_pos, self.time_ms));
+                let at_ms = (self.time_ms + self.soldiers[i].cooldown_ms as i64).max(step_start);
+                let recoil = RECOIL[(self.soldiers[i].burst_fired as usize).min(RECOIL.len() - 1)];
+                let p = self.hit_permille(i, j) * recoil / 1_000;
+                self.rolls += 1;
+                let hit = self.roll(i, self.rolls) < p;
+                let (from, t) = (self.soldiers[i].eye(), &self.soldiers[j]);
+                let to = Point { x: t.pos.0, y: t.pos.1, z: t.stance.body()[1] };
+                let me = &mut self.soldiers[i];
+                me.ammo -= 1;
+                me.burst_left -= 1;
+                me.burst_fired += 1;
+                me.cooldown_ms += if me.burst_left > 0 {
+                    CYCLIC_MS
+                } else if d < AUTO_MM {
+                    AFTER_AUTO_MS
+                } else if d < BURST_MM {
+                    AFTER_BURST_MS
                 } else {
-                    self.report(sq, i, shooter_pos, CONF_HEARD);
+                    AFTER_SINGLE_MS
+                };
+                self.log.push(Event::Shot { shooter: i, target: j, from, to, hit, at_ms });
+                // The target's squad learns where the fire came from; each squad within earshot hears it.
+                let (shooter_pos, shooter_team) = (self.soldiers[i].pos, self.soldiers[i].team);
+                let tsq = self.soldiers[j].squad as usize;
+                self.report(tsq, i, shooter_pos, CONF_SHOT_AT);
+                let mut near = std::mem::take(&mut self.scratch);
+                self.grid.near(shooter_pos, HEAR_MM, &mut near);
+                let mut told: Vec<usize> = Vec::new();
+                for &k in &near {
+                    let o = &self.soldiers[k as usize];
+                    let (dx, dy) = (o.pos.0 - shooter_pos.0, o.pos.1 - shooter_pos.1);
+                    let sq = o.squad as usize;
+                    if !o.alive() || dx * dx + dy * dy > HEAR_MM * HEAR_MM || told.contains(&sq) {
+                        continue;
+                    }
+                    told.push(sq);
+                    if o.team == shooter_team {
+                        self.heard[sq] = Some((shooter_pos, self.time_ms));
+                    } else {
+                        self.report(sq, i, shooter_pos, CONF_HEARD);
+                    }
+                }
+                self.scratch = near;
+                let t = &mut self.soldiers[j];
+                t.suppression = (t.suppression + if hit { SUPPRESS_HIT } else { SUPPRESS_MISS }).min(1_000);
+                if hit {
+                    t.health = t.health.saturating_sub(DAMAGE);
+                    if !t.alive() {
+                        self.dead_logged[j] = true;
+                        self.log.push(Event::Killed { soldier: j, by: i });
+                    }
                 }
             }
-            self.scratch = near;
-            let t = &mut self.soldiers[j];
-            t.suppression = (t.suppression + if hit { SUPPRESS_HIT } else { SUPPRESS_MISS }).min(1_000);
-            if hit {
-                t.health = t.health.saturating_sub(DAMAGE);
-                if !t.alive() {
-                    self.dead_logged[j] = true;
-                    self.log.push(Event::Killed { soldier: j, by: i });
-                }
+            if !self.soldiers[j].alive() {
+                self.soldiers[i].burst_left = 0;
             }
         }
     }

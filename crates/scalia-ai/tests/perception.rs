@@ -46,7 +46,10 @@ fn the_squad_shares_what_one_man_sees() {
 #[test]
 fn shot_from_behind_he_learns_where_from_turns_and_returns_fire() {
     let mut b = Battle::new(field(), vec![man(0, 0, 50_000, 50_000, NORTH), man(1, 1, 50_000, 25_000, NORTH)], 2);
-    // Enemy (1) behind man 0, facing him.
+    // Enemy (1) behind man 0, facing him. (Man 0 is made tough: this is about how he reacts, not whether he
+    // survives bursts in the back.)
+    b.soldiers[0].health = 1_000;
+    b.soldiers[1].health = 1_000;
     for _ in 0..200 {
         b.step(50);
     }
