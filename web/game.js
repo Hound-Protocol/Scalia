@@ -433,9 +433,83 @@ try {
   // whether it can. The order then goes out over the radio, and the unit moves once it has answered.
   const actionsBox = $('actions');
   const closeActions = () => { actionsBox.hidden = true; };
+  // ---- Unit recognition ----
+  // Field view: call sign and number over each unit, nothing else. PDA map: an open-corner square around each unit,
+  // yellow, green when selected, with a details panel on the left of the screen.
+  const fieldEls = new Map();
+  const drawFieldLabels = () => {
+    const box = $('fieldLabels');
+    const on = !tabletUp && !tabletShown && scene === 'ground';
+    box.hidden = !on;
+    if (!on) return;
+    const w = canvas.clientWidth, h = canvas.clientHeight, seen = new Set();
+    for (const m of JSON.parse(v.unit_marks())) {
+      let el = fieldEls.get(m.id);
+      if (!el) { el = document.createElement('i'); el.textContent = `${m.cs} ${String(m.n).padStart(2, '0')}`; if (m.you) el.className = 'you'; box.appendChild(el); fieldEls.set(m.id, el); }
+      const up = m.r * h + 12;
+      el.style.transform = `translate(${(m.x * w).toFixed(1)}px, ${(m.y * h - up).toFixed(1)}px) translate(-50%, -100%)`;
+      seen.add(m.id);
+    }
+    for (const [id, el] of fieldEls) if (!seen.has(id)) { el.remove(); fieldEls.delete(id); }
+  };
+  const markEls = new Map();
+  let lastMarks = [], commanderPicked = false, panelKey = '';
+  const SPEC = { weapon: 'Assault rifle', armor: 'Standard fatigues', gear: 'Radio, first-aid kit' };
+  const drawUnitPanel = (units, marks) => {
+    const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const panel = $('unitPanel');
+    const sel = marks.find((m) => m.sel);
+    let key = '', html = '';
+    if (sel) {
+      const u = units.find((x) => x.id === sel.id);
+      if (u) {
+        const boss = u.boss >= 0 ? (units.find((x) => x.id === u.boss) || {}).name : 'Battalion command';
+        key = `${u.id}|${u.soldiers}|${u.status}|${u.stance}|${u.task}`;
+        html = `<h4>${sel.cs} ${String(sel.n).padStart(2, '0')}</h4><div class="role">${u.captain ? 'Captain' : 'Squad'}</div><dl>
+          <dt>Manpower</dt><dd>${u.soldiers}</dd><dt>Status</dt><dd>${cap(u.status)}${u.task ? ' · ' + u.task : ''}</dd><dt>Stance</dt><dd>${cap(u.stance)}</dd>
+          <dt>Answers to</dt><dd>${boss}</dd><dt>Weapon</dt><dd>${SPEC.weapon}</dd><dt>Armor</dt><dd>${SPEC.armor}</dd><dt>Equipment</dt><dd>${SPEC.gear}</dd></dl>`;
+      }
+    } else if (commanderPicked) {
+      key = 'cmd';
+      html = `<h4>Actual 00</h4><div class="role">Commander</div><dl><dt>Name</dt><dd>${ident.cmdr}</dd><dt>Manpower</dt><dd>1</dd><dt>Weapon</dt><dd>Rifle, slung</dd>
+        <dt>Armor</dt><dd>Black uniform</dd><dt>Equipment</dt><dd>Command PDA, handheld radio</dd></dl>`;
+    }
+    panel.hidden = !html;
+    if (key !== panelKey) { panelKey = key; if (html) panel.innerHTML = html + '<p class="note">Placeholder details until equipment is simulated.</p>'; }
+  };
+  const MARK_SVG = '<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M20 2 H98 V80"/><path d="M2 20 V98 H80"/></svg>';
+  const drawMapMarks = () => {
+    if (!(tabletUp && tabletShown && page === 'map')) return;
+    const box = $('mapMarks'), w = mapCanvas.clientWidth, h = mapCanvas.clientHeight;
+    const marks = onMap(() => JSON.parse(v.unit_marks()));
+    lastMarks = marks;
+    const seen = new Set();
+    for (const m of marks) {
+      let el = markEls.get(m.id);
+      if (!el) {
+        el = document.createElement('div'); el.innerHTML = MARK_SVG; el.firstChild.style.position = 'absolute';
+        const b = document.createElement('b'); b.textContent = `${m.cs} ${String(m.n).padStart(2, '0')}`;
+        el.style.cssText = 'position:absolute;left:0;top:0;will-change:transform'; el.appendChild(b); box.appendChild(el); markEls.set(m.id, el);
+      }
+      const size = Math.max(26, m.r * h * 2);
+      const svg = el.firstChild;
+      svg.style.width = svg.style.height = `${size}px`; svg.style.left = svg.style.top = `${-size / 2}px`;
+      svg.classList.toggle('sel', m.sel || (m.you && commanderPicked));
+      el.style.transform = `translate(${(m.x * w).toFixed(1)}px, ${(m.y * h).toFixed(1)}px)`;
+      el.lastChild.style.bottom = `${size / 2}px`; el.lastChild.style.left = '0'; el.lastChild.style.marginBottom = '3px';
+      seen.add(m.id);
+    }
+    for (const [id, el] of markEls) if (!seen.has(id)) { el.remove(); markEls.delete(id); }
+    drawUnitPanel(JSON.parse(v.roster()), marks);
+  };
   const mapClick = (e) => {
     closeActions();
     const px = e.offsetX * dpr(), py = e.offsetY * dpr();
+    const me = lastMarks.find((m) => m.you);
+    if (me && Math.hypot(me.x * mapCanvas.clientWidth - e.offsetX, me.y * mapCanvas.clientHeight - e.offsetY) <= Math.max(16, me.r * mapCanvas.clientHeight)) {
+      commanderPicked = true; onMap(() => v.select_only(-1)); return;
+    }
+    commanderPicked = false;
     const unit = onMap(() => v.unit_at(px, py));
     if (unit >= 0 || !onMap(() => v.selection_name())) {
       const msg = onMap(() => v.click(px, py, performance.now())); if (msg) flash(msg); return;
@@ -780,6 +854,8 @@ try {
       const t0 = performance.now();
       const line = v.frame(now);
       syncTablet();
+      drawFieldLabels();
+      drawMapMarks();
       footsteps();
       cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
       const showNote = now < noteUntil;

@@ -868,6 +868,40 @@ impl Viewer {
         }
         format!("[{}]", out.join(","))
     }
+    /// Every unit as seen by the camera that is active right now (the field camera, or the tablet map's inside
+    /// `use_map(true)`): JSON [{id, cs, n, x, y, r, sel, you}] with x, y as fractions of the canvas (0..1, y down) and r
+    /// the unit's radius as a fraction of the canvas height. The commander is id -1. Units off screen are left out.
+    pub fn unit_marks(&mut self) -> String {
+        let (target, yaw, view_h) = self.last_cam;
+        let (r, u, _) = scalia_render::camera::basis(yaw);
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        let mut units: Vec<(i64, String, u32, f64, f64, f32, bool)> = Vec::new();
+        for i in 0..self.world.groups.len() as u32 {
+            let c = self.group_centre(i, self.world.now);
+            let rad = (self.world.groups.people(GroupId(i)) as f32).sqrt() * 0.675 + 1.5;
+            units.push((i as i64, self.call_sign(i), i + 1, c.x as f64, c.y as f64, rad, self.selection.contains(&i)));
+        }
+        units.push((-1, "Actual".into(), 0, self.cmd.0, self.cmd.1, 1.2, false));
+        let mut out = Vec::new();
+        for (id, cs, n, ax, ay, rad_m, sel) in units {
+            let rel = Vec3::new((ax - self.origin.0) as f32, (ay - self.origin.1) as f32, self.height_at(ax as f32, ay as f32));
+            let d = rel - target;
+            let (x, y) = (0.5 + d.dot(r) / (view_h * aspect), 0.5 - d.dot(u) / view_h);
+            if !(-0.1..=1.1).contains(&x) || !(-0.1..=1.1).contains(&y) { continue; }
+            out.push(format!("{{\"id\":{id},\"cs\":\"{cs}\",\"n\":{n},\"x\":{x:.4},\"y\":{y:.4},\"r\":{:.4},\"sel\":{sel},\"you\":{}}}", rad_m / view_h, id < 0));
+        }
+        format!("[{}]", out.join(","))
+    }
+    /// Selects exactly one unit without moving the camera (clicking its marker on the tablet map).
+    pub fn select_only(&mut self, id: i32) {
+        if id >= 0 && (id as u32) < self.world.groups.len() as u32 {
+            self.selected = Some(id as u32);
+            self.selection = vec![id as u32];
+        } else {
+            self.selected = None;
+            self.selection.clear();
+        }
+    }
     /// The tablet map glides back over the commander, close in (from wherever it was, the planet or
     /// the star system included).
     pub fn map_center_commander(&mut self) {
