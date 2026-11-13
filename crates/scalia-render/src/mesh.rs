@@ -23,6 +23,9 @@ pub enum Part {
     /// Forearms and hands: bend at the elbows.
     LeftForearm = 11,
     RightForearm = 12,
+    /// Boots below the ankle: stay flat on the ground while the leg swings over them.
+    LeftFoot = 13,
+    RightFoot = 14,
 }
 
 /// Number of palette colours (the GPU palette's length).
@@ -85,6 +88,8 @@ pub fn part_of(code: f32) -> Part {
         10 => Part::Head,
         11 => Part::LeftForearm,
         12 => Part::RightForearm,
+        13 => Part::LeftFoot,
+        14 => Part::RightFoot,
         _ => Part::Body,
     }
 }
@@ -212,7 +217,7 @@ pub fn figure_kit() -> MeshBuilder {
     use kit::*;
     let mut f = MeshBuilder::default();
     let c = |p: u8, part: Part| code(p, part);
-    for (s, thigh, shin) in [(-1.0f32, Part::LeftThigh, Part::LeftShin), (1.0, Part::RightThigh, Part::RightShin)] {
+    for (s, thigh, shin, foot) in [(-1.0f32, Part::LeftThigh, Part::LeftShin, Part::LeftFoot), (1.0, Part::RightThigh, Part::RightShin, Part::RightFoot)] {
         let x = s * 0.105;
         // Thigh, full and tapering to the knee, with a cargo pocket on the outside.
         f.prism([x, 0.0, 0.48], [0.085, 0.092], [x, 0.0, 0.93], [0.118, 0.126], 8, c(UNIFORM, thigh));
@@ -220,16 +225,17 @@ pub fn figure_kit() -> MeshBuilder {
         f.cuboid([x + s * 0.095 - 0.037, -0.062, 0.74], [x + s * 0.095 + 0.037, 0.072, 0.775], c(UNIFORM, thigh));
         // Shin, then the boot: shaft, dark cuff, laces, foot with a raised heel and a rounded toe cap, sole.
         f.prism([x, 0.0, 0.22], [0.072, 0.078], [x, 0.0, 0.49], [0.086, 0.092], 8, c(UNIFORM, shin));
-        f.prism([x, -0.005, 0.07], [0.078, 0.086], [x, 0.0, 0.24], [0.084, 0.09], 8, c(BOOT, shin));
+        f.prism([x, -0.005, 0.07], [0.078, 0.086], [x, -0.003, 0.15], [0.0806, 0.0877], 8, c(BOOT, foot));
+        f.prism([x, -0.0035, 0.13], [0.0801, 0.0874], [x, 0.0, 0.24], [0.084, 0.09], 8, c(BOOT, shin));
         f.prism([x, 0.0, 0.215], [0.092, 0.1], [x, 0.0, 0.265], [0.096, 0.104], 8, c(PAD, shin));
         for k in 0..3 {
             let z = 0.11 + k as f32 * 0.035;
             f.cuboid([x - 0.03, 0.078, z], [x + 0.03, 0.094, z + 0.016], c(STRAP, shin));
         }
-        f.cuboid([x - 0.074, -0.11, 0.025], [x + 0.074, 0.10, 0.11], c(BOOT, shin));
-        f.prism([x, 0.115, 0.025], [0.074, 0.06], [x, 0.125, 0.095], [0.066, 0.05], 8, c(BOOT, shin));
-        f.cuboid([x - 0.078, -0.115, 0.0], [x + 0.078, 0.19, 0.03], c(PAD, shin));
-        f.cuboid([x - 0.07, -0.115, 0.03], [x + 0.07, -0.05, 0.06], c(PAD, shin));
+        f.cuboid([x - 0.074, -0.11, 0.025], [x + 0.074, 0.10, 0.11], c(BOOT, foot));
+        f.prism([x, 0.115, 0.025], [0.074, 0.06], [x, 0.125, 0.095], [0.066, 0.05], 8, c(BOOT, foot));
+        f.cuboid([x - 0.078, -0.115, 0.0], [x + 0.078, 0.19, 0.03], c(PAD, foot));
+        f.cuboid([x - 0.07, -0.115, 0.03], [x + 0.07, -0.05, 0.06], c(PAD, foot));
     }
     // Hips and a broad torso in the uniform; skin at the neck.
     f.prism([0.0, 0.0, 0.82], [0.19, 0.125], [0.0, 0.0, 0.99], [0.185, 0.12], 10, c(UNIFORM, Part::Torso));

@@ -47,6 +47,17 @@ fn leg(q: vec3f, hip: f32, knee: f32) -> vec3f {
   return rot(rot(q, 0.0, 0.46, -knee), 0.0, 0.88, hip);
 }
 
+// Ankle bend that keeps the boot level under weight (port of pose.rs `ankle`).
+fn ankle(hip: f32, knee: f32) -> f32 {
+  let shin = hip - knee;
+  let t = clamp((knee - 0.45) / 0.45, 0.0, 1.0);
+  let planted = 1.0 - t * t * (3.0 - 2.0 * t);
+  return -(max(shin, 0.0) + 0.4 * min(shin, 0.0)) * planted;
+}
+fn foot(q: vec3f, hip: f32, knee: f32) -> vec3f {
+  return leg(rot(q, 0.0, 0.085, ankle(hip, knee)), hip, knee);
+}
+
 // Gait for both legs (port of pose.rs `gait`): x = left, y = right; the right leg is half a cycle behind.
 fn gait_hip(phase: f32, swing: f32, forward: f32) -> vec2f {
   return vec2f(swing * sin(phase * 6.2831853) + forward, swing * sin((phase + 0.5) * 6.2831853) + forward);
@@ -176,8 +187,8 @@ fn pose_params(pose: u32, phase: f32) -> PP {
 fn ground_drop(hip: vec2f, knee: vec2f) -> f32 {
   var low = 1e9;
   for (var i = 0; i < 2; i++) {
-    low = min(low, leg(vec3f(0.0, -0.115, 0.0), hip[i], knee[i]).z);
-    low = min(low, leg(vec3f(0.0, 0.19, 0.0), hip[i], knee[i]).z);
+    low = min(low, foot(vec3f(0.0, -0.09, 0.0), hip[i], knee[i]).z);
+    low = min(low, foot(vec3f(0.0, 0.14, 0.0), hip[i], knee[i]).z);
   }
   return -low;
 }
@@ -199,6 +210,8 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   else if (part == 2u) { q = rot(v, 0.0, 0.88, p.hip.y); }
   else if (part == 6u) { q = leg(v, p.hip.x, p.knee.x); }
   else if (part == 7u) { q = leg(v, p.hip.y, p.knee.y); }
+  else if (part == 13u) { q = foot(v, p.hip.x, p.knee.x); }
+  else if (part == 14u) { q = foot(v, p.hip.y, p.knee.y); }
   else if (part == 3u) { q = arm(v, p.sh.x, 0.0, p.reach.x, p.abd.x, -0.238); }
   else if (part == 4u) { q = arm(v, p.sh.y, 0.0, p.reach.y, p.abd.y, 0.238); }
   else if (part == 11u) { q = arm(v, p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
@@ -210,7 +223,7 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
     q = rot(v, 0.03, 0.78, p.rifle) + hand - vec3f(0.238, 0.03, 0.78);
     if (p.sling > 0.0) { q = mix(q, slung(v), p.sling); }
   }
-  if (part != 1u && part != 2u && part != 6u && part != 7u) {
+  if (part != 1u && part != 2u && part != 6u && part != 7u && part != 13u && part != 14u) {
     q = rot(turn(q, p.twist), 0.0, 0.88, -p.lean);
   }
   q.z = q.z + p.drop + p.bob;

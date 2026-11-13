@@ -26,12 +26,12 @@ fn feet(p: &PoseParams, pts: &[[(Vec3, Part); 2]; 2]) -> [[Vec3; 2]; 2] {
 
 fn main() {
     let fig = figure();
-    let shins: Vec<(Vec3, Part)> = fig.vertices.iter().map(|v| (Vec3::from(v.pos), part_of(v.color))).filter(|(_, p)| matches!(p, Part::LeftShin | Part::RightShin)).collect();
+    let shins: Vec<(Vec3, Part)> = fig.vertices.iter().map(|v| (Vec3::from(v.pos), part_of(v.color))).filter(|(_, p)| matches!(p, Part::LeftFoot | Part::RightFoot)).collect();
     let near = |part: Part, target: Vec3| *shins.iter().filter(|(_, p)| *p == part).min_by(|a, b| a.0.distance(target).total_cmp(&b.0.distance(target))).unwrap();
     let mut pts = [[(Vec3::ZERO, Part::Body); 2]; 2];
-    for (i, part, x) in [(0, Part::LeftShin, -0.1f32), (1, Part::RightShin, 0.1)] {
-        pts[i][0] = near(part, Vec3::new(x, -0.115, 0.03));
-        pts[i][1] = near(part, Vec3::new(x, 0.19, 0.03));
+    for (i, part, x) in [(0, Part::LeftFoot, -0.1f32), (1, Part::RightFoot, 0.1)] {
+        pts[i][0] = near(part, Vec3::new(x, -0.09, 0.03));
+        pts[i][1] = near(part, Vec3::new(x, 0.14, 0.03));
     }
     let mut bad = 0;
     println!("{:<10} {:>8} {:>10} {:>10} {:>10} {:>10}", "gait", "speed", "slide avg", "slide max", "seam", "jerk");
@@ -42,13 +42,15 @@ fn main() {
         let f: Vec<[[Vec3; 2]; 2]> = ps.iter().map(|p| feet(p, &pts)).collect();
         let (mut sum, mut max, mut n, mut vs) = (0.0f32, 0.0f32, 0, 0.0f32);
         for k in 0..N {
-            for i in 0..2 { for j in 0..2 {
-                let planted = f[k][i][j].z < 0.03 && f[k + 1][i][j].z < 0.03;
-                if !planted { continue; }
-                let v = -(f[k + 1][i][j].y - f[k][i][j].y) / dt;
+            // The planted leg is the one whose lowest point is lower; its boot centre should travel back at ground speed.
+            let low = |fr: &[[Vec3; 2]; 2], i: usize| fr[i][0].z.min(fr[i][1].z);
+            let i = if low(&f[k], 0) < low(&f[k], 1) { 0 } else { 1 };
+            if low(&f[k + 1], i) < low(&f[k + 1], 1 - i) {
+                let c = |fr: &[[Vec3; 2]; 2]| (fr[i][0].y + fr[i][1].y) * 0.5;
+                let v = -(c(&f[k + 1]) - c(&f[k])) / dt;
                 let s = (v - speed).abs();
                 sum += s; max = max.max(s); n += 1; vs += v;
-            } }
+            }
         }
         let seam = angles(&ps[0]).iter().zip(angles(&ps[N])).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
         let a: Vec<Vec<f32>> = ps.iter().map(angles).collect();

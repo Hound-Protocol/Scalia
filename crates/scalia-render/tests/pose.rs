@@ -21,7 +21,7 @@ fn standing_legs_and_body_are_the_mesh_itself() {
     let pp = params(Pose::Stand, 0.0);
     for v in figure().vertices {
         let part = part_of(v.color);
-        if matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::Torso | Part::Head) {
+        if matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot | Part::Torso | Part::Head) {
             let p = Vec3::from(v.pos);
             assert!((pose_vertex(p, part, &pp) - p).length() < 1e-5, "{part:?} moved");
         }
@@ -378,3 +378,4 @@ fn standing_soldiers_breathe_shift_and_look_around() {
         assert_eq!(p.rifle, aim.rifle, "the sight picture stays steady");
     }
 }
+

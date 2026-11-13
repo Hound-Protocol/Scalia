@@ -165,6 +165,27 @@ fn leg(q: Vec3, hip: f32, knee: f32) -> Vec3 {
     rot(rot(q, 0.0, KNEE_Z, -knee), 0.0, HIP_Z, hip)
 }
 
+/// Height of the ankle joint above the ground (rest pose).
+pub const ANKLE_Z: f32 = 0.085;
+/// The boot's heel and toe along the foot (y), where it touches the ground.
+pub const HEEL_Y: f32 = -0.09;
+pub const TOE_Y: f32 = 0.14;
+
+/// Ankle bend that keeps the boot level while the leg is under weight: it cancels the shin's pitch (`hip - knee`)
+/// fully while the knee is straight-ish and not at all once the knee lifts for the swing. Past the vertical (leg
+/// behind) it cancels only part, so the heel rolls up at toe-off.
+pub fn ankle(hip: f32, knee: f32) -> f32 {
+    let shin = hip - knee;
+    let t = ((knee - 0.45) / 0.45).clamp(0.0, 1.0);
+    let planted = 1.0 - t * t * (3.0 - 2.0 * t);
+    -(shin.max(0.0) + 0.4 * shin.min(0.0)) * planted
+}
+
+/// A foot point: ankle bend, then the leg.
+fn foot(q: Vec3, hip: f32, knee: f32) -> Vec3 {
+    leg(rot(q, 0.0, ANKLE_Z, ankle(hip, knee)), hip, knee)
+}
+
 /// Gait for both legs at a phase: (hip, knee) angles. Each leg swings `swing` radians about `forward`; its knee
 /// flexes most mid-swing (as it passes under the body) and a little at mid-stance, carrying the weight, so the hips
 /// dip twice per stride (motion guide rule 2). The right leg is half a cycle behind the left.
@@ -346,8 +367,8 @@ fn aim_arms(p: &mut PoseParams) {
 pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
     let mut low = f32::MAX;
     for i in 0..2 {
-        for y in [-0.115, 0.19] {
-            low = low.min(leg(Vec3::new(0.0, y, 0.0), hip[i], knee[i]).z);
+        for y in [HEEL_Y, TOE_Y] {
+            low = low.min(foot(Vec3::new(0.0, y, 0.0), hip[i], knee[i]).z);
         }
     }
     -low
@@ -361,6 +382,8 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightThigh => rot(v, 0.0, HIP_Z, p.hip[1]),
         Part::LeftShin => leg(v, p.hip[0], p.knee[0]),
         Part::RightShin => leg(v, p.hip[1], p.knee[1]),
+        Part::LeftFoot => foot(v, p.hip[0], p.knee[0]),
+        Part::RightFoot => foot(v, p.hip[1], p.knee[1]),
         Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
         Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
         Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
@@ -372,7 +395,7 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::Head => turn(rot(v, 0.0, NECK_Z, p.head), p.look),
         Part::Torso => v,
     };
-    if part != Part::LeftThigh && part != Part::RightThigh && part != Part::LeftShin && part != Part::RightShin {
+    if !matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot) {
         q = rot(turn(q, p.twist), 0.0, HIP_Z, -p.lean);
     }
     q.z += p.drop + p.bob;

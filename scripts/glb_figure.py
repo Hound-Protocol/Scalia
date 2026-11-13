@@ -23,6 +23,7 @@ import glb_inspect as G  # noqa: E402
 # Our rig (metres) and part ids (mesh.rs Part codes).
 HIP, KNEE, SHOULDER_Z, SHOULDER_X, ELBOW, NECK, GRIP = 0.88, 0.46, 1.40, 0.238, 1.09, 1.46, 0.81
 WRIST = 0.865
+L_FOOT, R_FOOT, ANKLE = 13, 14, 0.085  # boots below the ankle are their own parts so they can stay flat
 L_THIGH, R_THIGH, L_ARM, R_ARM, L_SHIN, R_SHIN, TORSO, RIFLE, HEAD, L_FORE, R_FORE = 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12
 # Kit palette (mesh::kit).
 UNIFORM, UNIFORM_DARK, VEST, STRAP, PACK, BOOT, GLOVE, BALACLAVA, LENS, GOGGLE, HELMET, SKIN, PAD, METAL, COYOTE_DARK, TEAM = \
@@ -309,6 +310,8 @@ def convert(path):
     for shin, thigh in ((L_SHIN, L_THIGH), (R_SHIN, R_THIGH)):
         parts[(parts == shin) & (cz > KNEE + 0.08)] = thigh
     parts[np.isin(parts, [L_THIGH, R_THIGH]) & (cz > HIP + 0.05)] = TORSO
+    for shin, foot in ((L_SHIN, L_FOOT), (R_SHIN, R_FOOT)):
+        parts[(parts == shin) & (cz < ANKLE)] = foot
     codes = pals + 32.0 * parts
     band = np.isin(parts, [L_ARM, R_ARM]) & (zs.min(1) > 1.17) & (zs.max(1) < 1.33)
     codes[band] = [code(TEAM, p) for p in parts[band]]

@@ -6,7 +6,7 @@
 //! `pose::pose_vertex` puts it (the tests check this for every part), and vertices shared between bones blend.
 
 use crate::mesh::Part;
-use crate::pose::{hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, SHOULDER_X, SHOULDER_Z};
+use crate::pose::{ankle, ANKLE_Z, hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, SHOULDER_X, SHOULDER_Z};
 use glam::{Affine3A, Mat3A, Vec3, Vec3A};
 
 /// The bones, in the order of `skin_matrices`.
@@ -29,9 +29,12 @@ pub enum Bone {
     LeftShin = 9,
     RightShin = 10,
     Rifle = 11,
+    /// Boots: follow the shin, plus the ankle bend that keeps them level.
+    LeftFoot = 12,
+    RightFoot = 13,
 }
 
-pub const BONES: usize = 12;
+pub const BONES: usize = 14;
 
 /// The bone a rigid part of the old rig moves with.
 pub fn bone_of(part: Part) -> Bone {
@@ -48,6 +51,8 @@ pub fn bone_of(part: Part) -> Bone {
         Part::LeftShin => Bone::LeftShin,
         Part::RightShin => Bone::RightShin,
         Part::Rifle => Bone::Rifle,
+        Part::LeftFoot => Bone::LeftFoot,
+        Part::RightFoot => Bone::RightFoot,
     }
 }
 
@@ -112,6 +117,7 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     let rifle = if p.sling > 0.0 { lerp_affine(held, slung_affine(), p.sling) } else { held };
     let thigh = |i: usize| body * pitch_at(HIP_Z, p.hip[i]);
     let shin = |i: usize| body * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);
+    let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle(p.hip[i], p.knee[i]));
     [
         body,
         spine,
@@ -125,6 +131,8 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
         shin(0),
         shin(1),
         spine * rifle,
+        foot(0),
+        foot(1),
     ]
 }
 
@@ -142,6 +150,8 @@ pub fn rest_joint(b: Bone) -> Vec3 {
         Bone::LeftShin => Vec3::new(-0.105, 0.0, KNEE_Z),
         Bone::RightShin => Vec3::new(0.105, 0.0, KNEE_Z),
         Bone::Rifle => RIFLE_GRIP,
+        Bone::LeftFoot => Vec3::new(-0.105, 0.0, ANKLE_Z),
+        Bone::RightFoot => Vec3::new(0.105, 0.0, ANKLE_Z),
     }
 }
 
