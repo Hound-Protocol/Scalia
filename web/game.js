@@ -1297,6 +1297,68 @@ try {
 
   // Keyboard: held keys pan and rotate every frame, others act once.
   const held = new Set();
+  // ---- Inventory (Q): the field around the commander blurs and his kit floats in a ring around him. Pick a slot
+  // with a small move of the mouse from the middle (its direction), or keys 1 to 5; click or Enter to use it.
+  const DEBUG = new URLSearchParams(location.search).has('debug');
+  const SLOTS = [
+    { key: 'main', name: 'Main weapon', item: 'M4 carbine', note: '5.56 mm, 30-round magazine', icon: '<path d="M6 30h34l4-4h10v6h-6l-2 4H28l-2 6h-6l2-6H6z"/>' },
+    { key: 'belt', name: 'Belt', item: '6 magazines, 2 frag grenades', note: 'Within reach while moving', icon: '<path d="M8 26h48v12H8z M14 22h8v4h-8z M28 22h8v4h-8z M42 22h8v4h-8z"/>' },
+    { key: 'pda', name: 'PDA', item: 'Command tablet', note: 'Map, roster, orders (Tab)', icon: '<path d="M14 14h36v36H14z M18 18v24h28V18z M28 45h8v2h-8z"/>' },
+    { key: 'pack', name: 'Backpack', item: 'Water, rations, radio battery', note: 'Slow to reach', icon: '<path d="M20 18c0-6 24-6 24 0v32H20z M24 32h16v10H24z M26 14h12v4H26z"/>' },
+    { key: 'side', name: 'Secondary weapon', item: 'Sidearm', note: '9 mm pistol', icon: '<path d="M10 26h30l4 4h6v6h-6l-4 4h-8l-2 8h-7l2-8h-5z"/>' },
+  ];
+  let invOpen = false, invSel = -1, invVec = [0, 0];
+  const invEl = document.createElement('div');
+  invEl.id = 'inventory';
+  invEl.hidden = true;
+  invEl.innerHTML = '<div class="blur"></div>' + SLOTS.map((sl, k) => `<div class="slot" data-k="${k}"><svg viewBox="0 0 64 64">${sl.icon}</svg><b>${k + 1}</b><span>${sl.name}</span><small>${sl.item}</small></div>`).join('') + '<div class="cursor"></div><div class="hint">Mouse or 1-5 to pick · click or Enter to use · Q or Esc to close</div>';
+  document.body.appendChild(invEl);
+  const R_RING = Math.min(innerWidth, innerHeight) * 0.2, R_PICK = 22, R_MAX = 70;
+  const invLayout = () => {
+    const c = v.commander_screen();
+    const cx = c[0] * innerWidth, cy = c[1] * innerHeight;
+    invEl.style.setProperty('--cx', `${cx}px`); invEl.style.setProperty('--cy', `${cy}px`);
+    invEl.querySelectorAll('.slot').forEach((el, k) => {
+      const a = -Math.PI / 2 + k * 2 * Math.PI / SLOTS.length;
+      el.style.left = `${cx + Math.cos(a) * R_RING}px`; el.style.top = `${cy + Math.sin(a) * R_RING}px`;
+    });
+    const cur = invEl.querySelector('.cursor');
+    cur.style.left = `${cx + invVec[0]}px`; cur.style.top = `${cy + invVec[1]}px`;
+  };
+  const invPick = (k) => {
+    invSel = k;
+    invEl.querySelectorAll('.slot').forEach((el, j) => el.classList.toggle('on', j === k));
+  };
+  const openInv = () => {
+    invOpen = true; invSel = -1; invVec = [0, 0];
+    invEl.hidden = false; invLayout(); invPick(-1);
+    requestAnimationFrame(() => invEl.classList.add('in'));
+  };
+  const closeInv = () => { invOpen = false; invEl.classList.remove('in'); setTimeout(() => { if (!invOpen) invEl.hidden = true; }, 180); };
+  const useSlot = (k) => {
+    const sl = SLOTS[k]; if (!sl) return;
+    closeInv();
+    if (sl.key === 'pda') { if (!tabletUp && v.tablet_view() === 0) setTablet(true); return; }
+    flash(`${sl.name}: ${sl.item} (${sl.note})`);
+  };
+  const invKey = (k, e) => {
+    if (k === 'q' || k === 'escape') { if (!e.repeat) closeInv(); return; }
+    if (k >= '1' && k <= '5') { invPick(Number(k) - 1); return; }
+    if (k === 'enter' && invSel >= 0) useSlot(invSel);
+  };
+  // Mouse: a small cursor moves from the middle, held within a short reach; its direction picks the slot.
+  addEventListener('mousemove', (e) => {
+    if (!invOpen) return;
+    invVec = [invVec[0] + e.movementX, invVec[1] + e.movementY];
+    const d = Math.hypot(invVec[0], invVec[1]);
+    if (d > R_MAX) invVec = [invVec[0] * R_MAX / d, invVec[1] * R_MAX / d];
+    if (d > R_PICK) {
+      const a = Math.atan2(invVec[1], invVec[0]) + Math.PI / 2;
+      invPick(((Math.round(a / (2 * Math.PI / SLOTS.length)) % SLOTS.length) + SLOTS.length) % SLOTS.length);
+    }
+    invLayout();
+  });
+  invEl.addEventListener('pointerdown', (e) => { e.preventDefault(); if (invSel >= 0) useSlot(invSel); });
   // ---- Training assault (K): a squad takes the killhouse from the enemy inside, on the battle AI ----
   // Gunfire is the recorded M4 shot, placed by distance from the commander (quieter, duller, later) and panned
   // to where it is on screen; a grenade is the same shot slowed down and loud.
@@ -1371,10 +1433,12 @@ try {
       return;
     }
     if (k === 'e' && !$('answerCall').hidden) { answer(); return; }
-    if (k === '1') setScene('ships');
-    else if (k === '2') setScene('ground');
-    else if (k === '3') setScene('planet');
-    else if (k === '4') setScene('system');
+    if (invOpen) { invKey(k, e); return; }
+    if (k === 'q' && !e.repeat && !tabletUp) { openInv(); return; }
+    if (DEBUG && k === '1') setScene('ships');
+    else if (DEBUG && k === '2') setScene('ground');
+    else if (DEBUG && k === '3') setScene('planet');
+    else if (DEBUG && k === '4') setScene('system');
     else if (k === ' ') { e.preventDefault(); v.launch(performance.now()); }
     else if (k === 'c' && tabletUp && page === 'map') { v.map_center_commander(); pdaTap(); }
     else if (k === 'f') v.follow();
@@ -1521,8 +1585,8 @@ Click to copy and close.`;
         const my = (held.has('w') || held.has('arrowup') ? 1 : 0) - (held.has('s') || held.has('arrowdown') ? 1 : 0);
         v.move_commander(mx, my, held.has('shift'));
       }
-      if (held.has('q')) v.rotate(-1.5 * dt);
-      if (held.has('e')) v.rotate(1.5 * dt);
+      if (held.has(',') || held.has('<')) v.rotate(-1.5 * dt);
+      if (held.has('.') || held.has('>')) v.rotate(1.5 * dt);
       if (bench) v.rotate((Math.PI * 2 / 20) * dt);
       const t0 = performance.now();
       const line = v.frame(now);

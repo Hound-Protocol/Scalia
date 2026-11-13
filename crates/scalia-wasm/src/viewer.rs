@@ -1017,6 +1017,16 @@ impl Viewer {
         }
     }
     /// The commander's gait phase (0..1), or -1 when he stands: a foot lands at 0.25 (left) and 0.75 (right).
+    /// Where the commander is on screen (fractions of the width and height from the top left; his chest).
+    pub fn commander_screen(&mut self) -> Vec<f32> {
+        let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32) + 1.2;
+        let (target, yaw, view_h) = self.last_cam;
+        let (r, u, _) = scalia_render::camera::basis(yaw);
+        let d = Vec3::new((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32, z) - target;
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        vec![0.5 + d.dot(r) / (view_h * aspect), 0.5 - d.dot(u) / view_h]
+    }
+
     pub fn commander_phase(&self) -> f32 {
         self.cmd_phase
     }
