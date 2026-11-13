@@ -59,14 +59,21 @@ fn foot(q: vec3f, hip: f32, knee: f32) -> vec3f {
 }
 
 // Gait for both legs (port of pose.rs `gait`): x = left, y = right; the right leg is half a cycle behind.
-fn gait_hip(phase: f32, swing: f32, forward: f32) -> vec2f {
-  return vec2f(swing * sin(phase * 6.2831853) + forward, swing * sin((phase + 0.5) * 6.2831853) + forward);
+// One leg through a stride (port of pose.rs `gait_leg`): x = hip, y = knee; heel strike at u = 0.
+fn gait_leg(u: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32) -> vec2f {
+  if (u < stance) {
+    let s = u / stance;
+    return vec2f(forward + swing * (1.0 - 2.0 * s), base + 0.08 * sin(3.14159265 * s));
+  }
+  let w = (u - stance) / (1.0 - stance);
+  let e = w * w * (3.0 - 2.0 * w);
+  return vec2f(forward - swing + 2.0 * swing * e, base + lift * sin(3.14159265 * w));
 }
-fn gait_knee(phase: f32, lift: f32, base: f32) -> vec2f {
-  let cl = cos(phase * 6.2831853);
-  let cr = cos((phase + 0.5) * 6.2831853);
-  return vec2f(base + lift * pow(max(cl, 0.0), 1.5) + 0.22 * max(-cl, 0.0),
-               base + lift * pow(max(cr, 0.0), 1.5) + 0.22 * max(-cr, 0.0));
+fn gait(p: ptr<function, PP>, phase: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32) {
+  let l = gait_leg(fract(phase), swing, forward, lift, base, stance);
+  let r = gait_leg(fract(phase + 0.5), swing, forward, lift, base, stance);
+  (*p).hip = vec2f(l.x, r.x);
+  (*p).knee = vec2f(l.y, r.y);
 }
 
 // Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
@@ -125,21 +132,18 @@ fn pose_params(pose: u32, phase: f32) -> PP {
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
-    p.hip = gait_hip(phase, 0.34, 0.0);
-    p.knee = gait_knee(phase, 0.85, 0.06);
+    gait(&p, phase, 0.45, 0.0, 0.75, 0.06, 0.6);
     p.lean = 0.05;
     carry(&p, 1u);
     stride(&p, phase, 0.018, 0.06, 0.035, 0.025);
   } else if (pose == 2u) {
-    p.hip = gait_hip(phase, 0.48, 0.08);
-    p.knee = gait_knee(phase, 1.0, 0.2);
+    gait(&p, phase, 0.6, 0.08, 1.15, 0.15, 0.45);
     p.lean = 0.25;
     carry(&p, 2u);
     p.head = 0.2;
     stride(&p, phase, 0.03, 0.1, 0.05, 0.04);
   } else if (pose == 7u) {
-    p.hip = gait_hip(phase, 0.58, 0.1);
-    p.knee = gait_knee(phase, 1.35, 0.26);
+    gait(&p, phase, 0.64, 0.1, 1.45, 0.2, 0.36);
     p.lean = 0.42;
     carry(&p, 2u);
     p.head = 0.38;

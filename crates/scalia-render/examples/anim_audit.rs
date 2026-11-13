@@ -35,28 +35,33 @@ fn main() {
     }
     let mut bad = 0;
     println!("{:<10} {:>8} {:>10} {:>10} {:>10} {:>10}", "gait", "speed", "slide avg", "slide max", "seam", "jerk");
-    for (pose, hz, speed) in [(Pose::Walk, 0.95f32, 1.7f32), (Pose::Walk, 0.9, 1.4), (Pose::Run, 1.2, 3.0), (Pose::Sprint, 1.5, 4.6), (Pose::Sprint, 1.45, 3.5)] {
+    // Each gait at its game speeds: (pose, ground speed m/s, share of the cycle a foot is planted).
+    for (pose, speed, stance) in [(Pose::Walk, 1.7f32, 0.6f32), (Pose::Walk, 1.5, 0.6), (Pose::Run, 3.0, 0.45), (Pose::Sprint, 4.6, 0.36), (Pose::Sprint, 3.5, 0.36)] {
         let ps: Vec<PoseParams> = (0..=N).map(|k| params(pose, k as f32 / N as f32)).collect();
+        // The game sets the cadence from the speed: cycles per second = speed / stride.
+        let hz = speed / stride_m(pose);
         let dt = 1.0 / hz / N as f32;
-        // Foot slide: while a foot is the planted one (lowest of the two), it should move backwards at the ground speed.
         let f: Vec<[[Vec3; 2]; 2]> = ps.iter().map(|p| feet(p, &pts)).collect();
+        // Foot slide: the left boot (heel strike at phase 0) through the middle of its stance, against the ground.
+        let c = |k: usize| (f[k][0][0].y + f[k][0][1].y) * 0.5;
+        let (k0, k1) = ((0.08 * N as f32) as usize, ((stance - 0.08) * N as f32) as usize);
+        let measured = -(c(k1) - c(k0)) / ((k1 - k0) as f32 / N as f32); // metres per cycle
         let (mut sum, mut max, mut n, mut vs) = (0.0f32, 0.0f32, 0, 0.0f32);
-        for k in 0..N {
-            // The planted leg is the one whose lowest point is lower; its boot centre should travel back at ground speed.
-            let low = |fr: &[[Vec3; 2]; 2], i: usize| fr[i][0].z.min(fr[i][1].z);
-            let i = if low(&f[k], 0) < low(&f[k], 1) { 0 } else { 1 };
-            if low(&f[k + 1], i) < low(&f[k + 1], 1 - i) {
-                let c = |fr: &[[Vec3; 2]; 2]| (fr[i][0].y + fr[i][1].y) * 0.5;
-                let v = -(c(&f[k + 1]) - c(&f[k])) / dt;
-                let s = (v - speed).abs();
-                sum += s; max = max.max(s); n += 1; vs += v;
-            }
+        for k in k0..k1 {
+            let v = -(c(k + 1) - c(k)) / dt;
+            let s = (v - speed).abs();
+            sum += s; max = max.max(s); n += 1; vs += v;
         }
+        if (measured - stride_m(pose)).abs() > 0.05 * measured {
+            println!("  !! {pose:?}: stride_m says {:.2} m but the legs cover {measured:.2} m per cycle", stride_m(pose));
+            bad += 1;
+        }
+        if sum / n.max(1) as f32 > 0.15 { println!("  !! {pose:?} at {speed} m/s: the planted foot slides {:.2} m/s", sum / n.max(1) as f32); bad += 1; }
         let seam = angles(&ps[0]).iter().zip(angles(&ps[N])).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
         let a: Vec<Vec<f32>> = ps.iter().map(angles).collect();
         let mut jerk = 0.0f32;
         for k in 1..N - 1 { for j in 0..a[k].len() { jerk = jerk.max(((a[k + 1][j] - 2.0 * a[k][j] + a[k - 1][j]) / (dt * dt)).abs()); } }
-        println!("{:<10} {:>6.1}m/s {:>8.2}m/s {:>8.2}m/s {:>9.3}r {:>9.0}   stride {:.2} m/cycle: no slide at {:.2} cycles/s", format!("{pose:?}"), speed, sum / n.max(1) as f32, max, seam, jerk, vs / n.max(1) as f32 / hz, speed / (vs / n.max(1) as f32 / hz));
+        println!("{:<10} {:>6.1}m/s {:>8.2}m/s {:>8.2}m/s {:>9.3}r {:>9.0}   stride {measured:.2} m/cycle, {hz:.2} cycles/s (foot {:.2} m/s)", format!("{pose:?}"), speed, sum / n.max(1) as f32, max, seam, jerk, vs / n.max(1) as f32);
         if seam > 0.01 { println!("  !! loop seam {seam:.3} rad: the cycle jumps where it restarts"); bad += 1; }
     }
     println!("\nLeft palm to the rifle handguard (m); the right palm holds the grip by construction");

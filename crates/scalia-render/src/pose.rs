@@ -189,17 +189,43 @@ fn foot(q: Vec3, hip: f32, knee: f32) -> Vec3 {
 /// Gait for both legs at a phase: (hip, knee) angles. Each leg swings `swing` radians about `forward`; its knee
 /// flexes most mid-swing (as it passes under the body) and a little at mid-stance, carrying the weight, so the hips
 /// dip twice per stride (motion guide rule 2). The right leg is half a cycle behind the left.
-fn gait(phase: f32, swing: f32, forward: f32, lift: f32, base: f32) -> ([f32; 2], [f32; 2]) {
+fn gait(phase: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32) -> ([f32; 2], [f32; 2]) {
     let mut hip = [0.0; 2];
     let mut knee = [0.0; 2];
     for (i, off) in [0.0f32, 0.5].into_iter().enumerate() {
-        let a = (phase + off) * std::f32::consts::TAU;
-        let (s, c) = a.sin_cos();
-        hip[i] = swing * s + forward;
-        knee[i] = base + lift * c.max(0.0).powf(1.5) + 0.22 * (-c).max(0.0);
+        (hip[i], knee[i]) = gait_leg((phase + off).fract(), swing, forward, lift, base, stance);
     }
     (hip, knee)
 }
+
+/// One leg through a stride (u in 0..1, heel strike at 0). Stance (the first `stance` of the cycle): the hip sweeps
+/// back at an even rate, so the planted foot travels backwards at a steady speed (no slide once the cadence matches
+/// the ground speed), with a little knee give mid-stance. Swing: the leg comes forward eased, the knee lifting it clear.
+pub fn gait_leg(u: f32, swing: f32, forward: f32, lift: f32, base: f32, stance: f32) -> (f32, f32) {
+    use std::f32::consts::PI;
+    if u < stance {
+        let s = u / stance;
+        (forward + swing * (1.0 - 2.0 * s), base + 0.08 * (PI * s).sin())
+    } else {
+        let w = (u - stance) / (1.0 - stance);
+        let e = w * w * (3.0 - 2.0 * w);
+        (forward - swing + 2.0 * swing * e, base + lift * (PI * w).sin())
+    }
+}
+
+/// Ground covered per gait cycle (m): the planted foot sweeps back `stride` while the body moves the same, so the
+/// cadence is speed / stride. Measured by `examples/anim_audit` (keep in step with the gait parameters).
+pub fn stride_m(pose: Pose) -> f32 {
+    match pose {
+        Pose::Walk => WALK_STRIDE,
+        Pose::Run => RUN_STRIDE,
+        Pose::Sprint => SPRINT_STRIDE,
+        _ => 1.0,
+    }
+}
+pub const WALK_STRIDE: f32 = 1.22;
+pub const RUN_STRIDE: f32 = 2.14;
+pub const SPRINT_STRIDE: f32 = 2.85;
 
 /// Pose parameters at a gait phase (0..1; only the gaits use it). Rifle carries per pose (rule 3): low ready when
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
@@ -208,20 +234,20 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
     match pose {
         Pose::Stand => carry(&mut p, Carry::SafeHang),
         Pose::Walk => {
-            (p.hip, p.knee) = gait(phase, 0.34, 0.0, 0.85, 0.06);
+            (p.hip, p.knee) = gait(phase, 0.45, 0.0, 0.75, 0.06, 0.6);
             p.lean = 0.05;
             carry(&mut p, Carry::LowReady);
             stride(&mut p, phase, 0.018, 0.06, 0.035, 0.025);
         }
         Pose::Run => {
-            (p.hip, p.knee) = gait(phase, 0.48, 0.08, 1.0, 0.2);
+            (p.hip, p.knee) = gait(phase, 0.6, 0.08, 1.15, 0.15, 0.45);
             p.lean = 0.25;
             carry(&mut p, Carry::Collapsed);
             p.head = 0.2;
             stride(&mut p, phase, 0.03, 0.1, 0.05, 0.04);
         }
         Pose::Sprint => {
-            (p.hip, p.knee) = gait(phase, 0.58, 0.1, 1.35, 0.26);
+            (p.hip, p.knee) = gait(phase, 0.64, 0.1, 1.45, 0.2, 0.36);
             p.lean = 0.42;
             carry(&mut p, Carry::Collapsed);
             p.head = 0.38;

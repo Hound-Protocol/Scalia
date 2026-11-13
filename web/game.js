@@ -482,7 +482,7 @@ try {
     setTimeout(() => { thumb.classList.remove('press'); }, 450);
     setTimeout(() => { pressingOff = false; setTablet(false); }, 520);
   };
-  // The commander's footsteps on grass: one step each time a foot lands (gait phase 0.25 and 0.75), a little
+  // The commander's footsteps on grass: one step each time a heel strikes (gait phase 0 and 0.5), a little
   // different every time.
   const stepSound = new Audio('./sfx/steps-grass.mp3'); stepSound.preload = 'auto';
   let lastPhase = -1;
@@ -490,7 +490,7 @@ try {
     const ph = v.scene_name() === 'ground' ? v.commander_phase() : -1;
     if (ph >= 0 && lastPhase >= 0) {
       const crossed = (at) => (lastPhase < at && ph >= at) || (lastPhase > ph && (lastPhase < at || ph >= at));
-      if (crossed(0.25) || crossed(0.75)) {
+      if (crossed(0.0) || crossed(0.5)) {
         const a = stepSound.cloneNode(); worldAudio.add(a);
         a.volume = (v.commander_gait() === 2 ? 0.7 : 0.5) * (0.85 + Math.random() * 0.3);
         a.playbackRate = 0.9 + Math.random() * 0.2;

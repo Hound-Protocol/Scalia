@@ -67,9 +67,10 @@ fn aiming_points_the_rifle_forward_at_shoulder_height() {
 
 #[test]
 fn walking_swings_the_legs_and_running_leans_forward() {
-    let a = posed(Pose::Walk, 0.25);
-    let b = posed(Pose::Walk, 0.75);
-    let foot = |v: &[(Part, Vec3)]| v.iter().filter(|p| p.0 == Part::LeftShin).map(|p| p.1.y).fold(f32::MIN, f32::max);
+    // The left foot strikes in front at phase 0 and leaves the ground behind at the end of its stance (0.6).
+    let a = posed(Pose::Walk, 0.0);
+    let b = posed(Pose::Walk, 0.6);
+    let foot = |v: &[(Part, Vec3)]| v.iter().filter(|p| p.0 == Part::LeftFoot).map(|p| p.1.y).fold(f32::MIN, f32::max);
     assert!((foot(&a) - foot(&b)).abs() > 0.3, "left foot barely moves: {} vs {}", foot(&a), foot(&b));
     let head_y = |v: &[(Part, Vec3)]| v.iter().filter(|p| p.0 == Part::Head).map(|p| p.1.y).fold(f32::MIN, f32::max);
     assert!(head_y(&posed(Pose::Run, 0.0)) > head_y(&posed(Pose::Stand, 0.0)) + 0.1);

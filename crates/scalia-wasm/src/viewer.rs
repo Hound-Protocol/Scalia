@@ -24,6 +24,7 @@ use scalia_core::world::World;
 use scalia_render::bend::{globe_point, Bend};
 use scalia_render::gpu::{FrameDesc, Gpu};
 use scalia_render::mesh::{figure, figure_far, figure_lo, grass_tuft, MeshBuilder};
+use scalia_render::pose::stride_m;
 use scalia_render::pose::Pose;
 use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
@@ -1519,13 +1520,13 @@ impl Viewer {
             self.gpu.upload("plinth", plinth.bytes());
             // Every 3 seconds the next pose: walk, run, stand, crouch, cover aim, prone, standing aim.
             const SHOW: [(Pose, f32); 9] = [
-                (Pose::Walk, 0.9), (Pose::Run, 1.35), (Pose::Stand, 0.0), (Pose::Crouch, 0.0),
-                (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0), (Pose::Sprint, 1.45),
+                (Pose::Walk, 1.5 / scalia_render::pose::WALK_STRIDE), (Pose::Run, 3.0 / scalia_render::pose::RUN_STRIDE), (Pose::Stand, 0.0), (Pose::Crouch, 0.0),
+                (Pose::CoverAim, 0.0), (Pose::Prone, 0.0), (Pose::StandAim, 0.0), (Pose::Sprint, 4.6 / scalia_render::pose::SPRINT_STRIDE),
                 (Pose::Cover, 0.0),
             ];
             // Entry 9 is "walk while aiming": the walk with an aiming upper body layered on top.
             let walk_aim = self.preview_pose == Some(9);
-            let (pose, steps) = if walk_aim { (Pose::Walk, 0.9) } else { SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()] };
+            let (pose, steps) = if walk_aim { (Pose::Walk, 1.5 / stride_m(Pose::Walk)) } else { SHOW[self.preview_pose.unwrap_or((t / 3000.0) as usize) % SHOW.len()] };
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
             let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
@@ -1666,10 +1667,11 @@ impl Viewer {
             };
             let walking = d.phase == Phase::Marching || d.phase == Phase::Walking || d.phase == Phase::Climbing;
             let running = walking && matches!(self.world.groups.process(d.group).kind, ProcessKind::March { speed_mm_s, .. } if speed_mm_s >= RUN_SPEED_MM_S);
+            let march = match self.world.groups.process(d.group).kind { ProcessKind::March { speed_mm_s, .. } => speed_mm_s as f32 / 1000.0, _ => MARCH_SPEED_MM_S as f32 / 1000.0 };
             let (pose, steps) = if running {
-                (Pose::Sprint, 1.45 + jitter * 0.1)
+                (Pose::Sprint, march / stride_m(Pose::Sprint))
             } else if walking {
-                (Pose::Walk, 0.9 + jitter * 0.1)
+                (Pose::Walk, march / stride_m(Pose::Walk))
             } else {
                 (self.stance.get(&d.group.0).copied().unwrap_or(Pose::Stand), 0.0)
             };
@@ -1957,7 +1959,8 @@ impl Viewer {
                 }
                 let moving = self.agent_now < entry.1;
                 let heading = entry.0;
-                let (pose, steps) = if moving && sprint { (Pose::Sprint, 1.45 + jitter * 0.1) } else if moving { (Pose::Walk, 0.9 + jitter * 0.1) } else { (stance, 0.0) };
+                let mps = self.agents[&g].speed_mm_s() as f32 / 1000.0;
+                let (pose, steps) = if moving && sprint { (Pose::Sprint, mps / stride_m(Pose::Sprint)) } else if moving { (Pose::Walk, mps / stride_m(Pose::Walk)) } else { (stance, 0.0) };
                 let (ix, iy) = (px as f64 + (x - px) as f64 * alpha, py as f64 + (y - py) as f64 * alpha);
                 let (ax, ay) = (ix / 1000.0, iy / 1000.0);
                 let z = self.height_at(ax as f32, ay as f32);
@@ -2037,7 +2040,8 @@ impl Viewer {
         if self.cmd_pose.0 != pose {
             self.cmd_pose = (pose, self.cmd_pose.0, ts);
         }
-        let steps = match pose { Pose::Sprint => 1.5, Pose::Walk => 0.95, _ => 0.0 };
+        // Cadence from his real speed: the planted foot then keeps pace with the ground.
+        let steps = match pose { Pose::Sprint => CMD_SPRINT / stride_m(pose), Pose::Walk => CMD_WALK / stride_m(pose), _ => 0.0 };
         // His gait phase, exactly as the shader computes it (instance phase offset 0.37), for the footsteps.
         self.cmd_phase = if steps > 0.0 { (ts * steps + 0.37).fract() } else { -1.0 };
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
