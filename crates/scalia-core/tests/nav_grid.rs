@@ -65,3 +65,15 @@ fn rebuilding_is_deterministic() {
     b.rebuild(&props);
     assert_eq!(a.fingerprint(), b.fingerprint());
 }
+
+#[test]
+fn plywood_panels_block_walking_and_a_doorway_between_them_is_open() {
+    let mut g = grid();
+    // Two 3 m panels along y = 20 m with a 1.2 m doorway between x = 19.4 and 20.6 m; one has a window.
+    let panel = |x, window| Prop { kind: PropKind::Panel { length_mm: 3_000, window }, x_mm: x, y_mm: 20_000, quarter_turns: 0 };
+    g.rebuild(&[panel(17_900, false), panel(22_100, true)]);
+    assert!(!g.walkable_at(17_000, 20_000, 0), "solid panel");
+    assert!(!g.walkable_at(22_500, 20_000, 0), "a window panel still blocks walking");
+    assert!(g.walkable_at(20_000, 20_000, 0), "the doorway");
+    assert_eq!(PropKind::PANEL_MM, 200);
+}

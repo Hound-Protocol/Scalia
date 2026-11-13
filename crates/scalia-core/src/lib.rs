@@ -8,6 +8,7 @@ pub mod goap;
 pub mod flight;
 pub mod groups;
 pub mod hash;
+pub mod killhouse;
 pub mod nav;
 pub mod nav_agents;
 pub mod planet;

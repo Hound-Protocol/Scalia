@@ -13,6 +13,14 @@ pub enum PropKind {
     Wall { length_mm: i64, thickness_mm: i64 },
     /// A square crate.
     Crate { size_mm: i64 },
+    /// A plywood training-house panel, `PANEL_MM` thick and 2.4 m high, running east-west before turning; with
+    /// `window` it has an opening from 1.0 to 2.0 m (still blocks walking, not sight).
+    Panel { length_mm: i64, window: bool },
+}
+
+impl PropKind {
+    /// Thickness of a plywood panel.
+    pub const PANEL_MM: i64 = 200;
 }
 
 /// A static obstacle at a position, turned by whole quarter turns.
@@ -51,6 +59,10 @@ impl Prop {
                 if self.quarter_turns % 2 == 0 { (length_mm / 2, thickness_mm / 2) } else { (thickness_mm / 2, length_mm / 2) }
             }
             PropKind::Crate { size_mm } => (size_mm / 2, size_mm / 2),
+            PropKind::Panel { length_mm, .. } => {
+                let t = PropKind::PANEL_MM;
+                if self.quarter_turns % 2 == 0 { (length_mm / 2, t / 2) } else { (t / 2, length_mm / 2) }
+            }
         }
     }
 }

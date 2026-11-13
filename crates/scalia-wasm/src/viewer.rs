@@ -396,6 +396,9 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
     v.gpu.upload("figure", figure().bytes());
     v.gpu.upload("figure_lo", figure_lo().bytes());
     v.gpu.upload("figure_far", figure_far().bytes());
+    v.gpu.upload("enemy", enemy_kit(figure()).bytes());
+    v.gpu.upload("enemy_lo", enemy_kit(figure_lo()).bytes());
+    v.gpu.upload("enemy_far", enemy_kit(figure_far()).bytes());
     v.gpu.upload("tuft", grass_tuft().bytes());
     Ok(v)
 }
@@ -1877,14 +1880,28 @@ impl Viewer {
         instanced.push(("base".into(), "base_at".into()));
         let (bx, by) = ((-self.origin.0) as f32, (-self.origin.1) as f32);
         self.gpu.upload_instances("base_at", bytes(&[bx, by, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
+        // The enemy squad in the training house.
+        let mut foes = Vec::with_capacity(ENEMY_POSTS.len() * 12);
+        let (kx, ky) = (KILLHOUSE_MM.0 as f32 / 1000.0, KILLHOUSE_MM.1 as f32 / 1000.0);
+        for (i, &((px, py), (wx, wy), pose)) in ENEMY_POSTS.iter().enumerate() {
+            let (ax, ay) = (kx + px, ky + py);
+            let z = self.height_at(ax, ay);
+            let heading = (px - wx).atan2(wy - py);
+            let (x, y) = ((ax as f64 - self.origin.0) as f32, (ay as f64 - self.origin.1) as f32);
+            foes.extend_from_slice(&[x, y, z, ENEMY_RED as f32, heading, i as f32 * 0.137 % 1.0, 0.0, pose as u32 as f32, pose as u32 as f32, -1000.0, 0.0, 0.0]);
+        }
+        self.gpu.upload_instances("enemies", bytes(&foes));
         // Three levels of detail. Past 250 m a soldier is a few pixels tall: the 24-triangle figure, and no
         // shadow pass for it (its shadow would be smaller than a pixel).
         if self.ground_view <= 70.0 {
             instanced.push(("figure".into(), "soldiers".into()));
+            instanced.push(("enemy".into(), "enemies".into()));
         } else if self.ground_view <= 250.0 {
             instanced.push(("figure_lo".into(), "soldiers".into()));
+            instanced.push(("enemy_lo".into(), "enemies".into()));
         } else {
             decor.push(("figure_far".into(), "soldiers".into()));
+            decor.push(("enemy_far".into(), "enemies".into()));
         }
         if let Some(d) = self.order_dest {
             let arrived = self.selected.map_or(true, |g| !self.world.groups.process(GroupId(g)).is_running_at(tick));
@@ -2652,6 +2669,11 @@ fn prop_box(p: &Prop, h: f32) -> (Vec3, Vec3) {
             let top = if t <= 0.65 { 2.75 } else if t <= 0.8 { 1.0 } else if t <= 3.0 { 2.6 } else { 3.9 };
             (Vec3::new(x - hx, y - hy, h), Vec3::new(x + hx, y + hy, h + top))
         }
+        PropKind::Panel { length_mm, .. } => {
+            let (l, t) = (length_mm as f32 / 1000.0, PropKind::PANEL_MM as f32 / 1000.0);
+            let (hx, hy) = if p.quarter_turns % 2 == 0 { (l / 2.0, t / 2.0) } else { (t / 2.0, l / 2.0) };
+            (Vec3::new(x - hx, y - hy, h), Vec3::new(x + hx, y + hy, h + scalia_core::killhouse::WALL_TOP_M))
+        }
         PropKind::Crate { size_mm } => {
             let s = size_mm as f32 / 2000.0;
             let top = if size_mm >= 2_500 { 6.6 } else { s * 2.0 };
@@ -2670,6 +2692,7 @@ fn prop_kind(p: &Prop) -> &'static str {
         PropKind::Wall { .. } => "barracks",
         PropKind::Crate { size_mm } if size_mm >= 2_500 => "tower",
         PropKind::Crate { .. } => "crate",
+        PropKind::Panel { .. } => "killhouse",
     }
 }
 
@@ -2723,6 +2746,27 @@ fn structure_of(p: &Prop, h: f32) -> Structure {
             }
             s.rooms.push(vec![Vec3::new(lo.x, my + 1.0, hi.z), Vec3::new(hi.x, my + 1.0, hi.z)]); // the corridor
         }
+        "killhouse" => {
+            use scalia_core::killhouse::{SIZE_M, WALL_TOP_M, WINDOW_SILL_M, WINDOW_TOP_M};
+            let k = killhouse();
+            let (ox, oy) = (k.origin.0 as f32 / 1000.0, k.origin.1 as f32 / 1000.0);
+            let (lo, hi) = (Vec3::new(ox, oy, h), Vec3::new(ox + SIZE_M.0 as f32, oy + SIZE_M.1 as f32, h + WALL_TOP_M));
+            s.faces = box_faces(lo, hi).into_iter().skip(1).collect(); // no roof
+            let quad = |x: i64, y: i64, along_x: bool, w: f32, z0: f32, z1: f32| {
+                let (x, y) = (x as f32 / 1000.0, y as f32 / 1000.0);
+                if along_x { quad_y(y, x - w / 2.0, x + w / 2.0, z0, z1) } else { quad_x(x, y - w / 2.0, y + w / 2.0, z0, z1) }
+            };
+            for d in &k.doors {
+                s.doors.push(quad(d.x_mm, d.y_mm, d.along_x, d.width_mm as f32 / 1000.0, h, h + 2.1));
+            }
+            for w in &k.windows {
+                s.windows.push(quad(w.x_mm, w.y_mm, w.along_x, 1.5, h + WINDOW_SILL_M, h + WINDOW_TOP_M));
+            }
+            for r in &k.rooms {
+                let (a, b) = (Vec3::new(r.min.0 as f32 / 1000.0, r.min.1 as f32 / 1000.0, hi.z), Vec3::new(r.max.0 as f32 / 1000.0, r.max.1 as f32 / 1000.0, hi.z));
+                s.rooms.push(vec![a, Vec3::new(b.x, a.y, a.z), b, Vec3::new(a.x, b.y, a.z), a]);
+            }
+        }
         "tower" => {
             let (z0, z1) = (h + 4.8, h + 5.7);
             let (mx, my, a) = ((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, 0.5);
@@ -2775,8 +2819,17 @@ fn base_props() -> Vec<Prop> {
     }
     p.push(wall(-2_500, 150_000, 31_000, 600, 0));
     p.push(wall(32_000 - 1_000, 150_000, 34_000, 600, 0));
+    // The roofless plywood training house in the middle of the compound, where the enemy squad is stationed.
+    p.extend(killhouse().props());
     p
 }
+
+/// The training house on the testing ground (see scalia_core::killhouse).
+fn killhouse() -> scalia_core::killhouse::Killhouse {
+    scalia_core::killhouse::Killhouse::new(KILLHOUSE_MM.0, KILLHOUSE_MM.1)
+}
+/// Its south-west corner (absolute millimetres).
+const KILLHOUSE_MM: (i64, i64) = (80_000, 62_000);
 
 /// Low-poly mesh for the base's props, standing on the levelled pad at height `h` (same style as the soldiers).
 fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
@@ -2817,6 +2870,26 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
                     }
                 }
             }
+            PropKind::Panel { length_mm, window } => {
+                // Plywood on a dark frame: posts at the ends, a window as a sill wall and a header.
+                use scalia_core::killhouse::{WALL_TOP_M, WINDOW_SILL_M, WINDOW_TOP_M};
+                let (l, t) = (length_mm as f32 / 1000.0, PropKind::PANEL_MM as f32 / 1000.0);
+                let along_x = p.quarter_turns % 2 == 0;
+                let (hx, hy) = if along_x { (l / 2.0, t / 2.0) } else { (t / 2.0, l / 2.0) };
+                let (lo, hi) = ([x - hx, y - hy], [x + hx, y + hy]);
+                if window {
+                    m.cuboid([lo[0], lo[1], h], [hi[0], hi[1], h + WINDOW_SILL_M], c(kit::COYOTE_DARK));
+                    m.cuboid([lo[0], lo[1], h + WINDOW_TOP_M], [hi[0], hi[1], h + WALL_TOP_M], c(kit::COYOTE_DARK));
+                    // Sill and frame.
+                    m.cuboid([lo[0] - 0.03, lo[1] - 0.03, h + WINDOW_SILL_M], [hi[0] + 0.03, hi[1] + 0.03, h + WINDOW_SILL_M + 0.05], c(13));
+                } else {
+                    m.cuboid([lo[0], lo[1], h], [hi[0], hi[1], h + WALL_TOP_M], c(kit::COYOTE_DARK));
+                }
+                for e in [-1.0f32, 1.0] {
+                    let (px, py) = if along_x { (x + e * (hx - 0.05), y) } else { (x, y + e * (hy - 0.05)) };
+                    m.cuboid([px - 0.06, py - 0.12, h], [px + 0.06, py + 0.12, h + WALL_TOP_M + 0.05], c(13));
+                }
+            }
             PropKind::Crate { size_mm } => {
                 let s = size_mm as f32 / 2000.0;
                 if size_mm >= 2_500 {
@@ -2835,6 +2908,32 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
     }
     m
 }
+
+/// The enemy's outfit: the same soldier with a red helmet and red plate carrier, readable at any distance.
+fn enemy_kit(mut f: MeshBuilder) -> MeshBuilder {
+    use scalia_render::mesh::{code, kit, palette_of, part_of};
+    for v in &mut f.vertices {
+        if v.color >= 0.0 && matches!(palette_of(v.color) as u8, kit::HELMET | kit::VEST) {
+            v.color = code(ENEMY_RED, part_of(v.color));
+        }
+    }
+    f
+}
+/// Palette red for the enemy's kit and armbands.
+const ENEMY_RED: u8 = 9;
+
+/// The enemy squad stationed in the training house (absolute metres from its south-west corner): position, the
+/// point it watches, pose. Covering the doors and windows from inside, two to a room.
+const ENEMY_POSTS: [((f32, f32), (f32, f32), Pose); 8] = [
+    ((12.5, 3.5), (12.7, 0.0), Pose::CoverAim),
+    ((16.0, 2.0), (20.0, 3.7), Pose::StandAim),
+    ((5.0, 2.0), (3.7, 0.0), Pose::StandAim),
+    ((2.5, 5.0), (8.0, 3.6), Pose::CoverAim),
+    ((3.0, 10.6), (0.0, 10.7), Pose::CoverAim),
+    ((6.5, 12.0), (5.2, 14.0), Pose::StandAim),
+    ((16.5, 10.2), (20.0, 10.2), Pose::CoverAim),
+    ((13.0, 12.5), (10.6, 10.6), Pose::Stand),
+];
 
 /// The commander's figure: the soldier in black, with the armband patches in the instance (team) colour.
 fn commander_figure() -> MeshBuilder {
