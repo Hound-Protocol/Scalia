@@ -483,8 +483,9 @@ try {
     const box = $('mapMarks'), w = mapCanvas.clientWidth, h = mapCanvas.clientHeight;
     const marks = onMap(() => JSON.parse(v.unit_marks()));
     lastMarks = marks;
-    const seen = new Set();
-    for (const m of marks) {
+    const seen = new Set(), placed = [];
+    const order = [...marks].sort((a, b) => (b.sel || b.you) - (a.sel || a.you));
+    for (const m of order) {
       let el = markEls.get(m.id);
       if (!el) {
         el = document.createElement('div'); el.innerHTML = MARK_SVG; el.firstChild.style.position = 'absolute';
@@ -496,6 +497,10 @@ try {
       svg.style.width = svg.style.height = `${size}px`; svg.style.left = svg.style.top = `${-size / 2}px`;
       svg.classList.toggle('sel', m.sel || (m.you && commanderPicked));
       el.style.transform = `translate(${(m.x * w).toFixed(1)}px, ${(m.y * h).toFixed(1)}px)`;
+      const lx = m.x * w, ly = m.y * h - size / 2 - 8;
+      const clash = placed.some((q) => Math.abs(q[0] - lx) < 66 && Math.abs(q[1] - ly) < 12);
+      if (!clash) placed.push([lx, ly]);
+      el.lastChild.style.visibility = clash ? 'hidden' : 'visible';
       el.lastChild.style.bottom = `${size / 2}px`; el.lastChild.style.left = '0'; el.lastChild.style.marginBottom = '3px';
       seen.add(m.id);
     }
