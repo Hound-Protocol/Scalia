@@ -1,10 +1,14 @@
-//! `pose_dump <pose id> <out>`: a pose's posed figure (x, y, z, part per vertex; figure frame facing +y), for side/top/back contact sheets.
+//! `pose_dump <pose id> <out> [phase] [grip]`: a pose's posed figure (x, y, z, part per vertex; figure frame facing
+//! +y), for side/top/back contact sheets. With `grip`, the left hand is put on the handguard as the shader does.
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of};
-use scalia_render::pose::{params, pose_vertex, Pose};
+use scalia_render::pose::{grip, params, pose_vertex, two_handed, Pose};
 fn main() {
     let a: Vec<String> = std::env::args().collect();
-    let p = params(Pose::from_id(a[1].parse().unwrap()), 0.25);
+    let pose = Pose::from_id(a[1].parse().unwrap());
+    let phase: f32 = a.get(3).map_or(0.25, |s| s.parse().unwrap());
+    let mut p = params(pose, phase);
+    if a.get(4).is_some() { p = grip(&p, two_handed(pose)); }
     let fig = figure();
     let mut out = Vec::new();
     for v in &fig.vertices {

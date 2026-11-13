@@ -9,3 +9,4 @@ wgpu = { version = "30", default-features = false, features = ["webgpu", "wgsl"]
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }
+regex = "1"

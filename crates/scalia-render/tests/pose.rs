@@ -232,7 +232,9 @@ fn every_carry_holds_the_rifle_in_both_hands() {
         for k in 0..4 {
             let pp = params(pose, k as f32 / 4.0);
             assert!((rifle_lo..=rifle_hi).contains(&pp.rifle), "{pose:?}: rifle angle {}", pp.rifle);
-            // The left palm on the handguard (the right holds the pistol grip by construction).
+            // The left palm on the handguard as drawn, after `grip` (the right holds the pistol grip by
+            // construction).
+            let pp = grip(&pp, two_handed(pose));
             let miss = (hand(&pp, Side::Left) - held(RIFLE_GUARD, &pp)).length();
             assert!(miss < 0.05, "{pose:?}: left hand {miss:.3} m off the handguard");
         }
@@ -354,7 +356,7 @@ fn the_body_bobs_and_twists_against_the_legs_when_moving() {
         let bob = pp.iter().map(|p| p.bob).fold(f32::MIN, f32::max) - pp.iter().map(|p| p.bob).fold(f32::MAX, f32::min);
         let twist = pp.iter().map(|p| p.twist.abs()).fold(0.0f32, f32::max);
         assert!(bob > 0.01 && bob < 0.08, "{pose:?}: bob {bob}");
-        assert!(twist > 0.03 && twist < 0.2, "{pose:?}: twist {twist}");
+        assert!(twist > 0.03 && twist < 0.35, "{pose:?}: twist {twist}");
     }
     let still = params(Pose::Stand, 0.0);
     assert_eq!((still.bob, still.twist), (0.0, 0.0), "no stride, no bob");

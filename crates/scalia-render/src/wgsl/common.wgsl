@@ -98,13 +98,15 @@ fn carry(p: ptr<function, PP>, c: u32) {
 }
 
 // The stride's life (port of pose.rs `stride`): rise and fall, upper body turning against the legs, rifle sway.
-fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rifle: f32) {
+fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rifle: f32, swing: f32) {
   let t = phase * 6.2831853;
   (*p).bob = bob * cos(2.0 * t);
   (*p).twist = twist * sin(t);
+  (*p).look = (*p).look - 0.8 * (*p).twist;
   let sway = sin(2.0 * t + 0.5);
   (*p).sh = (*p).sh + vec2f(arms * sway);
   (*p).rifle = (*p).rifle + rifle * sin(2.0 * t);
+  (*p).ryaw = (*p).ryaw + swing * sin(t);
 }
 
 // Idle life for soldiers standing still (port of pose.rs `idle`): breathing, weight shifts, glances, a rifle hitch.
@@ -146,19 +148,19 @@ fn pose_params(pose: u32, phase: f32) -> PP {
     gait(&p, phase, 0.45, 0.0, 0.75, 0.06, 0.6);
     p.lean = 0.05;
     carry(&p, 1u);
-    stride(&p, phase, 0.018, 0.06, 0.035, 0.025);
+    stride(&p, phase, 0.018, 0.06, 0.035, 0.025, 0.04);
   } else if (pose == 2u) {
     gait(&p, phase, 0.6, 0.08, 1.15, 0.15, 0.45);
     p.lean = 0.25;
     carry(&p, 2u);
     p.head = 0.2;
-    stride(&p, phase, 0.03, 0.1, 0.05, 0.04);
+    stride(&p, phase, 0.03, 0.2, 0.08, 0.06, 0.16);
   } else if (pose == 7u) {
-    gait(&p, phase, 0.64, 0.1, 1.45, 0.2, 0.36);
+    gait(&p, phase, 0.56, 0.1, 1.45, 0.2, 0.36);
     p.lean = 0.42;
     carry(&p, 2u);
     p.head = 0.38;
-    stride(&p, phase, 0.035, 0.12, 0.03, 0.05);
+    stride(&p, phase, 0.035, 0.3, 0.06, 0.08, 0.24);
   } else if (pose == 3u) {
     p.hip = vec2f(1.55, -0.1);
     p.knee = vec2f(1.8, 1.75);

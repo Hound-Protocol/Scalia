@@ -64,10 +64,10 @@ fn main() {
         println!("{:<10} {:>6.1}m/s {:>8.2}m/s {:>8.2}m/s {:>9.3}r {:>9.0}   stride {measured:.2} m/cycle, {hz:.2} cycles/s (foot {:.2} m/s)", format!("{pose:?}"), speed, sum / n.max(1) as f32, max, seam, jerk, vs / n.max(1) as f32);
         if seam > 0.01 { println!("  !! loop seam {seam:.3} rad: the cycle jumps where it restarts"); bad += 1; }
     }
-    println!("\nLeft palm to the rifle handguard (m); the right palm holds the grip by construction");
+    println!("\nLeft palm to the rifle handguard (m, worst over the cycle, after grip()); the right palm holds the grip by construction");
     for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim] {
-        let p = params(pose, 0.25);
-        let guard = hand(&p, Side::Left).distance(held(RIFLE_GUARD, &p));
+        // Worst over the cycle, as drawn (after grip()).
+        let guard = (0..16).map(|k| { let p = grip(&params(pose, k as f32 / 16.0), two_handed(pose)); hand(&p, Side::Left).distance(held(RIFLE_GUARD, &p)) }).fold(0.0, f32::max);
         println!("{:<10} guard {:>6.3}", format!("{pose:?}"), guard);
         if guard > 0.03 { println!("  !! {pose:?}: the left hand is off the handguard"); bad += 1; }
     }

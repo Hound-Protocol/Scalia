@@ -353,7 +353,7 @@ pub fn stride_m(pose: Pose) -> f32 {
 }
 pub const WALK_STRIDE: f32 = 1.21;
 pub const RUN_STRIDE: f32 = 2.12;
-pub const SPRINT_STRIDE: f32 = 2.84;
+pub const SPRINT_STRIDE: f32 = 2.50;
 
 /// Pose parameters at a gait phase (0..1; only the gaits use it). Rifle carries per pose (rule 3): low ready when
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
@@ -365,21 +365,21 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
             (p.hip, p.knee) = gait(phase, 0.45, 0.0, 0.75, 0.06, 0.6);
             p.lean = 0.05;
             carry(&mut p, Carry::LowReady);
-            stride(&mut p, phase, 0.018, 0.06, 0.035, 0.025);
+            stride(&mut p, phase, 0.018, 0.06, 0.035, 0.025, 0.04);
         }
         Pose::Run => {
             (p.hip, p.knee) = gait(phase, 0.6, 0.08, 1.15, 0.15, 0.45);
             p.lean = 0.25;
             carry(&mut p, Carry::Collapsed);
             p.head = 0.2;
-            stride(&mut p, phase, 0.03, 0.1, 0.05, 0.04);
+            stride(&mut p, phase, 0.03, 0.2, 0.08, 0.06, 0.16);
         }
         Pose::Sprint => {
-            (p.hip, p.knee) = gait(phase, 0.64, 0.1, 1.45, 0.2, 0.36);
+            (p.hip, p.knee) = gait(phase, 0.56, 0.1, 1.45, 0.2, 0.36);
             p.lean = 0.42;
             carry(&mut p, Carry::Collapsed);
             p.head = 0.38;
-            stride(&mut p, phase, 0.035, 0.12, 0.03, 0.05);
+            stride(&mut p, phase, 0.035, 0.3, 0.06, 0.08, 0.24);
         }
         Pose::Crouch => {
             kneel(&mut p);
@@ -430,14 +430,18 @@ pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
 
 /// The life a stride puts into the body: a rise and fall twice per cycle, the upper body turning against the legs,
 /// and the rifle swaying with each footfall (both arms together, so the hands stay on it).
-fn stride(p: &mut PoseParams, phase: f32, bob: f32, twist: f32, arms: f32, rifle: f32) {
+/// `swing`: the rifle swinging across the body with the shoulders (turn around the grip, radians), the side
+/// to side motion of a hard run; the head turns against the shoulders so the eyes stay on the way ahead.
+fn stride(p: &mut PoseParams, phase: f32, bob: f32, twist: f32, arms: f32, rifle: f32, swing: f32) {
     let t = phase * std::f32::consts::TAU;
     p.bob = bob * (2.0 * t).cos();
     p.twist = twist * t.sin();
+    p.look -= 0.8 * p.twist;
     let sway = (2.0 * t + 0.5).sin();
     p.shoulder[0] += arms * sway;
     p.shoulder[1] += arms * sway;
     p.rifle += rifle * (2.0 * t).sin();
+    p.rifle_yaw += swing * t.sin();
 }
 
 /// Idle life for a soldier standing still (`t` seconds, `seed` 0..1 per soldier, so a squad is never in step):
