@@ -378,7 +378,35 @@ try {
   // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
   let tabletShown = false;
   const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
-  const sfx = (src, vol) => { const a = new Audio(src); a.preload = 'auto'; a.volume = vol; return () => { const b = a.cloneNode(); b.volume = vol; b.play().catch(() => {}); }; };
+  // Interface sounds play from decoded buffers on one audio context: an <audio> clone per play re-reads the
+  // file and was sometimes too late or silent (the tablet's open sound). The element is only the fallback
+  // until the buffer is ready.
+  const ui = { ctx: null, all: [] };
+  const uiCtx = () => {
+    if (!ui.ctx) { try { ui.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { return null; } }
+    if (ui.ctx.state === 'suspended') ui.ctx.resume().catch(() => {});
+    return ui.ctx;
+  };
+  const sfx = (src, vol) => {
+    const el = new Audio(src); el.preload = 'auto'; el.volume = vol;
+    let buf = null, loading = null;
+    const load = (c) => loading || (loading = fetch(src).then((r) => r.arrayBuffer()).then((b) => c.decodeAudioData(b)).then((d) => { buf = d; }).catch(() => { loading = null; }));
+    ui.all.push(load);
+    return () => {
+      const c = uiCtx();
+      if (c && buf && c.state === 'running') {
+        const n = c.createBufferSource(); n.buffer = buf;
+        const g = c.createGain(); g.gain.value = vol;
+        n.connect(g).connect(c.destination); n.start();
+        return;
+      }
+      if (c) load(c);
+      const b = el.cloneNode(); b.volume = vol; b.play().catch(() => {});
+    };
+  };
+  // The first touch of the page unlocks audio: decode every interface sound then.
+  addEventListener('pointerdown', () => { const c = uiCtx(); if (c) ui.all.forEach((l) => l(c)); }, { once: true, capture: true });
+  addEventListener('keydown', () => { const c = uiCtx(); if (c) ui.all.forEach((l) => l(c)); }, { once: true, capture: true });
   const unitSelect = sfx('./sfx/unit-select.mp3', 0.6), menuOpen = sfx('./sfx/context-menu.mp3', 0.6);
   const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-leave.mp3', 0.3), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
   // Every button on the tablet, on screen or on the device, taps.
