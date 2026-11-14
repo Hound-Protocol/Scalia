@@ -953,7 +953,7 @@ impl Battle {
             if let Some((at, p)) = self.brains[squad].blast_at {
                 if self.time_ms >= at {
                     self.brains[squad].blast_at = None;
-                    self.explode(p);
+                    self.explode(p, squad);
                 }
             }
         }
@@ -1070,12 +1070,17 @@ impl Battle {
         }
     }
 
-    fn explode(&mut self, p: (i64, i64)) {
+    /// A grenade goes off at `p`, thrown by squad `by`: everyone near is hurt and shaken, but the squad that
+    /// threw it was expecting the bang (they called "frag out" and kept their heads down behind the wall): it
+    /// does not break their stack.
+    fn explode(&mut self, p: (i64, i64), by: usize) {
         self.log.push(Event::Explosion { pos: p });
         for s in &mut self.soldiers {
             let d = dist(s.pos, p);
             if s.alive() && d < BLAST_MM * 2 {
-                s.suppression = 1_000;
+                if s.squad as usize != by || d < BLAST_MM {
+                    s.suppression = 1_000;
+                }
                 if d < BLAST_MM {
                     s.health = s.health.saturating_sub((120 * (BLAST_MM - d) / BLAST_MM) as i32 + 20);
                 }
@@ -1217,7 +1222,8 @@ impl Battle {
                     if rank < 4 {
                         self.soldiers[i].task = Task::Move { to: stack[rank], gait: Gait::Crouch };
                         self.soldiers[i].aim = rank == 0;
-                        if dist(self.soldiers[i].pos, stack[rank]) > 700 {
+                        // The pie needs the point man and his cover in place; the rest close up during it.
+                        if rank < 2 && dist(self.soldiers[i].pos, stack[rank]) > 700 {
                             ready = false;
                         }
                     } else {
