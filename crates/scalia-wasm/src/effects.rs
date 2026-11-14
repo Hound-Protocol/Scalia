@@ -26,6 +26,8 @@ struct Shot {
     at: f64,
     muzzle: [f64; 3],
     impact: [f64; 3],
+    /// Which way the barrel pointed (unit), for the flash; None = along the round's path.
+    bore: Option<[f64; 3]>,
     hit: bool,
     tracer: bool,
 }
@@ -63,9 +65,10 @@ fn lerp(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
 }
 
 impl Effects {
-    /// A round fired at viewer time `at` (ms) from `muzzle` to `impact`; `tracer` draws its streak.
-    pub fn shot(&mut self, at: f64, muzzle: [f64; 3], impact: [f64; 3], hit: bool, tracer: bool) {
-        self.shots.push(Shot { at, muzzle, impact, hit, tracer });
+    /// A round fired at viewer time `at` (ms) from `muzzle` to `impact` out of a barrel pointing along `bore`;
+    /// `tracer` draws its streak.
+    pub fn shot(&mut self, at: f64, muzzle: [f64; 3], impact: [f64; 3], bore: Option<[f64; 3]>, hit: bool, tracer: bool) {
+        self.shots.push(Shot { at, muzzle, impact, bore, hit, tracer });
     }
 
     pub fn blast(&mut self, at: f64, pos: [f64; 3]) {
@@ -124,11 +127,14 @@ impl Effects {
             let path = sub(s.impact, s.muzzle);
             let dist = len(path).max(0.01);
             if age < FLASH_MS {
-                // A star of fire at the muzzle: a bright core and a cone thrown forward.
+                // Fire out of the end of the barrel, along the barrel (not towards wherever the round lands): a small
+                // bright core just past the muzzle and a short tongue thrown forward, both shrinking as it dies.
                 let k = (1.0 - age / FLASH_MS) as f32;
-                let tip = lerp(s.muzzle, s.impact, (0.55 / dist).min(1.0));
-                m.diamond(rel(s.muzzle), 0.16 * k + 0.05, code(FLASH_GLOW, Part::Glow));
-                m.prism(rel(s.muzzle), [0.09 * k, 0.09 * k], rel(tip), [0.01, 0.01], 5, code(FLASH_GLOW, Part::Glow));
+                let bore = s.bore.and_then(|b| { let l = len(b); (l > 1e-6).then(|| [b[0] / l, b[1] / l, b[2] / l]) })
+                    .unwrap_or([path[0] / dist, path[1] / dist, path[2] / dist]);
+                let out = |d: f64| [s.muzzle[0] + bore[0] * d, s.muzzle[1] + bore[1] * d, s.muzzle[2] + bore[2] * d];
+                m.diamond(rel(out(0.04)), 0.05 * k + 0.035, code(FLASH_GLOW, Part::Glow));
+                m.prism(rel(out(0.02)), [0.05 * k + 0.01, 0.05 * k + 0.01], rel(out(0.22 + 0.25 * k as f64)), [0.008, 0.008], 5, code(FLASH_GLOW, Part::Glow));
             }
             let flight = dist / ROUND_M_PER_MS;
             if s.tracer && age < flight {
@@ -199,7 +205,7 @@ mod tests {
     #[test]
     fn a_shot_lights_up_briefly_and_its_tracer_flies_to_the_target() {
         let mut fx = Effects::default();
-        fx.shot(1_000.0, [100.0, 100.0, 1.4], [100.0, 190.0, 1.2], false, true);
+        fx.shot(1_000.0, [100.0, 100.0, 1.4], [100.0, 190.0, 1.2], None, false, true);
         assert!(fx.lights(990.0, (0.0, 0.0)).is_empty(), "not before it is fired");
         let l = fx.lights(1_010.0, (0.0, 0.0));
         assert_eq!(l.len(), 1);
@@ -219,12 +225,26 @@ mod tests {
     #[test]
     fn blasts_come_first_and_lights_are_newest_first() {
         let mut fx = Effects::default();
-        fx.shot(1_000.0, [0.0, 0.0, 1.4], [0.0, 30.0, 1.0], true, false);
-        fx.shot(1_020.0, [5.0, 0.0, 1.4], [5.0, 30.0, 1.0], true, false);
+        fx.shot(1_000.0, [0.0, 0.0, 1.4], [0.0, 30.0, 1.0], None, true, false);
+        fx.shot(1_020.0, [5.0, 0.0, 1.4], [5.0, 30.0, 1.0], None, true, false);
         fx.blast(1_010.0, [10.0, 10.0, 0.0]);
         let l = fx.lights(1_030.0, (0.0, 0.0));
         assert_eq!(l.len(), 3);
         assert_eq!(l[0].radius, 16.0, "the blast");
         assert_eq!(l[1].pos[0], 5.0, "then the newer flash");
+    }
+
+    #[test]
+    fn the_flash_leaves_along_the_barrel_whatever_the_round_hits() {
+        let mut fx = Effects::default();
+        // Barrel pointing up +y; the round went wide into the dirt off to the right.
+        fx.shot(1_000.0, [0.0, 0.0, 1.4], [20.0, 3.0, 0.0], Some([0.0, 1.0, 0.0]), false, false);
+        let m = fx.mesh(1_005.0, (0.0, 0.0));
+        assert!(!m.vertices.is_empty());
+        for v in &m.vertices {
+            assert!(v.pos[0].abs() < 0.12, "flash spills sideways off the barrel: {:?}", v.pos);
+            assert!(v.pos[1] > -0.12 && v.pos[1] < 0.6, "flash is a short tongue out of the muzzle: {:?}", v.pos);
+            assert!((v.pos[2] - 1.4).abs() < 0.12, "{:?}", v.pos);
+        }
     }
 }

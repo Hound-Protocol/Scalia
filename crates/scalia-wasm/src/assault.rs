@@ -70,6 +70,8 @@ pub struct Fx {
     pub hit: bool,
     pub blast: bool,
     pub tracer: bool,
+    /// Which way the shooter's barrel pointed (unit, world), for the muzzle flash.
+    pub bore: Option<[f32; 3]>,
 }
 
 pub struct Assault {
@@ -98,6 +100,8 @@ pub struct Assault {
     turn: Vec<(f32, f32, f32)>,
     /// Per soldier: where his muzzle was last drawn (mm, z over the ground), for flashes and tracers.
     muzzle: Vec<Option<(i64, i64, i64)>>,
+    /// Per soldier: which way his barrel pointed when last drawn (unit, world; zero = unknown).
+    bore: Vec<[f32; 3]>,
     /// Per soldier: his upper body (layer or pose) now, the one before, since when (shader clock): for blending
     /// the arms when the rifle comes up or down.
     uppers: Vec<(Pose, Pose, f32)>,
@@ -156,7 +160,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), uppers: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), uppers: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -178,6 +182,7 @@ impl Assault {
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
             self.turn.push((0.0, 0.0, 0.0));
             self.muzzle.push(None);
+            self.bore.push([0.0; 3]);
             self.uppers.push((Pose::Stand, Pose::Stand, -1000.0));
         }
     }
@@ -272,7 +277,8 @@ impl Assault {
                         let impact = if hit || target == shooter { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
                         // One round in four is a tracer.
                         let tracer = (r >> 40) % 4 == 0;
-                        self.fx.push(Fx { at, from: muzzle, to: impact, hit, blast: false, tracer });
+                        let bore = self.bore.get(shooter).copied().filter(|b| b.iter().any(|c| *c != 0.0));
+                        self.fx.push(Fx { at, from: muzzle, to: impact, hit, blast: false, tracer, bore });
                     }
                     // A magazine change, heard through: the old one out, the fresh one in about halfway, the bolt
                     // sent home near the end (over however long his change takes).
@@ -287,7 +293,7 @@ impl Assault {
                     Event::Explosion { pos } => {
                         let at = self.battle.time_ms as f64 + offset;
                         self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, step: None, at, cue: Cue::None });
-                        self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false });
+                        self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false, bore: None });
                     }
                     Event::Briefed { leader, soldier, role } => {
                         let sq = self.battle.soldiers[leader].squad as usize;
@@ -448,11 +454,13 @@ impl Assault {
             let lean = scalia_render::pose::pack_tilt(banked, pitched);
             // Where his muzzle is now, posed exactly as drawn: rounds fired from here.
             let heading = a.0;
+            let (q, b) = scalia_render::pose::barrel(scalia_render::pose::RIFLE, pose, upper, phase, dir);
             self.muzzle[i] = on_feet.then(|| {
-                let q = scalia_render::pose::muzzle(scalia_render::pose::RIFLE, pose, upper, phase, dir);
                 let w = scalia_render::pose::figure_to_world(q * 1000.0, glam::Vec3::new(x as f32, y as f32, 0.0), heading, banked, pitched);
                 (w.x as i64, w.y as i64, w.z as i64)
             });
+            let b = scalia_render::pose::figure_to_world(b, glam::Vec3::ZERO, heading, banked, pitched);
+            self.bore[i] = if on_feet { b.to_array() } else { [0.0; 3] };
             let eff = upper.unwrap_or(pose);
             let u = &mut self.uppers[i];
             if eff != u.0 {
@@ -476,10 +484,13 @@ impl Assault {
         self.muzzle.get(i).copied().flatten()
     }
     /// Where soldier `i`'s muzzle is (mm, z over the ground) when he is drawn elsewhere (the commander).
-    pub fn set_muzzle(&mut self, i: usize, at: Option<(i64, i64, i64)>) {
+    pub fn set_muzzle(&mut self, i: usize, at: Option<(i64, i64, i64)>, bore: [f32; 3]) {
         self.sync_tables();
         if let Some(m) = self.muzzle.get_mut(i) {
             *m = at;
+        }
+        if let Some(b) = self.bore.get_mut(i) {
+            *b = bore;
         }
     }
 
@@ -613,7 +624,8 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
     let upper = if reload { Some(Pose::Reload) } else if s.aim { Some(Pose::StandAim) } else { None };
     let aiming = s.aim || s.target.is_some();
     match (s.stance, moving) {
-        (Stance::Prone, _) => (Pose::Prone, 0.0, None, 0.0),
+        (Stance::Prone, true) => (Pose::Crawl, speed / scalia_render::pose::CRAWL_STRIDE, None, 0.0),
+        (Stance::Prone, false) => (Pose::Prone, 0.0, None, 0.0),
         (Stance::Crouch, true) => (Pose::CrouchWalk, speed / stride_m_dir(Pose::CrouchWalk, dir), upper, dir),
         (Stance::Crouch, false) => (if reload { Pose::Reload } else if aiming { if s.cover.is_some() { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, if reload { 0.4 } else { 0.0 }, None, 0.0),
         (Stance::Stand, true) => {

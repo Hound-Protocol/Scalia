@@ -186,6 +186,8 @@ pub struct Viewer {
     /// sprinting, moving, and until when he is on the radio.
     cmd: (f64, f64),
     cmd_heading: f32,
+    /// His heading following the aim point while the rifle is up (motion.rs `AimTrack`).
+    cmd_aim: crate::motion::AimTrack,
     cmd_input: (f32, f32, bool),
     /// Alt held: walk instead of jog.
     cmd_walk: bool,
@@ -373,6 +375,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         agent_clock: -1.0,
         cmd: (70_000.0 / 1000.0 + 20.0, 20.0),
         cmd_heading: 0.0,
+        cmd_aim: crate::motion::AimTrack::default(),
         cmd_input: (0.0, 0.0, false),
         cmd_walk: false,
         cmd_moving: false,
@@ -2599,7 +2602,7 @@ impl Viewer {
                 if f.blast {
                     self.fx.blast(self.lab_real(f.at), from);
                 } else {
-                    self.fx.shot(self.lab_real(f.at), from, to, f.hit, f.tracer);
+                    self.fx.shot(self.lab_real(f.at), from, to, f.bore.map(|b| [b[0] as f64, b[1] as f64, b[2] as f64]), f.hit, f.tracer);
                 }
             }
             self.assault = Some(a);
@@ -2958,8 +2961,23 @@ impl Viewer {
             }
             None => 0.0,
         };
-        self.cmd_spin += (spin - self.cmd_spin).clamp(-CMD_TURN_ACCEL * dt, CMD_TURN_ACCEL * dt);
-        self.cmd_heading += self.cmd_spin * dt;
+        match self.gun.toward.filter(|_| ready) {
+            // Rifle up on a mark: the barrel keeps pace with the cursor and settles onto it with a short eased pivot.
+            Some((tx, ty)) => {
+                let mut a = self.cmd_aim;
+                a.heading = self.cmd_heading;
+                a.spin = self.cmd_spin;
+                a.step((-tx).atan2(ty), dt);
+                self.cmd_aim = a;
+                self.cmd_heading = a.heading;
+                self.cmd_spin = a.spin;
+            }
+            None => {
+                self.cmd_aim = crate::motion::AimTrack::new(self.cmd_heading, self.cmd_spin);
+                self.cmd_spin += (spin - self.cmd_spin).clamp(-CMD_TURN_ACCEL * dt, CMD_TURN_ACCEL * dt);
+                self.cmd_heading += self.cmd_spin * dt;
+            }
+        }
         // Turning on the spot, his feet step him round (a shuffle) instead of sliding.
         let shuffling = !self.cmd_moving && self.cmd_spin.abs() > 1.2 && self.gun.stance == 0;
         // The way he moves from the way he faces (strafing, backing off with the rifle up).
@@ -2973,7 +2991,8 @@ impl Viewer {
         let legs = if self.cmd_skid == crate::motion::Skid::Cut {
             Pose::Crouch
         } else if self.cmd_skid == crate::motion::Skid::Stop {
-            Pose::Stand
+            // Hard stop: left leg thrown forward and out to brake, a short slide on it.
+            Pose::Brake
         } else if self.cmd_speed > if was == Pose::Sprint { 3.7 } else { 4.0 } {
             Pose::Sprint
         } else if self.cmd_speed > if matches!(was, Pose::Run | Pose::Sprint) { 2.1 } else { 2.4 } {
@@ -2994,10 +3013,13 @@ impl Viewer {
             (Pose::Wounded, None)
         } else {
             match self.gun.stance {
+                // Down on his belly he crawls (elbows and knees, rifle across the forearms) while he moves.
+                2 if self.cmd_moving && self.cmd_speed > 0.05 => (Pose::Crawl, None),
                 2 => (Pose::Prone, None),
                 1 if self.cmd_moving => (Pose::CrouchWalk, ready.then_some(Pose::CrouchAim)),
                 1 => (if ready { Pose::CrouchAim } else { Pose::Crouch }, None),
                 // Rifle in hand he stands combat ready (low ready, athletic); slung, he stands easy.
+                _ if legs == Pose::Brake => (Pose::Brake, None),
                 _ if legs == Pose::Stand && shuffling => (Pose::Walk, Some(if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Ready })),
                 _ if legs == Pose::Stand => (if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Ready }, None),
                 _ => (legs, if ready { Some(Pose::StandAim) } else if self.gun.slung { Some(Pose::Slung) } else { None }),
@@ -3010,7 +3032,7 @@ impl Viewer {
         let steps = match pose {
             // A shuffle round: short quick steps paced by how fast he turns.
             Pose::Walk if shuffling => (self.cmd_spin.abs() * 0.45).clamp(0.8, 1.8),
-            Pose::Sprint | Pose::Run | Pose::Walk | Pose::CrouchWalk => self.cmd_speed / stride_m(pose),
+            Pose::Sprint | Pose::Run | Pose::Walk | Pose::CrouchWalk | Pose::Crawl => self.cmd_speed / stride_m(pose),
             _ => 0.0,
         };
         self.cmd_gait = (self.cmd_gait + (steps * dt) as f64).fract();
@@ -3023,16 +3045,17 @@ impl Viewer {
         let lean = self.bank_for(u64::MAX, self.cmd_heading, self.cmd_speed);
         let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, if steps == 0.0 && ts - self.cmd_pose.2 > 0.4 { 0.0 } else { -1.0 }, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
         // His muzzle as drawn, so his rounds leave from the end of his barrel.
+        let (roll, pitch) = scalia_render::pose::unpack_tilt(9.0 + lean);
+        let (q, b) = scalia_render::pose::barrel(scalia_render::pose::RIFLE, pose, upper, self.cmd_gait as f32, move_dir);
+        let bore = scalia_render::pose::figure_to_world(b, Vec3::ZERO, self.cmd_heading, roll, pitch).to_array();
         let gun = (!self.gun.slung && scalia_render::pose::two_handed(upper.unwrap_or(pose)) > 0.0).then(|| {
-            let q = scalia_render::pose::muzzle(scalia_render::pose::RIFLE, pose, upper, self.cmd_gait as f32, move_dir) * 1000.0;
             let at = Vec3::new((self.cmd.0 * 1000.0) as f32, (self.cmd.1 * 1000.0) as f32, 0.0);
-            let (roll, pitch) = scalia_render::pose::unpack_tilt(9.0 + lean);
-            let w = scalia_render::pose::figure_to_world(q, at, self.cmd_heading, roll, pitch);
+            let w = scalia_render::pose::figure_to_world(q * 1000.0, at, self.cmd_heading, roll, pitch);
             (w.x as i64, w.y as i64, w.z as i64)
         });
         if let Some(a) = self.assault.as_mut() {
             if let Some(i) = a.battle.soldiers.iter().position(|s| s.player) {
-                a.set_muzzle(i, gun);
+                a.set_muzzle(i, gun, bore);
             }
         }
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.

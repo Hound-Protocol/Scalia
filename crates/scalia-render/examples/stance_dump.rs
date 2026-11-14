@@ -10,12 +10,14 @@ fn main() {
     let fig = figure();
     let mut out = Vec::new();
     for spec in &a[2..] {
+        // `<pose>[+<upper>][@<phase>]`
+        let (spec, phase) = spec.split_once('@').map_or((spec.as_str(), 0.0), |(a, b)| (a, b.parse().unwrap()));
         let mut it = spec.split('+').map(|s| Pose::from_id(s.parse().unwrap()));
         let legs = it.next().unwrap();
         let upper = it.next();
-        let mut p = params(legs, 0.0);
+        let mut p = params(legs, phase);
         if let Some(u) = upper {
-            p = layer(&p, &params(u, 0.0));
+            p = layer(&p, &params(u, phase));
         }
         let p = grip(&p, two_handed(upper.unwrap_or(legs)));
         for v in &fig.vertices {

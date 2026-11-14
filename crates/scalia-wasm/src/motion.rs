@@ -75,6 +75,53 @@ pub const CUT_FROM: f32 = 2.2;
 /// Stopping dead from at least this pace (m/s, a sprint) is a skid.
 pub const SKID_STOP_FROM: f32 = 3.6;
 
+/// The rifle's top swing rate while aimed (rad/s) and its angular acceleration (rad/s²): quicker than a body
+/// turning to walk, still a man's arms and hips, not a turret.
+pub const AIM_TOP: f32 = 9.0;
+pub const AIM_ACCEL: f32 = 45.0;
+/// How quickly the last few degrees close (s): the gentle settle onto the mark.
+const AIM_SETTLE_S: f32 = 0.05;
+
+fn wrap_pi(mut d: f32) -> f32 {
+    while d > std::f32::consts::PI { d -= std::f32::consts::TAU; }
+    while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
+    d
+}
+
+/// A shooter's heading following his aim point: it matches the pace of a sweeping mouse (so the barrel sits on
+/// the cursor rather than trailing it) and closes a flick with a short, eased pivot that does not overshoot.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct AimTrack {
+    pub heading: f32,
+    pub spin: f32,
+    last: Option<f32>,
+    pace: f32,
+}
+
+impl AimTrack {
+    pub fn new(heading: f32, spin: f32) -> Self {
+        AimTrack { heading, spin, last: None, pace: 0.0 }
+    }
+
+    pub fn step(&mut self, want: f32, dt: f32) {
+        if dt <= 0.0 {
+            return;
+        }
+        // How fast the mark itself is moving round him (smoothed over a few frames, so mouse jitter is not chased).
+        let moving = self.last.map_or(0.0, |l| wrap_pi(want - l) / dt);
+        self.last = Some(want);
+        self.pace += (moving - self.pace) * (dt / 0.06).min(1.0);
+        // The gap left once this step's share of the mark's own motion is covered (so he lands on it, not a frame
+        // ahead of it).
+        let gap = wrap_pi(want - self.heading) - self.pace * dt;
+        // Close the gap: braking-distance limited far out, eased (proportional) near the mark.
+        let close = gap.signum() * (2.0 * AIM_ACCEL * gap.abs()).sqrt().min(gap.abs() / AIM_SETTLE_S);
+        let target = (self.pace + close).clamp(-AIM_TOP, AIM_TOP);
+        self.spin += (target - self.spin).clamp(-AIM_ACCEL * dt, AIM_ACCEL * dt);
+        self.heading = wrap_pi(self.heading + self.spin * dt);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,5 +181,41 @@ mod tests {
         };
         assert!(turned(4.6) < turned(1.7), "sprint {} vs walk {}", turned(4.6), turned(1.7));
         assert_eq!(skidding((0.0, 4.6), (4.6, 0.0)), Skid::None, "a right-angle turn is a curve, not a skid");
+    }
+
+    /// Track a mouse orbiting at `w` rad/s for `secs`; returns the final gap (rad) and the largest overshoot.
+    fn follow(w: f32, secs: f32, step0: f32) -> (f32, f32) {
+        let mut a = AimTrack::default();
+        let (mut want, mut overshoot) = (step0, 0.0f32);
+        for _ in 0..(secs / 0.016) as usize {
+            want += w * 0.016;
+            a.step(want, 0.016);
+            if w == 0.0 { overshoot = overshoot.max((a.heading - want) * step0.signum()); }
+        }
+        (wrap_pi(want - a.heading), overshoot)
+    }
+
+    #[test]
+    fn the_rifle_keeps_up_with_a_sweeping_mouse() {
+        let (gap, _) = follow(3.0, 1.5, 0.0);
+        assert!(gap.abs() < 2f32.to_radians(), "gap {:.1} degrees", gap.to_degrees());
+    }
+
+    #[test]
+    fn a_flick_is_a_quick_gentle_pivot_without_overshoot() {
+        let mut a = AimTrack::default();
+        let mut t = 0.0;
+        while (0.4 - a.heading).abs() > 1f32.to_radians() && t < 1.0 { a.step(0.4, 0.016); t += 0.016; }
+        assert!(t < 0.25 && t > 0.08, "a 23 degree flick settles in {t:.2}s");
+        let (_, over) = follow(0.0, 1.0, 0.4);
+        assert!(over < 1f32.to_radians(), "overshoot {:.1} degrees", over.to_degrees());
+    }
+
+    #[test]
+    fn a_big_swing_turns_at_a_human_rate() {
+        let mut a = AimTrack::default();
+        let mut top = 0.0f32;
+        for _ in 0..60 { a.step(3.0, 0.016); top = top.max(a.spin.abs()); }
+        assert!(top <= AIM_TOP + 1e-3, "{top}");
     }
 }

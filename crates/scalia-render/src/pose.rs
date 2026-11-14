@@ -81,6 +81,11 @@ pub enum Pose {
     /// Combat ready (low ready): athletic stance, feet staggered and knees flexed, hips back and chest over the
     /// toes, stock in the shoulder, muzzle 30-40 degrees down, eyes up.
     Ready = 30,
+    /// Hard stop: the left leg shot forward and out to the side, the right bent behind, body leaning back
+    /// against the slide, rifle still at the ready.
+    Brake = 31,
+    /// Crawling on the belly: arms and legs working in turn (phase = the crawl cycle), rifle carried forward.
+    Crawl = 32,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -113,6 +118,8 @@ impl Pose {
             20 => Pose::Drone,
             28 => Pose::Slung,
             30 => Pose::Ready,
+            31 => Pose::Brake,
+            32 => Pose::Crawl,
             _ => Pose::Stand,
         }
     }
@@ -387,7 +394,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake => 1.0,
         _ => 0.0,
     }
 }
@@ -595,9 +602,12 @@ pub fn stride_m(pose: Pose) -> f32 {
         Pose::Run => RUN_STRIDE,
         Pose::Sprint => SPRINT_STRIDE,
         Pose::CrouchWalk => CROUCH_STRIDE,
+        Pose::Crawl => CRAWL_STRIDE,
         _ => 1.0,
     }
 }
+/// One crawl cycle (both arms) moves him this far (m).
+pub const CRAWL_STRIDE: f32 = 0.6;
 pub const WALK_STRIDE: f32 = 1.21;
 pub const RUN_STRIDE: f32 = 2.12;
 pub const SPRINT_STRIDE: f32 = 2.50;
@@ -844,6 +854,35 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.abduct = [0.7, 0.9];
             p.head = 0.55;
             p.look = 0.9;
+        }
+        Pose::Brake => {
+            // Planted left foot forward and wide, right knee bent behind; leaning back against the stop.
+            p.hip = [0.5, -0.3];
+            p.knee = [0.25, 0.3];
+            p.side = [-0.2, 0.04];
+            p.flat = 1.0;
+            carry(&mut p, Carry::LowReadyFwd);
+            p.twist = -p.rifle_yaw;
+            p.look = p.rifle_yaw;
+            p.lean = -0.12;
+            p.head = 0.12;
+        }
+        Pose::Crawl => {
+            // A low crawl: chest down on planted elbows, rifle cradled across the forearms with the muzzle ahead.
+            // Opposite limbs work together (right arm reaches as the left knee draws up, then the other pair) and
+            // the hips roll a little with the weight shift.
+            let s = (phase * std::f32::consts::TAU).sin();
+            let draw = [s.max(0.0), (-s).max(0.0)];
+            p.prone = 1.0;
+            p.shoulder = [2.75 - 0.3 * s, 2.75 + 0.3 * s];
+            p.elbow = [1.4 + 0.3 * s, 1.4 - 0.3 * s];
+            p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
+            p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
+            p.side = [-0.12 - 0.55 * draw[0], 0.12 + 0.55 * draw[1]];
+            p.twist = 0.06 * s;
+            p.tilt = 0.05 * s;
+            p.rifle = std::f32::consts::FRAC_PI_2;
+            p.head = 1.0;
         }
         Pose::Prone => {
             p.prone = 1.0;
@@ -1205,20 +1244,28 @@ mod bank_tests {
 pub struct Weapon {
     /// The end of the barrel, in the rest frame (mesh.rs builds the rifle's barrel out to y 0.77).
     pub muzzle: Vec3,
+    /// The back of the barrel (rest frame): with `muzzle`, which way the bore points.
+    pub breech: Vec3,
 }
 /// The issue rifle (mesh.rs `soldier`): barrel from y 0.58 to 0.77 at x 0.238, z 0.818..0.836.
-pub const RIFLE: Weapon = Weapon { muzzle: Vec3::new(0.238, 0.77, 0.827) };
+pub const RIFLE: Weapon = Weapon { muzzle: Vec3::new(0.238, 0.77, 0.827), breech: Vec3::new(0.238, 0.58, 0.827) };
 
 /// Where `w`'s muzzle is in a figure's own frame (x right, y forward, z up, metres from his feet) for a pose
 /// with an optional upper-body layer, posed as common.wgsl poses the gun (layer, then the two-handed grip).
 pub fn muzzle(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) -> Vec3 {
+    barrel(w, pose, upper, phase, dir).0
+}
+
+/// `w`'s muzzle and the unit direction its bore points, in a figure's own frame (as `muzzle`).
+pub fn barrel(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) -> (Vec3, Vec3) {
     let legs = params_dir(pose, phase, dir);
     let p = match upper {
         Some(u) => layer(&legs, &params_dir(u, phase, 0.0)),
         None => legs,
     };
     let p = grip(&p, two_handed(upper.unwrap_or(pose)));
-    pose_vertex(w.muzzle, Part::Rifle, &p)
+    let tip = pose_vertex(w.muzzle, Part::Rifle, &p);
+    (tip, (tip - pose_vertex(w.breech, Part::Rifle, &p)).normalize_or_zero())
 }
 
 /// A point of a figure's own frame placed in the world (metres): banked into a turn (`bank`, + to his left)
@@ -1248,6 +1295,20 @@ mod muzzle_tests {
         // Turned to face +x (heading -90 degrees): the muzzle is out along +x from where he stands.
         let w = figure_to_world(aim, Vec3::new(10.0, 20.0, 1.0), -std::f32::consts::FRAC_PI_2, 0.0, 0.0);
         assert!(w.x > 10.5 && (w.y - 20.0).abs() < 0.4 && w.z > 2.0, "{w:?}");
+    }
+
+    /// The barrel's direction (breech to muzzle) in a figure's frame.
+    fn bore(pose: Pose, upper: Option<Pose>) -> Vec3 {
+        barrel(RIFLE, pose, upper, 0.0, 0.0).1
+    }
+
+    #[test]
+    fn an_aimed_barrel_points_where_he_faces() {
+        for (pose, upper) in [(Pose::StandAim, None), (Pose::CrouchAim, None), (Pose::Walk, Some(Pose::StandAim))] {
+            let b = bore(pose, upper);
+            let yaw = b.x.atan2(b.y).to_degrees();
+            assert!(yaw.abs() < 3.0, "{pose:?}/{upper:?}: barrel yaw {yaw:.1} degrees off his heading");
+        }
     }
 }
 

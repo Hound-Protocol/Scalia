@@ -450,6 +450,29 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.reach = vec2f(-0.07);
     p.head = -0.45;
     p.sling = 1.0;
+  } else if (pose == 31u) {
+    // Hard stop (pose.rs `Pose::Brake`): left foot forward and wide, leaning back, rifle at the ready.
+    p.hip = vec2f(0.5, -0.3);
+    p.knee = vec2f(0.25, 0.3);
+    p.side = vec2f(-0.2, 0.04);
+    p.flat = 1.0;
+    carry(&p, 6u);
+    p.lean = -0.12;
+    p.head = 0.12;
+  } else if (pose == 32u) {
+    // Crawl (pose.rs `Pose::Crawl`).
+    let s = sin(phase * 6.2831853);
+    let draw = vec2f(max(s, 0.0), max(-s, 0.0));
+    p.prone = 1.0;
+    p.sh = vec2f(2.75 - 0.3 * s, 2.75 + 0.3 * s);
+    p.el = vec2f(1.4 + 0.3 * s, 1.4 - 0.3 * s);
+    p.hip = vec2f(0.1) + 0.3 * draw;
+    p.knee = vec2f(0.35) + 1.2 * draw;
+    p.side = vec2f(-0.12 - 0.55 * draw.x, 0.12 + 0.55 * draw.y);
+    p.twist = 0.06 * s;
+    p.tilt = 0.05 * s;
+    p.rifle = 1.5707963;
+    p.head = 1.0;
   } else if (pose == 28u) {
     p.sh = vec2f(0.08);
     p.el = vec2f(0.3);
@@ -500,7 +523,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
