@@ -1103,7 +1103,8 @@ pub const BANK_MAX: f32 = 0.26;
 /// The bank packed into the fractional part of an instance's colour (common.wgsl `bank_of`): 0.5 upright,
 /// 0.01..0.99 across -BANK_MAX..BANK_MAX. A colour with no fraction (0) reads as upright.
 pub fn pack_bank(angle: f32) -> f32 {
-    0.5 + (angle / BANK_MAX).clamp(-1.0, 1.0) * 0.49
+    // Upright stays a whole colour (no fraction at all).
+    if angle.abs() < 1e-3 { 0.0 } else { 0.5 + (angle / BANK_MAX).clamp(-1.0, 1.0) * 0.49 }
 }
 /// The inverse of `pack_bank` from a colour value (as the shader reads it).
 pub fn unpack_bank(colour: f32) -> f32 {
