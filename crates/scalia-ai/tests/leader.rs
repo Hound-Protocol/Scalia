@@ -167,3 +167,44 @@ fn the_stack_hugs_the_wall_beside_the_door() {
     }
 }
 
+
+#[test]
+fn a_gap_on_the_way_in_is_staged_pied_and_crossed_one_at_a_time() {
+    use scalia_ai::battle::Event;
+    use scalia_core::nav::{Prop, PropKind};
+    let k = Killhouse::new(80_000, 62_000);
+    let mut props = k.props();
+    // A wall across the way from the squad (south) to the house, with a 3 m gap in it at x = 90 m.
+    props.push(Prop { kind: PropKind::Wall { length_mm: 30_000, thickness_mm: 600 }, x_mm: 73_500, y_mm: 45_000, quarter_turns: 0 });
+    props.push(Prop { kind: PropKind::Wall { length_mm: 30_000, thickness_mm: 600 }, x_mm: 106_500, y_mm: 45_000, quarter_turns: 0 });
+    let mut nav = NavGrid::new(40_000, 20_000, 200, 160);
+    nav.rebuild(&props);
+    let sight = SightGrid::build(40_000, 20_000, 400, 320, &props);
+    let cover = CoverMap::build(&props, &nav);
+    let soldiers: Vec<Soldier> = (0..6).map(|i| Soldier::new(0, 0, (86_000 + (i as i64 % 3) * 1_500, 33_000 + (i as i64 / 3) * 1_500), Stance::Stand)).collect();
+    let mut b = Battle::with_map(nav, sight, cover, soldiers, 5);
+    b.set_building(k);
+    b.command(0, Order::Capture);
+    let mut ms = 0;
+    let mut first_through: Vec<i64> = vec![-1; 6];
+    while ms < 120_000 {
+        b.step(50);
+        ms += 50;
+        for i in 0..6 {
+            if first_through[i] < 0 && b.soldiers[i].pos.1 > 46_000 {
+                first_through[i] = ms;
+            }
+        }
+        if first_through.iter().all(|&t| t >= 0) {
+            break;
+        }
+    }
+    let steps: Vec<&str> = b.log.iter().filter_map(|e| if let Event::Order { squad: 0, step } = e { Some(*step) } else { None }).collect();
+    let c = steps.iter().position(|&s| s == "chokepoint").expect(&format!("the gap was seen: {steps:?}"));
+    assert!(steps[c..].contains(&"pie"), "and pied: {steps:?}");
+    // Through one at a time: nobody at the same moment as another.
+    let mut t: Vec<i64> = first_through.clone();
+    t.sort();
+    assert!(t[0] >= 0, "they got through: {first_through:?}");
+    assert!(t.windows(2).all(|w| w[1] - w[0] >= 300), "one at a time: {t:?}");
+}

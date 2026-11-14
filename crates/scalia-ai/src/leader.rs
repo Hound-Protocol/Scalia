@@ -205,11 +205,27 @@ pub struct Brain {
     aid: Vec<(usize, usize, u8, i64, (i64, i64))>,
     /// The door stack's order, fixed as it forms: nearest the door first (nobody squeezes past the others).
     stack_order: Vec<usize>,
+    /// A chokepoint on the way (a gap between walls): being crossed the careful way.
+    choke: Option<Choke>,
+    /// The approach leg whose way was last checked for chokepoints.
+    choke_leg: Option<usize>,
+}
+
+/// A narrow gap on the squad's way (a passage between walls, a gateway): where it is, which way the squad
+/// goes through it (unit vector x1000), how wide it is, the stage (0 forming up short of it, 1 pieing it,
+/// 2 going through one by one) and since when (ms).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Choke {
+    pub at: (i64, i64),
+    pub dir: (i64, i64),
+    pub width: i64,
+    pub stage: u8,
+    pub since: i64,
 }
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new() }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, choke_leg: None }
     }
 }
 
@@ -235,6 +251,14 @@ fn dist(a: (i64, i64), b: (i64, i64)) -> i64 {
 }
 
 /// A room's corners, a metre in from its walls.
+/// A gap narrower than this between walls (mm) is a chokepoint: a fatal funnel to be crossed with care.
+const CHOKE_MM: i64 = 4_000;
+/// How far short of a chokepoint the squad forms up, and past it they go to (mm).
+const CHOKE_STAGE_MM: i64 = 4_500;
+const CHOKE_PAST_MM: i64 = 5_000;
+/// Between men going through a chokepoint one at a time (ms).
+const CHOKE_FLOW_MS: i64 = 900;
+
 /// Slicing the pie: slices, and how long each is held (ms).
 const PIE_SLICES: usize = 6;
 const PIE_SLICE_MS: i64 = 600;
@@ -646,6 +670,140 @@ impl Battle {
         }
     }
 
+    /// The first chokepoint on the walking route from `from` to `to`: a point where walls close in on both
+    /// sides (gap under CHOKE_MM), more than 3 m ahead. Returns where, the way through (unit x1000) and width.
+    fn chokepoint(&self, from: (i64, i64), to: (i64, i64)) -> Option<((i64, i64), (i64, i64), i64)> {
+        let path = self.nav().and_then(|n| scalia_core::nav::find_path(n, from, to, crate::battle::BODY_MM))?;
+        let mut prev = from;
+        for &wp in &path {
+            let seg = dist(prev, wp);
+            let n = (seg / 500).max(1);
+            let dir = ((wp.0 - prev.0) * 1_000 / seg.max(1), (wp.1 - prev.1) * 1_000 / seg.max(1));
+            for k in 0..n {
+                let p = (prev.0 + (wp.0 - prev.0) * k / n, prev.1 + (wp.1 - prev.1) * k / n);
+                if dist(p, from) < 3_000 || dist(p, to) < 1_500 {
+                    continue;
+                }
+                // Walls to both sides, close?
+                let side = (-dir.1, dir.0);
+                let reach = |sgn: i64| (1..=CHOKE_MM / 250).map(|j| j * 250).find(|&d| self.sight.solid_at(p.0 + side.0 * sgn * d / 1_000, p.1 + side.1 * sgn * d / 1_000, 1_400));
+                if let (Some(a), Some(b)) = (reach(1), reach(-1)) {
+                    if a + b <= CHOKE_MM {
+                        let mid = (a - b) / 2;
+                        let at = (p.0 + side.0 * mid / 1_000, p.1 + side.1 * mid / 1_000);
+                        return Some((at, dir, a + b));
+                    }
+                }
+            }
+            prev = wp;
+        }
+        None
+    }
+
+    /// Crossing a chokepoint on the way to `goal` (approach leg `leg`), the careful way: the squad forms up
+    /// short of it, the point man pies it slice by slice from the near side, then they go through one at a
+    /// time with the others covering. Returns true while that is going on.
+    fn cross_chokepoint(&mut self, squad: usize, ms: &[usize], goal: (i64, i64), leg: usize) -> bool {
+        if self.brains[squad].choke.is_none() && self.brains[squad].choke_leg != Some(leg) {
+            self.brains[squad].choke_leg = Some(leg);
+            let c = self.centre(ms);
+            if let Some((at, dir, width)) = self.chokepoint(c, goal) {
+                self.brains[squad].choke = Some(Choke { at, dir, width, stage: 0, since: self.time_ms });
+                self.log.push(Event::Order { squad, step: "chokepoint" });
+            }
+        }
+        let Some(mut ch) = self.brains[squad].choke else { return false };
+        let now = self.time_ms;
+        let stage_at = (ch.at.0 - ch.dir.0 * CHOKE_STAGE_MM / 1_000, ch.at.1 - ch.dir.1 * CHOKE_STAGE_MM / 1_000);
+        let past = (ch.at.0 + ch.dir.0 * CHOKE_PAST_MM / 1_000, ch.at.1 + ch.dir.1 * CHOKE_PAST_MM / 1_000);
+        match ch.stage {
+            0 => {
+                // Form up short of it, down and watching it.
+                let mut ready = true;
+                for &i in ms {
+                    let s = &mut self.soldiers[i];
+                    if !matches!(s.task, Task::Move { to, .. } if to == stage_at) {
+                        s.task = Task::Move { to: stage_at, gait: Gait::Run };
+                    }
+                    s.aim = true;
+                    s.watch = Some((ch.at.0 - s.pos.0, ch.at.1 - s.pos.1));
+                    let there = s.settled || dist(s.pos, stage_at) <= 4_000 && !s.moving;
+                    if there {
+                        s.posture = Some(Stance::Crouch);
+                    }
+                    ready &= there;
+                }
+                if ready || now - ch.since >= 25_000 {
+                    ch.stage = 1;
+                    ch.since = now;
+                    self.log.push(Event::Order { squad, step: "pie" });
+                }
+            }
+            1 => {
+                // The point man (nearest the gap) pies it; the rest cover it.
+                let point = *ms.iter().min_by_key(|&&i| (dist(self.soldiers[i].pos, ch.at), i)).expect("someone");
+                let door = scalia_core::killhouse::Door { x_mm: ch.at.0, y_mm: ch.at.1, along_x: ch.dir.1.abs() > ch.dir.0.abs(), width_mm: ch.width, rooms: (None, None) };
+                let (u, n) = pie_axes(&door, stage_at);
+                let slice = ((now - ch.since) / PIE_SLICE_MS).min(PIE_SLICES as i64 - 1) as usize;
+                let at = pie_spot(&door, u, n, slice);
+                let look = (ch.at.0 + ch.dir.0 * 10, ch.at.1 + ch.dir.1 * 10);
+                for &i in ms {
+                    let s = &mut self.soldiers[i];
+                    s.aim = true;
+                    if i == point {
+                        s.task = Task::Hold { at, face: look };
+                        s.watch = Some((look.0 - s.pos.0, look.1 - s.pos.1));
+                        s.posture = None;
+                    }
+                }
+                if now - ch.since >= PIE_SLICE_MS * PIE_SLICES as i64 {
+                    ch.stage = 2;
+                    ch.since = now;
+                }
+            }
+            _ => {
+                // Through one at a time, the next going a moment after the one in front; each takes a knee
+                // past it, covering the way on.
+                // The order is fixed as they start (nearest the gap first), so nobody bunches up behind it.
+                if now == ch.since + LEAD_MS || self.brains[squad].stack_order.len() != ms.len() || ms.iter().any(|i| !self.brains[squad].stack_order.contains(i)) {
+                    let mut order: Vec<usize> = ms.to_vec();
+                    order.sort_by_key(|&i| (dist(self.soldiers[i].pos, ch.at), i));
+                    self.brains[squad].stack_order = order;
+                }
+                let order = self.brains[squad].stack_order.clone();
+                let mut all_through = true;
+                for (k, &i) in order.iter().enumerate() {
+                    let s = &mut self.soldiers[i];
+                    let through = (s.pos.0 - ch.at.0) * ch.dir.0 + (s.pos.1 - ch.at.1) * ch.dir.1 > 2_000 * 1_000;
+                    if now - ch.since >= k as i64 * CHOKE_FLOW_MS {
+                        if !matches!(s.task, Task::Move { to, .. } if to == past) {
+                            s.task = Task::Move { to: past, gait: Gait::Run };
+                            s.posture = None;
+                        }
+                        s.watch = Some(ch.dir);
+                        if through && !s.moving {
+                            s.posture = Some(Stance::Crouch);
+                        }
+                    }
+                    all_through &= through;
+                }
+                if all_through || now - ch.since >= 30_000 {
+                    for &i in ms {
+                        self.soldiers[i].watch = None;
+                        self.soldiers[i].posture = None;
+                    }
+                    self.brains[squad].choke = None;
+                    // Through: the way on from past the gap may have another, check again. Timed out short of
+                    // it: not this gap again on this leg.
+                    self.brains[squad].choke_leg = if all_through { None } else { Some(leg) };
+                    return false;
+                }
+            }
+        }
+        self.brains[squad].choke = Some(ch);
+        true
+    }
+
     /// Whether going to casualty `w` now would be running into fire: a known enemy, not pinned down
     /// (suppressed), within 60 m with a clear line to where he lies; or he lies in a room with an enemy in it.
     fn casualty_threatened(&self, w: usize) -> bool {
@@ -989,6 +1147,10 @@ impl Battle {
                 if leg >= legs.len() {
                     self.brains[squad].legs.clear();
                     self.finish(squad, Some(AT));
+                    return;
+                }
+                // A gap between walls on the way to this point: it is crossed the careful way first.
+                if self.cross_chokepoint(squad, &ms, legs[leg], leg) {
                     return;
                 }
                 // Fire teams by rank: team (leg % 2) bounds to the next point in a wedge pointing along the
