@@ -620,6 +620,11 @@ impl Battle {
                 continue;
             }
             let wp = self.soldiers[w].pos;
+            // Fire superiority first, casualty care second: nobody runs out to him while a known enemy who is
+            // not pinned down can see him, or into a room not yet cleared.
+            if self.casualty_threatened(w) {
+                continue;
+            }
             let helper = self
                 .soldiers
                 .iter()
@@ -641,6 +646,23 @@ impl Battle {
         }
     }
 
+    /// Whether going to casualty `w` now would be running into fire: a known enemy, not pinned down
+    /// (suppressed), within 60 m with a clear line to where he lies; or he lies in a room with an enemy in it.
+    fn casualty_threatened(&self, w: usize) -> bool {
+        let (wp, team, squad) = (self.soldiers[w].pos, self.soldiers[w].team, self.soldiers[w].squad as usize);
+        let now = self.time_ms;
+        let live = |e: usize| self.soldiers[e].alive() && !self.soldiers[e].down() && self.soldiers[e].team != team;
+        let sees = self.contacts[squad].iter().any(|c| {
+            live(c.enemy) && c.confidence >= crate::battle::CONF_HEARD && now - c.seen_ms <= 4_000 && dist(c.pos, wp) <= 60_000
+                && self.soldiers[c.enemy].suppression < 400
+                && self.sight.clear(crate::sight::Point { x: c.pos.0, y: c.pos.1, z: 1_500 }, crate::sight::Point { x: wp.0, y: wp.1, z: 300 })
+        });
+        let room_hot = self.building.as_ref().is_some_and(|(k, _)| {
+            k.room_at(wp.0, wp.1).is_some_and(|r| self.contacts[squad].iter().any(|c| live(c.enemy) && c.confidence >= crate::battle::CONF_HEARD && k.room_at(c.pos.0, c.pos.1) == Some(r)))
+        });
+        sees || room_hot
+    }
+
     /// One look at a casualty being cared for; false once it is done (or can no longer be done).
     fn give_aid(&mut self, a: &mut (usize, usize, u8, i64, (i64, i64))) -> bool {
         let (w, h) = (a.0, a.1);
@@ -650,6 +672,14 @@ impl Battle {
             return false;
         }
         let wp = self.soldiers[w].pos;
+        // On his way and it turns hot: he stays out of it (back to the fight) until it is safe to go again.
+        if a.2 == 0 && self.casualty_threatened(w) {
+            let s = &mut self.soldiers[h];
+            s.aiding = None;
+            s.dragging = None;
+            s.task = Task::Hold { at: s.pos, face: wp };
+            return false;
+        }
         match a.2 {
             0 => {
                 // Is he in the enemy's sight? Then he comes out of it first: dragged behind cover.

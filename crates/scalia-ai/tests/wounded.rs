@@ -85,3 +85,30 @@ fn nobody_shoots_at_a_man_who_is_down() {
     assert_eq!(at_him, 0, "shots at a downed man");
     assert!(matches!(b.soldiers[0].task, Task::Idle));
 }
+
+#[test]
+fn nobody_runs_out_to_a_casualty_while_an_enemy_who_is_not_pinned_covers_him() {
+    // The enemy 40 m off has a clear line to the wounded man and is not suppressed (he cannot be hit: no
+    // fire superiority). The squadmate stays out of it.
+    let men = vec![man(0, 0, 50_000, 50_000), man(0, 0, 56_000, 46_000), man(1, 1, 50_000, 90_000)];
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 120_000, &[]), men, 4);
+    b.soldiers[2].health = i32::MAX;
+    b.soldiers[1].health = i32::MAX;
+    b.soldiers[0].health = 100 - 2 * DAMAGE;
+    let mut went = false;
+    for _ in 0..(8_000 / 50) {
+        b.step(50);
+        // Keep the enemy unpinned (he shrugs off the return fire).
+        b.soldiers[2].suppression = 0;
+        went |= dist(b.soldiers[1].pos, b.soldiers[0].pos) < 2_000;
+    }
+    assert!(!went, "he did not run out into the open to him");
+    // The enemy is pinned down now (or gone): then he goes.
+    b.soldiers[2].health = 0;
+    let mut reached = false;
+    for _ in 0..(15_000 / 50) {
+        b.step(50);
+        reached |= dist(b.soldiers[1].pos, b.soldiers[0].pos) < 2_000;
+    }
+    assert!(reached, "once it is safe, he goes to him");
+}
