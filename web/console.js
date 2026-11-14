@@ -1,22 +1,55 @@
-// Developer console, as in Source games: the key under Esc drops it down from the top. It shows the game's log
-// (console output included) and takes commands; up/down walk the history, Tab completes a command.
+// Developer console, as in Source games: the key under Esc opens it as a window on the right of the screen, which
+// can be dragged by its title bar and resized from its corner (both remembered). It shows the game's log (console
+// output included) and takes commands; up/down walk the history, Tab completes a command.
 
 export function installConsole(commands) {
   const css = document.createElement('style');
   css.textContent = `
-  #devcon { position: fixed; left: 0; right: 0; top: 0; height: 42vh; z-index: 1000; display: flex; flex-direction: column;
-    background: rgba(12, 14, 12, 0.94); border-bottom: 1px solid #4b5a45; font: 12px/1.4 ui-monospace, monospace; color: #d6dfcf;
-    transform: translateY(-100%); transition: transform 0.12s ease-out; }
-  #devcon.open { transform: none; }
+  #devcon { position: fixed; right: 16px; top: 64px; width: min(560px, 46vw); height: 58vh; min-width: 300px; min-height: 160px; z-index: 1000;
+    display: flex; flex-direction: column; resize: both; overflow: hidden; background: rgba(12, 14, 12, 0.95); border: 1px solid #4b5a45;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.55); font: 12px/1.4 ui-monospace, monospace; color: #d6dfcf;
+    opacity: 0; visibility: hidden; transform: translateX(12px); transition: opacity 0.1s ease-out, transform 0.1s ease-out, visibility 0s 0.1s; }
+  #devcon.open { opacity: 1; visibility: visible; transform: none; transition: opacity 0.1s ease-out, transform 0.1s ease-out; }
+  #devcon .bar { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; background: #1f261c; border-bottom: 1px solid #3c4a38;
+    cursor: move; user-select: none; color: #b9c7a8; letter-spacing: 0.08em; }
+  #devcon .bar span { flex: 1; } #devcon .bar button { font: inherit; color: inherit; background: none; border: 0; padding: 0 6px; cursor: pointer; }
+  #devcon .bar button:hover, #devcon .bar button:focus-visible { color: #fff; outline: 1px solid #4b5a45; }
   #devcon .out { flex: 1; overflow-y: auto; padding: 6px 10px; white-space: pre-wrap; }
   #devcon .out .warn { color: #ffd479; } #devcon .out .err { color: #ff8a7a; } #devcon .out .cmd { color: #9fd0ff; }
   #devcon input { font: inherit; color: inherit; background: rgba(0,0,0,0.4); border: 0; border-top: 1px solid #3c4a38; padding: 6px 10px; outline: none; }
-  @media (prefers-reduced-motion: reduce) { #devcon { transition: none; } }`;
+  @media (prefers-reduced-motion: reduce) { #devcon, #devcon.open { transition: none; } }`;
   document.head.appendChild(css);
   const el = document.createElement('div');
   el.id = 'devcon';
-  el.innerHTML = '<div class="out"></div><input spellcheck="false" autocomplete="off" aria-label="Console command">';
+  el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Console');
+  el.innerHTML = '<div class="bar"><span>CONSOLE</span><button data-reset title="Back to the right side">Dock</button><button data-close title="Close (key under Esc)">✕</button></div>'
+    + '<div class="out"></div><input spellcheck="false" autocomplete="off" aria-label="Console command">';
   document.body.appendChild(el);
+  // Where the player left it: position and size, kept between visits.
+  const KEY = 'scalia.console';
+  const save = () => { try { const r = el.getBoundingClientRect(); localStorage.setItem(KEY, JSON.stringify({ x: r.left, y: r.top, w: r.width, h: r.height })); } catch (_) {} };
+  const place = (g) => {
+    if (!g) { Object.assign(el.style, { left: '', top: '', right: '', width: '', height: '' }); return; }
+    const w = Math.min(g.w, innerWidth), h = Math.min(g.h, innerHeight);
+    Object.assign(el.style, { right: 'auto', width: w + 'px', height: h + 'px',
+      left: Math.max(0, Math.min(innerWidth - 80, g.x)) + 'px', top: Math.max(0, Math.min(innerHeight - 32, g.y)) + 'px' });
+  };
+  try { place(JSON.parse(localStorage.getItem(KEY) || 'null')); } catch (_) {}
+  const bar = el.querySelector('.bar');
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    bar.setPointerCapture(e.pointerId);
+    const move = (m) => place({ x: m.clientX - dx, y: m.clientY - dy, w: r.width, h: r.height });
+    const up = () => { bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); save(); };
+    bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up);
+  });
+  // Resizing from the corner: remembered once the mouse lets go.
+  new ResizeObserver(() => { if (el.classList.contains('open')) { clearTimeout(el._rs); el._rs = setTimeout(save, 300); } }).observe(el);
+  el.querySelector('[data-close]').addEventListener('click', () => toggle(false));
+  el.querySelector('[data-reset]').addEventListener('click', () => { try { localStorage.removeItem(KEY); } catch (_) {} place(null); input.focus(); });
+  // Clicks inside the window stay with it (the game does not select or move underneath).
+  for (const t of ['pointerdown', 'wheel', 'contextmenu']) el.addEventListener(t, (e) => e.stopPropagation());
   const out = el.querySelector('.out'), input = el.querySelector('input');
   const history = [];
   let hpos = 0;
