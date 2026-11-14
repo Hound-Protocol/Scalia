@@ -208,7 +208,9 @@ try {
     if (scene === 'ground') {
       if (tabletUp) return;
       gun.x = e.offsetX; gun.y = e.offsetY;
-      if (e.button === 0) gun.trigger = true;
+      // Left fires only with the rifle up (right held); otherwise it selects what is under it.
+      if (e.button === 0 && gun.aim) gun.trigger = true;
+      else if (e.button === 0) { const msg = v.click(e.offsetX * dpr(), e.offsetY * dpr(), performance.now()); if (msg) flash(msg); return; }
       else if (e.button === 2) gun.aim = true;
       else return;
       canvas.setPointerCapture(e.pointerId);
@@ -244,7 +246,7 @@ try {
   const endDrag = (e) => {
     if (scene === 'ground') {
       if (e.button === 0 || e.type === 'pointercancel') gun.trigger = false;
-      if (e.button === 2 || e.type === 'pointercancel') gun.aim = false;
+      if (e.button === 2 || e.type === 'pointercancel') { gun.aim = false; gun.trigger = false; }
       gunSend();
       return;
     }

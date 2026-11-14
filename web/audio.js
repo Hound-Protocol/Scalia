@@ -126,7 +126,9 @@ export class AudioEngine {
       const conv = c.createConvolver(); conv.buffer = ir;
       // A room's ring without the boom (the low end stays in the direct sound).
       const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 220; hp.Q.value = 0.6;
-      input.connect(conv); conv.connect(hp); hp.connect(this.mix);
+      // The convolver normalises its impulse (quiet): the ring is brought back up to sit with the shot.
+      const wet = c.createGain(); wet.gain.value = 2.2;
+      input.connect(conv); conv.connect(hp); hp.connect(wet); wet.connect(this.mix);
       return input;
     };
     this.rev = {
@@ -139,6 +141,11 @@ export class AudioEngine {
     this.air = c.createGain();
     const airConv = c.createConvolver(); airConv.buffer = airTail(c);
     this.air.connect(airConv); airConv.connect(this.mix);
+    // Ringing ears: close gunfire indoors leaves a high whine that fades over a few seconds.
+    const ring = c.createOscillator(); ring.type = 'sine'; ring.frequency.value = 6800;
+    this.ringGain = c.createGain(); this.ringGain.gain.value = 0;
+    ring.connect(this.ringGain).connect(this.mix); ring.start();
+    this.ring = 0; this.ringAt = 0;
     this.applyEnv(true);
     return c;
   }
@@ -211,8 +218,13 @@ export class AudioEngine {
       try { worst.src.stop(); } catch (_) {}
       worst.done = true;
     }
+    // Gunfire inside: it fills the room. Louder and heavier in the body (the walls hold the low end in), the
+    // room rings hard, a slap comes straight back off the walls, and close by it leaves the ears ringing.
+    const gun = o.kind === 'shot' || o.kind === 'blast';
+    const inside = gun ? enc : 0;
     const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.rate || 1;
-    const g = c.createGain(); g.gain.value = o.gain;
+    const g = c.createGain(); g.gain.value = o.gain * (1 + 0.7 * inside);
+    const body = c.createBiquadFilter(); body.type = 'lowshelf'; body.frequency.value = 200; body.gain.value = 7 * inside;
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
     // Distance thins the low end too: what carries is the crack, not the boom.
     const hpf = c.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = Math.min(450, 40 + o.dist * 3); hpf.Q.value = 0.6;
@@ -227,13 +239,13 @@ export class AudioEngine {
     // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
     const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5;
     const out = c.createGain();
-    src.connect(g).connect(out).connect(hpf).connect(lp).connect(p);
+    src.connect(g).connect(body).connect(out).connect(hpf).connect(lp).connect(p);
     p.connect(dry).connect(this.mix);
     // A room it is made in rings: small or large by size, or a corridor's flutter. Open ground: no ring.
     const roomy = Math.max(0, Math.min(1, (9 - size) / 5));
     const sends = [[this.rev.small, enc * roomy * (1 - cor)], [this.rev.large, enc * (1 - roomy) * (1 - cor)], [this.rev.corridor, cor]];
     for (const [busIn, w] of sends) {
-      const amount = w * o.room;
+      const amount = w * o.room * (1 + 1.6 * inside);
       if (amount < 0.01) continue;
       const send = c.createGain(); send.gain.value = amount;
       p.connect(send).connect(busIn);
@@ -255,6 +267,26 @@ export class AudioEngine {
       const elp = c.createBiquadFilter(); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 5000) * 0.6; elp.Q.value = 0.5;
       const ep = c.createStereoPanner(); ep.pan.value = epan * 0.85;
       lp.connect(d).connect(eg).connect(elp).connect(ep).connect(this.mix);
+    }
+    if (inside > 0.3) {
+      const t0 = c.currentTime + Math.max(0, o.delay || 0);
+      // The slap: the nearest walls throw the crack straight back (a few, close together, from both sides).
+      for (const [dt, gk, pan] of [[0.007, 0.5, -0.6], [0.013, 0.4, 0.6], [0.021, 0.3, -0.3]]) {
+        const d = c.createDelay(0.1); d.delayTime.value = dt * (0.6 + size / 20);
+        const eg = c.createGain(); eg.gain.value = gk * inside;
+        const ep = c.createStereoPanner(); ep.pan.value = pan;
+        lp.connect(d).connect(eg).connect(ep).connect(this.mix);
+      }
+      // Ringing ears from close shots: builds up with each one, never past a faint whine, fades over ~4 s.
+      if (o.dist < 25 && this.ringGain) {
+        const now = c.currentTime;
+        this.ring = Math.min(0.025, this.ring * Math.exp(-(now - this.ringAt) / 1.6) + 0.004 * inside);
+        this.ringAt = now;
+        const rg = this.ringGain.gain;
+        rg.cancelScheduledValues(t0); rg.setValueAtTime(rg.value, t0);
+        rg.linearRampToValueAtTime(this.ring, t0 + 0.05);
+        rg.setTargetAtTime(0, t0 + 0.4, 1.6);
+      }
     }
     const v = { src, pri, gain: o.gain, out, done: false };
     src.onended = () => { v.done = true; };
