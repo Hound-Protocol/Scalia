@@ -176,10 +176,33 @@ fn goal_of(want: Want) -> Option<Goal> {
     }
 }
 
+thread_local! {
+    /// The action library, built once.
+    static LIBRARY: Vec<Action> = library();
+    /// Plans already found, by (facts, want): a handful of distinct situations come up over and over, so
+    /// nearly every plan is a lookup. (Deterministic: the planner gives the same plan for the same input.)
+    static PLANS: std::cell::RefCell<std::collections::HashMap<(u64, u8), Option<Vec<Act>>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+fn plan_for(facts: u64, want: Want, goal: Goal) -> Option<Vec<Act>> {
+    let key = (facts, want as u8);
+    if let Some(p) = PLANS.with(|m| m.borrow().get(&key).cloned()) {
+        return p;
+    }
+    let p = LIBRARY.with(|lib| goap::plan(State(facts), goal, lib, Limits { max_nodes: 256, max_depth: 5 }).map(|p| p.actions.iter().map(|&k| ACTS[k]).collect::<Vec<Act>>()));
+    PLANS.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() > 4_096 {
+            m.clear();
+        }
+        m.insert(key, p.clone());
+    });
+    p
+}
+
 /// Thinks: the most wanted thing he can make a plan for, and that plan. Wants with no plan possible (no
 /// cover, no magazines) fall through to the next.
 pub fn think(s: &Situation) -> Mind {
-    let lib = library();
     for (score, want) in wants(s) {
         if score <= 0 {
             continue;
@@ -193,8 +216,8 @@ pub fn think(s: &Situation) -> Mind {
             }
             continue;
         }
-        if let Some(p) = goap::plan(State(s.facts), goal, &lib, Limits { max_nodes: 256, max_depth: 5 }) {
-            return Mind { want, plan: p.actions.iter().map(|&k| ACTS[k]).collect() };
+        if let Some(plan) = plan_for(s.facts, want, goal) {
+            return Mind { want, plan };
         }
     }
     Mind::default()
