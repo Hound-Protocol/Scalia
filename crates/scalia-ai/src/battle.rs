@@ -1550,9 +1550,9 @@ impl Battle {
 
     /// The player pulls the trigger, pointing along `dir` (any length): a round goes if the rifle is ready (one
     /// every CYCLIC_MS while held). It goes at the first man of the other side in the line of fire (within the
-    /// spread: tight on the sights, wide from the hip), and hits on the same odds as any soldier's round at
-    /// him; nobody in the line, it flies on until something solid stops it.
-    pub fn player_fire(&mut self, i: usize, dir: (i64, i64), aimed: bool) -> PlayerShot {
+    /// spread, permille: 0 dead steady, 1000 wild), and hits on the same odds as any soldier's round at him,
+    /// less the wider it is; nobody in the line, it flies on until something solid stops it.
+    pub fn player_fire(&mut self, i: usize, dir: (i64, i64), spread: i64) -> PlayerShot {
         let Some(s) = self.soldiers.get(i).filter(|s| s.player && s.alive() && !s.down()) else { return PlayerShot::Cannot };
         if s.reloading_ms > 0 {
             return PlayerShot::Reloading;
@@ -1571,7 +1571,9 @@ impl Battle {
         let u = (dir.0 * 1_000 / len, dir.1 * 1_000 / len);
         let (me, team, eye) = (s.pos, s.team, s.eye());
         // The line of fire: whom it passes close enough to be the one shot at (the cone of his aim).
-        let spread = if aimed { 15 } else { 45 }; // mm off the line per metre
+        // How wide his rounds go (permille, 0 dead steady .. 1000 wild: the page's reticle shows the same).
+        let spread = spread.clamp(0, 1_000);
+        let cone = 8 + spread * 50 / 1_000; // mm off the line per metre
         let mut best: Option<(i64, i64, usize)> = None;
         for (k, t) in self.soldiers.iter().enumerate() {
             if k == i || t.team == team || !t.alive() {
@@ -1583,7 +1585,7 @@ impl Battle {
                 continue;
             }
             let off = ((vx * u.1 - vy * u.0) / 1_000).abs();
-            let reach = BODY_MM * 2 + along * spread / 1_000;
+            let reach = BODY_MM * 2 + along * cone / 1_000;
             if off <= reach && best.is_none_or(|b| along < b.0) && self.in_sight(i, k) {
                 best = Some((along, off * 1_000 / reach.max(1), k));
             }
@@ -1598,7 +1600,7 @@ impl Battle {
             Some((_, off, j)) => {
                 // His odds at that man, as any soldier's: from the hip about half, and less the further off
                 // the line he passes.
-                let p = self.hit_permille(i, j) * recoil / 1_000 * if aimed { 1_000 } else { 450 } / 1_000 * (1_000 - off / 2) / 1_000;
+                let p = self.hit_permille(i, j) * recoil / 1_000 * (1_000 - spread * 6 / 10) / 1_000 * (1_000 - off / 2) / 1_000;
                 self.rolls += 1;
                 let hit = self.roll(i, self.rolls) < p;
                 let t = &self.soldiers[j];

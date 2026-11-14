@@ -21,7 +21,7 @@ fn duel(props: &[Prop]) -> (Battle, usize) {
 fn hold(b: &mut Battle, me: usize, dir: (i64, i64), aimed: bool, ms: i64) -> Vec<(bool, Option<usize>)> {
     let mut t = 0;
     while t < ms {
-        b.player_fire(me, dir, aimed);
+        b.player_fire(me, dir, if aimed { 250 } else { 750 });
         b.step(50);
         t += 50;
     }
@@ -62,7 +62,7 @@ fn a_magazine_runs_dry_and_reloads_from_the_spares() {
     b.soldiers[me].mags = 5;
     let mut empty = false;
     for _ in 0..200 {
-        if b.player_fire(me, (1_000, 0), false) == PlayerShot::Empty {
+        if b.player_fire(me, (1_000, 0), 750) == PlayerShot::Empty {
             empty = true;
         }
         b.step(50);

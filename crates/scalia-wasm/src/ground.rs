@@ -153,7 +153,7 @@ mod commander_tests {
             let stance = [Stance::Stand, Stance::Crouch, Stance::Prone][(r() % 3) as usize];
             let dir = ((r() % 2001) as i64 - 1000, (r() % 2001) as i64 - 1000);
             a.battle.player_set(me, at, dir, stance, (r() % 6000) as i64);
-            let _ = a.battle.player_fire(me, dir, r() % 2 == 0);
+            let _ = a.battle.player_fire(me, dir, (r() % 1001) as i64);
             if r() % 50 == 0 {
                 a.battle.player_reload(me);
             }

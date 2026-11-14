@@ -1326,6 +1326,11 @@ impl Viewer {
             a.battle.player_reload(i);
         }
     }
+    /// How wide the commander's rounds go now (0 steady .. 1 wild): moving, standing up and the hip open it;
+    /// crouched or prone and still close it. The battle uses it for his shots; the page sizes the reticle by it.
+    fn gun_spread(&self) -> f32 {
+        (0.2 + 0.5 * (self.cmd_speed / CMD_SPRINT).min(1.0) + [0.15, 0.05, 0.0][self.gun.stance.min(2) as usize] + if self.gun.aim { 0.0 } else { 0.3 }).min(1.0)
+    }
     /// The commander's weapon for the page, as JSON: rounds in the rifle and spare, reloading, slung, stance,
     /// rounds fired so far, health (0..100), and the aim line [x0, y0, x1, y1] (screen fractions) while aiming.
     pub fn commander_weapon_state(&mut self) -> String {
@@ -1336,7 +1341,7 @@ impl Viewer {
         let line = self.gun.line.map_or("null".to_string(), |l| format!("[{:.4},{:.4},{:.4},{:.4}]", l[0], l[1], l[2], l[3]));
         // How wide the rounds go now (0 steady .. 1 wild): moving, standing up and the hip open it; crouched or
         // prone and still close it. The page sizes the reticle by it.
-        let spread = (0.25 + 0.45 * (self.cmd_speed / CMD_SPRINT).min(1.0) + [0.15, 0.05, 0.0][self.gun.stance.min(2) as usize] + if self.gun.aim { 0.0 } else { 0.3 }).min(1.0);
+        let spread = self.gun_spread();
         format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"spread\":{spread:.3},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots)
     }
     /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
@@ -2967,7 +2972,7 @@ impl Viewer {
             a.battle.player_set(i, at, ((-h.sin() * 1000.0) as i64, (h.cos() * 1000.0) as i64), stance, pace);
             if let Some((tx, ty)) = toward {
                 if (self.gun.trigger || self.gun.pull) && (ready || self.gun.pull) && !self.gun.slung && pose != Pose::Sprint {
-                    match a.battle.player_fire(i, ((tx * 1000.0) as i64, (ty * 1000.0) as i64), self.gun.aim) {
+                    match a.battle.player_fire(i, ((tx * 1000.0) as i64, (ty * 1000.0) as i64), (self.gun_spread() * 1000.0) as i64) {
                         scalia_ai::battle::PlayerShot::Fired { .. } => {
                             self.gun.shots += 1;
                             self.gun.pull = false;
