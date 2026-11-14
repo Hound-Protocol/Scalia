@@ -916,6 +916,11 @@ impl Battle {
         }
     }
 
+    /// Whether a spot is in the live-fire zone (all of it, when the map has none).
+    pub fn live_at(&self, p: (i64, i64)) -> bool {
+        self.map.as_ref().and_then(|m| m.live).is_none_or(|(x0, y0, x1, y1)| p.0 >= x0 && p.0 <= x1 && p.1 >= y0 && p.1 <= y1)
+    }
+
     /// Whether soldier `i` sees enemy `j` right now (as of the last perception pass).
     pub fn sees(&self, i: usize, j: usize) -> bool {
         self.visible[i].contains(&(j as u32))
@@ -984,7 +989,8 @@ impl Battle {
                 self.grid.ring(me.pos, r, &mut near);
                 for &j in &near {
                     let t = &self.soldiers[j as usize];
-                    if t.team == me.team {
+                    // Outside the live-fire zone nobody fights: neither he nor his enemy can be outside it.
+                    if t.team == me.team || !self.live_at(t.pos) || !self.live_at(me.pos) {
                         continue;
                     }
                     let (dx, dy) = (t.pos.0 - me.pos.0, t.pos.1 - me.pos.1);

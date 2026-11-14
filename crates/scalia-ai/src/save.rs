@@ -32,6 +32,9 @@ pub struct MapSpec {
     pub killhouse: Option<(i64, i64)>,
     /// How many of the props (the last ones) were placed during the battle, in order.
     placed: usize,
+    /// The live-fire zone (x0, y0, x1, y1; mm): only soldiers inside it see and fight each other. None: the
+    /// whole map is live.
+    pub live: Option<(i64, i64, i64, i64)>,
 }
 
 /// Navigation cells are 500 mm, sight cells 250 mm.
@@ -40,7 +43,7 @@ const SIGHT_CELL: i64 = 250;
 
 impl MapSpec {
     pub fn new(x0: i64, y0: i64, w_mm: i64, h_mm: i64, props: &[Prop]) -> MapSpec {
-        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None, placed: 0 }
+        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None, placed: 0, live: None }
     }
 
     /// The training house with its south-west corner at `origin`, on 100 × 80 m of open ground around it.
@@ -113,7 +116,7 @@ impl From<PropSpec> for Prop {
 
 /// "SCAB" (Scalia battle) and the format version: a save from another version is refused, not misread.
 const MAGIC: [u8; 4] = *b"SCAB";
-pub const SAVE_VERSION: u32 = 8;
+pub const SAVE_VERSION: u32 = 9;
 
 /// Frames a state as magic, version, payload and a checksum over the payload.
 pub(crate) fn frame(payload: &[u8]) -> Vec<u8> {

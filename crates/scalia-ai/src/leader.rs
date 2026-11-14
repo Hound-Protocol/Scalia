@@ -725,6 +725,8 @@ impl Battle {
     /// The first chokepoint on the walking route from `from` to `to`: a point where walls close in on both
     /// sides (gap under CHOKE_MM), more than 3 m ahead. Returns where, the way through (unit x1000) and width.
     fn chokepoint(&self, from: (i64, i64), to: (i64, i64)) -> Option<((i64, i64), (i64, i64), i64)> {
+        // A way point inside a wall (the straight-line legs can land in one): the nearest walkable spot.
+        let to = self.walkable_near(to);
         let path = self.nav().and_then(|n| scalia_core::nav::find_path(n, from, to, crate::battle::BODY_MM))?;
         let mut prev = from;
         for &wp in &path {
@@ -752,6 +754,23 @@ impl Battle {
             prev = wp;
         }
         None
+    }
+
+    /// The nearest walkable spot to `p` (rings 1 m apart, up to 5 m), or `p`.
+    fn walkable_near(&self, p: (i64, i64)) -> (i64, i64) {
+        let Some(n) = self.nav() else { return p };
+        if n.walkable_at(p.0, p.1, 0) {
+            return p;
+        }
+        for r in 1..=5i64 {
+            for &(c, sn) in DIRS_24.iter() {
+                let q = (p.0 + c * r, p.1 + sn * r);
+                if n.walkable_at(q.0, q.1, 0) {
+                    return q;
+                }
+            }
+        }
+        p
     }
 
     /// Crossing a chokepoint on the way to `goal` (approach leg `leg`), the careful way: the squad forms up

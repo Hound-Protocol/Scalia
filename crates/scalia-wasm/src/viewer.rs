@@ -653,7 +653,8 @@ impl Viewer {
             self.stop_assault();
         }
         let a = self.assault.get_or_insert_with(|| unreachable!("the field exists once the base is built"));
-        let at: Vec<(i64, i64)> = (0..12i64).map(|i| (KILLHOUSE_MM.0 + 6_000 + (i % 4) * 1_500, KILLHOUSE_MM.1 - 27_000 + (i / 4) * 1_500)).collect();
+        // Outside the range by its door: the briefing, then in.
+        let at: Vec<(i64, i64)> = (0..12i64).map(|i| (RANGE_MM.2 + 8_000 + (i % 4) * 1_500, RANGE_DOOR_Y_MM - 3_000 + (i / 4) * 1_500)).collect();
         a.spawn_squad(crate::assault::DEMO_SQUAD, 0, &at);
         a.order(crate::assault::DEMO_SQUAD, scalia_ai::leader::Order::Capture);
         self.demo = true;
@@ -669,6 +670,7 @@ impl Viewer {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
         map.killhouse = Some(KILLHOUSE_MM);
+        map.live = Some(RANGE_LIVE_MM);
         crate::assault::Assault::field(map, KILLHOUSE_MM, 7, self.lab_t)
     }
     /// Battle (lab clock) time to viewer time: what happens later in the battle happens later on screen, slower
@@ -685,41 +687,45 @@ impl Viewer {
     pub fn lab_start(&mut self, name: &str) -> String {
         use crate::assault::{DEMO_SQUAD, LAB_RED};
         use scalia_ai::leader::{Mode, Order};
-        let (kx, ky) = KILLHOUSE_MM;
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
         map.killhouse = Some(KILLHOUSE_MM);
+        // The house scenarios are on the live-fire range (live only inside its walls); the open-ground ones
+        // are live everywhere.
         let house = matches!(name, "clear" | "contact");
+        map.live = if house { Some(RANGE_LIVE_MM) } else { None };
         let mut a = crate::assault::Assault::field_with(map, KILLHOUSE_MM, 7, self.lab_t, house);
         self.demo = false;
         self.lab_wound = None;
         let block = |x0: i64, y0: i64, n: i64| -> Vec<(i64, i64)> { (0..n).map(|i| (x0 + (i % 4) * 1_500, y0 + (i / 4) * 1_500)).collect() };
+        let door = (RANGE_MM.2, RANGE_DOOR_Y_MM);
         let (watch, note) = match name {
             "contact" => {
-                a.spawn_squad(DEMO_SQUAD, 0, &block(kx - 30_000, ky - 16_000, 8));
-                a.order(DEMO_SQUAD, Order::Move { to: (kx + 50_000, ky - 16_000), mode: Mode::Plain });
-                ((kx + 10_000, ky - 22_000), "Blue walks past the house 15 m out; the defenders open up through the windows. Watch who takes cover, where, and when they move on.")
+                // Inside the range, along its east side, past the house 6 m off its east wall.
+                a.spawn_squad(DEMO_SQUAD, 0, &block(RANGE_MM.2 - 7_000, RANGE_MM.1 + 2_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (RANGE_MM.2 - 5_000, RANGE_MM.3 - 3_000), mode: Mode::Plain });
+                ((RANGE_MM.2 - 8_000, door.1), "On the range, Blue walks up past the house 6 m off its east wall; the defenders open up through the windows and the east door. Watch who takes cover, where, and when they move on.")
             }
             "wounded" => {
-                a.spawn_squad(DEMO_SQUAD, 0, &block(kx, ky - 30_000, 8));
+                a.spawn_squad(DEMO_SQUAD, 0, &block(95_000, 40_000, 8));
                 a.order(DEMO_SQUAD, Order::Hold);
-                a.spawn_squad(LAB_RED, 1, &block(kx + 45_000, ky - 30_000, 3));
+                a.spawn_squad(LAB_RED, 1, &block(130_000, 40_000, 3));
                 a.order(LAB_RED, Order::Hold);
                 self.lab_wound = Some((DEMO_SQUAD, 2, 25));
-                ((kx + 12_000, ky - 30_000), "One Blue man starts down and bleeding with Red 45 m east. Watch who goes to him, the drag to cover, and the aid.")
+                ((105_000, 42_000), "One Blue man starts down and bleeding with Red 35 m east. Watch who goes to him and when (not into fire), the drag to cover, and the aid.")
             }
             "standoff" => {
-                a.spawn_squad(DEMO_SQUAD, 0, &block(kx - 30_000, ky - 40_000, 8));
-                a.order(DEMO_SQUAD, Order::Move { to: (kx + 40_000, ky - 40_000), mode: Mode::Confirmed });
-                a.spawn_squad(LAB_RED, 1, &block(kx + 40_000, ky - 40_000, 8));
-                a.order(LAB_RED, Order::Move { to: (kx - 30_000, ky - 40_000), mode: Mode::Confirmed });
-                ((kx + 5_000, ky - 40_000), "Blue and Red, eight each with the same brain, advance on each other across open ground. Watch bounding, cover and fire.")
+                a.spawn_squad(DEMO_SQUAD, 0, &block(78_000, 92_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (142_000, 95_000), mode: Mode::Confirmed });
+                a.spawn_squad(LAB_RED, 1, &block(140_000, 92_000, 8));
+                a.order(LAB_RED, Order::Move { to: (80_000, 95_000), mode: Mode::Confirmed });
+                ((110_000, 95_000), "Blue and Red, eight each with the same brain, advance on each other across the open north of the base. Watch bounding, cover and fire.")
             }
             _ => {
-                // Formed up 55 m out (the old 27 m had both sides in each other's sights from the first frame).
-                a.spawn_squad(DEMO_SQUAD, 0, &block(kx + 6_000, ky - 55_000, 12));
+                // Outside the range by its door (safe: not live): the briefing, then in through the door.
+                a.spawn_squad(DEMO_SQUAD, 0, &block(door.0 + 8_000, door.1 - 3_000, 12));
                 a.order(DEMO_SQUAD, Order::Capture);
-                ((kx + 10_000, ky - 30_000), "Blue (12) takes the training house from Red (8): approach, stack, entry, clearing.")
+                ((door.0 - 4_000, door.1), "Blue (12) takes the training house on the range from Red (8): briefing outside, in through the range door (pied), approach, stack, pie, entry, clearing.")
             }
         };
         self.assault = Some(a);
@@ -3232,9 +3238,11 @@ fn structure_of(p: &Prop, h: f32) -> Structure {
 fn base_props() -> Vec<Prop> {
     let mut p = Vec::new();
     let wall = |x: i64, y: i64, len: i64, thick: i64, turns: u8| Prop { kind: PropKind::Wall { length_mm: len, thickness_mm: thick }, x_mm: x, y_mm: y, quarter_turns: turns };
-    // Perimeter: a 140 m square from (20, 0) to (160, 140) m, 0.6 m concrete, with a 12 m gate in the south wall.
+    // Perimeter: a 140 m square from (20, 0) to (160, 140) m, 0.6 m concrete. Closed off for now (the 12 m
+    // gate in the south wall is walled up).
     p.push(wall(20_000 + 32_000, 0, 64_000, 600, 0));
     p.push(wall(160_000 - 32_000, 0, 64_000, 600, 0));
+    p.push(wall(90_000, 0, 12_000, 600, 0));
     p.push(wall(90_000, 140_000, 140_000, 600, 0));
     p.push(wall(20_000, 70_000, 140_000, 600, 1));
     p.push(wall(160_000, 70_000, 140_000, 600, 1));
@@ -3265,7 +3273,19 @@ fn base_props() -> Vec<Prop> {
     }
     p.push(wall(-2_500, 150_000, 31_000, 600, 0));
     p.push(wall(32_000 - 1_000, 150_000, 34_000, 600, 0));
-    // The roofless plywood training house in the middle of the compound, where the enemy squad is stationed.
+    // Headquarters in the middle of the base.
+    p.push(wall(90_000, 70_000, 16_000, 8_000, 0));
+    // The live-fire range in the south-west corner: a concrete-walled yard on a concrete floor, the roofless
+    // training house inside it (where the enemy squad is stationed), and one door in from the base, in the
+    // east wall. Through that door it is live.
+    let (x0, y0, x1, y1) = RANGE_MM;
+    let (cx, cy) = ((x0 + x1) / 2, (y0 + y1) / 2);
+    p.push(wall(cx, y0, x1 - x0, 600, 0));
+    p.push(wall(cx, y1, x1 - x0, 600, 0));
+    p.push(wall(x0, cy, y1 - y0, 600, 1));
+    let (d0, d1) = (RANGE_DOOR_Y_MM - RANGE_DOOR_MM / 2, RANGE_DOOR_Y_MM + RANGE_DOOR_MM / 2);
+    p.push(wall(x1, (y0 + d0) / 2, d0 - y0, 600, 1));
+    p.push(wall(x1, (d1 + y1) / 2, y1 - d1, 600, 1));
     p.extend(killhouse().props());
     p
 }
@@ -3274,14 +3294,23 @@ fn base_props() -> Vec<Prop> {
 fn killhouse() -> scalia_core::killhouse::Killhouse {
     scalia_core::killhouse::Killhouse::new(KILLHOUSE_MM.0, KILLHOUSE_MM.1)
 }
-/// Its south-west corner (absolute millimetres).
-const KILLHOUSE_MM: (i64, i64) = (80_000, 62_000);
+/// Its south-west corner (absolute millimetres): inside the live-fire range.
+const KILLHOUSE_MM: (i64, i64) = (34_000, 20_000);
+/// The live-fire range: its walls (x0, y0, x1, y1; mm), the door in its east wall (centre y, width).
+const RANGE_MM: (i64, i64, i64, i64) = (26_000, 8_000, 64_000, 46_000);
+const RANGE_DOOR_Y_MM: i64 = 27_000;
+const RANGE_DOOR_MM: i64 = 1_600;
+/// Inside the range's walls: live (soldiers see and fight each other only in here).
+const RANGE_LIVE_MM: (i64, i64, i64, i64) = (RANGE_MM.0 + 300, RANGE_MM.1 + 300, RANGE_MM.2 - 300, RANGE_MM.3 - 300);
 
 /// Low-poly mesh for the base's props, standing on the levelled pad at height `h` (same style as the soldiers).
 fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
     use scalia_render::mesh::kit;
     let mut m = MeshBuilder::default();
     let c = |p: u8| scalia_render::mesh::code(p, scalia_render::mesh::Part::Body);
+    // The range's concrete floor.
+    let (x0, y0, x1, y1) = (RANGE_MM.0 as f32 / 1000.0, RANGE_MM.1 as f32 / 1000.0, RANGE_MM.2 as f32 / 1000.0, RANGE_MM.3 as f32 / 1000.0);
+    m.cuboid([x0, y0, h - 0.05], [x1, y1, h + 0.03], c(2));
     for p in props {
         let (x, y) = (p.x_mm as f32 / 1000.0, p.y_mm as f32 / 1000.0);
         match p.kind {
