@@ -1499,6 +1499,7 @@ try {
     pause: { help: 'pause or resume battle time', run: () => { const p = !pause.on; pause.on = p; v.lab_set_speed(p ? 0 : 1); if (lab) lab.setSpeed(p ? 0 : 1); return p ? 'paused' : 'running'; } },
     labels: { help: 'toggle the AI lab labels', run: () => (lab ? `labels ${lab.toggleLabels() ? 'on' : 'off'}` : 'labels need the AI lab (lab <scenario>)') },
     field: { help: 'squads on the testing ground', run: () => v.field_debug() },
+    door: { help: 'door [n open|close|lock|breach]: list the doors, or set one', run: (a) => (a.length ? v.door_cmd(Number(a[0]), a[1] || '') : v.door_cmd(-1, '')) },
     steps: { help: 'leader steps and shouts since last asked', run: () => v.lab_feed() || '(none)' },
     report: { help: 'copy a bug report (version, browser, last errors) to the clipboard', run: () => { const r = errors.report(); navigator.clipboard.writeText(r).catch(() => {}); return `${errors.recent.length} error(s); report copied`; } },
     log: { help: 'log [clear]: errors, warnings and hitches (kept across reloads)', run: (a) => { if (a[0] === 'clear') { errors.clearLog(); return 'log cleared'; } return errors.logText() || '(empty)'; } },

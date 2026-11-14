@@ -106,6 +106,11 @@ pub(crate) fn battle_doors() -> Vec<scalia_ai::doors::Door> {
         .collect()
 }
 
+/// Which of `battle_doors()` are steel.
+pub(crate) fn door_steel() -> Vec<bool> {
+    world().doors().iter().map(|d| d.material == scalia_world::Material::Steel).collect()
+}
+
 /// The middle of a bay's floor (the squad's home position).
 pub(crate) fn bay_centre(squad: usize) -> (i64, i64) {
     let r = area(&format!("barracks_bay_{squad}"));

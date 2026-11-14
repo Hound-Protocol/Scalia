@@ -159,6 +159,8 @@ pub struct Viewer {
     origin: (f64, f64),
     /// The testing ground: its props, nav grid, level height (metres), and the squads walking as agents in it.
     base_props: Vec<Prop>,
+    /// Which of the field battle's doors are steel (the rest wood), in its door order.
+    door_steel: Vec<bool>,
     base_grid: NavGrid,
     base_h: f32,
     base_built: bool,
@@ -322,6 +324,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         far_level: None,
         origin: (0.0, 0.0),
         base_props: base_props(),
+        door_steel: crate::ground::door_steel(),
         base_grid: NavGrid::new((BASE_LO * 1000.0) as i64, (BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 2.0) as usize, ((BASE_HI - BASE_LO) * 2.0) as usize),
         base_h: 0.0,
         base_built: false,
@@ -687,6 +690,26 @@ impl Viewer {
     /// in slow motion.
     fn lab_real(&self, at: f64) -> f64 {
         if self.lab_speed <= 0.0 { self.frame_ms } else { self.frame_ms + (at - self.lab_t) / self.lab_speed }
+    }
+    /// Console: list the doors, or set one ("door 3 open|close|lock|breach").
+    pub fn door_cmd(&mut self, which: i32, state: &str) -> String {
+        use scalia_ai::doors::DoorState;
+        let Some(a) = self.assault.as_mut() else { return "no battle on the testing ground".into() };
+        if which < 0 {
+            return a.battle.doors.iter().enumerate().map(|(i, d)| format!("{i:2} ({:.1}, {:.1}) {}{:?}", d.at.0 as f64 / 1000.0, d.at.1 as f64 / 1000.0, if self.door_steel.get(i) == Some(&true) { "steel " } else { "" }, d.state)).collect::<Vec<_>>().join("\n");
+        }
+        let st = match state {
+            "open" => DoorState::Open,
+            "close" | "closed" => DoorState::Closed,
+            "lock" | "locked" => DoorState::Locked,
+            "breach" | "breached" => DoorState::Breached,
+            _ => return "door <n> open|close|lock|breach".into(),
+        };
+        if which as usize >= a.battle.doors.len() {
+            return format!("no door {which} (0..{})", a.battle.doors.len());
+        }
+        a.battle.set_door(which as usize, st, None);
+        format!("door {which}: {:?}", a.battle.doors[which as usize].state)
     }
     /// AI lab: how fast battle time runs (0 pauses).
     pub fn lab_set_speed(&mut self, speed: f64) {
@@ -2280,6 +2303,12 @@ impl Viewer {
             self.update_commander(t, ts, instanced);
         }
         instanced.push(("base".into(), "base_at".into()));
+        if let Some(a) = self.assault.as_ref() {
+            let now = self.frame_ms;
+            let m = door_mesh(&a.battle.doors, &self.door_steel, self.base_h, |at| now - self.lab_real(at as f64));
+            self.gpu.upload("doors", m.bytes());
+            instanced.push(("doors".into(), "base_at".into()));
+        }
         let (bx, by) = ((-self.origin.0) as f32, (-self.origin.1) as f32);
         self.gpu.upload_instances("base_at", bytes(&[bx, by, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
         // The enemy squad in the training house: on their posts, or fighting the live assault.
@@ -2612,7 +2641,15 @@ impl Viewer {
             let (nx, ny) = (self.cmd.0 + vx as f64, self.cmd.1 + vy as f64);
             // Against the props themselves (not the coarse nav grid, whose half-metre cells close a 1.6 m door to
             // a man of his width): free when no prop's footprint comes within his body's radius.
-            let free = |x: f64, y: f64| !in_base(x as f32, y as f32) || body_clear(&self.base_props, (x * 1000.0) as i64, (y * 1000.0) as i64, CMD_RADIUS_MM);
+            // Shut doors are in his way too; walking into a closed (not locked) one, he pushes it open.
+            let shut: Vec<(usize, Prop, bool)> = self.assault.as_ref().map(|a| a.battle.doors.iter().enumerate().filter(|(_, d)| d.shut()).map(|(i, d)| (i, d.as_prop(), d.state == scalia_ai::doors::DoorState::Locked)).collect()).unwrap_or_default();
+            let door_props: Vec<Prop> = shut.iter().map(|d| d.1).collect();
+            let mm = |v: f64| (v * 1000.0) as i64;
+            let blocking_door = shut.iter().find(|d| !body_clear(std::slice::from_ref(&d.1), mm(nx), mm(ny), CMD_RADIUS_MM)).map(|d| (d.0, d.2));
+            if let (Some((door, false)), Some(a)) = (blocking_door, self.assault.as_mut()) {
+                a.battle.set_door(door, scalia_ai::doors::DoorState::Open, None);
+            }
+            let free = |x: f64, y: f64| !in_base(x as f32, y as f32) || body_clear(&self.base_props, mm(x), mm(y), CMD_RADIUS_MM) && body_clear(&door_props, mm(x), mm(y), CMD_RADIUS_MM);
             if free(nx, ny) {
                 self.cmd = (nx, ny);
             } else if free(nx, self.cmd.1) {
@@ -3349,6 +3386,73 @@ fn furniture_mesh(m: &mut MeshBuilder, p: &Prop, item: Furnish, h: f32) {
             }
         }
     }
+}
+
+/// A box standing on four ground corners (counter-clockwise from above), from z0 to z1.
+fn slab(m: &mut MeshBuilder, c: [[f32; 2]; 4], z0: f32, z1: f32, colour: f32) {
+    let p = |k: usize, z: f32| [c[k][0], c[k][1], z];
+    let (a, b, cc, d) = (p(0, z0), p(1, z0), p(2, z0), p(3, z0));
+    let (e, f, g, h) = (p(0, z1), p(1, z1), p(2, z1), p(3, z1));
+    m.quad(a, d, cc, b, colour);
+    m.quad(e, f, g, h, colour);
+    m.quad(a, b, f, e, colour);
+    m.quad(b, cc, g, f, colour);
+    m.quad(cc, d, h, g, colour);
+    m.quad(d, a, e, h, colour);
+}
+
+/// The doors as they hang now: a leaf on its hinge across the doorway when shut, swung back into the room when
+/// open, knocked flat when breached; it swings over half a second from its last change (`since(ms)`: how long
+/// ago, in real ms, battle time ms happened). Steel doors are darker, with a heavier frame.
+fn door_mesh(doors: &[scalia_ai::doors::Door], steel: &[bool], h: f32, since: impl Fn(i64) -> f64) -> MeshBuilder {
+    use scalia_ai::doors::DoorState;
+    use scalia_render::mesh::{code, kit, Part};
+    let mut m = MeshBuilder::default();
+    for (i, d) in doors.iter().enumerate() {
+        let is_steel = steel.get(i).copied().unwrap_or(false);
+        let (cx, cy) = (d.at.0 as f32 / 1000.0, d.at.1 as f32 / 1000.0);
+        let w = d.width_mm as f32 / 1000.0;
+        let top = d.height_mm as f32 / 1000.0;
+        let (u, n) = if d.along_x { ([1.0f32, 0.0f32], [0.0f32, 1.0f32]) } else { ([0.0, 1.0], [-1.0, 0.0]) };
+        let hinge = [cx - u[0] * w / 2.0, cy - u[1] * w / 2.0];
+        let leaf = w - 0.04;
+        let t = if is_steel { 0.07 } else { 0.05 };
+        // Where it is swinging to, and from.
+        let (to, from) = match d.state {
+            DoorState::Open => (88.0f32, 0.0f32),
+            DoorState::Closed | DoorState::Locked => (0.0, 88.0),
+            DoorState::Breached => (100.0, 0.0),
+        };
+        let k = ((since(d.changed_ms) / 450.0).clamp(0.0, 1.0) as f32).powf(0.6);
+        let k = if d.changed_ms == 0 { 1.0 } else { k };
+        let ang = (from + (to - from) * k).to_radians();
+        let v = [u[0] * ang.cos() + n[0] * ang.sin(), u[1] * ang.cos() + n[1] * ang.sin()];
+        let p = [-v[1], v[0]];
+        let colour = if is_steel { code(1, Part::Body) } else { code(13, Part::Body) };
+        let corners = |len: f32| [
+            [hinge[0] - p[0] * t / 2.0, hinge[1] - p[1] * t / 2.0],
+            [hinge[0] + v[0] * len - p[0] * t / 2.0, hinge[1] + v[1] * len - p[1] * t / 2.0],
+            [hinge[0] + v[0] * len + p[0] * t / 2.0, hinge[1] + v[1] * len + p[1] * t / 2.0],
+            [hinge[0] + p[0] * t / 2.0, hinge[1] + p[1] * t / 2.0],
+        ];
+        if d.state == DoorState::Breached && k >= 1.0 {
+            // Off its hinges, lying in the doorway.
+            let c = corners(leaf);
+            let flat = [c[0], c[1], [c[1][0] + p[0] * top * 0.45, c[1][1] + p[1] * top * 0.45], [c[0][0] + p[0] * top * 0.45, c[0][1] + p[1] * top * 0.45]];
+            slab(&mut m, flat, h + 0.01, h + 0.06, colour);
+        } else {
+            slab(&mut m, corners(leaf), h + 0.02, h + top, colour);
+            // The handle, on the free edge, both faces.
+            let e = [hinge[0] + v[0] * (leaf - 0.1), hinge[1] + v[1] * (leaf - 0.1)];
+            let r = t / 2.0 + 0.04;
+            m.cuboid([e[0] - 0.04 - p[0].abs() * r, e[1] - 0.04 - p[1].abs() * r, h + 1.0], [e[0] + 0.04 + p[0].abs() * r, e[1] + 0.04 + p[1].abs() * r, h + 1.08], code(kit::METAL, Part::Body));
+        }
+        // The frame's header over the doorway (the posts are the walls' ends).
+        let f = if is_steel { 0.12 } else { 0.08 };
+        let (a, b) = ([cx - u[0] * w / 2.0 - n[0] * f, cy - u[1] * w / 2.0 - n[1] * f], [cx + u[0] * w / 2.0 + n[0] * f, cy + u[1] * w / 2.0 + n[1] * f]);
+        m.cuboid([a[0].min(b[0]), a[1].min(b[1]), h + top], [a[0].max(b[0]), a[1].max(b[1]), h + top + 0.12], colour);
+    }
+    m
 }
 
 /// The commander's body radius for walking into things (mm).
