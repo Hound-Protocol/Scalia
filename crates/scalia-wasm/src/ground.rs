@@ -1,244 +1,98 @@
-//! The testing ground's layout: the walled base, the live-fire range and its training house (millimetres).
-use scalia_core::nav::{Furnish, Prop, PropKind};
+//! The testing ground's layout, read from the world map (scalia-world: `data/testing_ground.ron`, objects from
+//! `data/catalog.ron`): the walled base, the live-fire range and its training house, the barracks. Millimetres.
+use scalia_core::nav::Prop;
+use scalia_world::{Spot, Use, World};
 
 pub(crate) const BASE_LO: f32 = -20.0;
 pub(crate) const BASE_HI: f32 = 220.0;
 
-/// The testing ground's military base (positions in millimetres). A walled compound with a gate, barracks,
-/// guard towers, sandbag lines and containers, and outside it an obstacle lane: a rock field and a narrow gap.
+fn world() -> &'static World {
+    World::testing_ground()
+}
+
+fn area(name: &str) -> (i64, i64, i64, i64) {
+    world().area(name).unwrap_or_else(|| panic!("the testing ground has an area '{name}'"))
+}
+
+/// Everything solid on the testing ground that does not open (doors are the world's `doors()`).
 pub(crate) fn base_props() -> Vec<Prop> {
-    let mut p = Vec::new();
-    let wall = |x: i64, y: i64, len: i64, thick: i64, turns: u8| Prop { kind: PropKind::Wall { length_mm: len, thickness_mm: thick }, x_mm: x, y_mm: y, quarter_turns: turns };
-    // Perimeter: a 140 m square from (20, 0) to (160, 140) m, 0.6 m concrete. Closed off for now (the 12 m
-    // gate in the south wall is walled up).
-    p.push(wall(20_000 + 32_000, 0, 64_000, 600, 0));
-    p.push(wall(160_000 - 32_000, 0, 64_000, 600, 0));
-    p.push(wall(90_000, 0, 12_000, 600, 0));
-    p.push(wall(90_000, 140_000, 140_000, 600, 0));
-    p.push(wall(20_000, 70_000, 140_000, 600, 1));
-    p.push(wall(160_000, 70_000, 140_000, 600, 1));
-    // Barracks: three 24 x 8 m blocks along the north.
-    for k in 0..3 {
-        p.push(wall(45_000 + k * 40_000, 118_000, 24_000, 8_000, 0));
-    }
-    // Guard towers in the corners and by the gate (3 m footprints).
-    for (x, y) in [(24_000, 4_000), (156_000, 4_000), (24_000, 136_000), (156_000, 136_000), (79_000, 5_000), (101_000, 5_000)] {
-        p.push(Prop { kind: PropKind::Crate { size_mm: 3_000 }, x_mm: x, y_mm: y, quarter_turns: 0 });
-    }
-    // Sandbag lines behind the gate, staggered so the way in zig-zags.
-    p.push(wall(78_000, 14_000, 10_000, 700, 0));
-    p.push(wall(102_000, 22_000, 10_000, 700, 0));
-    p.push(wall(68_000, 30_000, 8_000, 700, 1));
-    // Container stacks (2.5 x 12 m) in the depot corner.
-    for k in 0..4 {
-        p.push(wall(140_000, 30_000 + k * 6_000, 12_000, 2_500, 0));
-    }
-    // Crates scattered by the depot.
-    for k in 0..8i64 {
-        p.push(Prop { kind: PropKind::Crate { size_mm: 1_200 }, x_mm: 120_000 + (k % 4) * 3_000, y_mm: 60_000 + (k / 4) * 4_000, quarter_turns: 0 });
-    }
-    // Outside, west: a rock field and a wall with a 2 m gap (soldiers squeeze through one at a time).
-    for k in 0..24i64 {
-        let h = scalia_core::hash::mix64(k as u64 ^ 0x70c4);
-        p.push(Prop { kind: PropKind::Rock { radius_mm: 700 + (h % 1_400) as i64 }, x_mm: -10_000 + (h >> 16) as i64 % 24_000, y_mm: 20_000 + (h >> 32) as i64 % 90_000, quarter_turns: 0 });
-    }
-    p.push(wall(-2_500, 150_000, 31_000, 600, 0));
-    p.push(wall(32_000 - 1_000, 150_000, 34_000, 600, 0));
-    // Headquarters in the middle of the base.
-    p.push(wall(90_000, 70_000, 16_000, 8_000, 0));
-    // The live-fire range in the south-west corner: a concrete-walled yard on a concrete floor, the roofless
-    // training house inside it (where the enemy squad is stationed), and one door in from the base, in the
-    // east wall. Through that door it is live.
-    let (x0, y0, x1, y1) = RANGE_MM;
-    let (cx, cy) = ((x0 + x1) / 2, (y0 + y1) / 2);
-    p.push(wall(cx, y0, x1 - x0, 600, 0));
-    p.push(wall(cx, y1, x1 - x0, 600, 0));
-    p.push(wall(x0, cy, y1 - y0, 600, 1));
-    let (d0, d1) = (RANGE_DOOR_Y_MM - RANGE_DOOR_MM / 2, RANGE_DOOR_Y_MM + RANGE_DOOR_MM / 2);
-    p.push(wall(x1, (y0 + d0) / 2, d0 - y0, 600, 1));
-    p.push(wall(x1, (d1 + y1) / 2, y1 - d1, 600, 1));
-    p.extend(killhouse().props());
-    p.extend(barracks_props());
-    p
-}
-
-/// The squads' barracks, south of the container stacks: walls (x0, y0, x1, y1; mm), roofless so the
-/// commander sees in. Three rooms west to east: bay 0 (a squad's twelve bunks), the common room (two tables
-/// with benches, weapons racks), bay 1 (the second squad). Doors: the main one in the north wall into the
-/// common room, one in the west wall into bay 0, and one between each bay and the common room.
-pub(crate) const BARRACKS_MM: (i64, i64, i64, i64) = (118_000, 4_000, 154_000, 24_000);
-/// The partitions between the bays and the common room (x, mm).
-const BARRACKS_SPLIT_MM: [i64; 2] = [130_000, 142_000];
-const BARRACKS_WALL_MM: i64 = 300;
-const BARRACKS_DOOR_MM: i64 = 2_000;
-
-/// What a man does at a spot in the barracks (the animations to test there).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Use {
-    /// Standing by his bunk (where he waits at ease).
-    StandBy,
-    /// Lying in a bunk (the lower or upper one).
-    Lie { upper: bool },
-    /// Sitting: on a footlocker or a bench.
-    Sit,
-    /// At his locker.
-    Locker,
-    /// At the weapons rack.
-    Rack,
-}
-
-/// A place in the barracks: where, which way he faces there, what he does, and whose it is (the bay's squad
-/// and his place in it; the common room's are anybody's).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Spot {
-    pub at: (i64, i64),
-    pub face: (i64, i64),
-    pub what: Use,
-    pub bay: Option<usize>,
-    pub man: Option<usize>,
-}
-
-/// The rooms' extents (x0, x1) west to east: bay 0, common room, bay 1.
-fn barracks_rooms() -> [(i64, i64); 3] {
-    let (x0, _, x1, _) = BARRACKS_MM;
-    [(x0, BARRACKS_SPLIT_MM[0]), (BARRACKS_SPLIT_MM[0], BARRACKS_SPLIT_MM[1]), (BARRACKS_SPLIT_MM[1], x1)]
-}
-
-/// A wall from a to b along one axis, with door gaps (centres along the wall) left open.
-fn wall_run(p: &mut Vec<Prop>, along_x: bool, at: i64, from: i64, to: i64, doors: &[i64]) {
-    let mut cuts: Vec<(i64, i64)> = doors.iter().map(|&d| (d - BARRACKS_DOOR_MM / 2, d + BARRACKS_DOOR_MM / 2)).collect();
-    cuts.sort();
-    let mut a = from;
-    for (c0, c1) in cuts.into_iter().chain([(to, to)]) {
-        if c0 > a {
-            let (mid, len) = ((a + c0) / 2, c0 - a);
-            let (x, y) = if along_x { (mid, at) } else { (at, mid) };
-            p.push(Prop { kind: PropKind::Wall { length_mm: len, thickness_mm: BARRACKS_WALL_MM }, x_mm: x, y_mm: y, quarter_turns: if along_x { 0 } else { 1 } });
-        }
-        a = c1;
-    }
-}
-
-/// Bunk centres in a bay: three along each long wall, head to the wall (x centres, and y of the south and north
-/// rows).
-fn bunk_rows(bay: (i64, i64)) -> ([i64; 3], i64, i64) {
-    let (_, y0, _, y1) = BARRACKS_MM;
-    let w = BARRACKS_WALL_MM / 2;
-    ([bay.0 + 1_500, bay.0 + 5_500, bay.0 + 9_500], y0 + w + 1_050, y1 - w - 1_050)
-}
-
-/// The two lockers that go with a bunk at x: against the wall, in the space east of it (centres along x).
-fn lockers_of(x: i64) -> [i64; 2] {
-    [x + 900, x + 1_550]
-}
-/// A locker against a wall: its centre's distance from the wall's middle line, and its size (along, deep).
-const LOCKER_OFF_MM: i64 = BARRACKS_WALL_MM / 2 + 250;
-const LOCKER_MM: (i64, i64) = (600, 500);
-
-/// The barracks' walls and furniture.
-pub(crate) fn barracks_props() -> Vec<Prop> {
-    let (x0, y0, x1, y1) = BARRACKS_MM;
-    let mut p = Vec::new();
-    let [bay0, common, bay1] = barracks_rooms();
-    let mid_y = (y0 + y1) / 2;
-    wall_run(&mut p, true, y0, x0 - BARRACKS_WALL_MM / 2, x1 + BARRACKS_WALL_MM / 2, &[]);
-    wall_run(&mut p, true, y1, x0 - BARRACKS_WALL_MM / 2, x1 + BARRACKS_WALL_MM / 2, &[(common.0 + common.1) / 2]);
-    wall_run(&mut p, false, x0, y0, y1, &[mid_y]);
-    wall_run(&mut p, false, x1, y0, y1, &[]);
-    for &x in &BARRACKS_SPLIT_MM {
-        wall_run(&mut p, false, x, y0, y1, &[mid_y]);
-    }
-    let item = |p: &mut Vec<Prop>, item: Furnish, x: i64, y: i64, w: i64, d: i64| p.push(Prop { kind: PropKind::Furniture { item, width_mm: w, depth_mm: d }, x_mm: x, y_mm: y, quarter_turns: 0 });
-    for bay in [bay0, bay1] {
-        let (xs, ys, yn) = bunk_rows(bay);
-        for &x in &xs {
-            for (y, toward) in [(ys, 1), (yn, -1)] {
-                // The bunk (0.9 x 2.0 m), its footlocker at the foot, a locker beside its head.
-                item(&mut p, Furnish::Bunk, x, y, 900, 2_000);
-                item(&mut p, Furnish::Bench, x, y + toward * 1_250, 900, 450);
-                let wall_y = if toward > 0 { BARRACKS_MM.1 } else { BARRACKS_MM.3 };
-                for lx in lockers_of(x) {
-                    item(&mut p, Furnish::Locker, lx, wall_y + toward * LOCKER_OFF_MM, LOCKER_MM.0, LOCKER_MM.1);
-                }
-            }
-        }
-    }
-    // The common room: two tables with a bench each side, weapons racks along the south wall.
-    let cx = (common.0 + common.1) / 2;
-    for ty in [mid_y - 4_000, mid_y + 3_000] {
-        item(&mut p, Furnish::Table, cx, ty, 3_000, 1_000);
-        item(&mut p, Furnish::Bench, cx, ty - 900, 3_000, 350);
-        item(&mut p, Furnish::Bench, cx, ty + 900, 3_000, 350);
-    }
-    for k in 0..3 {
-        item(&mut p, Furnish::Rack, common.0 + 2_500 + k * 3_500, y0 + BARRACKS_WALL_MM / 2 + 350, 2_000, 500);
-    }
-    p
-}
-
-/// Every place in the barracks, with what a man does there.
-pub(crate) fn barracks_spots() -> Vec<Spot> {
-    let (_, y0, _, _) = BARRACKS_MM;
-    let [bay0, common, bay1] = barracks_rooms();
-    let mut out = Vec::new();
-    for (b, bay) in [bay0, bay1].into_iter().enumerate() {
-        let (xs, ys, yn) = bunk_rows(bay);
-        let mut man = 0;
-        for (y, toward) in [(ys, 1i64), (yn, -1)] {
-            for &x in &xs {
-                // Two men to a bunk: lower and upper.
-                for upper in [false, true] {
-                    let m = Some(man);
-                    let side = if upper { 1 } else { -1 };
-                    out.push(Spot { at: (x + side * 400, y + toward * 2_200), face: (0, toward), what: Use::StandBy, bay: Some(b), man: m });
-                    out.push(Spot { at: (x, y), face: (0, toward), what: Use::Lie { upper }, bay: Some(b), man: m });
-                    out.push(Spot { at: (x + side * 220, y + toward * 1_250), face: (0, toward), what: Use::Sit, bay: Some(b), man: m });
-                    let wall_y = if toward > 0 { BARRACKS_MM.1 } else { BARRACKS_MM.3 };
-                    let lx = lockers_of(x)[upper as usize];
-                    out.push(Spot { at: (lx, wall_y + toward * (LOCKER_OFF_MM + LOCKER_MM.1 / 2 + 450)), face: (0, -toward), what: Use::Locker, bay: Some(b), man: m });
-                    man += 1;
-                }
-            }
-        }
-    }
-    let (cx, mid_y) = ((common.0 + common.1) / 2, (BARRACKS_MM.1 + BARRACKS_MM.3) / 2);
-    for ty in [mid_y - 4_000, mid_y + 3_000] {
-        for k in -2..=2i64 {
-            out.push(Spot { at: (cx + k * 600, ty - 900), face: (0, 1), what: Use::Sit, bay: None, man: None });
-            out.push(Spot { at: (cx + k * 600, ty + 900), face: (0, -1), what: Use::Sit, bay: None, man: None });
-        }
-    }
-    for k in 0..3 {
-        out.push(Spot { at: (common.0 + 2_500 + k * 3_500, y0 + BARRACKS_WALL_MM / 2 + 1_100), face: (0, -1), what: Use::Rack, bay: None, man: None });
-    }
-    out
-}
-
-/// Where a man of a barracks squad waits at ease: standing at the foot of his bunk, facing the aisle
-/// (squad = bay).
-pub(crate) fn billet(squad: usize, man: usize) -> Option<Spot> {
-    barracks_spots().into_iter().find(|s| s.bay == Some(squad) && s.man == Some(man) && s.what == Use::StandBy)
-}
-
-/// The middle of a bay's floor (the squad's home position).
-pub(crate) fn bay_centre(squad: usize) -> (i64, i64) {
-    let r = barracks_rooms()[if squad == 0 { 0 } else { 2 }];
-    ((r.0 + r.1) / 2, (BARRACKS_MM.1 + BARRACKS_MM.3) / 2)
+    world().props()
 }
 
 /// The training house on the testing ground (see scalia_core::killhouse).
 pub(crate) fn killhouse() -> scalia_core::killhouse::Killhouse {
-    scalia_core::killhouse::Killhouse::new(KILLHOUSE_MM.0, KILLHOUSE_MM.1)
+    world().killhouses().into_iter().next().expect("the testing ground has its training house")
 }
 /// Its south-west corner (absolute millimetres): inside the live-fire range.
-pub(crate) const KILLHOUSE_MM: (i64, i64) = (34_000, 20_000);
-/// The live-fire range: its walls (x0, y0, x1, y1; mm), the door in its east wall (centre y, width).
-pub(crate) const RANGE_MM: (i64, i64, i64, i64) = (26_000, 8_000, 64_000, 46_000);
-pub(crate) const RANGE_DOOR_Y_MM: i64 = 27_000;
-pub(crate) const RANGE_DOOR_MM: i64 = 1_600;
+pub(crate) fn killhouse_mm() -> (i64, i64) {
+    killhouse().origin
+}
+/// The live-fire range's walls (x0, y0, x1, y1).
+pub(crate) fn range_mm() -> (i64, i64, i64, i64) {
+    area("range")
+}
 /// Inside the range's walls: live (soldiers see and fight each other only in here).
-pub(crate) const RANGE_LIVE_MM: (i64, i64, i64, i64) = (RANGE_MM.0 + 300, RANGE_MM.1 + 300, RANGE_MM.2 - 300, RANGE_MM.3 - 300);
+pub(crate) fn range_live_mm() -> (i64, i64, i64, i64) {
+    area("range_live")
+}
+/// The door in from the base: the door in the range's east wall.
+pub(crate) fn range_door() -> (i64, i64) {
+    let r = range_mm();
+    world().doors().iter().find(|d| d.at.0 == r.2).map(|d| d.at).expect("the range has its door in the east wall")
+}
+/// The squads' barracks (x0, y0, x1, y1), south of the container stacks.
+pub(crate) fn barracks_mm() -> (i64, i64, i64, i64) {
+    area("barracks")
+}
 
+fn inside(r: (i64, i64, i64, i64), p: (i64, i64)) -> bool {
+    p.0 > r.0 && p.0 < r.2 && p.1 > r.1 && p.1 < r.3
+}
+
+/// The bunks of a squad's bay in order: the south row west to east, then the north row.
+fn bunks_of(squad: usize) -> Vec<usize> {
+    let bay = area(&format!("barracks_bay_{squad}"));
+    let mut b: Vec<(usize, (i64, i64))> = world().of_kind("bunk").filter(|(_, o)| inside(bay, o.at)).map(|(i, o)| (i, o.at)).collect();
+    b.sort_by_key(|&(_, (x, y))| (y, x));
+    b.into_iter().map(|(i, _)| i).collect()
+}
+
+/// A barracks man's places: man k of squad s has bunk k/2 of the squad's bay, the lower bunk if k is even.
+/// Returns the place of `what` that is his (where he stands at its foot, which bunk he lies in, the seat on
+/// its footlocker, his locker).
+pub(crate) fn place_of(squad: usize, man: usize, what: Use) -> Option<Spot> {
+    let bunk = *bunks_of(squad).get(man / 2)?;
+    let w = world();
+    let o = w.objects[bunk];
+    let which = man % 2;
+    match what {
+        Use::Stand | Use::Lie => w.spots().into_iter().filter(|s| s.object == bunk && s.what == what).nth(which),
+        Use::Sit => {
+            // The footlocker at the foot of his bunk.
+            let (f, _) = w.of_kind("footlocker").min_by_key(|(_, f)| (f.at.0 - o.at.0).abs() + (f.at.1 - o.at.1).abs())?;
+            w.spots().into_iter().filter(|s| s.object == f && s.what == Use::Sit).nth(which)
+        }
+        Use::Work => {
+            // The lockers beside his bunk's head, along the same wall: the nearer one is the lower man's.
+            let mut l: Vec<(usize, i64)> = w.of_kind("locker").filter(|(_, l)| (l.at.1 - o.at.1).abs() < 2_000).map(|(i, l)| (i, (l.at.0 - o.at.0).abs())).filter(|&(_, d)| d < 2_000).collect();
+            l.sort_by_key(|&(i, d)| (d, i));
+            let (locker, _) = *l.get(which)?;
+            w.spots().into_iter().find(|s| s.object == locker)
+        }
+        Use::Handle => None,
+    }
+}
+
+/// Where a man of a barracks squad waits at ease: standing at the foot of his bunk, facing the aisle.
+pub(crate) fn billet(squad: usize, man: usize) -> Option<Spot> {
+    place_of(squad, man, Use::Stand)
+}
+
+/// The middle of a bay's floor (the squad's home position).
+pub(crate) fn bay_centre(squad: usize) -> (i64, i64) {
+    let r = area(&format!("barracks_bay_{squad}"));
+    ((r.0 + r.2) / 2, (r.1 + r.3) / 2)
+}
 
 #[cfg(test)]
 mod lab_tests {
@@ -252,10 +106,10 @@ mod lab_tests {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let props = base_props();
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
-        map.killhouse = Some(KILLHOUSE_MM);
-        map.live = Some(RANGE_LIVE_MM);
-        let mut a = Assault::field_with(map, KILLHOUSE_MM, seed, 0.0, true);
-        let door = (RANGE_MM.2, RANGE_DOOR_Y_MM);
+        map.killhouse = Some(killhouse_mm());
+        map.live = Some(range_live_mm());
+        let mut a = Assault::field_with(map, killhouse_mm(), seed, 0.0, true);
+        let door = (range_mm().2, range_door().1);
         let block: Vec<(i64, i64)> = (0..12).map(|i| (door.0 + 8_000 + (i % 4) * 1_500, door.1 - 3_000 + (i / 4) * 1_500)).collect();
         a.spawn_squad(DEMO_SQUAD, 0, &block);
         a.order(DEMO_SQUAD, scalia_ai::leader::Order::Capture);
@@ -354,15 +208,15 @@ mod lab_more {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let props = base_props();
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
-        map.killhouse = Some(KILLHOUSE_MM);
+        map.killhouse = Some(killhouse_mm());
         let house = name == "contact";
-        map.live = if house { Some(RANGE_LIVE_MM) } else { None };
-        let mut a = Assault::field_with(map, KILLHOUSE_MM, seed, 0.0, house);
+        map.live = if house { Some(range_live_mm()) } else { None };
+        let mut a = Assault::field_with(map, killhouse_mm(), seed, 0.0, house);
         let block = |x0: i64, y0: i64, n: i64| -> Vec<(i64, i64)> { (0..n).map(|i| (x0 + (i % 4) * 1_500, y0 + (i / 4) * 1_500)).collect() };
         match name {
             "contact" => {
-                a.spawn_squad(DEMO_SQUAD, 0, &block(RANGE_MM.2 - 7_000, RANGE_MM.1 + 2_000, 8));
-                a.order(DEMO_SQUAD, Order::Move { to: (RANGE_MM.2 - 5_000, RANGE_MM.3 - 3_000), mode: Mode::Plain });
+                a.spawn_squad(DEMO_SQUAD, 0, &block(range_mm().2 - 7_000, range_mm().1 + 2_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (range_mm().2 - 5_000, range_mm().3 - 3_000), mode: Mode::Plain });
             }
             "standoff-swapped" => {
                 // The same, Red brought on first (lower soldier numbers): any difference is order bias.
@@ -423,38 +277,44 @@ mod barracks_tests {
     }
 
     #[test]
-    fn every_man_of_both_squads_has_a_bunk_a_seat_a_locker_and_a_place_to_stand() {
-        let spots = barracks_spots();
-        for bay in 0..2 {
-            for man in 0..12 {
-                for what in [Use::StandBy, Use::Sit, Use::Locker] {
-                    assert_eq!(spots.iter().filter(|s| s.bay == Some(bay) && s.man == Some(man) && s.what == what).count(), 1, "bay {bay} man {man} {what:?}");
+    fn every_man_of_both_squads_has_his_own_bunk_seat_locker_and_place_to_stand() {
+        for what in [Use::Stand, Use::Lie, Use::Sit, Use::Work] {
+            let mut seen = Vec::new();
+            for squad in 0..2 {
+                for man in 0..12 {
+                    let s = place_of(squad, man, what).unwrap_or_else(|| panic!("squad {squad} man {man} has no {what:?} place"));
+                    assert!(inside(area(&format!("barracks_bay_{squad}")), s.at), "{what:?} of {squad}/{man} in his bay");
+                    let key = (s.at, s.height_mm);
+                    assert!(!seen.contains(&key), "{what:?} of {squad}/{man} shared");
+                    seen.push(key);
                 }
-                assert!(spots.iter().any(|s| s.bay == Some(bay) && s.man == Some(man) && matches!(s.what, Use::Lie { .. })));
             }
         }
-        assert!(spots.iter().filter(|s| s.bay.is_none() && s.what == Use::Sit).count() >= 20, "seats at the tables");
+        let seats = world().spots().into_iter().filter(|s| s.what == Use::Sit && inside(area("barracks_common"), s.at)).count();
+        assert!(seats >= 20, "seats at the tables: {seats}");
     }
 
     #[test]
     fn the_barracks_sits_south_of_the_containers_inside_the_base_clear_of_everything_else() {
-        let (x0, y0, x1, y1) = BARRACKS_MM;
-        assert!(x0 > 20_000 && x1 < 160_000 && y0 > 0, "inside the perimeter");
-        assert!(y1 < 30_000 - 1_250, "south of the containers");
-        let ours = barracks_props();
-        for p in base_props().iter().filter(|p| !ours.contains(p)) {
+        let (x0, y0, x1, y1) = barracks_mm();
+        let base = area("base");
+        assert!(x0 > base.0 && x1 < base.2 && y0 > base.1, "inside the perimeter");
+        let containers = world().of_kind("container").map(|(_, o)| o.at.1 - o.size.1 / 2).min().expect("containers");
+        assert!(y1 < containers, "south of the containers");
+        for p in base_props() {
             let (hx, hy) = p.half_extent();
             let clear = p.x_mm + hx < x0 || p.x_mm - hx > x1 || p.y_mm + hy < y0 || p.y_mm - hy > y1;
-            assert!(clear, "{p:?} overlaps the barracks");
+            let ours = inside((x0 - 200, y0 - 200, x1 + 200, y1 + 200), (p.x_mm, p.y_mm));
+            assert!(clear || ours, "{p:?} overlaps the barracks");
         }
     }
 
     #[test]
-    fn a_man_can_walk_from_the_base_to_every_standing_spot_and_every_seat() {
+    fn a_man_can_walk_from_the_base_to_every_place_in_the_barracks() {
         let g = grid();
         let from = (110_000, 40_000);
-        for s in barracks_spots().iter().filter(|s| matches!(s.what, Use::StandBy | Use::Sit | Use::Locker | Use::Rack)) {
-            // Seats and stands are against furniture: walkable ground within a metre and a half (the last steps are the
+        for s in world().spots().iter().filter(|s| inside(barracks_mm(), s.at) && s.what != Use::Lie) {
+            // Places are against furniture: walkable ground within a metre and a half (the last steps are the
             // animation's) is what counts.
             let ring = |r: i64| (0..8).map(move |k| { let a = k as f64 * std::f64::consts::FRAC_PI_4; ((a.cos() * r as f64) as i64, (a.sin() * r as f64) as i64) });
             let near = std::iter::once((0, 0)).chain(ring(600)).chain(ring(1_000)).chain(ring(1_500)).map(|d| (s.at.0 + d.0, s.at.1 + d.1)).find(|&p| g.walkable_at(p.0, p.1, 300));

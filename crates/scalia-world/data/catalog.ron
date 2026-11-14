@@ -1,0 +1,69 @@
+// The catalog of world objects: every kind of thing that can stand in the world.
+//
+// size: (along, across) in millimetres before turning: a wall's length and thickness, a crate's side, a rock's
+// radius, furniture's width and depth, a door's width and leaf thickness. A placement can override it.
+// states: what a door or hatch can be (the first is how it starts unless the map says otherwise).
+// spots: places on the object where a man does something, in the object's own frame (before turning): where he
+// is, which way he faces, how high (a top bunk).
+Catalog(kinds: [
+    // Structures.
+    Kind(id: "wall_concrete", name: "Concrete wall", class: Structure, shape: Wall, size: (1000, 600), material: Concrete),
+    Kind(id: "wall_block", name: "Block wall", class: Structure, shape: Wall, size: (1000, 300), material: Concrete),
+    Kind(id: "barracks_block", name: "Barracks block", class: Structure, shape: Wall, size: (24000, 8000), material: Concrete),
+    Kind(id: "container", name: "Shipping container", class: Structure, shape: Wall, size: (12000, 2500), material: Steel),
+    Kind(id: "tower", name: "Guard tower", class: Structure, shape: Crate, size: (3000, 3000), material: Steel),
+    Kind(id: "panel", name: "Plywood wall", class: Structure, shape: Panel(window: false), size: (1000, 200), material: Plywood),
+    Kind(id: "panel_window", name: "Plywood wall with a window", class: Structure, shape: Panel(window: true), size: (1000, 200), material: Plywood),
+
+    // Cover and nature.
+    Kind(id: "sandbags", name: "Sandbag wall", class: Cover, shape: Wall, size: (1000, 700), material: Sand),
+    Kind(id: "crate", name: "Supply crate", class: Cover, shape: Crate, size: (1200, 1200), material: Wood),
+    Kind(id: "rock", name: "Boulder", class: Nature, shape: Rock, size: (1000, 1000), material: Stone),
+
+    // Doors and hatches: they open, close, lock and can be breached.
+    Kind(id: "door_wood", name: "Wooden door", class: Door, shape: Door(height_mm: 2100), size: (1400, 60), material: Wood,
+        states: [Closed, Open, Locked, Breached],
+        spots: [
+            Spot(use: Handle, at: (0, -700), face: (0, 1)),
+            Spot(use: Handle, at: (0, 700), face: (0, -1)),
+        ]),
+    Kind(id: "door_steel", name: "Steel door", class: Door, shape: Door(height_mm: 2200), size: (1600, 80), material: Steel,
+        states: [Closed, Open, Locked, Breached],
+        spots: [
+            Spot(use: Handle, at: (0, -700), face: (0, 1)),
+            Spot(use: Handle, at: (0, 700), face: (0, -1)),
+        ]),
+    Kind(id: "hatch", name: "Floor hatch", class: Hatch, shape: Hatch, size: (900, 900), material: Steel,
+        states: [Closed, Open, Locked],
+        spots: [Spot(use: Handle, at: (0, -650), face: (0, 1))]),
+
+    // Furniture. Bunk: head at -y (against the wall), the man lies feet to +y; two stand at its foot.
+    Kind(id: "bunk", name: "Two-tier bunk", class: Furniture, shape: Furniture(Bunk), size: (900, 2000), material: Steel,
+        spots: [
+            Spot(use: Lie, at: (0, 0), face: (0, 1), height_mm: 450),
+            Spot(use: Lie, at: (0, 0), face: (0, 1), height_mm: 1450),
+            Spot(use: Stand, at: (-400, 2200), face: (0, 1)),
+            Spot(use: Stand, at: (400, 2200), face: (0, 1)),
+        ]),
+    Kind(id: "footlocker", name: "Footlocker", class: Furniture, shape: Furniture(Bench), size: (900, 450), material: Wood,
+        spots: [
+            Spot(use: Sit, at: (-220, 0), face: (0, 1), height_mm: 470),
+            Spot(use: Sit, at: (220, 0), face: (0, 1), height_mm: 470),
+        ]),
+    // Locker: against a wall at -y, its door facing +y; he stands in front of it.
+    Kind(id: "locker", name: "Wall locker", class: Furniture, shape: Furniture(Locker), size: (600, 500), material: Steel,
+        spots: [Spot(use: Work, at: (0, 700), face: (0, -1))]),
+    Kind(id: "table", name: "Mess table", class: Furniture, shape: Furniture(Table), size: (3000, 1000), material: Wood),
+    // Bench: seats along it, facing +y (towards the table).
+    Kind(id: "bench", name: "Bench", class: Furniture, shape: Furniture(Bench), size: (3000, 350), material: Wood,
+        spots: [
+            Spot(use: Sit, at: (-1200, 0), face: (0, 1), height_mm: 470),
+            Spot(use: Sit, at: (-600, 0), face: (0, 1), height_mm: 470),
+            Spot(use: Sit, at: (0, 0), face: (0, 1), height_mm: 470),
+            Spot(use: Sit, at: (600, 0), face: (0, 1), height_mm: 470),
+            Spot(use: Sit, at: (1200, 0), face: (0, 1), height_mm: 470),
+        ]),
+    // Weapons rack: against a wall at -y, rifles standing in it; he works at it from +y.
+    Kind(id: "rack", name: "Weapons rack", class: Furniture, shape: Furniture(Rack), size: (2000, 500), material: Steel,
+        spots: [Spot(use: Work, at: (0, 750), face: (0, -1))]),
+])

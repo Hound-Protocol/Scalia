@@ -517,7 +517,7 @@ fn grass_for(hm: &[f32], cx: i64, cy: i64, origin: (f64, f64)) -> Vec<f32> {
             // None through the concrete floors (the live-fire range, the barracks).
             let (wx, wy) = (((cx * CELLS as i64 + i as i64) as f64 + fx as f64) * 1000.0, ((cy * CELLS as i64 + j as i64) as f64 + fy as f64) * 1000.0);
             let on = |r: (i64, i64, i64, i64)| wx >= r.0 as f64 && wx <= r.2 as f64 && wy >= r.1 as f64 && wy <= r.3 as f64;
-            if on(RANGE_MM) || on(BARRACKS_MM) {
+            if on(range_mm()) || on(barracks_mm()) {
                 continue;
             }
             let colour = [7.0, 12.0, 11.0, 12.0][((h >> 24) % 4) as usize];
@@ -663,7 +663,7 @@ impl Viewer {
         }
         let a = self.assault.get_or_insert_with(|| unreachable!("the field exists once the base is built"));
         // Outside the range by its door: the briefing, then in.
-        let at: Vec<(i64, i64)> = (0..12i64).map(|i| (RANGE_MM.2 + 8_000 + (i % 4) * 1_500, RANGE_DOOR_Y_MM - 3_000 + (i / 4) * 1_500)).collect();
+        let at: Vec<(i64, i64)> = (0..12i64).map(|i| (range_mm().2 + 8_000 + (i % 4) * 1_500, range_door().1 - 3_000 + (i / 4) * 1_500)).collect();
         a.spawn_squad(crate::assault::DEMO_SQUAD, 0, &at);
         a.order(crate::assault::DEMO_SQUAD, scalia_ai::leader::Order::Capture);
         self.demo = true;
@@ -678,9 +678,9 @@ impl Viewer {
     fn new_field(&self) -> crate::assault::Assault {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
-        map.killhouse = Some(KILLHOUSE_MM);
-        map.live = Some(RANGE_LIVE_MM);
-        crate::assault::Assault::field(map, KILLHOUSE_MM, 7, self.lab_t)
+        map.killhouse = Some(killhouse_mm());
+        map.live = Some(range_live_mm());
+        crate::assault::Assault::field(map, killhouse_mm(), 7, self.lab_t)
     }
     /// Battle (lab clock) time to viewer time: what happens later in the battle happens later on screen, slower
     /// in slow motion.
@@ -698,22 +698,22 @@ impl Viewer {
         use scalia_ai::leader::{Mode, Order};
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
-        map.killhouse = Some(KILLHOUSE_MM);
+        map.killhouse = Some(killhouse_mm());
         // The house scenarios are on the live-fire range (live only inside its walls); the open-ground ones
         // are live everywhere.
         let house = matches!(name, "clear" | "contact");
-        map.live = if house { Some(RANGE_LIVE_MM) } else { None };
-        let mut a = crate::assault::Assault::field_with(map, KILLHOUSE_MM, 7, self.lab_t, house);
+        map.live = if house { Some(range_live_mm()) } else { None };
+        let mut a = crate::assault::Assault::field_with(map, killhouse_mm(), 7, self.lab_t, house);
         self.demo = false;
         self.lab_wound = None;
         let block = |x0: i64, y0: i64, n: i64| -> Vec<(i64, i64)> { (0..n).map(|i| (x0 + (i % 4) * 1_500, y0 + (i / 4) * 1_500)).collect() };
-        let door = (RANGE_MM.2, RANGE_DOOR_Y_MM);
+        let door = (range_mm().2, range_door().1);
         let (watch, note) = match name {
             "contact" => {
                 // Inside the range, along its east side, past the house 6 m off its east wall.
-                a.spawn_squad(DEMO_SQUAD, 0, &block(RANGE_MM.2 - 7_000, RANGE_MM.1 + 2_000, 8));
-                a.order(DEMO_SQUAD, Order::Move { to: (RANGE_MM.2 - 5_000, RANGE_MM.3 - 3_000), mode: Mode::Plain });
-                ((RANGE_MM.2 - 8_000, door.1), "On the range, Blue walks up past the house 6 m off its east wall; the defenders open up through the windows and the east door. Watch who takes cover, where, and when they move on.")
+                a.spawn_squad(DEMO_SQUAD, 0, &block(range_mm().2 - 7_000, range_mm().1 + 2_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (range_mm().2 - 5_000, range_mm().3 - 3_000), mode: Mode::Plain });
+                ((range_mm().2 - 8_000, door.1), "On the range, Blue walks up past the house 6 m off its east wall; the defenders open up through the windows and the east door. Watch who takes cover, where, and when they move on.")
             }
             "wounded" => {
                 a.spawn_squad(DEMO_SQUAD, 0, &block(95_000, 40_000, 8));
@@ -1672,7 +1672,7 @@ impl Viewer {
 
     /// The barracks place of a soldier of the testing ground's barracks squads while his squad is at home (not
     /// marching, not out as agents or on the field): standing at the foot of his bunk.
-    fn billeted(&self, g: u32, slot: u32) -> Option<crate::ground::Spot> {
+    fn billeted(&self, g: u32, slot: u32) -> Option<scalia_world::Spot> {
         if self.army != 0 || g >= 2 || self.agents.contains_key(&g) || self.assault.as_ref().is_some_and(|a| a.has_squad(g as u16)) {
             return None;
         }
@@ -2337,7 +2337,7 @@ impl Viewer {
             self.gpu.upload_instances("fx_at", bytes(&[0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
             decor.push(("fx".into(), "fx_at".into()));
         }
-        let (kx, ky) = (KILLHOUSE_MM.0 as f32 / 1000.0, KILLHOUSE_MM.1 as f32 / 1000.0);
+        let (kx, ky) = (killhouse_mm().0 as f32 / 1000.0, killhouse_mm().1 as f32 / 1000.0);
         let posts: &[((f32, f32), (f32, f32), Pose)] = if self.assault.is_none() { &ENEMY_POSTS } else { &[] };
         for (i, &((px, py), (wx, wy), pose)) in posts.iter().enumerate() {
             let (ax, ay) = (kx + px, ky + py);
@@ -3315,7 +3315,7 @@ fn furniture_mesh(m: &mut MeshBuilder, p: &Prop, item: Furnish, h: f32) {
                 m.cuboid([x - hx + 0.04, y - hy + 0.04, h + z + 0.06], [x + hx - 0.04, y + hy - 0.04, h + z + 0.2], c(kit::UNIFORM_DARK));
             }
             // Pillows at the head (the end against the wall: whichever end is nearer the barracks' long walls).
-            let head = if (y - BARRACKS_MM.1 as f32 / 1000.0).abs() < (y - BARRACKS_MM.3 as f32 / 1000.0).abs() { -1.0 } else { 1.0 };
+            let head = if (y - barracks_mm().1 as f32 / 1000.0).abs() < (y - barracks_mm().3 as f32 / 1000.0).abs() { -1.0 } else { 1.0 };
             for z in [0.58f32, 1.58] {
                 let py = y + head * (hy - 0.25);
                 m.cuboid([x - hx + 0.1, py - 0.15, h + z], [x + hx - 0.1, py + 0.15, h + z + 0.1], c(15));
@@ -3369,10 +3369,10 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
     let mut m = MeshBuilder::default();
     let c = |p: u8| scalia_render::mesh::code(p, scalia_render::mesh::Part::Body);
     // The range's concrete floor.
-    let (x0, y0, x1, y1) = (RANGE_MM.0 as f32 / 1000.0, RANGE_MM.1 as f32 / 1000.0, RANGE_MM.2 as f32 / 1000.0, RANGE_MM.3 as f32 / 1000.0);
+    let (x0, y0, x1, y1) = (range_mm().0 as f32 / 1000.0, range_mm().1 as f32 / 1000.0, range_mm().2 as f32 / 1000.0, range_mm().3 as f32 / 1000.0);
     m.cuboid([x0, y0, h - 0.05], [x1, y1, h + 0.03], c(2));
     // The barracks' concrete floor.
-    let (x0, y0, x1, y1) = (BARRACKS_MM.0 as f32 / 1000.0, BARRACKS_MM.1 as f32 / 1000.0, BARRACKS_MM.2 as f32 / 1000.0, BARRACKS_MM.3 as f32 / 1000.0);
+    let (x0, y0, x1, y1) = (barracks_mm().0 as f32 / 1000.0, barracks_mm().1 as f32 / 1000.0, barracks_mm().2 as f32 / 1000.0, barracks_mm().3 as f32 / 1000.0);
     m.cuboid([x0, y0, h - 0.05], [x1, y1, h + 0.03], c(19));
     for p in props {
         let (x, y) = (p.x_mm as f32 / 1000.0, p.y_mm as f32 / 1000.0);

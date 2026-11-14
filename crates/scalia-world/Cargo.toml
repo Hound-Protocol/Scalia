@@ -1,0 +1,10 @@
+[package]
+name = "scalia-world"
+version = "0.1.0"
+edition = "2021"
+description = "World objects: the catalog of what can stand in the world (walls, doors, furniture...) and the maps that place them."
+
+[dependencies]
+scalia-core = { path = "../scalia-core" }
+serde = { version = "1", features = ["derive"] }
+ron = "0.8"

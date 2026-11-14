@@ -536,9 +536,19 @@ dependencies = [
  "scalia-blueprint",
  "scalia-core",
  "scalia-render",
+ "scalia-world",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "scalia-world"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "scalia-core",
+ "serde",
 ]
 
 [[package]]
