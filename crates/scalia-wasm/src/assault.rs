@@ -354,6 +354,14 @@ impl Assault {
             m.0 += ((if walking { raw } else { 0.0 }) - m.0) * 0.25;
             let m_speed = m.0;
             let (mut pose, mut steps, mut upper, mut dir) = pose_of(s, walking, m.0, m.1);
+            // Turning on the spot, his feet step him round (a shuffle into the turn) instead of sliding.
+            let spin = self.turn[i].0;
+            if !walking && spin.abs() > 1.6 && matches!(pose, Pose::Ready | Pose::StandAim | Pose::Stand) && upper.is_none() {
+                upper = Some(pose);
+                pose = Pose::Walk;
+                steps = (spin.abs() * 0.45).clamp(0.8, 1.8);
+                dir = spin.signum() * std::f32::consts::FRAC_PI_2;
+            }
             // Shot down or killed: he falls (stumbling back onto his back, or crumpling forward), once, before
             // he lies there.
             let on_feet = s.alive() && !s.down();

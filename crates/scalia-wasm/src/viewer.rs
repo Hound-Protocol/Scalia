@@ -102,6 +102,8 @@ const CMD_AIM_WALK: f32 = 1.2;
 const CMD_CROUCH: f32 = 1.4;
 const CMD_CRAWL: f32 = 0.5;
 const CMD_SPRINT: f32 = 4.6;
+/// How fast the commander's turn can build up or ease off (rad/s²).
+const CMD_TURN_ACCEL: f32 = 28.0;
 /// His usual pace on foot (WASD): a jog. Alt held walks (CMD_WALK), Shift sprints.
 const CMD_JOG: f32 = 3.0;
 /// The commander winds up (m/s²) and brakes.
@@ -194,6 +196,8 @@ pub struct Viewer {
     cmd_dir: (f32, f32),
     /// Skidding: a 180 cut (plant, pivot, push off) or a sprint let go of (a short slide to a stop).
     cmd_skid: crate::motion::Skid,
+    /// How fast he is turning (rad/s, + to the left): turns build up and ease off.
+    cmd_spin: f32,
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
     /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms), last speed (m/s), smoothed
@@ -371,6 +375,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_speed: 0.0,
         cmd_dir: (0.0, 1.0),
         cmd_skid: crate::motion::Skid::None,
+        cmd_spin: 0.0,
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         turns: HashMap::new(),
@@ -2874,18 +2879,31 @@ impl Viewer {
         // Turn smoothly: towards where the rifle points while it is up (quicker), else where he walks.
         let wrap = |mut d: f32| { while d > std::f32::consts::PI { d -= std::f32::consts::TAU; } while d < -std::f32::consts::PI { d += std::f32::consts::TAU; } d };
         let travel = (-self.cmd_dir.0).atan2(self.cmd_dir.1);
+        // A body turns with weight: the turn speeds up and slows down (angular acceleration), never past a
+        // human rate: about 5 rad/s with the rifle up, 6 walking, less the faster he runs (he bends round instead),
+        // 8 in a cut.
         let face = match self.gun.toward.filter(|_| ready) {
-            Some((tx, ty)) => Some(((-tx).atan2(ty), 12.0)),
+            Some((tx, ty)) => Some(((-tx).atan2(ty), 5.0)),
             // In a cut he pivots round to where he is going while his body still slides the old way.
-            None if self.cmd_skid == crate::motion::Skid::Cut && len > 0.01 => Some(((-vx).atan2(vy), 14.0)),
-            None if self.cmd_moving => Some((travel, 8.0)),
+            None if self.cmd_skid == crate::motion::Skid::Cut && len > 0.01 => Some(((-vx).atan2(vy), 8.0)),
+            None if self.cmd_moving => Some((travel, 6.0 - 2.0 * (self.cmd_speed / CMD_SPRINT).min(1.0))),
             None => None,
         };
-        if let Some((want, rate)) = face {
-            self.cmd_heading += wrap(want - self.cmd_heading).clamp(-rate * dt, rate * dt);
-        }
+        let spin = match face {
+            Some((want, top)) => {
+                let d = wrap(want - self.cmd_heading);
+                // The rate that would stop exactly on the target at full deceleration, capped.
+                (d.signum() * (2.0 * CMD_TURN_ACCEL * d.abs()).sqrt()).clamp(-top, top)
+            }
+            None => 0.0,
+        };
+        self.cmd_spin += (spin - self.cmd_spin).clamp(-CMD_TURN_ACCEL * dt, CMD_TURN_ACCEL * dt);
+        self.cmd_heading += self.cmd_spin * dt;
+        // Turning on the spot, his feet step him round (a shuffle) instead of sliding.
+        let shuffling = !self.cmd_moving && self.cmd_spin.abs() > 1.2 && self.gun.stance == 0;
         // The way he moves from the way he faces (strafing, backing off with the rifle up).
-        let move_dir = if self.cmd_moving { wrap(travel - self.cmd_heading) } else { 0.0 };
+        // A shuffle steps sideways into the turn (the shorter side-step stride).
+        let move_dir = if self.cmd_moving { wrap(travel - self.cmd_heading) } else if shuffling { self.cmd_spin.signum() * std::f32::consts::FRAC_PI_2 } else { 0.0 };
         // Legs by his real pace: walking while he winds up, the sprint only once he is really going.
         // With a little give either way (hysteresis), so tapping a key or easing off near a threshold does not
         // flick him between poses.
@@ -2919,6 +2937,7 @@ impl Viewer {
                 1 if self.cmd_moving => (Pose::CrouchWalk, ready.then_some(Pose::CrouchAim)),
                 1 => (if ready { Pose::CrouchAim } else { Pose::Crouch }, None),
                 // Rifle in hand he stands combat ready (low ready, athletic); slung, he stands easy.
+                _ if legs == Pose::Stand && shuffling => (Pose::Walk, Some(if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Ready })),
                 _ if legs == Pose::Stand => (if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Ready }, None),
                 _ => (legs, if ready { Some(Pose::StandAim) } else if self.gun.slung { Some(Pose::Slung) } else { None }),
             }
@@ -2927,7 +2946,12 @@ impl Viewer {
             self.cmd_pose = (pose, was, scalia_render::pose::switch_start(self.cmd_pose.1, self.cmd_pose.2, pose, ts));
         }
         // Cadence from his real speed, integrated into the phase here: the planted foot keeps pace with the ground.
-        let steps = match pose { Pose::Sprint | Pose::Run | Pose::Walk | Pose::CrouchWalk => self.cmd_speed / stride_m(pose), _ => 0.0 };
+        let steps = match pose {
+            // A shuffle round: short quick steps paced by how fast he turns.
+            Pose::Walk if shuffling => (self.cmd_spin.abs() * 0.45).clamp(0.8, 1.8),
+            Pose::Sprint | Pose::Run | Pose::Walk | Pose::CrouchWalk => self.cmd_speed / stride_m(pose),
+            _ => 0.0,
+        };
         self.cmd_gait = (self.cmd_gait + (steps * dt) as f64).fract();
         // His gait phase (exactly what the shader is handed), for the footsteps.
         self.cmd_phase = if steps > 0.0 { self.cmd_gait as f32 } else { -1.0 };
