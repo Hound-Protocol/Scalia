@@ -54,7 +54,7 @@ jobs:
           sed -i "s#__UPDATE__#$n#" web/game.js
           python3 -c 'import json,sys; print(json.dumps({"v": sys.argv[1], "n": sys.argv[2], "title": sys.argv[3]}))' "$v" "$n" "$title" > web/version.json
           python3 - <<'PY' > web/changelog.json
-          import json, subprocess
+          import json, re, subprocess
           out = subprocess.run(['git', 'log', '--reverse', '--format=%x1e%ad%x1f%s%x1f%b%x1f%(trailers:key=Update,valueonly)', '--date=format:%d %b %Y'], capture_output=True, text=True).stdout
           count, rows = {}, []
           skip = ('Update:', 'Co-Authored-By:', 'Claude-Session:', 'Signed-off-by:')
@@ -62,10 +62,26 @@ jobs:
               date, subj, body, area = (rec.split('\x1f') + ['', '', '', ''])[:4]
               area = area.strip().splitlines()[0].strip() if area.strip() else ''
               if not area:
+                  # An Update: line not set off as a trailer (no blank line before it) still counts.
+                  m = re.search(r'^Update:\s*(.+)$', body, re.M)
+                  area = m.group(1).strip() if m else ''
+              if not area:
                   continue
               count[area] = count.get(area, 0) + 1
               # Everything in the commit: its subject and every line of its description (not the trailers).
-              detail = '\n'.join(l.rstrip() for l in body.strip().splitlines() if not l.startswith(skip)).strip()
+              # Rejoin hard-wrapped lines: a new line only for a new item ("- ") or after a blank line.
+              out_lines = []
+              for l in body.strip().splitlines():
+                  l = l.strip()
+                  if l.startswith(skip):
+                      continue
+                  if not l:
+                      out_lines.append('')
+                  elif l.startswith('- ') or not out_lines or out_lines[-1] == '':
+                      out_lines.append(l)
+                  else:
+                      out_lines[-1] += ' ' + l
+              detail = '\n'.join(x for x in out_lines if x).strip()
               rows.append({'n': '%s update V %03d' % (area, count[area]), 'text': subj.strip().replace('<', '&lt;'), 'body': detail.replace('<', '&lt;'), 'date': date.strip()})
           print(json.dumps(rows[::-1]))
           PY
