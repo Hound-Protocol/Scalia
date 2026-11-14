@@ -112,7 +112,6 @@ export function createMenu({ viewer, store, onEnter }) {
   const boom = sound('./sfx/menu-boom.mp3', 0.9);
   const travel = sound('./sfx/menu-travel.mp3', 0.8);
   const enter = sound('./sfx/menu-enter.mp3', 0.85);
-  const musicOn = () => store.get('music.on') !== '0';
 
   const foot = root.querySelector('.mn-foot');
   // 'menu' (waiting for Start), 'fly' (the intro), 'done'.
@@ -138,7 +137,8 @@ export function createMenu({ viewer, store, onEnter }) {
       ctx.fillRect(x * W, y * H, 1.2, 1.2);
     }
     // Tilted disc turning slowly; while falling, home is pulled to the centre of the screen.
-    const spin = now / 1000 * 0.012;
+    // Turning with its arms trailing (the arms wind outwards clockwise on screen, so it turns anticlockwise).
+    const spin = -now / 1000 * 0.012;
     const tilt = 0.52;
     const size = S * 1.25 * zoom;
     const [hx, hy] = galaxy.home;
@@ -305,7 +305,14 @@ export function createMenu({ viewer, store, onEnter }) {
       root.hidden = false;
       document.body.classList.add('in-menu');
       addEventListener('keydown', keys, true);
-      if (musicOn()) tune.play().catch(() => {});
+      // The menu theme plays whatever the in-game music setting; if the browser holds it back, the next key or
+      // click starts it.
+      const play = () => tune.play().catch(() => {
+        const again = () => { if (state === 'menu') tune.play().catch(() => {}); };
+        addEventListener('pointerdown', again, { once: true, capture: true });
+        addEventListener('keydown', again, { once: true, capture: true });
+      });
+      play();
       startBtn.focus();
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(frame);
