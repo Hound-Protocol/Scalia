@@ -69,6 +69,8 @@ pub enum Bark {
     Reloading,
     ManDown,
     Frag,
+    /// "Smoke out": a smoke grenade thrown.
+    Smoke,
     /// The leader is down: the next man takes command.
     TakingCommand,
 }
@@ -203,6 +205,8 @@ const PATHS_PER_STEP: u32 = 8;
 const CONE_COS: i64 = 500;
 /// Anyone this close is noticed whichever way he faces (heard, felt).
 const CLOSE_MM: i64 = 3_000;
+/// Within this a man notices whoever is firing at him wherever he is looking.
+const SHOT_NOTICE_MM: i64 = 15_000;
 /// Gunfire is heard this far away.
 const HEAR_MM: i64 = 60_000;
 /// Contact confidence (per mille) and its fade per second once out of sight, down to a floor (the last known
@@ -287,6 +291,8 @@ pub struct Soldier {
     /// What the plan lets him do: open fire, put covering fire down.
     pub may_fire: bool,
     pub may_suppress: bool,
+    /// Who last fired at him, and when (he turns on a man shooting at him, and notices him close by).
+    pub shot_by: Option<(u32, i64)>,
     /// The enemy he has his sights on (a new one takes a moment to get a sight picture on).
     sighted: Option<usize>,
     /// Marksmanship (‰, SKILL_ROOKIE to SKILL_MAX): grows with veterancy.
@@ -295,7 +301,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -339,7 +345,20 @@ pub enum Event {
     Explosion { pos: (i64, i64) },
 }
 
+/// A smoke grenade's cloud, landed at `at_ms`: it blocks sight through it once it has built up
+/// (SMOKE_BUILD_MS) until it thins out (SMOKE_MS). It does not stop bullets.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Smoke {
+    pub pos: (i64, i64),
+    pub at_ms: i64,
+}
+pub const SMOKE_R_MM: i64 = 4_500;
+pub const SMOKE_BUILD_MS: i64 = 2_500;
+pub const SMOKE_MS: i64 = 40_000;
+
 pub struct Battle {
+    /// Smoke clouds thrown (kept until they have thinned out).
+    pub smoke: Vec<Smoke>,
     pub soldiers: Vec<Soldier>,
     pub sight: SightGrid,
     pub seed: u64,
@@ -394,6 +413,7 @@ struct State {
     queue: Vec<(i64, Command)>,
     history: Vec<(i64, Command)>,
     rolls: u64,
+    smoke: Vec<Smoke>,
 }
 
 impl Battle {
@@ -401,7 +421,7 @@ impl Battle {
         let (sight_x0, sight_y0, sight_w, sight_h) = (sight.x_mm, sight.y_mm, sight.w as i64 * 250, sight.h as i64 * 250);
         let squads = soldiers.iter().map(|s| s.squad as usize + 1).max().unwrap_or(0);
         let n = soldiers.len();
-        Battle { soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![Vec::new(); n], grid: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), goals: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), scratch: Vec::new(), paths_this_step: 0, perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
+        Battle { smoke: Vec::new(), soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![Vec::new(); n], grid: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), goals: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), scratch: Vec::new(), paths_this_step: 0, perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
     }
 
     /// Puts a prop on the ground mid-battle (sandbags): it blocks sight and movement and gives cover from now on.
@@ -510,6 +530,7 @@ impl Battle {
             queue: self.queue.clone(),
             history: self.history.clone(),
             rolls: self.rolls,
+            smoke: self.smoke.clone(),
         }
     }
 
@@ -540,6 +561,7 @@ impl Battle {
         b.queue = st.queue;
         b.history = st.history;
         b.rolls = st.rolls;
+        b.smoke = st.smoke;
         Ok(b)
     }
 
@@ -1000,7 +1022,9 @@ impl Battle {
                     }
                     // In the cone: facing·d ≥ |d|·cos, done on squares (no square root in the hot loop).
                     let dot = me.facing.0 * dx + me.facing.1 * dy;
-                    if in_cone(dot, d2) || d2 <= CLOSE_MM * CLOSE_MM {
+                    // A man firing at him from close by is noticed wherever he is looking (the noise and flash).
+                    let shooting_me = me.shot_by.is_some_and(|(k, at)| k == j && now - at <= 1_500) && d2 <= SHOT_NOTICE_MM * SHOT_NOTICE_MM;
+                    if in_cone(dot, d2) || d2 <= CLOSE_MM * CLOSE_MM || shooting_me {
                         cands.push((d2, j));
                     }
                 }
@@ -1057,13 +1081,30 @@ impl Battle {
     fn in_sight(&self, shooter: usize, target: usize) -> bool {
         let (s, t) = (&self.soldiers[shooter], &self.soldiers[target]);
         // Head first: low cover hides the legs most often, so the answer comes soonest that way round.
-        t.stance.body().iter().rev().any(|&z| self.sight.clear(s.eye(), Point { x: t.pos.0, y: t.pos.1, z }))
+        !self.smoked(s.pos, t.pos) && t.stance.body().iter().rev().any(|&z| self.sight.clear(s.eye(), Point { x: t.pos.0, y: t.pos.1, z }))
     }
 
     /// How many of the target's three body points the shooter can see (0..3).
     pub fn exposure(&self, shooter: usize, target: usize) -> i64 {
         let (s, t) = (&self.soldiers[shooter], &self.soldiers[target]);
+        if self.smoked(s.pos, t.pos) {
+            return 0;
+        }
         t.stance.body().iter().filter(|&&z| self.sight.clear(s.eye(), Point { x: t.pos.0, y: t.pos.1, z })).count() as i64
+    }
+
+    /// Whether smoke hangs across the line from `a` to `b` (on the ground plan: the clouds are taller than a man).
+    pub fn smoked(&self, a: (i64, i64), b: (i64, i64)) -> bool {
+        let now = self.time_ms;
+        self.smoke.iter().any(|c| {
+            let age = now - c.at_ms;
+            if !(SMOKE_BUILD_MS..SMOKE_MS).contains(&age) {
+                return false;
+            }
+            let (d2, near) = seg_closest(a, b, c.pos);
+            // Smoke thrown outside stays outside: it does not fill the rooms of a building.
+            d2 < SMOKE_R_MM as i128 * SMOKE_R_MM as i128 && self.building.as_ref().is_none_or(|(k, _)| k.room_at(near.0, near.1).is_none())
+        })
     }
 
     /// Chance (per mille) that a shot from `shooter` hits `target` now.
@@ -1156,6 +1197,8 @@ impl Battle {
     pub fn step(&mut self, dt_ms: i32) {
         self.time_ms += dt_ms as i64;
         self.apply_commands();
+        let now = self.time_ms;
+        self.smoke.retain(|c| now - c.at_ms < SMOKE_MS);
         let fade = SUPPRESS_FADE_S * dt_ms / 1_000;
         for s in &mut self.soldiers {
             s.suppression = (s.suppression - fade).max(0);
@@ -1231,9 +1274,12 @@ impl Battle {
                 }
             }
             self.soldiers[i].target = best.map(|b| b.1);
-            // Face the fight: the target, else the freshest contact the squad has (shots from behind).
+            // Face the fight: the target, else whoever is shooting at him, else the freshest contact the squad
+            // has (shots from behind).
+            let shooter = self.soldiers[i].shot_by.filter(|&(_, at)| self.time_ms - at <= 2_000).map(|(k, _)| self.soldiers[k as usize].pos);
             let look = match self.soldiers[i].target {
                 Some(j) => Some(self.soldiers[j].pos),
+                None if shooter.is_some() => shooter,
                 None => self.contacts[self.soldiers[i].squad as usize].iter().filter(|c| self.time_ms - c.seen_ms <= 3_000 && c.confidence >= CONF_HEARD).max_by_key(|c| (c.confidence, c.seen_ms)).map(|c| c.pos),
             };
             let me = &mut self.soldiers[i];
@@ -1342,7 +1388,9 @@ impl Battle {
                     }
                 }
                 self.scratch = near;
+                let now = self.time_ms;
                 let t = &mut self.soldiers[j];
+                t.shot_by = Some((i as u32, now));
                 t.suppression = (t.suppression + if hit { SUPPRESS_HIT } else { SUPPRESS_MISS }).min(1_000);
                 if hit {
                     t.health = t.health.saturating_sub(DAMAGE);
@@ -1418,4 +1466,13 @@ mod cone_tests {
             assert_eq!(in_cone(dot, d2), dot >= isqrt(d2).max(1) * CONE_COS, "{dx} {dy} {f:?}");
         }
     }
+}
+
+/// Squared distance (mm²) from `p` to the segment `a`–`b`, and the segment's point nearest `p`.
+pub fn seg_closest(a: (i64, i64), b: (i64, i64), p: (i64, i64)) -> (i128, (i64, i64)) {
+    let (ab, ap) = (((b.0 - a.0) as i128, (b.1 - a.1) as i128), ((p.0 - a.0) as i128, (p.1 - a.1) as i128));
+    let len2 = ab.0 * ab.0 + ab.1 * ab.1;
+    let t = (ap.0 * ab.0 + ap.1 * ab.1).clamp(0, len2.max(1));
+    let (cx, cy) = (if len2 == 0 { 0 } else { ab.0 * t / len2 }, if len2 == 0 { 0 } else { ab.1 * t / len2 });
+    ((ap.0 - cx) * (ap.0 - cx) + (ap.1 - cy) * (ap.1 - cy), (a.0 + cx as i64, a.1 + cy as i64))
 }

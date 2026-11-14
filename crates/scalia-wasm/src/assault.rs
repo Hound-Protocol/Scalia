@@ -241,6 +241,7 @@ impl Assault {
                             Bark::Reloading => "bark:reloading",
                             Bark::ManDown => "bark:man down",
                             Bark::Frag => "bark:frag out",
+                            Bark::Smoke => "bark:smoke out",
                             Bark::TakingCommand => "bark:taking command",
                         };
                         let sq = self.battle.soldiers[soldier].squad as usize;

@@ -40,7 +40,16 @@ struct Blast {
 pub struct Effects {
     shots: Vec<Shot>,
     blasts: Vec<Blast>,
+    /// This frame's smoke clouds: (centre on the ground, age in ms, which cloud).
+    smoke: Vec<([f64; 3], f64, u64)>,
 }
+
+/// A smoke cloud's life (the simulation's SMOKE_BUILD_MS and SMOKE_MS), its radius, and its colours.
+const SMOKE_BUILD_MS: f64 = scalia_ai::battle::SMOKE_BUILD_MS as f64;
+const SMOKE_MS: f64 = scalia_ai::battle::SMOKE_MS as f64;
+const SMOKE_R_M: f64 = scalia_ai::battle::SMOKE_R_MM as f64 / 1000.0;
+const SMOKE_GREY: u8 = 2;
+const SMOKE_PALE: u8 = 15;
 
 fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -62,6 +71,11 @@ impl Effects {
         self.blasts.push(Blast { at, pos });
     }
 
+    /// The smoke clouds standing this frame (replacing the last frame's).
+    pub fn set_smoke(&mut self, clouds: Vec<([f64; 3], f64, u64)>) {
+        self.smoke = clouds;
+    }
+
     /// Drops what has finished by `now`.
     pub fn prune(&mut self, now: f64) {
         self.shots.retain(|s| now - s.at < PUFF_MS + len(sub(s.impact, s.muzzle)) / ROUND_M_PER_MS);
@@ -69,7 +83,7 @@ impl Effects {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.shots.is_empty() && self.blasts.is_empty()
+        self.shots.is_empty() && self.blasts.is_empty() && self.smoke.is_empty()
     }
 
     /// The lights at `now`, newest first (the renderer takes the first MAX_LIGHTS), relative to `origin`.
@@ -131,6 +145,26 @@ impl Effects {
                 let c = if s.hit { code(BLOOD, Part::Body) } else { code(DUST, Part::Body) };
                 let r = if s.hit { r * 0.6 } else { r };
                 m.cuboid([p[0] - r, p[1] - r, p[2] - r * 0.6], [p[0] + r, p[1] + r, p[2] + r * 0.6], c);
+            }
+        }
+        for &(c, age, id) in &self.smoke {
+            // Billowing out over the first seconds, then thinning: shrinking and sinking in its last eight.
+            let grow = (age / SMOKE_BUILD_MS).clamp(0.0, 1.0).sqrt();
+            let thin = ((SMOKE_MS - age) / 8_000.0).clamp(0.0, 1.0);
+            let k = (grow * (0.35 + 0.65 * thin)) as f32;
+            if k <= 0.01 {
+                continue;
+            }
+            let base = rel(c);
+            // A heap of puffs around the centre (fixed per cloud), slowly turning.
+            for n in 0..7u64 {
+                let h = scalia_core::hash::mix64(id ^ n.wrapping_mul(0x9e37_79b9));
+                let a = (h % 6283) as f64 / 1000.0 + age / 40_000.0;
+                let off = if n == 0 { 0.0 } else { SMOKE_R_M * (0.35 + ((h >> 16) % 450) as f64 / 1000.0) };
+                let r = SMOKE_R_M as f32 * (0.45 + ((h >> 32) % 250) as f32 / 1000.0) * k;
+                let p = [base[0] + (a.cos() * off) as f32 * k, base[1] + (a.sin() * off) as f32 * k, base[2]];
+                let colour = if n % 3 == 0 { SMOKE_PALE } else { SMOKE_GREY };
+                m.dome(p, [r, r], r * (1.1 + 0.4 * thin as f32), 9, 4, code(colour, Part::Body));
             }
         }
         for b in &self.blasts {

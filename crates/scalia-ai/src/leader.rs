@@ -9,7 +9,7 @@
 
 use crate::battle::{Act, Battle, Cue, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM};
 use crate::goap::{self, Action, Goal, Limits, State};
-use crate::sight::isqrt;
+use crate::sight::{isqrt, Point};
 use crate::tactics::{Building, Height, STACK_GAP_MM};
 use scalia_core::killhouse::Killhouse;
 use scalia_core::nav::{Prop, PropKind};
@@ -226,6 +226,16 @@ pub struct Brain {
     leader: Option<usize>,
     /// The approach leg whose way was last checked for chokepoints.
     choke_leg: Option<usize>,
+    /// Smoke grenades the squad still carries.
+    smokes: u8,
+    /// When the smoke thrown over the crossing has built up (the first man waits for it).
+    smoke_ready: i64,
+    /// Fragmentation grenades left for clearing rooms (after the entry one).
+    frags: u8,
+    /// The entry room could not be seen into (smoke across the door when it was pied): treated as held.
+    blind_entry: bool,
+    /// Where the men not clearing wait, out of sight of the rooms not yet cleared (for room `wait.0`).
+    wait: Option<(usize, Vec<(i64, i64)>)>,
 }
 
 /// A narrow gap on the squad's way (a passage between walls, a gateway): where it is, which way the squad
@@ -242,7 +252,7 @@ pub struct Choke {
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false }
     }
 }
 
@@ -259,6 +269,12 @@ const LEG_TIMEOUT_MS: i64 = 12_000;
 const STACK_TIMEOUT_MS: i64 = 20_000;
 const DRONE_MS: i64 = 6_000;
 const THROW_MS: i64 = 1_200;
+/// Smoke grenades a squad carries.
+const SMOKES: u8 = 2;
+/// Frags a squad carries for the rooms past the entry.
+const FRAGS: u8 = 3;
+/// How far a man throws one (mm).
+const SMOKE_THROW_MM: i64 = 35_000;
 const FUSE_MS: i64 = 1_500;
 const BLAST_MM: i64 = 4_000;
 const ROOM_TIMEOUT_MS: i64 = 25_000;
@@ -613,7 +629,7 @@ impl Battle {
         let entry_room = brain.entry.map(|e| plan.clear_order(plan.entries[e].door)[0]);
         Situation {
             intel: brain.drone_done || !inside.is_empty(),
-            enemy_in_entry: entry_room.is_some_and(|r| inside.iter().any(|p| k.room_at(p.0, p.1) == Some(r))),
+            enemy_in_entry: entry_room.is_some_and(|r| inside.iter().any(|p| k.room_at(p.0, p.1) == Some(r))) || brain.blind_entry && !brain.grenade_used,
             have_drone: !brain.drone_done,
             have_grenade: !brain.grenade_used,
             strength: self.members(squad).len() as i64,
@@ -810,6 +826,8 @@ impl Battle {
                     ch.stage = 1;
                     ch.since = now;
                     self.log.push(Event::Order { squad, step: "pie" });
+                    // If the objective looks onto the far side, screen it while the gap is pied.
+                    self.screen_crossing(squad, ms, ch.at, past);
                 }
             }
             1 => {
@@ -832,7 +850,7 @@ impl Battle {
                         s.cue = Cue::None;
                     }
                 }
-                if now - ch.since >= PIE_SLICE_MS * PIE_SLICES as i64 {
+                if now - ch.since >= PIE_SLICE_MS * PIE_SLICES as i64 && now >= self.brains[squad].smoke_ready {
                     ch.stage = 2;
                     ch.since = now;
                 }
@@ -1168,6 +1186,110 @@ impl Battle {
         }
     }
 
+    /// Smoke over a crossing (from the gap `at` to `past`) that the objective's openings look onto: a cloud
+    /// a few metres out from each opening that sees it (one cloud serving openings close together), as many as
+    /// the squad carries, thrown by the men nearest the gap. Returns how many went.
+    fn screen_crossing(&mut self, squad: usize, ms: &[usize], at: (i64, i64), past: (i64, i64)) -> usize {
+        let Some((k, _)) = self.building.as_ref() else { return 0 };
+        // Where a defender would stand behind each opening (inside, a metre and a half back), and the opening.
+        let mut eyes: Vec<((i64, i64), (i64, i64))> = Vec::new();
+        let inside = |x: i64, y: i64| k.rooms.iter().any(|r| r.contains(x, y));
+        let outer = k.windows.iter().map(|w| (w.x_mm, w.y_mm, w.along_x)).chain(k.doors.iter().filter(|d| d.rooms.0.is_none() || d.rooms.1.is_none()).map(|d| (d.x_mm, d.y_mm, d.along_x)));
+        for (x, y, along_x) in outer {
+            let n = if along_x { (0, 1_500) } else { (1_500, 0) };
+            let back = if inside(x + n.0, y + n.1) { (x + n.0, y + n.1) } else { (x - n.0, y - n.1) };
+            eyes.push(((x, y), back));
+        }
+        let seen = |p: (i64, i64), from: (i64, i64)| dist(p, from) <= 60_000 && self.sight.clear(Point { x: from.0, y: from.1, z: 1_500 }, Point { x: p.0, y: p.1, z: 1_500 });
+        let mut want: Vec<(i64, i64)> = Vec::new();
+        for &(_, back) in &eyes {
+            if !(seen(past, back) || seen(at, back)) {
+                continue;
+            }
+            // Along his line to the crossing: out of the building (through whichever opening it leaves by),
+            // then a couple of metres on.
+            let d = dist(back, past).max(1);
+            let mut t = 0;
+            while t < d && k.room_at(back.0 + (past.0 - back.0) * t / d, back.1 + (past.1 - back.1) * t / d).is_some() {
+                t += 250;
+            }
+            let t = (t + 2_500).min(d);
+            let p = (back.0 + (past.0 - back.0) * t / d, back.1 + (past.1 - back.1) * t / d);
+            if !want.iter().any(|&w| dist(w, p) <= crate::battle::SMOKE_R_MM * 4 / 5) {
+                want.push(p);
+            }
+        }
+        let mut throwers: Vec<usize> = ms.to_vec();
+        throwers.sort_by_key(|&i| (dist(self.soldiers[i].pos, at), i));
+        let mut thrown = 0;
+        for (p, &i) in want.into_iter().zip(throwers.iter()) {
+            if self.brains[squad].smokes == 0 || dist(self.soldiers[i].pos, p) > SMOKE_THROW_MM {
+                break;
+            }
+            self.brains[squad].smokes -= 1;
+            self.soldiers[i].act = Some((Act::Throw, self.time_ms + THROW_MS));
+            self.smoke.push(crate::battle::Smoke { pos: p, at_ms: self.time_ms + THROW_MS });
+            self.log.push(Event::Bark { soldier: i, bark: crate::battle::Bark::Smoke });
+            self.brains[squad].smoke_ready = self.time_ms + THROW_MS + crate::battle::SMOKE_BUILD_MS;
+            thrown += 1;
+        }
+        thrown
+    }
+
+    /// Where the men taking a room stop in it: near its corners, but out of sight of the rooms beyond it still
+    /// to clear (not in the line of an open door). A corner itself when nothing near it is hidden.
+    fn points_of_domination(&self, k: &Killhouse, room: usize, beyond: &[usize]) -> [(i64, i64); 4] {
+        let c = corners(k, room);
+        let mut hidden = self.safe_spots(k, &[room], beyond, &[]);
+        let mut out = c;
+        for (n, &corner) in c.iter().enumerate() {
+            if let Some((j, &q)) = hidden.iter().enumerate().filter(|(_, &q)| dist(q, corner) <= 3_000).min_by_key(|(_, &q)| dist(q, corner)) {
+                out[n] = q;
+                hidden.swap_remove(j);
+                hidden.retain(|&o| dist(o, q) >= SPACING_MM);
+            }
+        }
+        out
+    }
+
+    /// Spots in the cleared rooms (and just outside the house) from which none of the rooms still to clear can
+    /// be seen, nearest the door first: where the men wait out of the line of the open doors.
+    fn safe_spots(&self, k: &Killhouse, cleared: &[usize], open: &[usize], outside: &[(i64, i64)]) -> Vec<(i64, i64)> {
+        let mut looks: Vec<(i64, i64)> = Vec::new();
+        for &r in open {
+            let rm = k.rooms[r];
+            // Wherever in it a man could stand (every metre and a half, clear of the walls).
+            let mut y = rm.min.1 + 500;
+            while y <= rm.max.1 - 500 {
+                let mut x = rm.min.0 + 500;
+                while x <= rm.max.0 - 500 {
+                    looks.push((x, y));
+                    x += 1_500;
+                }
+                y += 1_500;
+            }
+        }
+        let hidden = |p: (i64, i64)| !looks.iter().any(|&l| self.sight.clear(Point { x: p.0, y: p.1, z: 1_400 }, Point { x: l.0, y: l.1, z: 1_400 }));
+        // Outside: the stack spots by the entry door (where the men wait before the first room).
+        let mut out: Vec<(i64, i64)> = outside.iter().copied().filter(|&p| false && hidden(p)).collect();
+        for &r in cleared {
+            let rm = k.rooms[r];
+            let mut y = rm.min.1 + 600;
+            while y <= rm.max.1 - 600 {
+                let mut x = rm.min.0 + 600;
+                while x <= rm.max.0 - 600 {
+                    let seen = looks.iter().any(|&l| self.sight.clear(Point { x, y, z: 1_400 }, Point { x: l.0, y: l.1, z: 1_400 }));
+                    if !seen {
+                        out.push((x, y));
+                    }
+                    x += 900;
+                }
+                y += 900;
+            }
+        }
+        out
+    }
+
     /// A grenade goes off at `p`, thrown by squad `by`: everyone near is hurt and shaken, but the squad that
     /// threw it was expecting the bang (they called "frag out" and kept their heads down behind the wall): it
     /// does not break their stack.
@@ -1437,8 +1559,9 @@ impl Battle {
                     self.soldiers[cover].aim = true;
                 }
                 if phase_ms >= PIE_SLICE_MS * PIE_SLICES as i64 {
-                    // Back to the stack, he has seen the room.
+                    // Back to the stack, he has seen the room (or could not, for smoke: then it counts as held).
                     self.soldiers[point].watch = None;
+                    self.brains[squad].blind_entry = self.smoked(self.soldiers[point].pos, room_c);
                     self.finish(squad, Some(PIED));
                 }
             }
@@ -1456,7 +1579,8 @@ impl Battle {
                 }
             }
             Some(m @ (Method::Storm | Method::SlowEntry)) => {
-                let spots = corners(k, entry_room);
+                let others: Vec<usize> = (0..k.rooms.len()).filter(|&r| r != entry_room).collect();
+                let spots = self.points_of_domination(k, entry_room, &others);
                 let mut inside = true;
                 for (rank, &i) in ms.iter().enumerate().take(4) {
                     // A flow, not a stampede: each man goes in a moment after the one in front of him.
@@ -1486,7 +1610,31 @@ impl Battle {
                     return;
                 }
                 let room = rooms[r];
-                let spots = corners(k, room);
+                let spots = self.points_of_domination(k, room, &rooms[r + 1..]);
+                // The men not taking this room wait out of sight of the rooms still to clear (out of the line of
+                // the open doors), watching it: the nearest free spot each (none left: where he is).
+                if self.brains[squad].wait.as_ref().is_none_or(|w| w.0 != r) {
+                    let outside = self.brains[squad].entry.map(|e| plan.entries[e].stack.clone()).unwrap_or_default();
+                    let spots = self.safe_spots(k, &rooms[..r], &rooms[r..], &outside);
+                    self.brains[squad].wait = Some((r, spots));
+                }
+                let mut free = self.brains[squad].wait.as_ref().map(|w| w.1.clone()).unwrap_or_default();
+                for &i in ms.iter().skip(2) {
+                    let p = self.soldiers[i].pos;
+                    let at = free.iter().enumerate().min_by_key(|(_, &q)| dist(q, p)).map(|(n, _)| n).map(|n| free.swap_remove(n));
+                    let at = match at {
+                        Some(q) => {
+                            free.retain(|&o| dist(o, q) >= SPACING_MM);
+                            q
+                        }
+                        None => match self.soldiers[i].task {
+                            Task::Hold { at, .. } => at,
+                            _ => p,
+                        },
+                    };
+                    self.soldiers[i].task = Task::Hold { at, face: k.rooms[room].centre() };
+                    self.soldiers[i].aim = true;
+                }
                 // The door into it from a room already cleared: the point man pies it from his side first.
                 let inner = k.doors.iter().find(|dd| match dd.rooms {
                     (Some(a), Some(b)) => a == room && rooms[..r].contains(&b) || b == room && rooms[..r].contains(&a),
@@ -1524,7 +1672,37 @@ impl Battle {
                 if let Some(&p) = ms.first() {
                     self.soldiers[p].watch = None;
                 }
-                // Two men take the room; the rest wait where they are, watching it.
+                // Someone known to be in it: a frag in through the door first (from the near side), then in
+                // on the bang.
+                let now = self.time_ms;
+                if let Some(dd) = inner {
+                    // (or somewhere in the rooms still to clear, when nothing is known of this one: it may be him).
+                    let live = |c: &&crate::battle::Contact| now - c.seen_ms <= 30_000 && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down();
+                    let here = self.contacts[squad].iter().filter(live).any(|c| k.room_at(c.pos.0, c.pos.1) == Some(room));
+                    let beyond = self.contacts[squad].iter().filter(live).any(|c| k.room_at(c.pos.0, c.pos.1).is_some_and(|x| rooms[r..].contains(&x)));
+                    let known = here || beyond;
+                    let pie_end = PIE_SLICE_MS * PIE_SLICES as i64;
+                    let first_past_pie = (pie_end..pie_end + LEAD_MS).contains(&self.brains[squad].room_ms);
+                    if known && self.brains[squad].frags > 0 && first_past_pie {
+                        let thrower = ms[0];
+                        self.brains[squad].frags -= 1;
+                        self.soldiers[thrower].act = Some((Act::Throw, now + THROW_MS));
+                        self.brains[squad].blast_at = Some((now + THROW_MS + FUSE_MS, k.rooms[room].centre()));
+                        self.log.push(Event::Bark { soldier: thrower, bark: crate::battle::Bark::Frag });
+                    }
+                    if self.brains[squad].blast_at.is_some() {
+                        // Everyone back from the door until it goes off.
+                        for &i in ms.iter().take(2) {
+                            let s = &mut self.soldiers[i];
+                            if k.room_at(s.pos.0, s.pos.1) == Some(room) {
+                                continue;
+                            }
+                            s.task = Task::Hold { at: s.pos, face: (dd.x_mm, dd.y_mm) };
+                        }
+                        return;
+                    }
+                }
+                // Two men take the room; the rest wait out of the line of the open doors, watching it.
                 let mut in_room = 0;
                 for (rank, &i) in ms.iter().enumerate() {
                     if rank < 2 {
@@ -1534,10 +1712,6 @@ impl Battle {
                         if k.room_at(self.soldiers[i].pos.0, self.soldiers[i].pos.1) == Some(room) {
                             in_room += 1;
                         }
-                    } else if !matches!(self.soldiers[i].task, Task::Hold { .. }) || rank < 4 {
-                        let p = self.soldiers[i].pos;
-                        self.soldiers[i].task = Task::Hold { at: p, face: k.rooms[room].centre() };
-                        self.soldiers[i].aim = true;
                     }
                 }
                 let hostile = self.soldiers.iter().any(|t| t.alive() && !t.down() && t.team != self.soldiers[ms[0]].team && k.room_at(t.pos.0, t.pos.1) == Some(room));

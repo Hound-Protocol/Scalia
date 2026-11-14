@@ -249,3 +249,59 @@ fn flanked_in_cover_he_finds_new_cover() {
     }
     assert!(moved, "he left the flanked spot for another");
 }
+
+#[test]
+fn nobody_sees_or_hits_through_smoke_until_it_thins() {
+    use scalia_ai::battle::{Smoke, SMOKE_BUILD_MS, SMOKE_MS};
+    let mut b = Battle::new(field(&[]), vec![man(0, 50_000, 30_000, Stance::Stand), man(1, 50_000, 60_000, Stance::Stand)], 7);
+    b.smoke.push(Smoke { pos: (50_500, 45_000), at_ms: 0 });
+    // Building up: not yet thick enough to hide anyone.
+    b.step(50);
+    assert!(b.exposure(0, 1) > 0, "the cloud is still building");
+    while b.time_ms < SMOKE_BUILD_MS {
+        b.step(50);
+    }
+    assert_eq!(b.exposure(0, 1), 0, "the cloud hides them from each other");
+    assert_eq!(b.hit_permille(0, 1), 0, "and nobody can hit what he cannot see");
+    let fired = b.log.len();
+    while b.time_ms < SMOKE_MS - 1_000 {
+        b.step(50);
+    }
+    assert!(b.soldiers.iter().all(|s| s.alive() && !s.down()), "nobody hit through the smoke");
+    let _ = fired;
+    while b.time_ms < SMOKE_MS + 100 {
+        b.step(50);
+    }
+    assert!(b.exposure(0, 1) > 0, "it thins out");
+    assert!(b.smoke.is_empty(), "and is gone");
+    // Off the line between them it hides nothing.
+    b.smoke.push(Smoke { pos: (60_000, 45_000), at_ms: b.time_ms - SMOKE_BUILD_MS });
+    assert!(b.exposure(0, 1) > 0, "a cloud 10 m off the line");
+}
+
+#[test]
+fn a_man_shot_at_turns_on_the_shooter_not_the_squads_other_contact() {
+    use scalia_ai::battle::Contact;
+    // Blue lies facing north, where his squad knows of an enemy (behind a wall, unseen); Red, 12 m south, a poor
+    // shot, fires on him from behind.
+    let wall = Prop { kind: PropKind::Panel { length_mm: 20_000, window: false }, x_mm: 50_000, y_mm: 70_000, quarter_turns: 0 };
+    let mut blue = man(0, 50_000, 50_000, Stance::Prone);
+    blue.facing = (0, 1_000);
+    let mut red = man(1, 50_000, 38_000, Stance::Stand);
+    red.facing = (0, 1_000);
+    red.skill = 300;
+    let far = man(1, 50_000, 80_000, Stance::Stand);
+    let mut b = Battle::new(field(&[wall]), vec![blue, red, far], 3);
+    let mut faced_south = false;
+    for _ in 0..80 {
+        let now = b.time_ms;
+        b.contacts[0].retain(|c| c.enemy != 2);
+        b.contacts[0].push(Contact { enemy: 2, pos: (50_000, 80_000), seen_ms: now, confidence: 1_000 });
+        b.step(50);
+        if b.soldiers[0].down() {
+            break;
+        }
+        faced_south |= b.soldiers[0].facing.1 < -500;
+    }
+    assert!(faced_south, "he turned on the man shooting him: {:?}", b.soldiers[0].facing);
+}

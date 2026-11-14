@@ -14,6 +14,7 @@ pub mod assault;
 pub mod effects;
 #[cfg(target_arch = "wasm32")]
 pub mod viewer;
+pub mod ground;
 
 fn json_str(s: &str) -> String {
     let mut o = String::from("\"");
