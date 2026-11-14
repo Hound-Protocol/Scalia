@@ -1,5 +1,6 @@
 // Full-screen game page. The Rust viewer draws everything; this file forwards input and the animation frame.
 import init, * as wasm from './pkg/scalia_wasm.js';
+import { AudioEngine } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
@@ -1431,52 +1432,25 @@ try {
   });
   invEl.addEventListener('pointerdown', (e) => { e.preventDefault(); if (invSel >= 0) useSlot(invSel); });
   // ---- Training assault (K): a squad takes the killhouse from the enemy inside, on the battle AI ----
-  // Gunfire is the recorded M4 shot, placed by distance from the commander (quieter, duller, later) and panned
-  // to where it is on screen; a grenade is the same shot slowed down and loud.
-  let fireCtx = null, shotBuf = null, voices = 0;
-  const fireGraph = () => {
-    if (fireCtx) return fireCtx;
-    try {
-      fireCtx = new AudioContext();
-      fetch('./sfx/m4-shot.mp3').then((r) => r.arrayBuffer()).then((b) => fireCtx.decodeAudioData(b)).then((d) => { shotBuf = d; }).catch(() => {});
-    } catch (_) { fireCtx = null; }
-    return fireCtx;
-  };
-  const fire = (dist, pan, blast, delay = 0) => {
-    const c = fireGraph(); if (!c || !shotBuf || voices > 48) return;
-    if (c.state === 'suspended') c.resume().catch(() => {});
-    const src = c.createBufferSource(); src.buffer = shotBuf;
-    src.playbackRate.value = blast ? 0.45 : 0.94 + Math.random() * 0.12;
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(1800, 18000 / (1 + dist / 40));
-    const g = c.createGain(); g.gain.value = Math.min(1, (blast ? 2.2 : 0.9) / (1 + dist / 20));
-    const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan * 0.8));
-    src.connect(lp).connect(g).connect(p).connect(c.destination);
-    voices++; src.onended = () => { voices--; };
-    src.start(c.currentTime + delay + dist / 343);
-  };
-  // Soldiers' footfalls: the grass step, quiet and short-ranged, panned like the gunfire.
-  let stepBuf = null, stepVoices = 0;
-  const step = (dist, pan, loud, delay = 0) => {
-    const c = fireGraph(); if (!c || stepVoices > 16) return;
-    if (!stepBuf) { if (!step.loading) { step.loading = true; fetch('./sfx/steps-grass.mp3').then((r) => r.arrayBuffer()).then((b) => c.decodeAudioData(b)).then((d) => { stepBuf = d; }).catch(() => {}); } return; }
-    const src = c.createBufferSource(); src.buffer = stepBuf;
-    src.playbackRate.value = 0.9 + Math.random() * 0.2;
-    const g = c.createGain(); g.gain.value = Math.min(0.6, 0.55 * loud / (1 + dist / 6));
-    const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan * 0.7));
-    src.connect(g).connect(p).connect(c.destination);
-    stepVoices++; src.onended = () => { stepVoices--; };
-    src.start(c.currentTime + delay);
-  };
+  // Battle sounds go through the Pack Engine audio graph (audio.js): the acoustics place every shot, blast and
+  // footfall (walls, distance, zoom, the listener's space, headphones 3D), the graph plays it.
+  const audio = new AudioEngine();
+  const SHOT = './sfx/m4-shot.mp3', STEPS = './sfx/steps-grass.mp3';
+  const fireGraph = () => { const c = audio.ensure(); if (c) { audio.buffer(SHOT); audio.buffer(STEPS); } return c; };
+  let envAt = 0;
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
   let assaultOn = false, assaultPoll = 0, lastAlive = null;
   const assaultTick = (now) => {
     // The field battle's sounds (gunfire, blasts, footfalls), whoever is fighting: tablet orders or the K demo.
     const s = v.take_sounds();
-    if (s.length && !fireCtx) fireGraph();
-    for (let i = 0; i + 3 < s.length; i += 4) {
-      if (s[i + 2] >= 2) step(s[i], s[i + 1], s[i + 2] - 2, s[i + 3]);
-      else fire(s[i], s[i + 1], s[i + 2] > 0.5, s[i + 3]);
+    if (s.length) fireGraph();
+    if (audio.ctx && now - envAt > 100) { envAt = now; audio.setEnv(v.audio_env()); }
+    for (let i = 0; i + 9 < s.length; i += 10) {
+      const [kind, loud, delay, gain, lowpass, wet, rx, ry] = s.subarray(i, i + 8);
+      if (kind === 2) audio.play(STEPS, { kind: 'step', gain: gain * (0.25 + 0.35 * loud), lowpass, wet: wet * 0.6, rx, ry, delay, rate: 0.9 + Math.random() * 0.2 });
+      else if (kind === 1) audio.play(SHOT, { kind: 'blast', gain: Math.min(4, gain * 6), lowpass, wet, rx, ry, delay, rate: 0.45 });
+      else audio.play(SHOT, { kind: 'shot', gain: Math.min(2.5, gain * 2.2), lowpass, wet, rx, ry, delay, rate: 0.94 + Math.random() * 0.12 });
     }
     if (!assaultOn) return;
     if (now - assaultPoll < 250) return;

@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 [dependencies]
 scalia-core = { path = "../scalia-core" }
 scalia-ai = { path = "../scalia-ai" }
+scalia-audio = { path = "../scalia-audio" }
 scalia-blueprint = { path = "../scalia-blueprint" }
 wasm-bindgen = "=0.2.130"
 scalia-render = { path = "../scalia-render" }

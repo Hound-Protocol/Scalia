@@ -109,6 +109,12 @@ impl SightGrid {
         self.bands[j as usize * self.w + i as usize]
     }
 
+    /// Whether a point is inside something solid (at height `z` mm).
+    pub fn solid_at(&self, x: i64, y: i64, z: i64) -> bool {
+        let band = (z / BAND_MM).clamp(0, 31) as u32;
+        self.bands_at(x, y) & (1 << band) != 0
+    }
+
     /// Whether nothing solid lies between two points. Samples every SAMPLE_MM along the line (skipping
     /// END_SKIP_MM at each end), sample k at a + d·k/n (truncated); empty 4 m blocks are crossed in one jump.
     pub fn clear(&self, a: Point, b: Point) -> bool {

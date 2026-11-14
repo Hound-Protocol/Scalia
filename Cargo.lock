@@ -488,6 +488,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scalia-audio"
+version = "0.1.0"
+dependencies = [
+ "scalia-ai",
+ "scalia-core",
+]
+
+[[package]]
 name = "scalia-bench"
 version = "0.1.0"
 dependencies = [
@@ -524,6 +532,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "scalia-ai",
+ "scalia-audio",
  "scalia-blueprint",
  "scalia-core",
  "scalia-render",

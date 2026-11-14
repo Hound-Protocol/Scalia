@@ -1,0 +1,8 @@
+[package]
+name = "scalia-audio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scalia-ai = { path = "../scalia-ai" }
+scalia-core = { path = "../scalia-core" }
