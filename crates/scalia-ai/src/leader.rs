@@ -847,13 +847,32 @@ impl Battle {
                     self.brains[squad].stack_order = order;
                 }
                 let order = self.brains[squad].stack_order.clone();
+                // What the pie showed: known enemies past the gap. Then each man sprints through and makes for
+                // cover against them on the far side (not an open spot), while the men still waiting cover him.
+                let threats: Vec<(i64, i64)> = self.contacts[squad].iter().filter(|c| c.confidence >= crate::battle::CONF_HEARD && now - c.seen_ms <= 20_000 && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && dist(c.pos, ch.at) <= 45_000).map(|c| c.pos).take(4).collect();
+                let hot = !threats.is_empty();
+                let mut taken: Vec<usize> = self.soldiers.iter().filter_map(|o| o.cover).collect();
                 let mut all_through = true;
                 for (k, &i) in order.iter().enumerate() {
+                    let through = (self.soldiers[i].pos.0 - ch.at.0) * ch.dir.0 + (self.soldiers[i].pos.1 - ch.at.1) * ch.dir.1 > 1_000 * 1_000;
+                    let going = now - ch.since >= k as i64 * CHOKE_FLOW_MS;
+                    if going && hot && !through && self.soldiers[i].cover.is_none() {
+                        if let Some(map) = self.cover.as_ref() {
+                            // Cover on the far side of the gap, near where he comes through.
+                            if let Some(c) = map.best(past, &threats, 12_000, &self.sight, &taken) {
+                                let far_side = (map.spots[c].pos.0 - ch.at.0) * ch.dir.0 + (map.spots[c].pos.1 - ch.at.1) * ch.dir.1 > 1_000 * 1_000;
+                                if far_side {
+                                    taken.push(c);
+                                    self.soldiers[i].cover = Some(c);
+                                }
+                            }
+                        }
+                    }
                     let s = &mut self.soldiers[i];
-                    let through = (s.pos.0 - ch.at.0) * ch.dir.0 + (s.pos.1 - ch.at.1) * ch.dir.1 > 2_000 * 1_000;
-                    if now - ch.since >= k as i64 * CHOKE_FLOW_MS {
+                    if going {
+                        let gait = if hot { Gait::Sprint } else { Gait::Run };
                         if !matches!(s.task, Task::Move { to, .. } if to == past) {
-                            s.task = Task::Move { to: past, gait: Gait::Run };
+                            s.task = Task::Move { to: past, gait };
                             s.posture = None;
                         }
                         s.watch = Some(ch.dir);
