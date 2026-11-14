@@ -30,6 +30,10 @@
   geomorphism cinematic trailer sound effects 123876" (start, cut to 8 s), "chrysalyn intense cinematic wind whoosh
   transition 543526" (the travel in, cut to 6 s) and "biww whoosh fly by sound effect 561945" (entering the
   commander); supplied by the project lead (Pixabay sound library naming). Re-encoded at 128 kbit/s.
+- **Intro sequence sounds** (`web/sfx/menu-flash1-door.mp3`, `menu-flash2-thump.mp3`, `space-ambience-01.mp3`,
+  `space-ambience-03.mp3`): "soundreality cinematic hit door 619512" (first flash), "blendertimer massive thump 116359"
+  (second flash), "fronbondi_skegs sfx deep space travel ambience 01 358466" and "... ambience 03 358469"; supplied by
+  the project lead (Pixabay sound library naming). Not yet wired in.
 - **"walkie talkie"** by [FayBall](https://sketchfab.com/FayBall), licensed under
   [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
   Source: https://sketchfab.com/3d-models/walkie-talkie-88d0177b7801448397b69fcd81220c3a
