@@ -192,11 +192,13 @@ pub struct Brain {
     builds: Vec<(i64, i64, i64, u8, usize)>,
     /// Casualty care in progress: (wounded, helper, step 0 going / 1 dragging / 2 treating, until ms, drag to).
     aid: Vec<(usize, usize, u8, i64, (i64, i64))>,
+    /// The door stack's order, fixed as it forms: nearest the door first (nobody squeezes past the others).
+    stack_order: Vec<usize>,
 }
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new() }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new() }
     }
 }
 
@@ -730,6 +732,10 @@ impl Battle {
     /// Defenders: each man holds where he stands, watching the way he faced when told.
     fn lead_hold(&mut self, squad: usize) {
         let ms = self.members(squad);
+        // In a building: each man takes a post covering an outer opening from back in the room.
+        if self.building.is_some() && ms.iter().any(|&i| self.soldiers[i].task == Task::Idle) {
+            self.post_defenders(&ms);
+        }
         for &i in &ms {
             if self.soldiers[i].task == Task::Idle {
                 let (p, f) = (self.soldiers[i].pos, self.soldiers[i].facing);
@@ -737,6 +743,50 @@ impl Battle {
             }
         }
         self.fall_back(squad, &ms);
+    }
+
+    /// Defenders inside the building who have no post yet: each takes the nearest free post covering an outer
+    /// window or door from back in the room (2.5 m behind a window, off to the side of a doorway), where
+    /// someone outside sees little of him through the opening, facing out.
+    fn post_defenders(&mut self, ms: &[usize]) {
+        let Some((k, _)) = self.building.clone() else { return };
+        let inside = |p: (i64, i64)| k.room_at(p.0, p.1).is_some();
+        let walk = |b: &Battle, p: (i64, i64)| b.nav().is_none_or(|n| n.walkable_at(p.0, p.1, 0));
+        let mut posts: Vec<((i64, i64), (i64, i64))> = Vec::new();
+        let openings = k.windows.iter().map(|w| (w.x_mm, w.y_mm, w.along_x, 0)).chain(k.doors.iter().filter(|d| matches!(d.rooms, (Some(_), None) | (None, Some(_)))).map(|d| (d.x_mm, d.y_mm, d.along_x, 1)));
+        for (x, y, along_x, door) in openings {
+            let n = if along_x { (0, 1) } else { (1, 0) };
+            let side = if along_x { (1, 0) } else { (0, 1) };
+            for sgn in [1, -1] {
+                // Back from the opening into the room; a doorway is covered from beside its line.
+                let lat = if door == 1 { [1_200, -1_200] } else { [0, 0] };
+                for l in lat {
+                    let p = (x + sgn * n.0 * 2_500 + side.0 * l, y + sgn * n.1 * 2_500 + side.1 * l);
+                    if inside(p) && walk(self, p) {
+                        posts.push((p, (x, y)));
+                    }
+                }
+            }
+        }
+        // Posts others already hold.
+        let held: Vec<(i64, i64)> = ms.iter().filter_map(|&j| if let Task::Hold { at, .. } = self.soldiers[j].task { Some(at) } else { None }).collect();
+        posts.retain(|p| held.iter().all(|&h| dist(h, p.0) > 1_500));
+        for &i in ms {
+            let s = &self.soldiers[i];
+            if s.task != Task::Idle || !inside(s.pos) || posts.is_empty() {
+                continue;
+            }
+            let me = s.pos;
+            let pick = (0..posts.len()).min_by_key(|&j| (dist(posts[j].0, me), j)).expect("a post");
+            let (at, look) = posts.remove(pick);
+            posts.retain(|p| dist(p.0, at) > 1_500);
+            let s = &mut self.soldiers[i];
+            // Facing the opening (through it, a point well outside).
+            let f = (look.0 + (look.0 - at.0) * 4, look.1 + (look.1 - at.1) * 4);
+            s.task = Task::Hold { at, face: f };
+            s.gait = Gait::Walk;
+            s.aim = true;
+        }
     }
 
     /// A defender whose room holds more known enemies than friends gives it up: he runs through an
@@ -847,10 +897,18 @@ impl Battle {
             None => {}
             Some(Method::Approach) => {
                 if self.brains[squad].legs.is_empty() {
+                    // Through dead ground: not straight at the door (its field of fire) but to a point out past the
+                    // far end of the stack, then in along the wall to the last man's place.
                     let from = self.centre(&ms);
-                    let total = dist(from, stack[0]);
-                    let n = (total / LEG_MM).max(1);
-                    self.brains[squad].legs = (1..=n).map(|k| (from.0 + (stack[0].0 - from.0) * k / n, from.1 + (stack[0].1 - from.1) * k / n)).collect();
+                    let along = ((stack[3].0 - stack[2].0).signum(), (stack[3].1 - stack[2].1).signum());
+                    let out = ((stack[0].0 - d.x_mm).signum() * (1 - along.0.abs()), (stack[0].1 - d.y_mm).signum() * (1 - along.1.abs()));
+                    let corner = (stack[3].0 + along.0 * 4_000 + out.0 * 3_000, stack[3].1 + along.1 * 4_000 + out.1 * 3_000);
+                    let corner = if self.nav().is_none_or(|n| n.walkable_at(corner.0, corner.1, 0)) { corner } else { stack[3] };
+                    let mut legs = Vec::new();
+                    let n = (dist(from, corner) / LEG_MM).max(1);
+                    legs.extend((1..=n).map(|k| (from.0 + (corner.0 - from.0) * k / n, from.1 + (corner.1 - from.1) * k / n)));
+                    legs.push(stack[3]);
+                    self.brains[squad].legs = legs;
                     self.brains[squad].leg = 0;
                     self.brains[squad].leg_ms = 0;
                 }
@@ -915,6 +973,12 @@ impl Battle {
             }
             Some(Method::Stack) => {
                 let mut ready = true;
+                if phase_ms == LEAD_MS || self.brains[squad].stack_order.iter().any(|i| !ms.contains(i)) || ms.iter().any(|i| !self.brains[squad].stack_order.contains(i)) {
+                    let mut order = ms.clone();
+                    order.sort_by_key(|&i| (dist(self.soldiers[i].pos, stack[0]), i));
+                    self.brains[squad].stack_order = order;
+                }
+                let ms = self.brains[squad].stack_order.clone();
                 for (rank, &i) in ms.iter().enumerate() {
                     if rank < 4 {
                         self.soldiers[i].task = Task::Move { to: stack[rank], gait: Gait::Crouch };
@@ -923,17 +987,26 @@ impl Battle {
                             ready = false;
                         }
                     } else {
-                        // Rear security: a short arc past the end of the stack, one man on along the wall, the next
-                        // a step out from it, watching outward and down the flank.
-                        let r = rank as i64 - 4;
                         let along = ((stack[3].0 - stack[2].0).signum(), (stack[3].1 - stack[2].1).signum());
                         let out = ((stack[0].0 - d.x_mm).signum() * (1 - along.0.abs()), (stack[0].1 - d.y_mm).signum() * (1 - along.1.abs()));
-                        let a = STACK_GAP_MM * (1 + r / 2);
-                        let o = (r % 2) * 1_300;
-                        let back = (stack[3].0 + along.0 * a + out.0 * o, stack[3].1 + along.1 * a + out.1 * o);
-                        let look = if r % 2 == 0 { (out.0 * 10_000 + along.0 * 4_000, out.1 * 10_000 + along.1 * 4_000) } else { (along.0 * 10_000 + out.0 * 3_000, along.1 * 10_000 + out.1 * 3_000) };
-                        self.soldiers[i].task = Task::Hold { at: back, face: (back.0 + look.0, back.1 + look.1) };
-                        self.soldiers[i].aim = true;
+                        if rank < 8 {
+                            // The second element: the stack carries on along the wall, ready to follow in.
+                            let at = (stack[3].0 + along.0 * STACK_GAP_MM * (rank as i64 - 3), stack[3].1 + along.1 * STACK_GAP_MM * (rank as i64 - 3));
+                            self.soldiers[i].task = Task::Move { to: at, gait: Gait::Crouch };
+                            self.soldiers[i].aim = false;
+                        } else {
+                            // Outer security: spread on an arc 8 m out from the stack, kneeling, each watching
+                            // his own slice outward and along the flanks.
+                            let mid = (stack[1].0 + stack[2].0) / 2 + out.0 * 600;
+                            let mid = (mid, (stack[1].1 + stack[2].1) / 2 + out.1 * 600);
+                            let base = DIRS_24.iter().position(|&(c, s)| (c, s) == (out.0 * 1_000, out.1 * 1_000)).unwrap_or(0) as i64;
+                            let slice = [-3i64, 3, -6, 6, 0, -5, 5][(rank - 8) % 7];
+                            let (c, sn) = DIRS_24[(base + slice).rem_euclid(24) as usize];
+                            let at = (mid.0 + c * 8_000 / 1_000, mid.1 + sn * 8_000 / 1_000);
+                            self.soldiers[i].task = Task::Hold { at, face: (at.0 + c * 10, at.1 + sn * 10) };
+                            self.soldiers[i].posture = Some(Stance::Crouch);
+                            self.soldiers[i].aim = true;
+                        }
                     }
                 }
                 if ready || phase_ms >= STACK_TIMEOUT_MS {

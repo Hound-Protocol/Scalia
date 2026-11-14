@@ -765,8 +765,10 @@ impl Battle {
             }
             // Inside the house the walls are the cover and the room is the job: nobody runs out of a clearing.
             let indoors = self.building.as_ref().is_some_and(|(k, _)| k.room_at(s.pos.0, s.pos.1).is_some());
-            // Shot at, or trading fire in the open at range while not creeping up on a door: get behind something.
-            let in_open_fight = s.target.is_some_and(|t| !near(self.soldiers[t].pos, s.pos, OPEN_FIGHT_MM)) && s.gait != Gait::Crouch && s.suppression > 0;
+            // Shot at, or trading fire in the open at range while not creeping up on a door: get behind something
+            // (not in an assault, where the leader's bounding is the answer to fire).
+            let in_open_fight = s.target.is_some_and(|t| !near(self.soldiers[t].pos, s.pos, OPEN_FIGHT_MM)) && s.gait != Gait::Crouch && s.suppression > 0
+                && !self.brains.get(s.squad as usize).is_some_and(|b| matches!(b.order, crate::leader::Order::Capture));
             if s.cover.is_none() && !indoors && (s.suppression >= SEEK_COVER || in_open_fight) {
                 // The four nearest known threats (a big fight has hundreds of contacts).
                 let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();

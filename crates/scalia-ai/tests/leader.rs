@@ -142,8 +142,12 @@ fn the_stack_hugs_the_wall_beside_the_door() {
     }
     assert!(stacked_at.is_some(), "the squad stacked up");
     let k = b.building().unwrap();
-    let men: Vec<(i64, i64)> = b.soldiers.iter().filter(|s| s.team == 0 && s.alive() && !s.down()).map(|s| s.pos).take(4).collect();
-    let door = k.doors.iter().filter(|d| d.rooms.0.is_none() || d.rooms.1.is_none()).min_by_key(|d| men.iter().map(|m| (m.0 - d.x_mm).pow(2) + (m.1 - d.y_mm).pow(2)).min().unwrap()).unwrap();
+    let all: Vec<(i64, i64)> = b.soldiers.iter().filter(|s| s.team == 0 && s.alive() && !s.down()).map(|s| s.pos).collect();
+    let door = k.doors.iter().filter(|d| d.rooms.0.is_none() || d.rooms.1.is_none()).min_by_key(|d| all.iter().map(|m| (m.0 - d.x_mm).pow(2) + (m.1 - d.y_mm).pow(2)).min().unwrap()).unwrap();
+    // The four at the door.
+    let mut men = all.clone();
+    men.sort_by_key(|m| (m.0 - door.x_mm).pow(2) + (m.1 - door.y_mm).pow(2));
+    men.truncate(4);
     for m in &men {
         let d = (((m.0 - door.x_mm).pow(2) + (m.1 - door.y_mm).pow(2)) as f64).sqrt() as i64;
         assert!(d < 5_500, "stack man at {m:?} is {d} mm from the door");
@@ -153,7 +157,8 @@ fn the_stack_hugs_the_wall_beside_the_door() {
     for a in 0..men.len() {
         for c in a + 1..men.len() {
             let d = (((men[a].0 - men[c].0).pow(2) + (men[a].1 - men[c].1).pow(2)) as f64).sqrt() as i64;
-            assert!(d >= 800, "two stack men {d} mm apart");
+            assert!(d >= 800, "two stack men {d} mm apart: {:?} {:?}", men, b.soldiers.iter().filter(|s| s.team == 0).map(|s| (s.pos, s.task, s.down(), s.act)).collect::<Vec<_>>());
         }
     }
 }
+

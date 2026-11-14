@@ -496,17 +496,33 @@ mod tests {
         let mut a = Assault::new((80_000, 62_000), 21, 0.0);
         let mut t = 0.0;
         let mut poses = Vec::new();
+        let mut post = None;
         while t < 60_000.0 {
             t += 16.7;
             a.advance(t);
             let _ = a.instances(1, (t / 1000.0) as f32, |_| 9.0, |x, y| Some((x as f32, y as f32, 0.0)));
-            // Until he is sent somewhere (to a wounded squadmate, say).
-            if matches!(a.battle.soldiers[ATTACKERS + 7].task, scalia_ai::battle::Task::Move { .. }) || a.battle.soldiers[ATTACKERS + 7].cover.is_some() {
+            let s = &a.battle.soldiers[ATTACKERS + 7];
+            // Once he has walked to his post and stopped: from then on, until he is sent elsewhere.
+            let scalia_ai::battle::Task::Hold { at, .. } = s.task else { if post.is_some() { break } else { continue } };
+            if post.is_some_and(|p| p != at) || s.cover.is_some() || !s.alive() || s.down() {
                 break;
+            }
+            if post.is_none() {
+                if s.moving || (s.pos.0 - at.0).abs() + (s.pos.1 - at.1).abs() > 300 {
+                    continue;
+                }
+                post = Some(at);
+                // Give the drawn legs half a second to come to a stand.
+                for _ in 0..30 {
+                    t += 16.7;
+                    a.advance(t);
+                    let _ = a.instances(1, (t / 1000.0) as f32, |_| 9.0, |x, y| Some((x as f32, y as f32, 0.0)));
+                }
+                continue;
             }
             poses.push(a.anim[ATTACKERS + 7].1);
         }
-        // A defender who does not move before contact: never a walking pose.
+        // A defender standing at his post: never a walking pose.
         assert!(poses.len() > 30 && poses.iter().all(|&p| !matches!(p, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk)), "{:?}", &poses.iter().filter(|p| matches!(p, Pose::Walk)).count());
     }
 
