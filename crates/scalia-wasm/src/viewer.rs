@@ -893,7 +893,8 @@ impl Viewer {
             let wait = (if lab_speed <= 0.0 { 0.0 } else { (snd.at - lab_t) / lab_speed }).max(0.0) as f32 / 1000.0;
             let (kind, loud) = match (snd.blast, snd.step) {
                 (true, _) => (1.0, 1.0),
-                (false, Some(l)) => (2.0, l),
+                // Footfalls: 2 on grass, 3 on concrete.
+                (false, Some(l)) => (if crate::ground::concrete_at(snd.x, snd.y) { 3.0 } else { 2.0 }, l),
                 _ => (0.0, 1.0),
             };
             // Right and ahead as the camera looks (ahead = up the screen, on the ground); below = the height.
@@ -1254,6 +1255,10 @@ impl Viewer {
         self.cmd_phase
     }
     /// The commander's gait for his footsteps: 0 standing, 1 walking, 2 sprinting.
+    /// What the commander walks on: 1 concrete, 0 grass.
+    pub fn commander_surface(&self) -> u8 {
+        crate::ground::concrete_at(self.cmd.0, self.cmd.1) as u8
+    }
     pub fn commander_gait(&self) -> u8 {
         if !self.cmd_moving { 0 } else if self.cmd_speed > 3.0 { 2 } else { 1 }
     }

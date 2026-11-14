@@ -106,6 +106,12 @@ pub(crate) fn battle_doors() -> Vec<scalia_ai::doors::Door> {
         .collect()
 }
 
+/// Whether a point (metres) is on a concrete floor (the range, the barracks), not grass.
+pub(crate) fn concrete_at(x: f64, y: f64) -> bool {
+    let p = ((x * 1000.0) as i64, (y * 1000.0) as i64);
+    inside(range_mm(), p) || inside(barracks_mm(), p)
+}
+
 /// Which of `battle_doors()` are steel.
 pub(crate) fn door_steel() -> Vec<bool> {
     world().doors().iter().map(|d| d.material == scalia_world::Material::Steel).collect()

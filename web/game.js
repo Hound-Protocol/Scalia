@@ -493,13 +493,17 @@ try {
   // The commander's footsteps on grass: one step each time a heel strikes (gait phase 0 and 0.5), a little
   // different every time.
   const stepSound = new Audio('./sfx/steps-grass.mp3'); stepSound.preload = 'auto';
+  // On concrete (the range, the barracks): three takes, never the same twice running.
+  const concreteSteps = [1, 2, 3].map((k) => { const a = new Audio(`./sfx/steps-concrete-${k}.mp3`); a.preload = 'auto'; return a; });
+  let lastConcrete = -1;
+  const concreteStep = () => { let k = Math.floor(Math.random() * 3); if (k === lastConcrete) k = (k + 1) % 3; lastConcrete = k; return k; };
   let lastPhase = -1;
   const footsteps = () => {
     const ph = v.scene_name() === 'ground' ? v.commander_phase() : -1;
     if (ph >= 0 && lastPhase >= 0) {
       const crossed = (at) => (lastPhase < at && ph >= at) || (lastPhase > ph && (lastPhase < at || ph >= at));
       if (crossed(0.0) || crossed(0.5)) {
-        const a = stepSound.cloneNode(); worldAudio.add(a);
+        const a = (v.commander_surface() === 1 ? concreteSteps[concreteStep()] : stepSound).cloneNode(); worldAudio.add(a);
         a.volume = (v.commander_gait() === 2 ? 0.7 : 0.5) * (0.85 + Math.random() * 0.3);
         a.playbackRate = 0.9 + Math.random() * 0.2;
         a.play().catch(() => {});
@@ -1445,7 +1449,8 @@ try {
   // footfall (walls, distance, zoom, the listener's space, headphones 3D), the graph plays it.
   const audio = new AudioEngine();
   const SHOT = './sfx/m4-shot.mp3', STEPS = './sfx/steps-grass.mp3';
-  const fireGraph = () => { const c = audio.ensure(); if (c) { audio.buffer(SHOT); audio.buffer(STEPS); } return c; };
+  const STEPS_CONCRETE = [1, 2, 3].map((k) => `./sfx/steps-concrete-${k}.mp3`);
+  const fireGraph = () => { const c = audio.ensure(); if (c) { audio.buffer(SHOT); audio.buffer(STEPS); STEPS_CONCRETE.forEach((u) => audio.buffer(u)); } return c; };
   let envAt = 0;
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
@@ -1461,7 +1466,8 @@ try {
       const space = s.subarray(i + 11, i + 14);
       const echoes = [0, 1, 2, 3].map((k) => s.subarray(i + 14 + k * 3, i + 17 + k * 3));
       const at = { lowpass, rx, ry, below, dist, delay, space, echoes };
-      if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2 });
+      if (kind === 3) audio.play(STEPS_CONCRETE[Math.floor(Math.random() * 3)], { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16 });
+      else if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2 });
       else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, rate: 0.45 });
       else audio.play(SHOT, { ...at, kind: 'shot', db: 130, gain: Math.min(3, gain * 4), room, rate: 0.94 + Math.random() * 0.12 });
     }
