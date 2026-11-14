@@ -327,6 +327,36 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.el = vec2f(0.25);
     p.reach = vec2f(0.3);
     p.head = 0.45;
+  } else if (pose == 25u) {
+    // Shot, falling back onto his back (pose.rs `Pose::FallBack`; ends in the wounded pose).
+    let k = array<f32, 5>(0.0, 0.2, 0.45, 0.75, 1.0);
+    let t = phase;
+    p.sling = keyed(t, k, array<f32, 5>(0.0, 0.6, 1.0, 1.0, 1.0));
+    p.lean = keyed(t, k, array<f32, 5>(0.0, -0.35, -0.15, 0.0, 0.0));
+    p.hip = vec2f(keyed(t, k, array<f32, 5>(0.0, -0.25, 0.9, 0.95, 0.85)), keyed(t, k, array<f32, 5>(0.0, 0.35, 0.7, 0.3, 0.1)));
+    p.knee = vec2f(keyed(t, k, array<f32, 5>(0.0, 0.3, 1.5, 1.6, 1.45)), keyed(t, k, array<f32, 5>(0.0, 0.5, 1.3, 0.6, 0.12)));
+    p.sh = vec2f(keyed(t, k, array<f32, 5>(0.3, 0.9, 1.2, 0.8, 0.55)), keyed(t, k, array<f32, 5>(0.3, 1.1, 1.4, 0.6, 0.15)));
+    p.el = vec2f(keyed(t, k, array<f32, 5>(1.2, 0.6, 0.8, 1.6, 1.95)), keyed(t, k, array<f32, 5>(1.2, 0.5, 0.4, 0.3, 0.3)));
+    p.reach = vec2f(keyed(t, k, array<f32, 5>(0.4, 0.2, 0.3, 0.6, 0.75)), 0.0);
+    p.abd = vec2f(0.0, keyed(t, k, array<f32, 5>(0.0, 0.5, 0.8, 1.0, 1.05)));
+    p.prone = keyed(t, k, array<f32, 5>(0.0, 0.0, -0.15, -0.7, -1.0));
+    p.head = keyed(t, k, array<f32, 5>(0.0, 0.35, -0.2, -0.5, -0.45));
+    p.look = keyed(t, k, array<f32, 5>(0.0, 0.0, 0.1, 0.2, 0.25));
+  } else if (pose == 26u) {
+    // Killed, crumpling forward (pose.rs `Pose::FallForward`; ends in the dead pose).
+    let k = array<f32, 5>(0.0, 0.18, 0.45, 0.75, 1.0);
+    let t = phase;
+    p.sling = keyed(t, k, array<f32, 5>(0.0, 0.7, 1.0, 1.0, 1.0));
+    p.lean = keyed(t, k, array<f32, 5>(0.0, -0.25, 0.45, 0.2, 0.0));
+    p.hip = vec2f(keyed(t, k, array<f32, 5>(0.0, 0.1, 1.3, 0.8, 0.15)), keyed(t, k, array<f32, 5>(0.0, -0.1, 1.1, 0.5, -0.2)));
+    p.knee = vec2f(keyed(t, k, array<f32, 5>(0.0, 0.2, 1.7, 1.0, 0.25)), keyed(t, k, array<f32, 5>(0.0, 0.15, 1.6, 1.0, 0.6)));
+    p.sh = vec2f(keyed(t, k, array<f32, 5>(0.3, 0.6, 0.4, 1.3, 1.9)), keyed(t, k, array<f32, 5>(0.3, 0.7, 0.3, 0.8, 0.6)));
+    p.el = vec2f(keyed(t, k, array<f32, 5>(1.2, 0.8, 0.3, 0.5, 0.6)), keyed(t, k, array<f32, 5>(1.2, 0.8, 0.3, 0.7, 0.9)));
+    p.reach = vec2f(0.0);
+    p.abd = vec2f(keyed(t, k, array<f32, 5>(0.0, 0.2, 0.3, 0.5, 0.7)), keyed(t, k, array<f32, 5>(0.0, 0.2, 0.3, 0.6, 0.9)));
+    p.prone = keyed(t, k, array<f32, 5>(0.0, 0.0, 0.0, 0.55, 1.0));
+    p.head = keyed(t, k, array<f32, 5>(0.0, 0.3, -0.4, 0.2, 0.55));
+    p.look = keyed(t, k, array<f32, 5>(0.0, 0.0, 0.2, 0.6, 0.9));
   } else if (pose == 24u) {
     // Killed, face down and limp (pose.rs `Pose::Dead`).
     p.prone = 1.0;

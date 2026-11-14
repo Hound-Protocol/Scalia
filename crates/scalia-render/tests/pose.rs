@@ -573,3 +573,16 @@ fn drone_launch_kneels_and_lifts_it_overhead() {
     assert!(hip_height(Pose::Drone, 0.5) < 0.7, "kneeling");
     assert_eq!(p.sling, 1.0);
 }
+
+#[test]
+fn a_fall_ends_exactly_in_the_pose_he_lies_in() {
+    use scalia_render::pose::{params, Pose};
+    for (fall, lie) in [(Pose::FallBack, Pose::Wounded), (Pose::FallForward, Pose::Dead)] {
+        let (a, b) = (params(fall, 1.0), params(lie, 0.0));
+        for (x, y) in [(a.prone, b.prone), (a.hip[0], b.hip[0]), (a.hip[1], b.hip[1]), (a.knee[0], b.knee[0]), (a.knee[1], b.knee[1]), (a.shoulder[0], b.shoulder[0]), (a.shoulder[1], b.shoulder[1]), (a.elbow[0], b.elbow[0]), (a.head, b.head), (a.sling, b.sling)] {
+            assert!((x - y).abs() < 1e-4, "{fall:?} ends at {x}, {lie:?} starts at {y}");
+        }
+        // And starts on his feet.
+        assert_eq!(params(fall, 0.0).prone, 0.0);
+    }
+}

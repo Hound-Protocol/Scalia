@@ -51,6 +51,9 @@ pub struct Assault {
     motion: Vec<(f32, f32, f64)>,
     /// Per soldier: the legs he is on (walk, run, sprint), kept until his pace clearly calls for another.
     legs: Vec<Pose>,
+    /// Per soldier: on his feet at the last drawing, and the fall he is in (started at viewer ms, which fall).
+    up: Vec<bool>,
+    falls: Vec<Option<(f64, Pose)>>,
     /// Per soldier: gait phase integrated from his cadence (strides), and the viewer time it was last advanced.
     gait: Vec<(f64, f64)>,
     pub sounds: Vec<Sound>,
@@ -68,6 +71,10 @@ pub struct Assault {
     pub done: Vec<u16>,
     reported: Vec<(u16, bool)>,
 }
+
+/// How long a fall takes (viewer ms; slower in the AI lab's slow motion).
+const FALL_BACK_MS: f64 = 1_100.0;
+const FALL_FORWARD_MS: f64 = 950.0;
 
 /// The enemy squad stationed in the training house.
 pub const ENEMY_SQUAD: u16 = 200;
@@ -102,7 +109,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -114,6 +121,8 @@ impl Assault {
             self.anim.push((0.0, Pose::Stand, Pose::Stand, -1000.0));
             self.motion.push((0.0, 0.0, -1.0));
             self.legs.push(Pose::Walk);
+            self.up.push(true);
+            self.falls.push(None);
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
         }
     }
@@ -271,7 +280,25 @@ impl Assault {
             }
             let walking = self.now < m.2;
             m.0 += ((if walking { raw } else { 0.0 }) - m.0) * 0.25;
-            let (mut pose, mut steps, upper, dir) = pose_of(s, walking, m.0, m.1);
+            let (mut pose, mut steps, mut upper, mut dir) = pose_of(s, walking, m.0, m.1);
+            // Shot down or killed: he falls (stumbling back onto his back, or crumpling forward), once, before
+            // he lies there.
+            let on_feet = s.alive() && !s.down();
+            if self.up[i] && !on_feet {
+                self.falls[i] = Some((self.now, if s.alive() { Pose::FallBack } else { Pose::FallForward }));
+            }
+            if on_feet {
+                self.falls[i] = None;
+            }
+            self.up[i] = on_feet;
+            let falling = self.falls[i].and_then(|(t0, fall)| {
+                let ms = if fall == Pose::FallBack { FALL_BACK_MS } else { FALL_FORWARD_MS };
+                let t = (self.now - t0) / ms;
+                (t < 1.0).then_some((fall, t as f32))
+            });
+            if let Some((fall, _)) = falling {
+                (pose, steps, upper, dir) = (fall, 0.0, None, 0.0);
+            }
             // Walk, run and sprint legs change only when the pace is clearly past the line (no flicker).
             if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint) {
                 let held = self.legs[i];
@@ -307,7 +334,10 @@ impl Assault {
                 let loud = match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, _ => 0.5 };
                 self.sounds.push(Sound { x: x / 1000.0, y: y / 1000.0, blast: false, step: Some(loud), at: self.now });
             }
-            let (phase, cadence) = (g.0 as f32, if steps > 0.0 { -1.0 } else { 0.0 });
+            let (phase, cadence) = match falling {
+                Some((_, t)) => (t, -1.0),
+                None => (g.0 as f32, if steps > 0.0 { -1.0 } else { 0.0 }),
+            };
             out.extend_from_slice(&[rx, ry, z, body(s_squad), a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
         out

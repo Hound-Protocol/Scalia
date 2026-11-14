@@ -67,6 +67,12 @@ pub enum Pose {
     Aid = 23,
     /// Killed: face down and limp, arms loose out to the sides, legs splayed, rifle slung across his back.
     Dead = 24,
+    /// Shot and going down wounded, over the phase (0..1, once): the impact rocks him back, he stumbles a step,
+    /// his knees give and he falls onto his back, ending exactly in the wounded pose.
+    FallBack = 25,
+    /// Killed, over the phase (0..1, once): a jolt, the knees go and he crumples forward onto his face,
+    /// ending exactly in the dead pose.
+    FallForward = 26,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -762,6 +768,36 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.elbow[0] = 2.4;
             p.reach[0] = 1.05;
             p.head = 0.1;
+        }
+        Pose::FallBack => {
+            let k = [0.0, 0.2, 0.45, 0.75, 1.0];
+            let t = phase;
+            p.sling = keyed(t, k, [0.0, 0.6, 1.0, 1.0, 1.0]);
+            p.lean = keyed(t, k, [0.0, -0.35, -0.15, 0.0, 0.0]);
+            p.hip = [keyed(t, k, [0.0, -0.25, 0.9, 0.95, 0.85]), keyed(t, k, [0.0, 0.35, 0.7, 0.3, 0.1])];
+            p.knee = [keyed(t, k, [0.0, 0.3, 1.5, 1.6, 1.45]), keyed(t, k, [0.0, 0.5, 1.3, 0.6, 0.12])];
+            p.shoulder = [keyed(t, k, [0.3, 0.9, 1.2, 0.8, 0.55]), keyed(t, k, [0.3, 1.1, 1.4, 0.6, 0.15])];
+            p.elbow = [keyed(t, k, [1.2, 0.6, 0.8, 1.6, 1.95]), keyed(t, k, [1.2, 0.5, 0.4, 0.3, 0.3])];
+            p.reach = [keyed(t, k, [0.4, 0.2, 0.3, 0.6, 0.75]), 0.0];
+            p.abduct = [0.0, keyed(t, k, [0.0, 0.5, 0.8, 1.0, 1.05])];
+            p.prone = keyed(t, k, [0.0, 0.0, -0.15, -0.7, -1.0]);
+            p.head = keyed(t, k, [0.0, 0.35, -0.2, -0.5, -0.45]);
+            p.look = keyed(t, k, [0.0, 0.0, 0.1, 0.2, 0.25]);
+        }
+        Pose::FallForward => {
+            let k = [0.0, 0.18, 0.45, 0.75, 1.0];
+            let t = phase;
+            p.sling = keyed(t, k, [0.0, 0.7, 1.0, 1.0, 1.0]);
+            p.lean = keyed(t, k, [0.0, -0.25, 0.45, 0.2, 0.0]);
+            p.hip = [keyed(t, k, [0.0, 0.1, 1.3, 0.8, 0.15]), keyed(t, k, [0.0, -0.1, 1.1, 0.5, -0.2])];
+            p.knee = [keyed(t, k, [0.0, 0.2, 1.7, 1.0, 0.25]), keyed(t, k, [0.0, 0.15, 1.6, 1.0, 0.6])];
+            p.shoulder = [keyed(t, k, [0.3, 0.6, 0.4, 1.3, 1.9]), keyed(t, k, [0.3, 0.7, 0.3, 0.8, 0.6])];
+            p.elbow = [keyed(t, k, [1.2, 0.8, 0.3, 0.5, 0.6]), keyed(t, k, [1.2, 0.8, 0.3, 0.7, 0.9])];
+            p.reach = [0.0, 0.0];
+            p.abduct = [keyed(t, k, [0.0, 0.2, 0.3, 0.5, 0.7]), keyed(t, k, [0.0, 0.2, 0.3, 0.6, 0.9])];
+            p.prone = keyed(t, k, [0.0, 0.0, 0.0, 0.55, 1.0]);
+            p.head = keyed(t, k, [0.0, 0.3, -0.4, 0.2, 0.55]);
+            p.look = keyed(t, k, [0.0, 0.0, 0.2, 0.6, 0.9]);
         }
         Pose::Dead => {
             p.prone = 1.0;
