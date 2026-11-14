@@ -102,6 +102,8 @@ const CMD_AIM_WALK: f32 = 1.2;
 const CMD_CROUCH: f32 = 1.4;
 const CMD_CRAWL: f32 = 0.5;
 const CMD_SPRINT: f32 = 4.6;
+/// His usual pace on foot (WASD): a jog. Alt held walks (CMD_WALK), Shift sprints.
+const CMD_JOG: f32 = 3.0;
 /// The commander winds up (m/s²) and brakes.
 /// Selection tag on an instance's colour (the shader outlines tagged figures): +64 stable, +128 wounded or
 /// incapacitated, +192 killed.
@@ -183,6 +185,8 @@ pub struct Viewer {
     cmd: (f64, f64),
     cmd_heading: f32,
     cmd_input: (f32, f32, bool),
+    /// Alt held: walk instead of jog.
+    cmd_walk: bool,
     cmd_moving: bool,
     /// His real pace (m/s), winding up to the walk or sprint and braking to a stop; the way he last moved; and his
     /// gait phase, integrated from the cadence so the legs never jump as the pace changes.
@@ -357,6 +361,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd: (70_000.0 / 1000.0 + 20.0, 20.0),
         cmd_heading: 0.0,
         cmd_input: (0.0, 0.0, false),
+        cmd_walk: false,
         cmd_moving: false,
         cmd_speed: 0.0,
         cmd_dir: (0.0, 1.0),
@@ -1279,6 +1284,10 @@ impl Viewer {
     pub fn move_commander(&mut self, x: f32, y: f32, sprint: bool) {
         self.cmd_input = (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0), sprint);
     }
+    /// Alt held: the commander walks instead of jogging.
+    pub fn commander_walk(&mut self, walk: bool) {
+        self.cmd_walk = walk;
+    }
     /// The commander's trigger and aim (held or not), and where the mouse is (device px).
     pub fn commander_weapon(&mut self, trigger: bool, aim: bool, px: f64, py: f64) {
         // A click shorter than a frame still fires a round.
@@ -1358,7 +1367,8 @@ impl Viewer {
         crate::ground::concrete_at(self.cmd.0, self.cmd.1) as u8
     }
     pub fn commander_gait(&self) -> u8 {
-        if !self.cmd_moving { 0 } else if self.cmd_speed > 3.0 { 2 } else { 1 }
+        // 0 still, 1 walking, 2 jogging, 3 sprinting.
+        if !self.cmd_moving { 0 } else if self.cmd_speed > 3.8 { 3 } else if self.cmd_speed > 2.2 { 2 } else { 1 }
     }
     /// The fraction of the screen's height the tablet close-up's box covers: the dive frames the tablet to match.
     pub fn set_tablet_fit(&mut self, f: f32) {
@@ -2789,7 +2799,8 @@ impl Viewer {
             1 => CMD_CROUCH,
             _ if self.gun.aim && ready => CMD_AIM_WALK,
             _ if sprint && !ready => CMD_SPRINT,
-            _ => CMD_WALK,
+            _ if self.cmd_walk || ready => CMD_WALK,
+            _ => CMD_JOG,
         };
         let target = if wants { pace } else { 0.0 };
         let rate = if target > self.cmd_speed { CMD_ACCEL } else { CMD_BRAKE };
@@ -2845,9 +2856,11 @@ impl Viewer {
         // With a little give either way (hysteresis), so tapping a key or easing off near a threshold does not
         // flick him between poses.
         let was = self.cmd_pose.0;
-        let legs = if self.cmd_speed > if was == Pose::Sprint { 2.7 } else { 3.2 } {
+        let legs = if self.cmd_speed > if was == Pose::Sprint { 3.7 } else { 4.0 } {
             Pose::Sprint
-        } else if self.cmd_speed > if matches!(was, Pose::Walk | Pose::Sprint) { 0.05 } else { 0.2 } {
+        } else if self.cmd_speed > if matches!(was, Pose::Run | Pose::Sprint) { 2.1 } else { 2.4 } {
+            Pose::Run
+        } else if self.cmd_speed > if matches!(was, Pose::Walk | Pose::Run | Pose::Sprint) { 0.05 } else { 0.2 } {
             Pose::Walk
         } else {
             Pose::Stand
@@ -2874,7 +2887,7 @@ impl Viewer {
             self.cmd_pose = (pose, was, scalia_render::pose::switch_start(self.cmd_pose.1, self.cmd_pose.2, pose, ts));
         }
         // Cadence from his real speed, integrated into the phase here: the planted foot keeps pace with the ground.
-        let steps = match pose { Pose::Sprint | Pose::Walk | Pose::CrouchWalk => self.cmd_speed / stride_m(pose), _ => 0.0 };
+        let steps = match pose { Pose::Sprint | Pose::Run | Pose::Walk | Pose::CrouchWalk => self.cmd_speed / stride_m(pose), _ => 0.0 };
         self.cmd_gait = (self.cmd_gait + (steps * dt) as f64).fract();
         // His gait phase (exactly what the shader is handed), for the footsteps.
         self.cmd_phase = if steps > 0.0 { self.cmd_gait as f32 } else { -1.0 };

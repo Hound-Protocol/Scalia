@@ -204,17 +204,21 @@ try {
   // line the rounds will take). Units are commanded through the tablet's map.
   const gun = { trigger: false, aim: false, x: 0, y: 0 };
   const gunSend = () => v.commander_weapon(gun.trigger, gun.aim, gun.x * dpr(), gun.y * dpr());
+  // Which buttons are down, from the event itself: a second button pressed while one is held comes only as a
+  // change in e.buttons (no pointerdown), so every pointer event reads it (1 left, 2 right).
+  const gunButtons = (e) => {
+    gun.aim = (e.buttons & 2) !== 0;
+    gun.trigger = gun.aim && (e.buttons & 1) !== 0;
+    gunSend();
+  };
   canvas.addEventListener('pointerdown', (e) => {
     if (scene === 'ground') {
       if (tabletUp) return;
       gun.x = e.offsetX; gun.y = e.offsetY;
       // Left fires only with the rifle up (right held); otherwise it selects what is under it.
-      if (e.button === 0 && gun.aim) gun.trigger = true;
-      else if (e.button === 0) { const msg = v.click(e.offsetX * dpr(), e.offsetY * dpr(), performance.now()); if (msg) flash(msg); return; }
-      else if (e.button === 2) gun.aim = true;
-      else return;
+      if (e.button === 0 && !(e.buttons & 2)) { const msg = v.click(e.offsetX * dpr(), e.offsetY * dpr(), performance.now()); if (msg) flash(msg); return; }
+      gunButtons(e);
       canvas.setPointerCapture(e.pointerId);
-      gunSend();
       return;
     }
     if (e.button === 2) {
@@ -235,7 +239,7 @@ try {
     canvas.classList.add('dragging');
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (scene === 'ground') { gun.x = e.offsetX; gun.y = e.offsetY; gunSend(); return; }
+    if (scene === 'ground') { gun.x = e.offsetX; gun.y = e.offsetY; if (!tabletUp) gunButtons(e); else gunSend(); return; }
     if (box) { box.x1 = e.offsetX; box.y1 = e.offsetY; showBox(); return; }
     if (!drag) return;
     const dx = e.clientX - drag[0], dy = e.clientY - drag[1];
@@ -245,9 +249,7 @@ try {
   });
   const endDrag = (e) => {
     if (scene === 'ground') {
-      if (e.button === 0 || e.type === 'pointercancel') gun.trigger = false;
-      if (e.button === 2 || e.type === 'pointercancel') { gun.aim = false; gun.trigger = false; }
-      gunSend();
+      if (e.type === 'pointercancel') { gun.aim = gun.trigger = false; gunSend(); } else gunButtons(e);
       return;
     }
     if (box) {
@@ -606,7 +608,7 @@ try {
       const crossed = (at) => (lastPhase < at && ph >= at) || (lastPhase > ph && (lastPhase < at || ph >= at));
       if (crossed(0.0) || crossed(0.5)) {
         // Through the same acoustics as the soldiers' steps: the room he is in rings, nearby walls answer.
-        const loud = (v.commander_gait() === 2 ? 0.8 : 0.35) * (0.85 + Math.random() * 0.3);
+        const loud = ([0, 0.35, 0.6, 0.8][v.commander_gait()] || 0.35) * (0.85 + Math.random() * 0.3);
         playSounds(v.commander_step(loud));
       }
     }
@@ -1682,6 +1684,8 @@ try {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     held.add(k);
+    // Alt walks: keep the browser from taking it for its menu.
+    if (k === 'alt') { e.preventDefault(); return; }
     if (k === 'k' && !e.repeat && !tabletUp) { toggleAssault(); return; }
     if (e.key === 'F1') { e.preventDefault(); const c = $('controls'); c.hidden = !c.hidden; store.set('scalia.controls', c.hidden ? '0' : '1'); return; }
     // The commander's rifle and stance (on foot, tablet down).
@@ -1717,7 +1721,7 @@ try {
     else if (k === 'p') flash(v.cycle_stance());
     else if (k === 'l') { capIndex = (capIndex + 1) % CAPS.length; store.set('scalia.cap', String(capIndex)); flash(`frame cap: ${CAPS[capIndex] || 'off'}`); }
   });
-  addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
+  addEventListener('keyup', (e) => { held.delete(e.key.toLowerCase()); if (e.key === 'Alt') e.preventDefault(); });
   addEventListener('blur', () => held.clear());
 
   // Performance panel: CPU and GPU bars against the frame budget, and a frame-time graph.
@@ -1855,6 +1859,7 @@ Click to copy and close.`;
         const mx = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
         const my = (held.has('w') || held.has('arrowup') ? 1 : 0) - (held.has('s') || held.has('arrowdown') ? 1 : 0);
         v.move_commander(mx, my, held.has('shift'));
+        v.commander_walk(held.has('alt'));
       }
       if (held.has(',') || held.has('<')) v.rotate(-1.5 * dt);
       if (held.has('.') || held.has('>')) v.rotate(1.5 * dt);
