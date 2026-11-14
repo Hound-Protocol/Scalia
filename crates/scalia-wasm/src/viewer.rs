@@ -194,6 +194,8 @@ pub struct Viewer {
     cmd_dir: (f32, f32),
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
+    /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms): for banking into turns.
+    turns: HashMap<u64, (f32, f32, f64)>,
     /// The commander's rifle and stance, worked by the player on foot.
     gun: Gun,
     /// The live killhouse assault, when one is running (replaces the static enemy posts).
@@ -367,6 +369,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_dir: (0.0, 1.0),
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
+        turns: HashMap::new(),
         gun: Gun::default(),
         assault: None,
         demo: false,
@@ -1457,7 +1460,7 @@ impl Viewer {
         }
         units.push((-1, "Actual".into(), 0, self.cmd.0, self.cmd.1, 1.2, false));
         let origin = self.origin;
-        let mut screen = |me: &mut Self, ax: f64, ay: f64| {
+        let screen = |me: &mut Self, ax: f64, ay: f64| {
             let rel = Vec3::new((ax - origin.0) as f32, (ay - origin.1) as f32, me.height_at(ax as f32, ay as f32));
             let d = rel - target;
             (0.5 + d.dot(r) / (view_h * aspect), 0.5 - d.dot(u) / view_h)
@@ -2740,7 +2743,8 @@ impl Viewer {
                 let (prev_pose, since) = (entry.1, entry.2);
                 let aiming = matches!(stance, Pose::StandAim | Pose::CoverAim);
                 let upper = if moving && pose == Pose::Walk && aiming { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 };
-                inst.extend_from_slice(&[rx, ry, z, body, heading, jitter, steps, pose as u32 as f32, prev_pose as u32 as f32, since, upper, 0.0]);
+                let lean = if moving { self.bank_for(1u64 << 40 | key as u64, heading, mps) } else { 0.0 };
+                inst.extend_from_slice(&[rx, ry, z, body + lean, heading, jitter, steps, pose as u32 as f32, prev_pose as u32 as f32, since, upper, 0.0]);
             }
         }
     }
@@ -2895,7 +2899,8 @@ impl Viewer {
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
         // The phase is always handed over (frozen when he stops), so legs blending out of a stride stay where they were.
-        let rec = [rx, ry, z, 9.0, self.cmd_heading, self.cmd_gait as f32, -1.0, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
+        let lean = self.bank_for(u64::MAX, self.cmd_heading, self.cmd_speed);
+        let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, -1.0, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
         let mut me = rec;
@@ -2952,6 +2957,23 @@ impl Viewer {
             }
             None => None,
         };
+    }
+
+    /// The packed bank (pose.rs `pack_bank`) for figure `key` facing `heading` at `speed` m/s: how hard he is
+    /// turning is followed from frame to frame (smoothed, so one jerk of the heading does not tip him).
+    fn bank_for(&mut self, key: u64, heading: f32, speed: f32) -> f32 {
+        let now = self.frame_ms;
+        let e = self.turns.entry(key).or_insert((heading, 0.0, now));
+        let dt = ((now - e.2) / 1000.0) as f32;
+        if dt > 0.0005 {
+            let mut d = heading - e.0;
+            while d > std::f32::consts::PI { d -= std::f32::consts::TAU; }
+            while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
+            let rate = if dt < 0.25 { d / dt } else { 0.0 };
+            e.1 += (rate - e.1) * (dt * 6.0).min(1.0);
+            *e = (heading, e.1, now);
+        }
+        scalia_render::pose::pack_bank(scalia_render::pose::bank(speed, e.1))
     }
 
     /// Where a point (absolute metres, `up` metres over the ground) is on screen (fractions from the top left).

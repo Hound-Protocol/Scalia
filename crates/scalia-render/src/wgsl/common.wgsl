@@ -655,10 +655,24 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
       if (u32(b.w) == 18u && layer < 1.0) { pp = reach_left(pp, reload_target(pp, phase), min(w, 1.0), 2.0); }
     }
     q = pose_vertex(v, part, pp);
+    // Banking into a turn (pose.rs `bank`): the whole figure tips over its feet towards the inside of the bend
+    // (+ to his left, about the forward axis).
+    let k = bank_of(a);
+    if (k != 0.0) {
+      let cb = cos(k);
+      let sb = sin(k);
+      q = vec3f(q.x * cb - q.z * sb, q.y, q.x * sb + q.z * cb);
+    }
   }
   let ch = cos(b.x);
   let sh = sin(b.x);
   return vec3f(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + a.xyz;
+}
+
+// Instance colour a.w, fractional part: the bank into a turn (pose.rs `pack_bank`; no fraction = upright).
+fn bank_of(a: vec4f) -> f32 {
+  let f = fract(a.w);
+  return select(0.0, (f - 0.5) / 0.49 * 0.26, f > 0.001);
 }
 
 // Instance colour a.w: palette index, +32 for a squad leader, +64 per selection level (1 stable, 2 hurt, 3 killed).

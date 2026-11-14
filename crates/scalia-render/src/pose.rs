@@ -1091,3 +1091,41 @@ mod switch_tests {
         assert_eq!(switch_start(0u8, 0.0, 2u8, 0.1), 0.1);
     }
 }
+
+/// How far a figure banks into a turn (radians, + to the left): the faster he goes and the harder he turns, the
+/// more, like a runner leaning into a bend. About 2 degrees walking, 6 jogging, 14 sprinting on a firm turn;
+/// never past BANK_MAX. `speed` m/s, `turn` rad/s (+ turning left).
+pub fn bank(speed: f32, turn: f32) -> f32 {
+    (speed * speed * turn * 0.006).clamp(-BANK_MAX, BANK_MAX)
+}
+/// The steepest bank (15 degrees).
+pub const BANK_MAX: f32 = 0.26;
+/// The bank packed into the fractional part of an instance's colour (common.wgsl `bank_of`): 0.5 upright,
+/// 0.01..0.99 across -BANK_MAX..BANK_MAX. A colour with no fraction (0) reads as upright.
+pub fn pack_bank(angle: f32) -> f32 {
+    0.5 + (angle / BANK_MAX).clamp(-1.0, 1.0) * 0.49
+}
+/// The inverse of `pack_bank` from a colour value (as the shader reads it).
+pub fn unpack_bank(colour: f32) -> f32 {
+    let f = colour - colour.floor();
+    if f > 0.001 { (f - 0.5) / 0.49 * BANK_MAX } else { 0.0 }
+}
+
+#[cfg(test)]
+mod bank_tests {
+    use super::*;
+    #[test]
+    fn banking_grows_with_pace_and_turn_and_survives_packing() {
+        let deg = |a: f32| a.to_degrees();
+        assert!(deg(bank(1.7, 2.0)) < 3.0, "walking: barely");
+        assert!((4.0..9.0).contains(&deg(bank(3.0, 2.0))), "jogging: a little ({})", deg(bank(3.0, 2.0)));
+        assert!(deg(bank(4.6, 2.0)) >= 12.0, "sprinting: clearly");
+        assert!(bank(4.6, -2.0) < 0.0 && bank(3.0, 0.0) == 0.0);
+        for a in [-0.26f32, -0.1, 0.0, 0.07, 0.26] {
+            let c = 6.0 + 32.0 + 64.0 + pack_bank(a);
+            assert!((unpack_bank(c) - a).abs() < 1e-3, "{a} -> {}", unpack_bank(c));
+            assert_eq!(c.floor(), 102.0, "the colour's whole part is untouched");
+        }
+        assert_eq!(unpack_bank(14.0), 0.0, "no bank given: upright");
+    }
+}

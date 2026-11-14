@@ -58,6 +58,8 @@ pub struct Assault {
     on_back: Vec<bool>,
     /// Per soldier: gait phase integrated from his cadence (strides), and the viewer time it was last advanced.
     gait: Vec<(f64, f64)>,
+    /// Per soldier: how hard he is turning (rad/s, smoothed), for banking into turns.
+    turn: Vec<f32>,
     pub sounds: Vec<Sound>,
     pub fx: Vec<Fx>,
     /// The leader's steps as they start, for the radio.
@@ -113,7 +115,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -129,6 +131,7 @@ impl Assault {
             self.on_back.push(false);
             self.falls.push(None);
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
+            self.turn.push(0.0);
         }
     }
 
@@ -293,6 +296,7 @@ impl Assault {
             }
             let walking = self.now < m.2;
             m.0 += ((if walking { raw } else { 0.0 }) - m.0) * 0.25;
+            let m_speed = m.0;
             let (mut pose, mut steps, mut upper, mut dir) = pose_of(s, walking, m.0, m.1);
             // Shot down or killed: he falls (stumbling back onto his back, or crumpling forward), once, before
             // he lies there.
@@ -338,7 +342,14 @@ impl Assault {
             let a = &mut self.anim[i];
             // Heading eases round to his facing (the battle turns him at 4 rad/s; this only smooths the steps).
             let want = heading_of(s.facing);
-            a.0 += wrap(want - a.0) * 0.35;
+            let turned = wrap(want - a.0) * 0.35;
+            a.0 += turned;
+            // How hard he is turning (rad/s, smoothed): he banks into it at pace.
+            let dt = ((self.now - self.gait[i].1) / 1000.0).clamp(0.0, 0.1) as f32;
+            if dt > 0.0005 {
+                self.turn[i] += (turned / dt - self.turn[i]) * (dt * 6.0).min(1.0);
+            }
+            let a = &mut self.anim[i];
             if a.1 != pose {
                 *a = (a.0, pose, a.1, ts);
             }
@@ -362,7 +373,8 @@ impl Assault {
             let leader = if self.battle.leader_of(s_squad as usize) == Some(i) { 32.0 } else { 0.0 };
             // A selected squad's men carry the selection tag (+64 per level) for the outline: stable, hurt, killed.
             let tag = if self.selected.contains(&s_squad) { 64.0 * select_level(readiness(s.alive(), s.down(), s.health)) } else { 0.0 };
-            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
+            let lean = if on_feet { scalia_render::pose::pack_bank(scalia_render::pose::bank(m_speed, self.turn[i])) } else { 0.0 };
+            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
         out
     }
