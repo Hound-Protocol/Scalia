@@ -657,7 +657,13 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
   return vec3f(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + a.xyz;
 }
 
-fn palette_index(c: f32, a: vec4f) -> u32 {
+// Instance colour a.w: palette index, +32 for a squad leader, +64 per selection level (1 stable, 2 hurt, 3 killed).
+fn select_level(a: vec4f) -> f32 {
+  return select(0.0, floor(a.w / 64.0), a.w >= 64.0);
+}
+fn palette_index(c: f32, a0: vec4f) -> u32 {
+  var a = a0;
+  a.w = a.w - 64.0 * select_level(a0);
   // A squad leader (instance colour flagged +32): his helmet is drawn as a red beret.
   if (a.w >= 32.0 && c >= 0.0 && (c - 32.0 * floor(c / 32.0)) == 26.0) { return 9u; }
   // Negative codes and swaying parts (grass) take the instance colour.

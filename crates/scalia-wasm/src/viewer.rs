@@ -96,6 +96,9 @@ const STEP_FIELD_MAX: usize = 2;
 const CMD_WALK: f32 = 1.7;
 const CMD_SPRINT: f32 = 4.6;
 /// The commander winds up (m/s²) and brakes.
+/// Selection tag on an instance's colour (the shader outlines tagged figures): +64 stable, +128 wounded or
+/// incapacitated, +192 killed.
+const SEL_STABLE: f32 = 64.0;
 const CMD_ACCEL: f32 = 4.2;
 const CMD_BRAKE: f32 = 6.0;
 
@@ -2257,7 +2260,8 @@ impl Viewer {
             } else {
                 (self.stance.get(&d.group.0).copied().unwrap_or(Pose::Stand), 0.0)
             };
-            let body = if self.selection.contains(&d.group.0) { 14.0 } else if self.chain.is_captain(d.group) { 4.0 } else if walking { 7.0 } else { 6.0 };
+            // Selected: outlined in his readiness colour (+64 per level: the shader's selection tag), not recoloured.
+            let body = if self.chain.is_captain(d.group) { 4.0 } else if walking { 7.0 } else { 6.0 } + if self.selection.contains(&d.group.0) { SEL_STABLE } else { 0.0 };
             // Pose changes are tracked per group and ripple through it: each soldier starts up to 0.4 s late.
             let entry = self.group_pose.entry(d.group.0).or_insert((pose, pose, -1000.0));
             if entry.0 != pose {
@@ -2418,7 +2422,9 @@ impl Viewer {
             let ts = ((t / 1000.0) % 86_400.0) as f32;
             let origin = self.origin;
             // Our squads keep their roster colours: selected, captain, or plain.
-            let colours: Vec<(u16, f32)> = (0..self.world.groups.len() as u32).map(|g| (g as u16, if self.selection.contains(&g) { 14.0 } else if self.chain.is_captain(GroupId(g)) { 4.0 } else { 6.0 })).collect();
+            let colours: Vec<(u16, f32)> = (0..self.world.groups.len() as u32).map(|g| (g as u16, if self.chain.is_captain(GroupId(g)) { 4.0 } else { 6.0 })).collect();
+            // Selected squads are outlined man by man in their readiness colour (the battle knows who is hurt).
+            a.selected = self.selection.iter().map(|&g| g as u16).collect();
             let mut place = |x: f64, y: f64| {
                 let z = self.height_at(x as f32, y as f32);
                 let (rx, ry) = ((x - origin.0) as f32, (y - origin.1) as f32);
@@ -2654,7 +2660,7 @@ impl Viewer {
                 if !self.on_screen(rx, ry, z, 3.0) {
                     continue;
                 }
-                let body = if self.selection.contains(&g) { 14.0 } else if self.chain.is_captain(GroupId(g)) { 4.0 } else if moving { 7.0 } else { 6.0 };
+                let body = if self.chain.is_captain(GroupId(g)) { 4.0 } else if moving { 7.0 } else { 6.0 } + if self.selection.contains(&g) { SEL_STABLE } else { 0.0 };
                 let entry = self.group_pose.entry(1_000_000 + key).or_insert((pose, pose, -1000.0));
                 if entry.0 != pose {
                     *entry = (pose, entry.0, ts);

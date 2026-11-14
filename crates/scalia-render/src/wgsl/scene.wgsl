@@ -15,7 +15,7 @@ fn vnoise(p: vec2f) -> f32 {
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var sm: texture_depth_2d;
 @group(0) @binding(2) var smp: sampler_comparison;
-struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32, @location(2) @interpolate(flat) fade: f32 };
+struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @interpolate(flat) ci: u32, @location(2) @interpolate(flat) fade: f32, @location(3) @interpolate(flat) sel: f32 };
 @vertex fn vs(@location(0) p: vec3f, @location(1) c: f32, @location(2) ia: vec4f, @location(3) ib: vec4f, @location(4) ic: vec4f) -> VO {
   let w = bend_point(animate(p, c, ia, ib, ic, u.time.x, true), u.bend, u.bend2.x);
   var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
@@ -24,6 +24,8 @@ struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @
   if (c >= 0.0 && floor(c / 32.0) == 15.0) { o.ci = o.ci | 256u; }
   // Instance c.w: how far this draw has dissolved (0 solid, 1 gone); used to cross-fade terrain detail levels.
   o.fade = ic.w;
+  // Selected figures are tagged in the normal target's alpha (1 none; 0.75, 0.5, 0.25 by level) for the outline.
+  o.sel = select_level(ia);
   // A fading layer is nudged towards the camera so it lies over the solid one instead of fighting it for depth.
   if (ic.w > 0.0) { o.pos.z = o.pos.z - 0.0005 * o.pos.w; }
   return o;
@@ -68,7 +70,7 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
   var o: FO;
   if ((i.ci & 256u) != 0u) {
     o.c = vec4f(min(u.pal[i.ci & 31u].rgb * 2.4, vec3f(1.0)), 1.0);
-    o.n = vec4f(n * 0.5 + 0.5, 1.0);
+    o.n = vec4f(n * 0.5 + 0.5, 1.0 - 0.25 * i.sel);
     return o;
   }
   // Point lights: a warm pool around each muzzle flash or blast, falling off to nothing at its radius.
@@ -84,6 +86,6 @@ struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
     }
   }
   o.c = vec4f(u.pal[i.ci & 31u].rgb * (u.ambient.rgb + u.light_col.rgb * q + pl), 1.0);
-  o.n = vec4f(n * 0.5 + 0.5, 1.0);
+  o.n = vec4f(n * 0.5 + 0.5, 1.0 - 0.25 * i.sel);
   return o;
 }

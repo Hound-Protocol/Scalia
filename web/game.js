@@ -798,7 +798,12 @@ try {
     box.hidden = !on;
     if (!on) return;
     const w = canvas.clientWidth, h = canvas.clientHeight, seen = new Set();
-    for (const m of JSON.parse(v.unit_marks())) {
+    const marks = JSON.parse(v.unit_marks());
+    let glow = box.querySelector('svg');
+    if (!glow) { glow = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); glow.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible'; box.prepend(glow); }
+    const gh = marks.filter((m) => m.sel && m.id >= 0).map((m) => glowAt(m, w, h, true)).join('');
+    if (glow.dataset.html !== gh) { glow.dataset.html = gh; glow.innerHTML = GLOW_DEFS + gh; }
+    for (const m of marks) {
       let el = fieldEls.get(m.id);
       if (!el) { el = document.createElement('i'); el.textContent = `${m.cs} ${String(m.n).padStart(2, '0')}`; if (m.you) el.className = 'you'; box.appendChild(el); fieldEls.set(m.id, el); }
       const up = m.r * h + 12;
@@ -920,6 +925,14 @@ try {
   // squad's readiness in words when it is selected, hovered or has anyone hurt. The selected squad's men are
   // ringed one by one (green; a fainter ring under the mouse) instead of boxing the whole squad.
   const SVGNS = 'http://www.w3.org/2000/svg';
+  // A faint glow on the ground under each man of a selected squad (the outline itself is drawn by the renderer),
+  // tinted by his state: green stable, yellow hurt, red killed. Fainter still under the mouse.
+  const GLOW_DEFS = '<defs>' + ['g1', 'g2', 'g3'].map((id, k) => `<radialGradient id="${id}"><stop offset="0" stop-color="${['#4ae06b', '#f2cc33', '#eb4033'][k]}" stop-opacity="0.55"/><stop offset="1" stop-color="${['#4ae06b', '#f2cc33', '#eb4033'][k]}" stop-opacity="0"/></radialGradient>`).join('') + '</defs>';
+  const glowAt = (m, w, h, on) => {
+    const rx = Math.max(7, 0.85 * m.u * h), ry = rx * 0.55;
+    const pts = m.men.length ? m.men : [[m.x, m.y, 0, 100]];
+    return pts.map((x) => `<ellipse fill="url(#g${x[2] === 0 ? 1 : x[2] === 3 ? 3 : 2})" opacity="${on ? 1 : 0.45}" cx="${(x[0] * w).toFixed(1)}" cy="${(x[1] * h).toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"/>`).join('');
+  };
   const drawMapMarks = () => {
     if (!(tabletUp && tabletShown && page === 'map')) return;
     const box = $('mapMarks'), w = mapCanvas.clientWidth, h = mapCanvas.clientHeight;
@@ -941,11 +954,7 @@ try {
     let ringHtml = '';
     for (const m of order) {
       const on = m.sel || (m.you && commanderPicked), hov = hoverId === m.id;
-      if (on || hov) {
-        const rr = Math.max(5, 0.6 * m.u * h);
-        const pts = m.men.length ? m.men : [[m.x, m.y, 0, 100]];
-        for (const x of pts) ringHtml += `<circle class="${on ? 'sel' : 'hov'} r${x[2]}" cx="${(x[0] * w).toFixed(1)}" cy="${(x[1] * h).toFixed(1)}" r="${rr.toFixed(1)}"/>`;
-      }
+      if (on || hov) ringHtml += glowAt(m, w, h, on);
       let el = markEls.get(m.id);
       if (!el) {
         el = document.createElement('div'); el.className = 'utag' + (m.you ? ' you' : '');
@@ -970,7 +979,7 @@ try {
       el.style.transform = `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px) translate(-50%, -100%)`;
       seen.add(m.id);
     }
-    if (rings.dataset.html !== ringHtml) { rings.dataset.html = ringHtml; rings.innerHTML = ringHtml; }
+    if (rings.dataset.html !== ringHtml) { rings.dataset.html = ringHtml; rings.innerHTML = GLOW_DEFS + ringHtml; }
     for (const [id, el] of markEls) if (!seen.has(id)) { el.remove(); markEls.delete(id); }
     drawUnitPanel(JSON.parse(v.roster()), marks);
   };

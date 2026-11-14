@@ -63,6 +63,8 @@ pub struct Assault {
     /// The leader's steps as they start, for the radio.
     pub steps: Vec<(usize, &'static str)>,
     pub over: bool,
+    /// Squads selected by the player: their men are outlined.
+    pub selected: Vec<u16>,
     /// The AI lab's event feed: every leader step and shout, stamped with battle time and squad.
     pub lab_log: Vec<String>,
     /// A training assault on its own (the K demo): it ends when one side is gone. The testing ground's
@@ -111,7 +113,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -356,7 +358,9 @@ impl Assault {
             };
             // The squad's leader is flagged (+32 on the colour) so the shader gives him his red beret.
             let leader = if self.battle.leader_of(s_squad as usize) == Some(i) { 32.0 } else { 0.0 };
-            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
+            // A selected squad's men carry the selection tag (+64 per level) for the outline: stable, hurt, killed.
+            let tag = if self.selected.contains(&s_squad) { 64.0 * select_level(readiness(s.alive(), s.down(), s.health)) } else { 0.0 };
+            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
         out
     }
@@ -618,6 +622,16 @@ mod tests {
 
 /// A soldier's readiness for the squad tags: 0 stable, 1 wounded (hit but on his feet), 2 incapacitated (down),
 /// 3 deceased.
+/// The selection outline's level for a readiness: 1 green (stable), 2 yellow (wounded or incapacitated), 3 red
+/// (killed).
+pub fn select_level(readiness: u8) -> f32 {
+    match readiness {
+        0 => 1.0,
+        1 | 2 => 2.0,
+        _ => 3.0,
+    }
+}
+
 pub fn readiness(alive: bool, down: bool, health: i32) -> u8 {
     match (alive, down) {
         (false, _) => 3,

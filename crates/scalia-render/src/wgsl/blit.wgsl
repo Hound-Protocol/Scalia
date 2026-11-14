@@ -11,6 +11,8 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 }
 fn ld(p: vec2i) -> f32 { return textureLoad(dep, p, 0); }
 fn ln(p: vec2i) -> vec3f { return textureLoad(nrm, p, 0).xyz * 2.0 - 1.0; }
+// Selection level drawn at a pixel (0 none, 1..3): the scene writes 1 - 0.25 level into the normal's alpha.
+fn tag(p: vec2i) -> i32 { return i32(round((1.0 - textureLoad(nrm, p, 0).a) * 4.0)); }
 // Haze towards the fog colour with distance behind the focus, then a soft vignette.
 // Stars for the void around planets: sparse hashed points on the internal pixel grid, a few brighter and coloured.
 fn star(p: vec2i) -> vec3f {
@@ -39,6 +41,17 @@ fn grade(c: vec3f, d: f32, uv: vec2f) -> vec4f {
   let p = clamp(vec2i(floor(i.uv * b.size + b.off)) + vec2i(1, 1), vec2i(1, 1), full - vec2i(2, 2));
   var c = textureLoad(col, p, 0).rgb;
   let d = ld(p);
+  // Selected figures: a one-pixel outline just outside them, in their readiness colour (green stable, yellow hurt,
+  // red killed). Tagged in the normal target's alpha.
+  if (tag(p) == 0) {
+    var k = 0;
+    let ring = array<vec2i, 4>(vec2i(1, 0), vec2i(-1, 0), vec2i(0, 1), vec2i(0, -1));
+    for (var j = 0; j < 4; j++) { k = max(k, tag(p + ring[j])); }
+    if (k > 0) {
+      let sel = array<vec3f, 3>(vec3f(0.29, 0.88, 0.42), vec3f(0.95, 0.80, 0.2), vec3f(0.92, 0.25, 0.2));
+      return vec4f(sel[k - 1], 1.0);
+    }
+  }
   if (b.outline < 0.5 || d >= 1.0) { return grade(c, d, i.uv); }
   let n = ln(p);
   var silhouette = false;
