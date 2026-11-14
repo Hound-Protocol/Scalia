@@ -119,7 +119,18 @@ export class AudioEngine {
     }
     for (let k = chain.length - 1; k >= 0; k--) { chain[k].connect(last); last = chain[k]; }
     head = last;
-    this.mix = c.createGain(); this.mix.connect(head);
+    // The world: everything goes through a low-pass the shock of close indoor fire can close for a moment (the
+    // ears stunned), and non-gunfire through a bus that gunfire ducks (the bang pushes everything else away).
+    this.muffle = c.createBiquadFilter(); this.muffle.type = 'lowpass'; this.muffle.frequency.value = 22000; this.muffle.Q.value = 0.5;
+    this.muffle.connect(head);
+    this.mix = c.createGain(); this.mix.connect(this.muffle);
+    this.world = c.createGain(); this.world.connect(this.mix);
+    // Room heat: sustained fire indoors keeps the room ringing on top of itself (rises per shot, fades in ~1.5 s).
+    this.heat = 0; this.heatAt = 0;
+    // Saturation curve for gunfire close by indoors: the overloaded crack of a shot in a hallway (bodycam).
+    const n = 2048, curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = Math.tanh(3.2 * x) / Math.tanh(3.2); }
+    this.crunch = curve;
     // Reverb buses: each sound is sent to the space it is made in (its own sends, per voice).
     const bus = (ir) => {
       const input = c.createGain();
@@ -144,7 +155,8 @@ export class AudioEngine {
     // Ringing ears: close gunfire indoors leaves a high whine that fades over a few seconds.
     const ring = c.createOscillator(); ring.type = 'sine'; ring.frequency.value = 6800;
     this.ringGain = c.createGain(); this.ringGain.gain.value = 0;
-    ring.connect(this.ringGain).connect(this.mix); ring.start();
+    // The whine is in the head, not the room: after the muffle.
+    ring.connect(this.ringGain).connect(head); ring.start();
     this.ring = 0; this.ringAt = 0;
     this.applyEnv(true);
     return c;
@@ -218,13 +230,17 @@ export class AudioEngine {
       try { worst.src.stop(); } catch (_) {}
       worst.done = true;
     }
-    // Gunfire inside: it fills the room. Louder and heavier in the body (the walls hold the low end in), the
-    // room rings hard, a slap comes straight back off the walls, and close by it leaves the ears ringing.
+    // Gunfire inside (Battlefield 3 / bodycam): it overwhelms. Close shots crunch (saturated), the room rings
+    // hard and keeps ringing as the fire goes on, the walls slap the crack straight back, everything else is
+    // shoved aside for a moment, and close by the ears ring and dull.
     const gun = o.kind === 'shot' || o.kind === 'blast';
     const inside = gun ? enc : 0;
+    const close = Math.max(0, Math.min(1, 1 - o.dist / 30));
     const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.rate || 1;
-    const g = c.createGain(); g.gain.value = o.gain * (1 + 0.7 * inside);
-    const body = c.createBiquadFilter(); body.type = 'lowshelf'; body.frequency.value = 200; body.gain.value = 7 * inside;
+    const g = c.createGain(); g.gain.value = o.gain * (1 + 0.6 * inside);
+    const body = c.createWaveShaper();
+    const drive = inside * close;
+    if (drive > 0.05) { body.curve = this.crunch; body.oversample = '4x'; }
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
     // Distance thins the low end too: what carries is the crack, not the boom.
     const hpf = c.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = Math.min(450, 40 + o.dist * 3); hpf.Q.value = 0.6;
@@ -239,13 +255,21 @@ export class AudioEngine {
     // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
     const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5;
     const out = c.createGain();
-    src.connect(g).connect(body).connect(out).connect(hpf).connect(lp).connect(p);
-    p.connect(dry).connect(this.mix);
+    // Driven into the curve by how close and how enclosed; brought back down after it.
+    const pre = c.createGain(); pre.gain.value = 1 + 2.5 * drive;
+    const post = c.createGain(); post.gain.value = 1 / (1 + 1.2 * drive);
+    src.connect(g).connect(pre).connect(body).connect(post).connect(out).connect(hpf).connect(lp).connect(p);
+    p.connect(dry).connect(gun ? this.mix : this.world);
     // A room it is made in rings: small or large by size, or a corridor's flutter. Open ground: no ring.
     const roomy = Math.max(0, Math.min(1, (9 - size) / 5));
     const sends = [[this.rev.small, enc * roomy * (1 - cor)], [this.rev.large, enc * (1 - roomy) * (1 - cor)], [this.rev.corridor, cor]];
+    if (inside > 0) {
+      const now = c.currentTime;
+      this.heat = Math.min(1.5, this.heat * Math.exp(-(now - this.heatAt) / 1.5) + 0.25 * inside);
+      this.heatAt = now;
+    }
     for (const [busIn, w] of sends) {
-      const amount = w * o.room * (1 + 1.6 * inside);
+      const amount = w * o.room * (1 + 2.6 * inside) * (1 + (inside > 0 ? this.heat : 0));
       if (amount < 0.01) continue;
       const send = c.createGain(); send.gain.value = amount;
       p.connect(send).connect(busIn);
@@ -271,21 +295,34 @@ export class AudioEngine {
     if (inside > 0.3) {
       const t0 = c.currentTime + Math.max(0, o.delay || 0);
       // The slap: the nearest walls throw the crack straight back (a few, close together, from both sides).
-      for (const [dt, gk, pan] of [[0.007, 0.5, -0.6], [0.013, 0.4, 0.6], [0.021, 0.3, -0.3]]) {
+      for (const [dt, gk, pan] of [[0.007, 0.7, -0.6], [0.013, 0.55, 0.6], [0.021, 0.45, -0.3], [0.034, 0.3, 0.2]]) {
         const d = c.createDelay(0.1); d.delayTime.value = dt * (0.6 + size / 20);
         const eg = c.createGain(); eg.gain.value = gk * inside;
         const ep = c.createStereoPanner(); ep.pan.value = pan;
         lp.connect(d).connect(eg).connect(ep).connect(this.mix);
       }
-      // Ringing ears from close shots: builds up with each one, never past a faint whine, fades over ~4 s.
+      // The bang shoves everything else aside for a moment (footsteps, the room's own noises).
+      const wg = this.world.gain;
+      wg.cancelScheduledValues(t0); wg.setValueAtTime(wg.value, t0);
+      wg.linearRampToValueAtTime(Math.max(0.25, 1 - 0.7 * inside * (0.4 + close)), t0 + 0.015);
+      wg.setTargetAtTime(1, t0 + 0.08, 0.35);
+      // Ringing, dulled ears from close shots: build up with each one, the whine fades over ~5 s, the world
+      // comes back from muffled over a second or so after a burst.
       if (o.dist < 25 && this.ringGain) {
         const now = c.currentTime;
-        this.ring = Math.min(0.025, this.ring * Math.exp(-(now - this.ringAt) / 1.6) + 0.004 * inside);
+        this.ring = Math.min(0.035, this.ring * Math.exp(-(now - this.ringAt) / 2.5) + 0.007 * inside);
         this.ringAt = now;
         const rg = this.ringGain.gain;
         rg.cancelScheduledValues(t0); rg.setValueAtTime(rg.value, t0);
         rg.linearRampToValueAtTime(this.ring, t0 + 0.05);
-        rg.setTargetAtTime(0, t0 + 0.4, 1.6);
+        rg.setTargetAtTime(0, t0 + 0.5, 2.5);
+        const stun = this.ring / 0.035;
+        if (stun > 0.3) {
+          const mf = this.muffle.frequency;
+          mf.cancelScheduledValues(t0); mf.setValueAtTime(mf.value, t0);
+          mf.linearRampToValueAtTime(Math.max(1800, 22000 - 19000 * stun), t0 + 0.03);
+          mf.setTargetAtTime(22000, t0 + 0.25, 0.6);
+        }
       }
     }
     const v = { src, pri, gain: o.gain, out, done: false };
