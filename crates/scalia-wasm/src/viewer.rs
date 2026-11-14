@@ -1021,8 +1021,9 @@ impl Viewer {
             return self.assign_task(c, kind, (x, y), now_ms);
         }
         let groups = if self.selection.is_empty() { self.selected.into_iter().collect::<Vec<_>>() } else { self.selection.clone() };
-        // Clearing the building: the squad joins the field and its leader plans the assault.
-        if action == 21 {
+        // Into a building (move into or clear it): the squad joins the field and its leader plans the entry:
+        // approach through dead ground, stack, entry, room by room. Nobody walks into a building cold.
+        if action == 21 || action == 20 {
             let spot = grid(x, y);
             for &g in &groups {
                 self.field_join(g);
@@ -1032,7 +1033,7 @@ impl Viewer {
                 self.arrive_report.insert(g, (spot.clone(), 2));
             }
             self.order_mode = None;
-            return format!("{} clearing the building", groups.len());
+            return format!("{} {} the building", groups.len(), if action == 20 { "moving into" } else { "clearing" });
         }
         if action == 22 {
             self.order_mode = Some(scalia_ai::leader::Mode::Garrison);

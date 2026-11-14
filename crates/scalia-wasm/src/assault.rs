@@ -460,8 +460,9 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
         (Stance::Stand, true) => {
             // The legs go by how fast he really is, not the gait he is heading for.
             let pose = if speed >= SPRINT_FROM && s.gait == Gait::Sprint { Pose::Sprint } else if speed >= RUN_FROM { Pose::Run } else { Pose::Walk };
-            // Sprinting the rifle is across the chest: no aim layer.
-            let upper = if pose == Pose::Sprint { None } else { upper };
+            // Running he carries the rifle and runs (arms working); he only keeps it shouldered on the run with
+            // an enemy in his sights. Sprinting, it is across the chest.
+            let upper = if pose == Pose::Sprint || pose == Pose::Run && s.target.is_none() && !reload { None } else { upper };
             (pose, speed / stride_m_dir(pose, dir), upper, dir)
         }
         (Stance::Stand, false) => (if reload { Pose::Reload } else if aiming { Pose::StandAim } else { Pose::Stand }, if reload { 0.4 } else { 0.0 }, None, 0.0),
