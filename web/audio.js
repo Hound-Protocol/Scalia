@@ -149,7 +149,9 @@ export class AudioEngine {
     if (b && b !== 'loading') return b;
     if (!b && this.ctx) {
       this.buffers.set(url, 'loading');
-      fetch(url).then((r) => r.arrayBuffer()).then((a) => this.ctx.decodeAudioData(a)).then((d) => this.buffers.set(url, d)).catch(() => this.buffers.delete(url));
+      // From the preloaded bytes when the page has them (a copy: decoding takes the buffer over).
+      const get = this.fetchBytes || ((u) => fetch(u).then((r) => r.arrayBuffer()));
+      get(url).then((a) => this.ctx.decodeAudioData(a.slice(0))).then((d) => this.buffers.set(url, d)).catch(() => this.buffers.delete(url));
     }
     return null;
   }

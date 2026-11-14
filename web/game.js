@@ -3,6 +3,7 @@ import init, * as wasm from './pkg/scalia_wasm.js';
 import { AudioEngine } from './audio.js';
 import { installConsole } from './console.js';
 import { createErrors } from './errors.js';
+import { preload, fileBytes } from './preload.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
@@ -100,8 +101,27 @@ const music = (() => {
   return m;
 })();
 
+// Everything short is fetched now, while the prototype notice is up: the engine and every sound effect (music and
+// wind stream on their own). The notice shows the progress and lets you in once it is all here.
+const SOUNDS = ['./sfx/context-menu.mp3', './sfx/dive-whoosh.mp3', './sfx/m4-shot.mp3', './sfx/map-zoom.mp3', './sfx/pda-close.mp3',
+  './sfx/pda-leave.mp3', './sfx/pda-open.mp3', './sfx/pda-tap.mp3', './sfx/radio-key.mp3', './sfx/steps-concrete-1.mp3',
+  './sfx/steps-concrete-2.mp3', './sfx/steps-concrete-3.mp3', './sfx/steps-grass.mp3', './sfx/unit-select.mp3',
+  './sfx/update-alert.mp3', './sfx/urgent-alert.mp3', './sfx/walkie-down.mp3', './sfx/walkie-ring.mp3', './sfx/walkie-up.mp3'];
+const BUILD = new URL(import.meta.url).searchParams.get('v');
+const WASM_URL = new URL(`./pkg/scalia_wasm_bg.wasm${BUILD ? '?v=' + BUILD : ''}`, import.meta.url).href;
+const loaded = (() => {
+  const bar = $('protoLoad');
+  const show = (done, total, files, n) => {
+    if (!bar) return;
+    const pct = files >= n ? 100 : Math.min(99, total ? Math.floor(100 * done / total) : Math.floor(100 * files / n));
+    bar.style.setProperty('--p', pct + '%');
+    bar.dataset.text = files >= n ? 'Ready' : `Loading ${pct}%  ·  ${(done / 1048576).toFixed(1)} MB`;
+  };
+  return preload([WASM_URL, ...SOUNDS], show);
+})();
 try {
-  await init();
+  const wasmBytes = (await loaded)[0];
+  await init(wasmBytes ? { module_or_path: wasmBytes } : undefined);
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser.');
 
   // Canvas in device pixels; the viewer renders at 1/scale of that and scales up with sharp pixels.
@@ -390,7 +410,7 @@ try {
   const sfx = (src, vol) => {
     const el = new Audio(src); el.preload = 'auto'; el.volume = vol;
     let buf = null, loading = null;
-    const load = (c) => loading || (loading = fetch(src).then((r) => r.arrayBuffer()).then((b) => c.decodeAudioData(b)).then((d) => { buf = d; }).catch(() => { loading = null; }));
+    const load = (c) => loading || (loading = fileBytes(src).then((b) => c.decodeAudioData(b.slice(0))).then((d) => { buf = d; }).catch(() => { loading = null; }));
     ui.all.push(load);
     return () => {
       const c = uiCtx();
@@ -1518,8 +1538,9 @@ try {
   // Battle sounds go through the Pack Engine audio graph (audio.js): the acoustics place every shot, blast and
   // footfall (walls, distance, zoom, the listener's space, headphones 3D), the graph plays it.
   const audio = new AudioEngine();
+  audio.fetchBytes = fileBytes;
   const SHOT = './sfx/m4-shot.mp3', STEPS = './sfx/steps-grass.mp3';
-  const STEPS_CONCRETE = [1, 2, 3].map((k) => `./sfx/steps-concrete-${k}.mp3`);
+  const STEPS_CONCRETE = ['./sfx/steps-concrete-1.mp3', './sfx/steps-concrete-2.mp3', './sfx/steps-concrete-3.mp3'];
   const fireGraph = () => { const c = audio.ensure(); if (c) { audio.buffer(SHOT); audio.buffer(STEPS); STEPS_CONCRETE.forEach((u) => audio.buffer(u)); } return c; };
   let envAt = 0;
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
@@ -1808,12 +1829,18 @@ const UPDATE = '__UPDATE__';
   const box = document.getElementById('proto');
   if (!box) return;
   document.getElementById('protoVer').textContent = UPDATE.startsWith('__') ? 'Local build' : UPDATE;
-  const go = () => { box.hidden = true; removeEventListener('keydown', key, true); music.start(); ambience(); };
+  let ready = false;
+  const goBtn = document.getElementById('protoGo');
+  goBtn.disabled = true;
+  loaded.then(() => { ready = true; goBtn.disabled = false; goBtn.focus(); });
+  const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); music.start(); ambience(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
   const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };
   document.getElementById('protoGo').addEventListener('click', go);
   addEventListener('keydown', key, true);
 })();
+// Repeat visits load from the offline cache (sw.js); deployed builds only, never a local one.
+if (BUILD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 (function watchForUpdates() {
   const mine = new URL(import.meta.url).searchParams.get('v');
   if (!mine) return; // local build
