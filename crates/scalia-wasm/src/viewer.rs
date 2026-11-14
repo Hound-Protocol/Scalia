@@ -1270,6 +1270,10 @@ impl Viewer {
     }
     /// The commander's trigger and aim (held or not), and where the mouse is (device px).
     pub fn commander_weapon(&mut self, trigger: bool, aim: bool, px: f64, py: f64) {
+        // A click shorter than a frame still fires a round.
+        if trigger && !self.gun.trigger && !self.gun.slung {
+            self.gun.pull = true;
+        }
         self.gun.trigger = trigger && !self.gun.slung;
         self.gun.aim = aim && !self.gun.slung;
         self.gun.at_px = Some((px, py));
@@ -2892,9 +2896,14 @@ impl Viewer {
             let i = commander_soldier(&mut a, at);
             a.battle.player_set(i, at, ((-h.sin() * 1000.0) as i64, (h.cos() * 1000.0) as i64), stance, pace);
             if let Some((tx, ty)) = toward {
-                if self.gun.trigger && ready && pose != Pose::Sprint {
-                    if let scalia_ai::battle::PlayerShot::Fired { .. } = a.battle.player_fire(i, ((tx * 1000.0) as i64, (ty * 1000.0) as i64), self.gun.aim) {
-                        self.gun.shots += 1;
+                if (self.gun.trigger || self.gun.pull) && (ready || self.gun.pull) && !self.gun.slung && pose != Pose::Sprint {
+                    match a.battle.player_fire(i, ((tx * 1000.0) as i64, (ty * 1000.0) as i64), self.gun.aim) {
+                        scalia_ai::battle::PlayerShot::Fired { .. } => {
+                            self.gun.shots += 1;
+                            self.gun.pull = false;
+                        }
+                        scalia_ai::battle::PlayerShot::Cycling => {}
+                        _ => self.gun.pull = false,
                     }
                 }
                 let l = (tx * tx + ty * ty).sqrt().max(1e-3);
@@ -3890,6 +3899,8 @@ fn you_marker(at: [f32; 3], pix: f32) -> MeshBuilder {
 #[derive(Default)]
 struct Gun {
     trigger: bool,
+    /// The trigger was pressed since the last round (fires once even if released before the next frame).
+    pull: bool,
     aim: bool,
     at_px: Option<(f64, f64)>,
     stance: u8,
