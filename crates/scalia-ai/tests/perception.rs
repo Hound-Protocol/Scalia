@@ -80,7 +80,8 @@ fn gunfire_is_heard_by_friends_nearby() {
     // Squad 0 fights squad 1; squad 2 (team 0) stands 40 m away facing elsewhere and hears it.
     let mut b = Battle::new(field(), vec![man(0, 0, 50_000, 50_000, NORTH), man(1, 1, 50_000, 70_000, SOUTH), man(0, 2, 10_000, 50_000, SOUTH)], 3);
     b.soldiers[1].passive = true;
-    for _ in 0..20 {
+    // (A moment to spot him and get a sight picture before the first round.)
+    for _ in 0..60 {
         b.step(50);
     }
     assert!(b.contact(2, 1).is_some() || b.heard(2).is_some(), "the shooting is heard");

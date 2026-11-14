@@ -121,6 +121,12 @@ impl Stance {
 }
 
 pub const MAG: i32 = 30;
+/// Spare magazines carried (seven 30-round M4 magazines in all, one in the rifle).
+pub const MAGS: i32 = 6;
+/// Below this many rounds, a man with nothing to shoot at tops up with a fresh magazine.
+const TOP_UP: i32 = 12;
+/// From this suppression on he mostly keeps his head down, firing only now and then.
+const PINNED: i32 = 600;
 pub const DAMAGE: i32 = 35;
 /// Marksmanship (‰): the chance a round hits a man standing still in the open at 10 m or less, the shooter
 /// steady and calm. A rookie hits half; no soldier, however seasoned, ever does better than 85 %. Range,
@@ -247,13 +253,15 @@ pub struct Soldier {
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
+    /// The enemy he has his sights on (a new one takes a moment to get a sight picture on).
+    sighted: Option<usize>,
     /// Marksmanship (‰, SKILL_ROOKIE to SKILL_MAX): grows with veterancy.
     pub skill: i32,
 }
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -968,6 +976,67 @@ impl Battle {
         base * t.stance.size() / 1_000 * moving / 1_000 * target_moving / 1_000 * calm / 1_000 * shown / 1_000
     }
 
+    /// A fresh magazine in, if he has one (a little slower or quicker every time; fumbled under fire).
+    fn reload(&mut self, i: usize) {
+        if self.soldiers[i].mags <= 0 || self.soldiers[i].reloading_ms > 0 {
+            return;
+        }
+        self.rolls += 1;
+        let r = self.roll(i, self.rolls) as i32;
+        let s = &mut self.soldiers[i];
+        s.mags -= 1;
+        s.reloading_ms = (RELOAD_MS - 300 + r * 700 / 1_000) * (1_000 + s.suppression / 2) / 1_000;
+        s.burst_left = 0;
+        self.log.push(Event::Reload { soldier: i });
+        self.log.push(Event::Bark { soldier: i, bark: Bark::Reloading });
+    }
+
+    /// Nothing in his sights: top up the magazine in the lull, or (rifle up, calm enough, not on the move)
+    /// put covering fire where the squad last saw an enemy, to keep his head down.
+    fn lull(&mut self, i: usize, dt_ms: i32) {
+        let s = &self.soldiers[i];
+        if s.ammo < TOP_UP && s.mags > 0 && s.ammo < MAG {
+            self.reload(i);
+            return;
+        }
+        self.soldiers[i].cooldown_ms = self.soldiers[i].cooldown_ms.max(-dt_ms);
+        let s = &self.soldiers[i];
+        if !s.aim || s.moving || s.cooldown_ms > 0 || s.suppression >= PINNED / 2 || s.ammo <= TOP_UP {
+            return;
+        }
+        let now = self.time_ms;
+        let Some(c) = self.contacts[s.squad as usize].iter().filter(|c| now - c.seen_ms <= 4_000 && c.confidence >= CONF_HEARD && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down()).filter(|c| near(c.pos, s.pos, BURST_MM) && !near(c.pos, s.pos, 3_000)).max_by_key(|c| (c.seen_ms, c.confidence)).cloned() else { return };
+        // Only toward where he can put rounds (a clear line to the spot), and not every lull.
+        let aim_at = Point { x: c.pos.0, y: c.pos.1, z: 1_200 };
+        if !self.sight.clear(s.eye(), aim_at) {
+            return;
+        }
+        self.rolls += 1;
+        if self.roll(i, self.rolls) < 450 {
+            self.soldiers[i].cooldown_ms = 600;
+            return;
+        }
+        self.rolls += 1;
+        let n = 2 + self.roll(i, self.rolls) % 3;
+        let from = self.soldiers[i].eye();
+        for k in 0..n.min(self.soldiers[i].ammo as i64) {
+            let at_ms = self.time_ms + k * CYCLIC_MS as i64;
+            let r = mix64(self.seed ^ (at_ms as u64) << 9 ^ i as u64);
+            let to = Point { x: c.pos.0 + (r % 3_001) as i64 - 1_500, y: c.pos.1 + ((r >> 16) % 3_001) as i64 - 1_500, z: 900 };
+            self.soldiers[i].ammo -= 1;
+            self.log.push(Event::Shot { shooter: i, target: c.enemy, from, to, hit: false, at_ms });
+        }
+        // Rounds cracking in around him: he feels it if he is still there.
+        let e = &mut self.soldiers[c.enemy];
+        if near(e.pos, c.pos, 4_000) {
+            e.suppression = (e.suppression + SUPPRESS_MISS * n as i32 / 2).min(1_000);
+        }
+        let (tsq, spos) = (self.soldiers[c.enemy].squad as usize, self.soldiers[i].pos);
+        self.report(tsq, i, spos, CONF_SHOT_AT);
+        self.rolls += 1;
+        self.soldiers[i].cooldown_ms = 1_200 + (self.roll(i, self.rolls) * 1_600 / 1_000) as i32;
+    }
+
     fn roll(&self, who: usize, n: u64) -> i64 {
         (mix64(self.seed ^ (self.time_ms as u64).wrapping_mul(0x9e37_79b9) ^ (who as u64) << 40 ^ n) % 1_000) as i64
     }
@@ -1025,6 +1094,8 @@ impl Battle {
                 self.soldiers[i].reloading_ms -= dt_ms;
                 if self.soldiers[i].reloading_ms <= 0 {
                     self.soldiers[i].ammo = MAG;
+                    // A fresh magazine, then a moment to get back on the sights.
+                    self.soldiers[i].sighted = None;
                 }
                 continue;
             }
@@ -1061,27 +1132,48 @@ impl Battle {
             }
             let Some(j) = self.soldiers[i].target else {
                 self.soldiers[i].burst_left = 0;
+                self.soldiers[i].sighted = None;
+                self.lull(i, dt_ms);
                 continue;
             };
+            // A new target: he needs a sight picture before the first round (longer far off, longer for a
+            // rookie, a little different every time).
+            if self.soldiers[i].sighted != Some(j) {
+                self.soldiers[i].sighted = Some(j);
+                self.soldiers[i].burst_left = 0;
+                let d_m = crate::grid::dist(self.soldiers[i].pos, self.soldiers[j].pos) / 1_000;
+                self.rolls += 1;
+                let r = self.roll(i, self.rolls) as i32;
+                let slow = 1_000 + (SKILL_MAX - self.soldiers[i].skill.min(SKILL_MAX)) * 2;
+                let acquire = ((250 + d_m as i32 * 8) * slow / 1_000 + r * 350 / 1_000) * (1_000 + self.soldiers[i].suppression) / 1_000;
+                self.soldiers[i].cooldown_ms = self.soldiers[i].cooldown_ms.max(acquire);
+            }
             // Rounds fall at their own times inside the step; a long wait does not bank rounds.
             let step_start = self.time_ms - dt_ms as i64;
             self.soldiers[i].cooldown_ms = self.soldiers[i].cooldown_ms.max(-dt_ms);
             while self.soldiers[i].cooldown_ms <= 0 && self.soldiers[j].alive() {
                 if self.soldiers[i].ammo <= 0 {
                     self.soldiers[i].burst_left = 0;
-                    if self.soldiers[i].mags > 0 {
-                        self.soldiers[i].mags -= 1;
-                        self.soldiers[i].reloading_ms = RELOAD_MS;
-                        self.log.push(Event::Reload { soldier: i });
-                    }
+                    self.reload(i);
                     break;
                 }
                 let d = crate::grid::dist(self.soldiers[i].pos, self.soldiers[j].pos);
                 if self.soldiers[i].burst_left == 0 {
-                    // A new burst: how many rounds by range.
+                    // What now, with the rifle up: his nerve decides. Calm, he works the target with bursts
+                    // that suit the range; under fire they get shorter and rarer; pinned, he mostly stays down
+                    // and only now and then pops off a round or two.
                     self.rolls += 1;
                     let r = self.roll(i, self.rolls);
-                    let n = if d < AUTO_MM { 4 + r % 3 } else if d < BURST_MM { 2 + r % 2 } else { 1 };
+                    let sup = self.soldiers[i].suppression as i64;
+                    if sup >= PINNED as i64 && r < sup - 300 {
+                        self.rolls += 1;
+                        self.soldiers[i].cooldown_ms += 500 + (self.roll(i, self.rolls) * 900 / 1_000) as i32;
+                        continue;
+                    }
+                    self.rolls += 1;
+                    let r2 = self.roll(i, self.rolls);
+                    let full = if d < AUTO_MM { 3 + r2 % 4 } else if d < BURST_MM { 2 + r2 % 3 } else { 1 + r2 % 2 };
+                    let n = (full * (1_000 - sup * 6 / 10) / 1_000).max(1).min(self.soldiers[i].ammo as i64);
                     self.soldiers[i].burst_left = n as u8;
                     self.soldiers[i].burst_fired = 0;
                 }
@@ -1098,12 +1190,12 @@ impl Battle {
                 me.burst_fired += 1;
                 me.cooldown_ms += if me.burst_left > 0 {
                     CYCLIC_MS
-                } else if d < AUTO_MM {
-                    AFTER_AUTO_MS
-                } else if d < BURST_MM {
-                    AFTER_BURST_MS
                 } else {
-                    AFTER_SINGLE_MS
+                    // Between bursts: re-aim, check the result, breathe. Longer far off, much longer when the
+                    // rounds are coming his way, never quite the same twice.
+                    let (lo, hi) = if d < AUTO_MM { (AFTER_AUTO_MS, AFTER_AUTO_MS * 2) } else if d < BURST_MM { (AFTER_BURST_MS, AFTER_BURST_MS * 3) } else { (AFTER_SINGLE_MS * 2, AFTER_SINGLE_MS * 4) };
+                    let r = (mix64(self.seed ^ (at_ms as u64) << 8 ^ i as u64) % 1_000) as i32;
+                    (lo + (hi - lo) * r / 1_000) * (1_000 + me.suppression * 2) / 1_000
                 };
                 self.log.push(Event::Shot { shooter: i, target: j, from, to, hit, at_ms });
                 // The target's squad learns where the fire came from; each squad within earshot hears it.
@@ -1149,11 +1241,6 @@ impl Battle {
 /// Whether `dot` (facing ×1000 · offset) ≥ ⌊√d2⌋ × CONE_COS (d2 = |offset|²), without a square root:
 /// for dot ≥ 0 that is d2 < (⌊dot / CONE_COS⌋ + 1)². (At d2 = 0 the old test said no and this says yes; that
 /// case is always within CLOSE_MM, which the caller accepts anyway.)
-/// Whether two points are within `r` of each other.
-fn near(a: (i64, i64), b: (i64, i64), r: i64) -> bool {
-    (a.0 - b.0).pow(2) + (a.1 - b.1).pow(2) <= r * r
-}
-
 fn in_cone(dot: i64, d2: i64) -> bool {
     if dot < 0 {
         return false;
@@ -1163,6 +1250,11 @@ fn in_cone(dot: i64, d2: i64) -> bool {
 }
 
 /// Whether a man can walk straight from `a` to `b` (checked every 250 mm with his body's clearance).
+/// Whether two points are within `r` of each other.
+fn near(a: (i64, i64), b: (i64, i64), r: i64) -> bool {
+    (a.0 - b.0).pow(2) + (a.1 - b.1).pow(2) <= r * r
+}
+
 fn walk_line(n: &NavGrid, a: (i64, i64), b: (i64, i64)) -> bool {
     let len = crate::grid::dist(a, b);
     let k = (len / 250).max(1);

@@ -60,10 +60,13 @@ fn being_shot_at_suppresses_and_suppression_spoils_aim() {
     let mut b = Battle::new(field(&[]), vec![man(0, 50_000, 20_000, Stance::Stand), man(1, 50_000, 80_000, Stance::Stand)], 3);
     b.soldiers[1].passive = true;
     b.soldiers[1].health = i32::MAX;
-    for _ in 0..40 {
+    // (He first needs to spot him and get a sight picture at 60 m.)
+    let mut felt = 0;
+    for _ in 0..80 {
         b.step(50);
+        felt = felt.max(b.soldiers[1].suppression);
     }
-    assert!(b.soldiers[1].suppression > 0, "rounds coming in suppress");
+    assert!(felt > 0, "rounds coming in suppress");
     let calm = b.hit_permille(0, 1);
     b.soldiers[0].suppression = 1000;
     assert!(b.hit_permille(0, 1) < calm, "a suppressed shooter aims worse");
@@ -74,10 +77,12 @@ fn a_rifleman_reloads_after_a_magazine() {
     let mut b = Battle::new(field(&[]), vec![man(0, 50_000, 20_000, Stance::Stand), man(1, 50_000, 80_000, Stance::Stand)], 5);
     b.soldiers[1].passive = true;
     b.soldiers[1].health = i32::MAX;
-    for _ in 0..400 {
+    // Aimed shots at 60 m: a magazine lasts a while.
+    for _ in 0..1_400 {
         b.step(50);
     }
     assert!(b.log.iter().any(|e| matches!(e, Event::Reload { soldier: 0 })));
+    assert!(b.soldiers[0].ammo <= 30 && b.soldiers[0].mags < scalia_ai::battle::MAGS);
 }
 
 /// Shooter 0's shots at a target `d_mm` away (the target cannot die or fire): their times (ms).
@@ -117,14 +122,15 @@ fn close_up_he_fires_full_auto_bursts() {
 #[test]
 fn at_mid_range_he_fires_short_controlled_bursts() {
     let b = bursts(&shots_at(35_000, 8_000));
-    assert!(b.len() >= 3 && b.iter().all(|&n| (2..=3).contains(&n)), "bursts of 2-3 at 35 m: {b:?}");
+    assert!(b.len() >= 3 && b.iter().all(|&n| (1..=4).contains(&n)), "short bursts at 35 m: {b:?}");
+    assert!(b.windows(2).any(|w| w[0] != w[1]), "not the same burst every time: {b:?}");
 }
 
 #[test]
 fn far_away_he_takes_single_aimed_shots() {
     let t = shots_at(90_000, 8_000);
-    assert!(t.len() >= 5, "{t:?}");
-    assert!(bursts(&t).iter().all(|&n| n == 1), "single shots at 90 m: {t:?}");
+    assert!(t.len() >= 4, "{t:?}");
+    assert!(bursts(&t).iter().all(|&n| n <= 2), "aimed singles or pairs at 90 m: {t:?}");
 }
 
 #[test]
@@ -165,4 +171,21 @@ fn nobody_hits_more_than_85_percent_and_a_rookie_half() {
     // Further off, much less.
     b.soldiers[1].pos = (10_000, 60_000);
     assert!(b.hit_permille(0, 1) < 300, "a rookie at 50 m: {}", b.hit_permille(0, 1));
+}
+
+#[test]
+fn a_pinned_man_fires_far_less_than_a_calm_one() {
+    let fired = |sup: i32| {
+        let mut b = Battle::new(field(&[]), vec![man(0, 50_000, 10_000, Stance::Stand), man(1, 50_000, 40_000, Stance::Stand)], 9);
+        b.soldiers[1].passive = true;
+        b.soldiers[1].health = i32::MAX;
+        b.soldiers[0].mags = 99;
+        for _ in 0..200 {
+            b.soldiers[0].suppression = sup;
+            b.step(50);
+        }
+        b.log.iter().filter(|e| matches!(e, Event::Shot { shooter: 0, .. })).count()
+    };
+    let (calm, pinned) = (fired(0), fired(950));
+    assert!(pinned * 3 < calm, "calm {calm} rounds, pinned {pinned}");
 }
