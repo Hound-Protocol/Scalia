@@ -658,6 +658,8 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
 }
 
 fn palette_index(c: f32, a: vec4f) -> u32 {
+  // A squad leader (instance colour flagged +32): his helmet is drawn as a red beret.
+  if (a.w >= 32.0 && c >= 0.0 && (c - 32.0 * floor(c / 32.0)) == 26.0) { return 9u; }
   // Negative codes and swaying parts (grass) take the instance colour.
   // Negative codes, swaying parts (grass) and palette 31 on any part take the instance colour.
   let instance_colour = c < 0.0 || floor(c / 32.0) == 5.0 || (c - 32.0 * floor(c / 32.0)) == 31.0;

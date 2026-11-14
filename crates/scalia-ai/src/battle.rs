@@ -55,6 +55,10 @@ pub enum Cue {
     Peek(bool),
     /// Inside a room being cleared: sweeping it.
     Sweep,
+    /// Down on a knee, listening (the briefing).
+    Kneel,
+    /// The leader briefing his men: talking with his hands.
+    Brief,
 }
 
 /// What a soldier calls out (the radio voices and on-screen labels pick these up).
@@ -65,6 +69,8 @@ pub enum Bark {
     Reloading,
     ManDown,
     Frag,
+    /// The leader is down: the next man takes command.
+    TakingCommand,
 }
 
 /// Something a soldier is busy doing with his hands (the animation plays it; he does not shoot meanwhile).
@@ -328,6 +334,8 @@ pub enum Event {
     Bark { soldier: usize, bark: Bark },
     /// A squad leader starts a step of his plan.
     Order { squad: usize, step: &'static str },
+    /// The leader briefs a man on his part in the plan.
+    Briefed { leader: usize, soldier: usize, role: &'static str },
     Explosion { pos: (i64, i64) },
 }
 

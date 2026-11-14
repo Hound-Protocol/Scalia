@@ -76,6 +76,9 @@ const ARRIVE_NEAR_MM: i64 = 4_500;
 /// One step of a building assault.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Method {
+    /// Before the assault, out of contact: the squad kneels in a half circle in front of its leader and he
+    /// goes through the plan, man by man (positions, roles, how they will take it).
+    Brief,
     Approach,
     Drone,
     Stack,
@@ -101,6 +104,7 @@ impl Method {
             Method::Clear => "clear",
             Method::Consolidate => "consolidate",
             Method::Pie => "pie",
+            Method::Brief => "briefing",
         }
     }
 }
@@ -118,6 +122,8 @@ pub struct Situation {
     pub strength: i64,
     /// Enemies known to be inside.
     pub enemies_known: i64,
+    /// Out of contact: nobody under fire, no enemy seen lately (time for a briefing).
+    pub quiet: bool,
 }
 
 const AT: u32 = 0;
@@ -129,13 +135,19 @@ const CLEARED: u32 = 5;
 const HOLDING: u32 = 6;
 /// The entry room has been looked into from outside (pied).
 const PIED: u32 = 7;
+/// The squad has been briefed.
+const BRIEFED: u32 = 8;
+const QUIET: u32 = 9;
 
 /// The steps from `start` (facts already true) to holding the building, cheapest first.
 fn plan_from(s: &Situation, start: State) -> Vec<Method> {
     let ratio = s.strength / s.enemies_known.max(1);
     let storm_cost = if ratio >= 3 { 2 } else if ratio >= 2 { 3 } else { 7 };
     let mut acts: Vec<(Action, Method)> = vec![
-        (Action::new("approach", 2).sets(AT, true), Method::Approach),
+        // Briefed first when there is time (quiet): cheaper overall than going in without one.
+        (Action::new("brief", 1).needs(QUIET, true).needs(BRIEFED, false).needs(AT, false).sets(BRIEFED, true), Method::Brief),
+        (Action::new("approach", 2).needs(BRIEFED, true).sets(AT, true), Method::Approach),
+        (Action::new("approach unbriefed", 4).needs(BRIEFED, false).sets(AT, true), Method::Approach),
         (Action::new("stack", 1).needs(AT, true).sets(STACKED, true), Method::Stack),
         // Nobody goes through a door without looking through it first: pie it from outside (anyone seen in the
         // entry room makes it hot, and the leader re-plans).
@@ -168,6 +180,9 @@ fn facts(s: &Situation) -> State {
     }
     if s.enemy_in_entry {
         v |= 1 << ENTRY_HOT;
+    }
+    if s.quiet {
+        v |= 1 << QUIET;
     }
     State(v)
 }
@@ -207,6 +222,8 @@ pub struct Brain {
     stack_order: Vec<usize>,
     /// A chokepoint on the way (a gap between walls): being crossed the careful way.
     choke: Option<Choke>,
+    /// The squad's leader (red beret): the first man, then whoever takes command when he falls.
+    leader: Option<usize>,
     /// The approach leg whose way was last checked for chokepoints.
     choke_leg: Option<usize>,
 }
@@ -225,7 +242,7 @@ pub struct Choke {
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, choke_leg: None }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None }
     }
 }
 
@@ -601,6 +618,33 @@ impl Battle {
             have_grenade: !brain.grenade_used,
             strength: self.members(squad).len() as i64,
             enemies_known: inside.len() as i64,
+            quiet: self.quiet(squad),
+        }
+    }
+
+    /// Out of contact: none of the squad under fire and no enemy seen in the last ten seconds.
+    fn quiet(&self, squad: usize) -> bool {
+        let now = self.time_ms;
+        self.members(squad).iter().all(|&i| self.soldiers[i].suppression == 0 && self.soldiers[i].target.is_none())
+            && self.contacts[squad].iter().all(|c| now - c.seen_ms > 10_000 || !self.soldiers[c.enemy].alive() || self.soldiers[c.enemy].down())
+    }
+
+    /// The squad's leader: kept while he can lead, otherwise the next man takes command (and says so).
+    pub fn leader_of(&self, squad: usize) -> Option<usize> {
+        self.brains.get(squad).and_then(|b| b.leader).filter(|&l| self.soldiers[l].alive() && !self.soldiers[l].down())
+    }
+
+    fn keep_leader(&mut self, squad: usize) {
+        if self.leader_of(squad).is_some() {
+            return;
+        }
+        let had = self.brains[squad].leader.is_some();
+        let next = self.soldiers.iter().enumerate().filter(|(_, s)| s.squad as usize == squad && s.alive() && !s.down()).map(|(i, _)| i).next();
+        self.brains[squad].leader = next;
+        if had {
+            if let Some(l) = next {
+                self.log.push(Event::Bark { soldier: l, bark: crate::battle::Bark::TakingCommand });
+            }
         }
     }
 
@@ -692,14 +736,16 @@ impl Battle {
                 if dist(p, from) < 3_000 || dist(p, to) < 1_500 {
                     continue;
                 }
-                // Walls to both sides, close?
-                let side = (-dir.1, dir.0);
-                let reach = |sgn: i64| (1..=CHOKE_MM / 250).map(|j| j * 250).find(|&d| self.sight.solid_at(p.0 + side.0 * sgn * d / 1_000, p.1 + side.1 * sgn * d / 1_000, 1_400));
-                if let (Some(a), Some(b)) = (reach(1), reach(-1)) {
-                    if a + b <= CHOKE_MM {
-                        let mid = (a - b) / 2;
-                        let at = (p.0 + side.0 * mid / 1_000, p.1 + side.1 * mid / 1_000);
-                        return Some((at, dir, a + b));
+                // Walls close on both sides? Measured across the way he walks, and straight across in x and in y
+                // (a route cutting a gap's corner diagonally would slip past one wall's end otherwise).
+                let reach = |side: (i64, i64), sgn: i64| (1..=CHOKE_MM / 250).map(|j| j * 250).find(|&d| self.sight.solid_at(p.0 + side.0 * sgn * d / 1_000, p.1 + side.1 * sgn * d / 1_000, 1_400));
+                for (side, through) in [((-dir.1, dir.0), dir), ((1_000, 0), (0, if dir.1 >= 0 { 1_000 } else { -1_000 })), ((0, 1_000), (if dir.0 >= 0 { 1_000 } else { -1_000 }, 0))] {
+                    if let (Some(a), Some(b)) = (reach(side, 1), reach(side, -1)) {
+                        if a + b <= CHOKE_MM {
+                            let mid = (a - b) / 2;
+                            let at = (p.0 + side.0 * mid / 1_000, p.1 + side.1 * mid / 1_000);
+                            return Some((at, through, a + b));
+                        }
                     }
                 }
             }
@@ -933,6 +979,9 @@ impl Battle {
     }
 
     pub(crate) fn lead(&mut self) {
+        for squad in 0..self.brains.len() {
+            self.keep_leader(squad);
+        }
         self.care();
         for squad in 0..self.brains.len() {
             match self.brains[squad].order {
@@ -1267,6 +1316,66 @@ impl Battle {
                 }
                 if ready || phase_ms >= STACK_TIMEOUT_MS {
                     self.finish(squad, Some(STACKED));
+                }
+            }
+            Some(Method::Brief) => {
+                // Contact while briefing: cut short, straight into it.
+                if !self.quiet(squad) {
+                    self.finish(squad, Some(BRIEFED));
+                    return;
+                }
+                let Some(lead) = self.leader_of(squad) else {
+                    self.finish(squad, Some(BRIEFED));
+                    return;
+                };
+                let lp = self.soldiers[lead].pos;
+                // His men kneel in a half circle 3 m from him on the side away from the house (out of its way);
+                // he faces them.
+                let to_house = (kc.0 - lp.0, kc.1 - lp.1);
+                let len = isqrt(to_house.0 * to_house.0 + to_house.1 * to_house.1).max(1);
+                let f = (to_house.0 * 1_000 / len, to_house.1 * 1_000 / len);
+                let men: Vec<usize> = ms.iter().copied().filter(|&i| i != lead).collect();
+                let n = men.len().max(1) as i64;
+                // Gathering for 4 s, then a couple of seconds for each man.
+                let per_man = 1_800;
+                let talking_to = ((phase_ms - 4_000) / per_man).max(-1);
+                for (k, &i) in men.iter().enumerate() {
+                    // Spread over the half circle facing him (from his left to his right).
+                    let idx = (24 + 6 + ((k as i64 * 12 + 6) / n) as i32) % 24;
+                    let (c, sn) = DIRS_24[idx as usize];
+                    // In the frame where f points at the house: rotate the half-circle to sit in front of him.
+                    let (rx, ry) = ((f.0 * c - f.1 * sn) / 1_000, (f.1 * c + f.0 * sn) / 1_000);
+                    let at = (lp.0 + rx * 3_000 / 1_000, lp.1 + ry * 3_000 / 1_000);
+                    let s = &mut self.soldiers[i];
+                    s.task = Task::Hold { at, face: lp };
+                    s.posture = Some(Stance::Crouch);
+                    s.aim = false;
+                    s.cue = Cue::Kneel;
+                    let _ = talking_to;
+                }
+                let s = &mut self.soldiers[lead];
+                // He faces his men (they kneel on the side away from the house).
+                s.task = Task::Hold { at: lp, face: (lp.0 - f.0 * 3, lp.1 - f.1 * 3) };
+                s.posture = None;
+                s.aim = false;
+                s.cue = if phase_ms >= 4_000 { Cue::Brief } else { Cue::None };
+                if phase_ms >= 4_000 && (phase_ms - 4_000) % per_man == 0 && ((phase_ms - 4_000) / per_man) < men.len() as i64 {
+                    let who = men[((phase_ms - 4_000) / per_man) as usize];
+                    let role = match ((phase_ms - 4_000) / per_man) as usize {
+                        0 => "point",
+                        1 => "number two",
+                        2 | 3 => "stack",
+                        4..=7 => "second element",
+                        _ => "outer security",
+                    };
+                    self.log.push(Event::Briefed { leader: lead, soldier: who, role });
+                }
+                if phase_ms >= 4_000 + per_man * men.len() as i64 {
+                    for &i in &ms {
+                        self.soldiers[i].posture = None;
+                        self.soldiers[i].cue = Cue::None;
+                    }
+                    self.finish(squad, Some(BRIEFED));
                 }
             }
             Some(Method::Pie) => {

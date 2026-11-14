@@ -225,6 +225,10 @@ impl Assault {
                         self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, step: None, at });
                         self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false });
                     }
+                    Event::Briefed { leader, soldier, role } => {
+                        let sq = self.battle.soldiers[leader].squad as usize;
+                        self.lab_log.push(format!("{:>5.1}s  {} #{leader} to #{soldier}: \"you're {role}\"", self.battle.time_ms as f64 / 1000.0, lab_squad(sq)));
+                    }
                     Event::Order { squad, step } => {
                         self.steps.push((squad, step));
                         self.lab_log.push(format!("{:>5.1}s  {}  {step}", self.battle.time_ms as f64 / 1000.0, lab_squad(squad)));
@@ -237,6 +241,7 @@ impl Assault {
                             Bark::Reloading => "bark:reloading",
                             Bark::ManDown => "bark:man down",
                             Bark::Frag => "bark:frag out",
+                            Bark::TakingCommand => "bark:taking command",
                         };
                         let sq = self.battle.soldiers[soldier].squad as usize;
                         self.steps.push((sq, word));
@@ -348,7 +353,9 @@ impl Assault {
                 Some((_, t)) => (t, -1.0),
                 None => (g.0 as f32, if steps > 0.0 { -1.0 } else { 0.0 }),
             };
-            out.extend_from_slice(&[rx, ry, z, body(s_squad), a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
+            // The squad's leader is flagged (+32 on the colour) so the shader gives him his red beret.
+            let leader = if self.battle.leader_of(s_squad as usize) == Some(i) { 32.0 } else { 0.0 };
+            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
         out
     }
@@ -394,6 +401,9 @@ pub fn lab_state(b: &Battle, i: usize) -> String {
     if s.down() {
         w.push(if s.stable() { "DOWN stable".into() } else { "DOWN bleeding".into() });
     } else {
+        if b.leader_of(s.squad as usize) == Some(i) {
+            w.push("LEADER".into());
+        }
         // His mind first: what he wants and the plan for it.
         w.push(s.mind.describe());
         w.push(match s.task {
@@ -468,6 +478,10 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
             scalia_ai::battle::Cue::Stack => return (Pose::Stack, 0.0, None, 0.0),
             scalia_ai::battle::Cue::Peek(right) => return (if right { Pose::LeanRight } else { Pose::LeanLeft }, 0.0, None, 0.0),
             scalia_ai::battle::Cue::Sweep => return (Pose::Sweep, 0.3, None, 0.0),
+            // Listening to the briefing, down on a knee.
+            scalia_ai::battle::Cue::Kneel => return (Pose::Crouch, 0.0, None, 0.0),
+            // The leader talking his men through it, with his hands.
+            scalia_ai::battle::Cue::Brief => return (Pose::Signal, 0.45, None, 0.0),
             scalia_ai::battle::Cue::None => {}
         }
     }
@@ -540,7 +554,8 @@ mod tests {
         assert!((c.0 - 60_000).abs() < 2_500 && (c.1 - 50_000).abs() < 2_500, "{c:?}");
         let inst = a.instances(0, 1.0, |sq| sq as f32, |x, y| Some((x as f32, y as f32, 0.0)));
         assert_eq!(inst.len(), 6 * 12);
-        assert_eq!(inst[3], 4.0, "colour by squad");
+        assert_eq!(inst[3] % 32.0, 4.0, "colour by squad (the leader carries +32 for his beret)");
+        assert_eq!(inst[3], 36.0, "the first man is the leader");
     }
 
     #[test]

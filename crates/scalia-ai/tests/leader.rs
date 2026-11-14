@@ -7,7 +7,7 @@ use scalia_core::nav::NavGrid;
 
 #[test]
 fn the_leader_picks_the_method_the_situation_calls_for() {
-    let base = Situation { intel: false, enemy_in_entry: false, have_drone: true, have_grenade: true, strength: 8, enemies_known: 0 };
+    let base = Situation { intel: false, enemy_in_entry: false, have_drone: true, have_grenade: true, strength: 8, enemies_known: 0, quiet: false };
     // Nothing known and a drone in the kit: look first.
     assert!(choose(&base).contains(&Method::Drone), "{:?}", choose(&base));
     // Intel says someone is waiting in the entry room: grenade before going in.
@@ -20,6 +20,9 @@ fn the_leader_picks_the_method_the_situation_calls_for() {
     // Blind, no drone, not strong: slow and careful.
     let s = Situation { have_drone: false, strength: 4, ..base };
     assert!(choose(&s).contains(&Method::SlowEntry), "{:?}", choose(&s));
+    // Out of contact the leader briefs his men first; in contact he does not.
+    assert_eq!(choose(&Situation { quiet: true, ..base }).first(), Some(&Method::Brief));
+    assert!(!choose(&base).contains(&Method::Brief));
     // Whatever the way in, the door is pied first.
     for p in [choose(&base), choose(&s)] {
         let (pie, entry) = (p.iter().position(|&m| m == Method::Pie), p.iter().position(|&m| matches!(m, Method::Storm | Method::SlowEntry)));
