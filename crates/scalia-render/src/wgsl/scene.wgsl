@@ -23,11 +23,11 @@ struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @
   // Glowing geometry (mesh part 15): flagged for the fragment shader to draw unlit.
   if (c >= 0.0 && floor(c / 32.0) == 15.0) { o.ci = o.ci | 256u; }
   // Instance c.w: how far this draw has dissolved (0 solid, 1 gone); used to cross-fade terrain detail levels.
-  o.fade = ic.w;
+  o.fade = fade_of(ic.w);
   // Selected figures are tagged in the normal target's alpha (1 none; 0.75, 0.5, 0.25 by level) for the outline.
   o.sel = select_level(ia);
   // A fading layer is nudged towards the camera so it lies over the solid one instead of fighting it for depth.
-  if (ic.w > 0.0) { o.pos.z = o.pos.z - 0.0005 * o.pos.w; }
+  if (o.fade > 0.0) { o.pos.z = o.pos.z - 0.0005 * o.pos.w; }
   return o;
 }
 struct FO { @location(0) c: vec4f, @location(1) n: vec4f };

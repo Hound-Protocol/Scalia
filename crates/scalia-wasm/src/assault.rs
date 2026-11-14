@@ -98,6 +98,9 @@ pub struct Assault {
     turn: Vec<(f32, f32, f32)>,
     /// Per soldier: where his muzzle was last drawn (mm, z over the ground), for flashes and tracers.
     muzzle: Vec<Option<(i64, i64, i64)>>,
+    /// Per soldier: his upper body (layer or pose) now, the one before, since when (shader clock): for blending
+    /// the arms when the rifle comes up or down.
+    uppers: Vec<(Pose, Pose, f32)>,
     pub sounds: Vec<Sound>,
     pub fx: Vec<Fx>,
     /// The leader's steps as they start, for the radio.
@@ -153,7 +156,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), uppers: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -175,6 +178,7 @@ impl Assault {
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
             self.turn.push((0.0, 0.0, 0.0));
             self.muzzle.push(None);
+            self.uppers.push((Pose::Stand, Pose::Stand, -1000.0));
         }
     }
 
@@ -449,7 +453,13 @@ impl Assault {
                 let w = scalia_render::pose::figure_to_world(q * 1000.0, glam::Vec3::new(x as f32, y as f32, 0.0), heading, banked, pitched);
                 (w.x as i64, w.y as i64, w.z as i64)
             });
-            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
+            let eff = upper.unwrap_or(pose);
+            let u = &mut self.uppers[i];
+            if eff != u.0 {
+                *u = (eff, u.0, ts);
+            }
+            let layer_back = scalia_render::pose::pack_fade_layer(0.0, Some(u.1), 1.0 - ((ts - u.2) / scalia_render::pose::LAYER_BLEND_S).clamp(0.0, 1.0));
+            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), layer_back]);
         }
         out
     }

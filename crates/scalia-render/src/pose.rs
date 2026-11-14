@@ -1250,3 +1250,46 @@ mod muzzle_tests {
         assert!(w.x > 10.5 && (w.y - 20.0).abs() < 0.4 && w.z > 2.0, "{w:?}");
     }
 }
+
+/// How long a change of upper body (raising or lowering the rifle over moving legs) takes to blend (s).
+pub const LAYER_BLEND_S: f32 = 0.3;
+
+/// An instance's c.w for a figure (common.wgsl `fade_of`, `layer_back`): its dissolve (0 solid .. 1 gone) with,
+/// while it changes upper body, the one it is leaving (`was`, None = the legs' own) and how much of it remains
+/// (1 just changed .. 0 done). Settled, this is just the dissolve.
+pub fn pack_fade_layer(fade: f32, was: Option<Pose>, remaining: f32) -> f32 {
+    let fade = fade.clamp(0.0, 0.999);
+    let r = (remaining.clamp(0.0, 1.0) * 63.0).round();
+    if r <= 0.0 {
+        return fade;
+    }
+    let code = was.map_or(0.0, |p| p as u32 as f32 + 1.0);
+    code * 64.0 + r + fade
+}
+
+/// The inverse of `pack_fade_layer`: (dissolve, upper body being left as id + 1 or 0, remaining).
+pub fn unpack_fade_layer(w: f32) -> (f32, f32, f32) {
+    if w < 1.0 {
+        return (w, 0.0, 0.0);
+    }
+    let whole = w.floor();
+    let code = (whole / 64.0).floor();
+    (w - whole, code, (whole - code * 64.0) / 63.0)
+}
+
+#[cfg(test)]
+mod fade_layer_tests {
+    use super::*;
+    #[test]
+    fn the_upper_body_being_left_rides_with_the_dissolve() {
+        assert_eq!(pack_fade_layer(0.0, Some(Pose::StandAim), 0.0), 0.0, "settled: nothing extra");
+        assert_eq!(pack_fade_layer(0.4, None, 0.0), 0.4, "a plain dissolve is unchanged");
+        let w = pack_fade_layer(0.25, Some(Pose::StandAim), 0.5);
+        let (f, code, rem) = unpack_fade_layer(w);
+        assert!((f - 0.25).abs() < 1e-3 && code == Pose::StandAim as u32 as f32 + 1.0 && (rem - 0.5).abs() < 0.02, "{f} {code} {rem}");
+        let (_, code, rem) = unpack_fade_layer(pack_fade_layer(0.0, None, 1.0));
+        assert!(code == 0.0 && rem > 0.99, "leaving the legs' own upper body");
+        let (_, code, _) = unpack_fade_layer(pack_fade_layer(0.0, Some(Pose::Ready), 0.9));
+        assert_eq!(code, Pose::Ready as u32 as f32 + 1.0);
+    }
+}

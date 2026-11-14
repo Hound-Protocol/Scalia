@@ -198,6 +198,8 @@ pub struct Viewer {
     cmd_skid: crate::motion::Skid,
     /// How fast he is turning (rad/s, + to the left): turns build up and ease off.
     cmd_spin: f32,
+    /// His upper body (the layer, or the pose's own): now, the one before, since when (shader clock, s).
+    cmd_upper: (Pose, Pose, f32),
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
     /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms), last speed (m/s), smoothed
@@ -376,6 +378,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_dir: (0.0, 1.0),
         cmd_skid: crate::motion::Skid::None,
         cmd_spin: 0.0,
+        cmd_upper: (Pose::Stand, Pose::Stand, -1000.0),
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         turns: HashMap::new(),
@@ -2976,8 +2979,14 @@ impl Viewer {
         }
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
+        // Raising or lowering the rifle over his legs blends the arms over LAYER_BLEND_S (common.wgsl `layer_back`).
+        let eff = upper.unwrap_or(pose);
+        if eff != self.cmd_upper.0 {
+            self.cmd_upper = (eff, self.cmd_upper.0, ts);
+        }
+        let remaining = 1.0 - ((ts - self.cmd_upper.2) / scalia_render::pose::LAYER_BLEND_S).clamp(0.0, 1.0);
         let mut me = rec;
-        me[11] = self.cine_fade(self.frame_ms);
+        me[11] = scalia_render::pose::pack_fade_layer(self.cine_fade(self.frame_ms), Some(self.cmd_upper.1), remaining);
         self.gpu.upload_instances("commander_at", bytes(&me));
         instanced.push(("commander".into(), "commander_at".into()));
         // The tablet appears in his hands once they have come up to hold it.

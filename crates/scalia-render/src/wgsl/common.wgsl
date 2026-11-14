@@ -664,9 +664,15 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     var pp = pose_params(u32(b.w), phase, dir);
     if (w < 1.0) { pp = blend(pose_params(u32(d.x), phase, dir), pp, w); }
     // Instance c.z: an upper-body stance (pose id + 1) over these legs, e.g. walking while aiming.
-    if (layer >= 1.0) {
-      let up = pose_params(u32(layer - 1.0), phase, 0.0);
-      pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.tilt = up.tilt; pp.twist = pp.twist + up.twist; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
+    let base = pp;
+    if (layer >= 1.0) { pp = upper_over(base, pose_params(u32(layer - 1.0), phase, 0.0)); }
+    // Instance c.w (pose.rs `pack_fade_layer`): the upper body it is still leaving (raising or lowering the
+    // rifle, starting to walk with it up) blended out over 0.3 s, so the arms and rifle never pop.
+    let lb = layer_back(d.w);
+    if (lb.y > 0.0) {
+      var was = base;
+      if (lb.x >= 1.0) { was = upper_over(base, pose_params(u32(lb.x - 1.0), phase, 0.0)); }
+      pp = blend(was, pp, 1.0 - lb.y);
     }
     // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
     if (b.z == 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
@@ -696,6 +702,24 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
   let ch = cos(b.x);
   let sh = sin(b.x);
   return vec3f(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + a.xyz;
+}
+
+// An upper-body stance laid over the legs' pose (pose.rs `layer`).
+fn upper_over(legs: PP, up: PP) -> PP {
+  var pp = legs;
+  pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.tilt = up.tilt; pp.twist = legs.twist + up.twist; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
+  return pp;
+}
+
+// Instance c.w (pose.rs `pack_fade_layer`): below 1 it is only the dissolve (0 solid, 1 gone); from 1 up, the
+// whole part also carries the upper body being left (id + 1, 0 = the legs' own) and how much of it remains
+// (x: code, y: 0..1), the fraction the dissolve.
+fn fade_of(w: f32) -> f32 { return select(w, fract(w), w >= 1.0); }
+fn layer_back(w: f32) -> vec2f {
+  if (w < 1.0) { return vec2f(0.0); }
+  let whole = floor(w);
+  let code = floor(whole / 64.0);
+  return vec2f(code, (whole - code * 64.0) / 63.0);
 }
 
 // Instance colour a.w, fractional part: bank into a turn and lean with acceleration (pose.rs `pack_tilt`; no
