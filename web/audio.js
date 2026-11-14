@@ -129,7 +129,7 @@ export class AudioEngine {
 
   /// The listener's space from the acoustics: [enclosure, size m, rt60 s, corridor, tablet 0/1].
   setEnv(e) {
-    if (!e || e.length < 5) return;
+    if (!e || e.length < 5 || ![...e].every(Number.isFinite)) return;
     this.env = { enclosure: e[0], size: e[1], rt60: e[2], corridor: e[3], pda: e[4] };
     this.applyEnv(false);
   }
@@ -154,6 +154,11 @@ export class AudioEngine {
   /// room is how much rings in the listener's own space, far how much comes back as distant echoes.
   play(url, o) {
     const c = this.ensure(); if (!c) return;
+    // Anything odd coming in (a missing or non-finite number) is made safe here: audio never stops the game.
+    const num = (x, d, lo, hi) => (Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d);
+    o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), room: num(o.room, 0, 0, 1), far: num(o.far, 0, 0, 1),
+      rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
+    if (o.gain <= 0.0005) return;
     const buf = this.buffer(url); if (!buf) return;
     const pri = PRIORITY[o.kind] || 1;
     this.active = this.active.filter((v) => !v.done);
