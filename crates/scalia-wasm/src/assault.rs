@@ -60,6 +60,8 @@ pub struct Assault {
     gait: Vec<(f64, f64)>,
     /// Per soldier: how hard he is turning (rad/s, smoothed), for banking into turns.
     turn: Vec<f32>,
+    /// Per soldier: where his muzzle was last drawn (mm, z over the ground), for flashes and tracers.
+    muzzle: Vec<Option<(i64, i64, i64)>>,
     pub sounds: Vec<Sound>,
     pub fx: Vec<Fx>,
     /// The leader's steps as they start, for the radio.
@@ -115,7 +117,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -136,6 +138,7 @@ impl Assault {
             self.falls.push(None);
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
             self.turn.push(0.0);
+            self.muzzle.push(None);
         }
     }
 
@@ -218,10 +221,11 @@ impl Assault {
                     Event::Shot { from, to, hit, at_ms, shooter, target } => {
                         let at = at_ms as f64 + offset;
                         self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false, step: None, at });
-                        // The muzzle: 0.6 m out towards the target, at shoulder height.
+                        // From the end of his barrel as he was last drawn (any weapon, any pose); if he has not been
+                        // drawn yet, 0.6 m out towards the target at shoulder height.
                         let (dx, dy) = (to.x - from.x, to.y - from.y);
                         let d = (((dx * dx + dy * dy) as f64).sqrt() as i64).max(1);
-                        let muzzle = (from.x + dx * 600 / d, from.y + dy * 600 / d, from.z - 250);
+                        let muzzle = self.muzzle.get(shooter).copied().flatten().unwrap_or((from.x + dx * 600 / d, from.y + dy * 600 / d, from.z - 250));
                         // A miss lands short, long or wide: in the dirt a few metres around him.
                         let r = scalia_core::hash::mix64(at_ms as u64 ^ (shooter as u64) << 32);
                         // A round at nobody (the commander firing into the open) lands where it flew to.
@@ -379,10 +383,30 @@ impl Assault {
             let leader = if self.battle.leader_of(s_squad as usize) == Some(i) { 32.0 } else { 0.0 };
             // A selected squad's men carry the selection tag (+64 per level) for the outline: stable, hurt, killed.
             let tag = if self.selected.contains(&s_squad) { 64.0 * select_level(readiness(s.alive(), s.down(), s.health)) } else { 0.0 };
-            let lean = if on_feet { scalia_render::pose::pack_bank(scalia_render::pose::bank(m_speed, self.turn[i])) } else { 0.0 };
+            let banked = if on_feet { scalia_render::pose::bank(m_speed, self.turn[i]) } else { 0.0 };
+            let lean = scalia_render::pose::pack_bank(banked);
+            // Where his muzzle is now, posed exactly as drawn: rounds fired from here.
+            let heading = a.0;
+            self.muzzle[i] = on_feet.then(|| {
+                let q = scalia_render::pose::muzzle(scalia_render::pose::RIFLE, pose, upper, phase, dir);
+                let w = scalia_render::pose::figure_to_world(q * 1000.0, glam::Vec3::new(x as f32, y as f32, 0.0), heading, banked);
+                (w.x as i64, w.y as i64, w.z as i64)
+            });
             out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
         out
+    }
+
+    /// Where soldier `i`'s muzzle was last drawn (mm, z over the ground).
+    pub fn muzzle_of(&self, i: usize) -> Option<(i64, i64, i64)> {
+        self.muzzle.get(i).copied().flatten()
+    }
+    /// Where soldier `i`'s muzzle is (mm, z over the ground) when he is drawn elsewhere (the commander).
+    pub fn set_muzzle(&mut self, i: usize, at: Option<(i64, i64, i64)>) {
+        self.sync_tables();
+        if let Some(m) = self.muzzle.get_mut(i) {
+            *m = at;
+        }
     }
 
     /// Who is still standing on each side.

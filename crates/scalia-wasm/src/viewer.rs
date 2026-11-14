@@ -2901,6 +2901,18 @@ impl Viewer {
         // The phase is always handed over (frozen when he stops), so legs blending out of a stride stay where they were.
         let lean = self.bank_for(u64::MAX, self.cmd_heading, self.cmd_speed);
         let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, -1.0, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
+        // His muzzle as drawn, so his rounds leave from the end of his barrel.
+        let gun = (!self.gun.slung && scalia_render::pose::two_handed(upper.unwrap_or(pose)) > 0.0).then(|| {
+            let q = scalia_render::pose::muzzle(scalia_render::pose::RIFLE, pose, upper, self.cmd_gait as f32, move_dir) * 1000.0;
+            let at = Vec3::new((self.cmd.0 * 1000.0) as f32, (self.cmd.1 * 1000.0) as f32, 0.0);
+            let w = scalia_render::pose::figure_to_world(q, at, self.cmd_heading, scalia_render::pose::unpack_bank(9.0 + lean));
+            (w.x as i64, w.y as i64, w.z as i64)
+        });
+        if let Some(a) = self.assault.as_mut() {
+            if let Some(i) = a.battle.soldiers.iter().position(|s| s.player) {
+                a.set_muzzle(i, gun);
+            }
+        }
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
         let mut me = rec;
@@ -2951,7 +2963,12 @@ impl Viewer {
                 let hgt = match self.gun.stance { 0 => 1.45, 1 => 0.95, _ => 0.3 };
                 let a0 = (self.cmd.0 + (tx / l * 0.7) as f64, self.cmd.1 + (ty / l * 0.7) as f64);
                 let a1 = (self.cmd.0 + (tx / l * reach) as f64, self.cmd.1 + (ty / l * reach) as f64);
-                let p0 = self.screen_of(a0, hgt);
+                // From the end of his barrel (as drawn last frame) when known.
+                let barrel = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().position(|s| s.player).and_then(|i| a.muzzle_of(i)));
+                let p0 = match barrel {
+                    Some((mx, my, mz)) => self.screen_of((mx as f64 / 1000.0, my as f64 / 1000.0), mz as f32 / 1000.0),
+                    None => self.screen_of(a0, hgt),
+                };
                 let p1 = self.screen_of(a1, hgt);
                 Some([p0.0, p0.1, p1.0, p1.1])
             }

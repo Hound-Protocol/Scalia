@@ -1130,3 +1130,54 @@ mod bank_tests {
         assert_eq!(unpack_bank(14.0), 0.0, "no bank given: upright");
     }
 }
+
+/// A weapon as the figures carry it. Every gun is drawn in the rifle's rest frame (grip at `RIFLE_GRIP`); its
+/// rounds leave from `muzzle`, wherever the pose puts the gun, so flashes and tracers start at the barrel's end
+/// for any weapon given its own muzzle.
+#[derive(Copy, Clone, Debug)]
+pub struct Weapon {
+    /// The end of the barrel, in the rest frame (mesh.rs builds the rifle's barrel out to y 0.77).
+    pub muzzle: Vec3,
+}
+/// The issue rifle (mesh.rs `soldier`): barrel from y 0.58 to 0.77 at x 0.238, z 0.818..0.836.
+pub const RIFLE: Weapon = Weapon { muzzle: Vec3::new(0.238, 0.77, 0.827) };
+
+/// Where `w`'s muzzle is in a figure's own frame (x right, y forward, z up, metres from his feet) for a pose
+/// with an optional upper-body layer, posed as common.wgsl poses the gun (layer, then the two-handed grip).
+pub fn muzzle(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) -> Vec3 {
+    let legs = params_dir(pose, phase, dir);
+    let p = match upper {
+        Some(u) => layer(&legs, &params_dir(u, phase, 0.0)),
+        None => legs,
+    };
+    let p = grip(&p, two_handed(upper.unwrap_or(pose)));
+    pose_vertex(w.muzzle, Part::Rifle, &p)
+}
+
+/// A point of a figure's own frame placed in the world (metres): banked into a turn (`bank`, + to his left)
+/// and turned to his heading as common.wgsl `animate` does, then moved to where he stands (`at`, z = ground).
+pub fn figure_to_world(q: Vec3, at: Vec3, heading: f32, bank: f32) -> Vec3 {
+    let (sb, cb) = bank.sin_cos();
+    let q = Vec3::new(q.x * cb - q.z * sb, q.y, q.x * sb + q.z * cb);
+    let (sh, ch) = heading.sin_cos();
+    Vec3::new(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + at
+}
+
+#[cfg(test)]
+mod muzzle_tests {
+    use super::*;
+    #[test]
+    fn the_muzzle_is_at_the_barrels_end_wherever_the_pose_puts_the_gun() {
+        let aim = muzzle(RIFLE, Pose::StandAim, None, 0.0, 0.0);
+        assert!(aim.y > 0.6 && (1.1..1.8).contains(&aim.z), "aiming: well ahead at about shoulder height, {aim:?}");
+        let crouch = muzzle(RIFLE, Pose::CrouchAim, None, 0.0, 0.0);
+        assert!(crouch.z < aim.z - 0.2, "crouched: lower, {crouch:?}");
+        let prone = muzzle(RIFLE, Pose::Prone, None, 0.0, 0.0);
+        assert!(prone.z < 0.5, "prone: near the ground, {prone:?}");
+        let walking_aim = muzzle(RIFLE, Pose::Walk, Some(Pose::StandAim), 0.3, 0.0);
+        assert!((walking_aim - aim).length() < 0.3, "aiming while walking: close to the standing aim, {walking_aim:?}");
+        // Turned to face +x (heading -90 degrees): the muzzle is out along +x from where he stands.
+        let w = figure_to_world(aim, Vec3::new(10.0, 20.0, 1.0), -std::f32::consts::FRAC_PI_2, 0.0);
+        assert!(w.x > 10.5 && (w.y - 20.0).abs() < 0.4 && w.z > 2.0, "{w:?}");
+    }
+}
