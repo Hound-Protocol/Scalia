@@ -118,6 +118,8 @@ impl Stance {
 
 pub const MAG: i32 = 30;
 pub const DAMAGE: i32 = 35;
+/// Squad numbers a command may name (each has a leader record and a contact list).
+pub const MAX_SQUADS: usize = 4_096;
 /// Fire modes by range: full auto close in, controlled bursts at mid range, single aimed shots beyond.
 const AUTO_MM: i64 = 15_000;
 const BURST_MM: i64 = 60_000;
@@ -338,6 +340,17 @@ impl Battle {
             self.contacts.resize(sq + 1, Vec::new());
             self.heard.resize(sq + 1, None);
         }
+        let mut s = s;
+        // Never inside a prop: the nearest walkable spot (rings of 250 mm out to 5 m).
+        if let Some(n) = self.nav.as_ref() {
+            if !n.walkable_at(s.pos.0, s.pos.1, BODY_MM) {
+                let p = s.pos;
+                let found = (1..=20i64).find_map(|ring| DIRS_24.iter().map(|d| (p.0 + d.0 * ring * 250 / 1_000, p.1 + d.1 * ring * 250 / 1_000)).find(|q| n.walkable_at(q.0, q.1, BODY_MM)));
+                if let Some(q) = found {
+                    s.pos = q;
+                }
+            }
+        }
         self.soldiers.push(s);
         self.visible.push(Vec::new());
         self.dead_logged.push(false);
@@ -382,8 +395,8 @@ impl Battle {
         for (_, c) in due {
             match c {
                 Command::Task { soldier, task } if soldier < self.soldiers.len() && self.soldiers[soldier].alive() => self.order(soldier, task),
-                Command::Squad { squad, order } if squad < 1 << 16 => self.command(squad, order),
-                Command::Spawn { team, squad, pos, stance } => {
+                Command::Squad { squad, order } if squad < MAX_SQUADS => self.command(squad, order),
+                Command::Spawn { team, squad, pos, stance } if (squad as usize) < MAX_SQUADS => {
                     self.join(Soldier::new(team, squad, pos, stance));
                 }
                 _ => continue,
@@ -509,7 +522,14 @@ impl Battle {
         let before: Vec<(i64, i64)> = self.soldiers.iter().map(|s| s.pos).collect();
         for i in 0..self.soldiers.len() {
             if !self.soldiers[i].alive() {
-                self.soldiers[i].vel = (0, 0);
+                // The dead drop where they are: no motion, no task, nothing in hand.
+                let s = &mut self.soldiers[i];
+                s.moving = false;
+                s.vel = (0, 0);
+                s.speed = 0;
+                s.task = Task::Idle;
+                s.act = None;
+                s.path.clear();
                 continue;
             }
             let mut dest = self.destination(i);

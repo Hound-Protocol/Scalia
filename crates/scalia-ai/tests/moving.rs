@@ -169,3 +169,40 @@ fn garrisoning_a_building_they_man_its_windows_facing_out() {
     }
     assert!(sandbags(&b).is_empty(), "no sandbags in doorways");
 }
+
+#[test]
+fn a_soldier_joining_inside_a_wall_is_put_beside_it() {
+    let props = [Prop { kind: PropKind::Wall { length_mm: 6_000, thickness_mm: 2_000 }, x_mm: 50_000, y_mm: 50_000, quarter_turns: 0 }];
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &props), vec![], 1);
+    b.submit(0, Command::Spawn { team: 0, squad: 0, pos: (50_000, 50_000), stance: Stance::Stand });
+    b.step(50);
+    let p = b.soldiers[0].pos;
+    assert!(b.nav().unwrap().walkable_at(p.0, p.1, 250), "walkable: {p:?}");
+    assert!(dist(p, (50_000, 50_000)) < 2_500, "close by: {p:?}");
+}
+
+#[test]
+fn the_dead_stop_moving_and_drop_what_they_were_doing() {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(1, (20_000, 20_000)), 1);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: (60_000, 60_000), mode: Mode::Plain } });
+    run(&mut b, 2_000);
+    assert!(b.soldiers[0].moving);
+    b.soldiers[0].health = 0;
+    b.step(50);
+    let s = &b.soldiers[0];
+    assert!(!s.moving && s.vel == (0, 0) && s.task == Task::Idle && s.act.is_none(), "{:?} {:?} {:?}", s.moving, s.vel, s.task);
+}
+
+#[test]
+fn a_builder_killed_at_work_lays_no_sandbag() {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(4, (20_000, 20_000)), 6);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: (50_000, 50_000), mode: Mode::Garrison } });
+    // Until the first man starts laying bags, then he dies.
+    while b.time_ms < 80_000 && !b.soldiers.iter().any(|s| s.act.is_some()) {
+        b.step(50);
+    }
+    let k = b.soldiers.iter().position(|s| s.act.is_some()).expect("someone builds");
+    b.soldiers[k].health = 0;
+    run(&mut b, 20_000);
+    assert_eq!(sandbags(&b).len(), 3, "the dead man's bags are never laid");
+}

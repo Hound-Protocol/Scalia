@@ -183,7 +183,7 @@ pub struct Brain {
     secured: bool,
     /// Sandbag loads the squad carries (kept across orders), and bags being laid: (done at ms, x, y, turns).
     kit: u8,
-    builds: Vec<(i64, i64, i64, u8)>,
+    builds: Vec<(i64, i64, i64, u8, usize)>,
 }
 
 impl Brain {
@@ -444,7 +444,7 @@ impl Battle {
             self.soldiers[i].act = Some((Act::Build, done));
             let b = &mut self.brains[squad];
             b.kit -= 1;
-            b.builds.push((done, c.0, c.1, turns));
+            b.builds.push((done, c.0, c.1, turns, i));
         }
     }
 
@@ -570,7 +570,11 @@ impl Battle {
             let now = self.time_ms;
             let (done, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.brains[squad].builds).into_iter().partition(|b| b.0 <= now);
             self.brains[squad].builds = wait;
-            for (_, x, y, turns) in done {
+            for (_, x, y, turns, builder) in done {
+                // Only if he lived to finish it (the bags of a man killed at work are lost).
+                if !self.soldiers[builder].alive() {
+                    continue;
+                }
                 self.place_prop(Prop { kind: PropKind::Wall { length_mm: SANDBAG_LEN_MM, thickness_mm: SANDBAG_THICK_MM }, x_mm: x, y_mm: y, quarter_turns: turns });
             }
         }

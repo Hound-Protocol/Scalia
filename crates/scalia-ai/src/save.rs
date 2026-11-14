@@ -113,7 +113,7 @@ impl From<PropSpec> for Prop {
 
 /// "SCAB" (Scalia battle) and the format version: a save from another version is refused, not misread.
 const MAGIC: [u8; 4] = *b"SCAB";
-pub const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 3;
 
 /// Frames a state as magic, version, payload and a checksum over the payload.
 pub(crate) fn frame(payload: &[u8]) -> Vec<u8> {
