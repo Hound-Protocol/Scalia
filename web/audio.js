@@ -106,7 +106,7 @@ export class AudioEngine {
     const lim = c.createDynamicsCompressor();
     lim.threshold.value = -4; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.18;
     lim.connect(c.destination);
-    // Tablet band-pass (2 - 7 kHz while it is up): four high-passes and four low-passes in a row (about
+    // Tablet band-pass (500 Hz - 10 kHz while it is up): four high-passes and four low-passes in a row (about
     // -48 dB/oct on each edge).
     this.hp = []; this.lp = [];
     let last = lim, head = null;
@@ -165,9 +165,9 @@ export class AudioEngine {
     const c = this.ctx; if (!c) return;
     const { pda } = this.env;
     const t = c.currentTime;
-    // Through the tablet's small speaker: nothing below 2 kHz, nothing above 7 kHz.
-    for (const h of this.hp) h.frequency.setTargetAtTime(pda ? 2000 : 10, t, 0.08);
-    for (const l of this.lp) l.frequency.setTargetAtTime(pda ? 7000 : 22000, t, 0.08);
+    // Through the tablet's small speaker: nothing below 500 Hz, nothing above 10 kHz.
+    for (const h of this.hp) h.frequency.setTargetAtTime(pda ? 500 : 10, t, 0.08);
+    for (const l of this.lp) l.frequency.setTargetAtTime(pda ? 10000 : 22000, t, 0.08);
   }
 
   /// Plays a sound as the acoustics place it. `o`: { db, gain, lowpass, room, rx, ry, below, dist, delay, rate,
