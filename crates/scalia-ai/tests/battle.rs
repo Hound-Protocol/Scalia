@@ -153,3 +153,16 @@ fn recoil_makes_the_later_rounds_of_a_burst_less_accurate() {
     let (f, l) = (first.0 * 1000 / first.1.max(1), later.0 * 1000 / later.1.max(1));
     assert!(f > l + 100, "first rounds hit clearly more often: first {f}‰ of {}, later {l}‰ of {}", first.1, later.1);
 }
+
+#[test]
+fn nobody_hits_more_than_85_percent_and_a_rookie_half() {
+    use scalia_ai::battle::{SKILL_MAX, SKILL_ROOKIE};
+    let mut b = Battle::new(SightGrid::build(0, 0, 100, 100, &[]), vec![Soldier::new(0, 0, (10_000, 10_000), Stance::Stand), Soldier::new(1, 1, (10_000, 15_000), Stance::Stand)], 1);
+    b.soldiers[0].skill = 5_000;
+    assert_eq!(b.hit_permille(0, 1), SKILL_MAX as i64, "best case caps at 85 %");
+    b.soldiers[0].skill = SKILL_ROOKIE;
+    assert_eq!(b.hit_permille(0, 1), 500);
+    // Further off, much less.
+    b.soldiers[1].pos = (10_000, 60_000);
+    assert!(b.hit_permille(0, 1) < 300, "a rookie at 50 m: {}", b.hit_permille(0, 1));
+}

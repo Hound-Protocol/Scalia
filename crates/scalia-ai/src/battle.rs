@@ -122,6 +122,13 @@ impl Stance {
 
 pub const MAG: i32 = 30;
 pub const DAMAGE: i32 = 35;
+/// Marksmanship (‰): the chance a round hits a man standing still in the open at 10 m or less, the shooter
+/// steady and calm. A rookie hits half; no soldier, however seasoned, ever does better than 85 %. Range,
+/// movement, recoil, suppression and how much of the target shows all come off this.
+pub const SKILL_ROOKIE: i32 = 500;
+pub const SKILL_REGULAR: i32 = 600;
+pub const SKILL_VETERAN: i32 = 720;
+pub const SKILL_MAX: i32 = 850;
 /// At or below this a man is down: he cannot move or fight and bleeds until treated.
 pub const DOWN_HP: i32 = 40;
 /// A man down and untreated loses one point of health this often.
@@ -240,11 +247,13 @@ pub struct Soldier {
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
+    /// Marksmanship (‰, SKILL_ROOKIE to SKILL_MAX): grows with veterancy.
+    pub skill: i32,
 }
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0 }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -943,7 +952,15 @@ impl Battle {
         let (s, t) = (&self.soldiers[shooter], &self.soldiers[target]);
         let (dx, dy) = (t.pos.0 - s.pos.0, t.pos.1 - s.pos.1);
         let d_m = isqrt(dx * dx + dy * dy) / 1000;
-        let base = (900 - (d_m - 10).max(0) * 600 / 140).clamp(80, 900);
+        // Range: full skill out to 10 m, then falling off (55 % of it at 50 m, 30 % at 100 m, 12 % at 200 m).
+        let range = match d_m {
+            0..=10 => 1_000,
+            11..=50 => 1_000 - (d_m - 10) * 450 / 40,
+            51..=100 => 550 - (d_m - 50) * 250 / 50,
+            101..=200 => 300 - (d_m - 100) * 180 / 100,
+            _ => 120,
+        };
+        let base = s.skill.clamp(0, SKILL_MAX) as i64 * range / 1_000;
         let moving = if s.moving { 500 } else { 1_000 };
         let target_moving = if t.moving { 700 } else { 1_000 };
         let calm = 1_000 - s.suppression as i64 / 2;
