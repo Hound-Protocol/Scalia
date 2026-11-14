@@ -358,6 +358,18 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.prone = keyed(t, k, array<f32, 5>(0.0, 0.0, 0.0, 0.55, 1.0));
     p.head = keyed(t, k, array<f32, 5>(0.0, 0.3, -0.4, 0.2, 0.55));
     p.look = keyed(t, k, array<f32, 5>(0.0, 0.0, 0.2, 0.6, 0.9));
+  } else if (pose == 27u) {
+    // Killed lying on his back (pose.rs `Pose::DeadBack`).
+    p.prone = -1.0;
+    p.sling = 1.0;
+    p.hip = vec2f(0.25, 0.1);
+    p.knee = vec2f(0.45, 0.15);
+    p.sh = vec2f(0.35, 0.3);
+    p.el = vec2f(0.5, 0.4);
+    p.reach = vec2f(0.0);
+    p.abd = vec2f(0.9, 1.0);
+    p.head = -0.3;
+    p.look = 0.8;
   } else if (pose == 24u) {
     // Killed, face down and limp (pose.rs `Pose::Dead`).
     p.prone = 1.0;

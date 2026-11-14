@@ -54,6 +54,8 @@ pub struct Assault {
     /// Per soldier: on his feet at the last drawing, and the fall he is in (started at viewer ms, which fall).
     up: Vec<bool>,
     falls: Vec<Option<(f64, Pose)>>,
+    /// Per soldier: lying on his back (went down wounded): if he dies there he stays on his back.
+    on_back: Vec<bool>,
     /// Per soldier: gait phase integrated from his cadence (strides), and the viewer time it was last advanced.
     gait: Vec<(f64, f64)>,
     pub sounds: Vec<Sound>,
@@ -109,7 +111,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -122,6 +124,7 @@ impl Assault {
             self.motion.push((0.0, 0.0, -1.0));
             self.legs.push(Pose::Walk);
             self.up.push(true);
+            self.on_back.push(false);
             self.falls.push(None);
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
         }
@@ -289,6 +292,13 @@ impl Assault {
             }
             if on_feet {
                 self.falls[i] = None;
+                self.on_back[i] = false;
+            } else if s.alive() {
+                self.on_back[i] = true;
+            }
+            // Died lying on his back: he stays on his back (no turning over onto his face).
+            if !s.alive() && self.on_back[i] && pose == Pose::Dead {
+                pose = Pose::DeadBack;
             }
             self.up[i] = on_feet;
             let falling = self.falls[i].and_then(|(t0, fall)| {

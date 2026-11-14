@@ -73,6 +73,9 @@ pub enum Pose {
     /// Killed, over the phase (0..1, once): a jolt, the knees go and he crumples forward onto his face,
     /// ending exactly in the dead pose.
     FallForward = 26,
+    /// Killed while lying on his back (wounded, then bled out or hit again): limp on his back, arms fallen
+    /// out, head rolled to the side. No turning over.
+    DeadBack = 27,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -798,6 +801,18 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.prone = keyed(t, k, [0.0, 0.0, 0.0, 0.55, 1.0]);
             p.head = keyed(t, k, [0.0, 0.3, -0.4, 0.2, 0.55]);
             p.look = keyed(t, k, [0.0, 0.0, 0.2, 0.6, 0.9]);
+        }
+        Pose::DeadBack => {
+            p.prone = -1.0;
+            p.sling = 1.0;
+            p.hip = [0.25, 0.1];
+            p.knee = [0.45, 0.15];
+            p.shoulder = [0.35, 0.3];
+            p.elbow = [0.5, 0.4];
+            p.reach = [0.0, 0.0];
+            p.abduct = [0.9, 1.0];
+            p.head = -0.3;
+            p.look = 0.8;
         }
         Pose::Dead => {
             p.prone = 1.0;

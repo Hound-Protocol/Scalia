@@ -1946,6 +1946,7 @@ impl Viewer {
                 Some(28) => Some((Pose::Dead, 0.0, None, 0.0)),
                 Some(29) => Some((Pose::FallBack, 0.9, None, 0.0)),
                 Some(30) => Some((Pose::FallForward, 1.0, None, 0.0)),
+                Some(31) => Some((Pose::DeadBack, 0.0, None, 0.0)),
                 _ => None,
             };
             let (pose, steps, upper, dir) = combo.unwrap_or_else(|| {
