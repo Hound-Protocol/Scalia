@@ -176,7 +176,8 @@ fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rif
 // Idle life for soldiers standing still (port of pose.rs `idle`): breathing, weight shifts, glances, a rifle hitch.
 fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   var q = p0;
-  if (pose == 1u || pose == 2u || pose == 7u || pose == 5u || pose == 11u || pose >= 21u) { return q; }
+  // Tablet (10): held still for the close-up (no sway).
+  if (pose == 1u || pose == 2u || pose == 7u || pose == 5u || pose == 10u || pose == 11u || pose >= 21u) { return q; }
   let tau = 6.2831853;
   let breathe = sin(tau * (t / 3.8 + seed));
   if (pose == 6u || pose == 4u || pose == 12u || pose == 13u || pose == 14u) {

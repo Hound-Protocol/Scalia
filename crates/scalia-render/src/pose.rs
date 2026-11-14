@@ -854,7 +854,8 @@ fn stride(p: &mut PoseParams, phase: f32, bob: f32, twist: f32, arms: f32, rifle
 /// their life from the stride instead; aiming soldiers keep their eyes and rifle on the target.
 pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
     let mut q = *p;
-    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::Prone | Pose::CrouchWalk) {
+    // Holding the tablet he keeps still: the close-up camera is on it, and any sway smears the screen.
+    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::Prone | Pose::CrouchWalk | Pose::Tablet) {
         return q;
     }
     let tau = std::f32::consts::TAU;
