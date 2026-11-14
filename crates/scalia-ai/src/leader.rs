@@ -1277,7 +1277,7 @@ impl Battle {
         }
         let hidden = |p: (i64, i64)| !looks.iter().any(|&l| self.sight.clear(Point { x: p.0, y: p.1, z: 1_400 }, Point { x: l.0, y: l.1, z: 1_400 }));
         // Outside: the stack spots by the entry door (where the men wait before the first room).
-        let mut out: Vec<(i64, i64)> = outside.iter().copied().filter(|&p| false && hidden(p)).collect();
+        let mut out: Vec<(i64, i64)> = outside.iter().copied().filter(|&p| hidden(p)).collect();
         for &r in cleared {
             let rm = k.rooms[r];
             let mut y = rm.min.1 + 600;

@@ -49,7 +49,8 @@ const SMOKE_BUILD_MS: f64 = scalia_ai::battle::SMOKE_BUILD_MS as f64;
 const SMOKE_MS: f64 = scalia_ai::battle::SMOKE_MS as f64;
 const SMOKE_R_M: f64 = scalia_ai::battle::SMOKE_R_MM as f64 / 1000.0;
 const SMOKE_GREY: u8 = 2;
-const SMOKE_PALE: u8 = 15;
+const SMOKE_PALE: u8 = 19;
+const SMOKE_DARK: u8 = 1;
 
 fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -156,15 +157,17 @@ impl Effects {
                 continue;
             }
             let base = rel(c);
-            // A heap of puffs around the centre (fixed per cloud), slowly turning.
-            for n in 0..7u64 {
+            // A heap of lumpy puffs around the centre (fixed per cloud), slowly turning and rising, some up on
+            // top of the others: a billow rather than a dome.
+            for n in 0..14u64 {
                 let h = scalia_core::hash::mix64(id ^ n.wrapping_mul(0x9e37_79b9));
-                let a = (h % 6283) as f64 / 1000.0 + age / 40_000.0;
-                let off = if n == 0 { 0.0 } else { SMOKE_R_M * (0.35 + ((h >> 16) % 450) as f64 / 1000.0) };
-                let r = SMOKE_R_M as f32 * (0.45 + ((h >> 32) % 250) as f32 / 1000.0) * k;
-                let p = [base[0] + (a.cos() * off) as f32 * k, base[1] + (a.sin() * off) as f32 * k, base[2]];
-                let colour = if n % 3 == 0 { SMOKE_PALE } else { SMOKE_GREY };
-                m.dome(p, [r, r], r * (1.1 + 0.4 * thin as f32), 9, 4, code(colour, Part::Body));
+                let a = (h % 6283) as f64 / 1000.0 + age / 30_000.0 * if n % 2 == 0 { 1.0 } else { -1.0 };
+                let off = if n == 0 { 0.0 } else { SMOKE_R_M * (0.15 + ((h >> 16) % 620) as f64 / 1000.0) };
+                let r = SMOKE_R_M as f32 * (0.26 + ((h >> 32) % 240) as f32 / 1000.0) * k;
+                let lift = (((h >> 44) % 1000) as f32 / 1000.0 * 1.9 + (age / 1000.0) as f32 * 0.02) * k;
+                let p = [base[0] + (a.cos() * off) as f32 * k, base[1] + (a.sin() * off) as f32 * k, base[2] + lift - r * 0.35];
+                let colour = match n % 4 { 0 => SMOKE_PALE, 1 => SMOKE_DARK, _ => SMOKE_GREY };
+                m.dome(p, [r, r * 0.92], r * (1.0 + 0.3 * thin as f32), 7, 3, code(colour, Part::Body));
             }
         }
         for b in &self.blasts {
