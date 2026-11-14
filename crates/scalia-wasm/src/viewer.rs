@@ -711,9 +711,10 @@ impl Viewer {
                 ((kx + 5_000, ky - 40_000), "Blue and Red, eight each with the same brain, advance on each other across open ground. Watch bounding, cover and fire.")
             }
             _ => {
-                a.spawn_squad(DEMO_SQUAD, 0, &block(kx + 6_000, ky - 27_000, 12));
+                // Formed up 55 m out (the old 27 m had both sides in each other's sights from the first frame).
+                a.spawn_squad(DEMO_SQUAD, 0, &block(kx + 6_000, ky - 55_000, 12));
                 a.order(DEMO_SQUAD, Order::Capture);
-                ((kx + 10_000, ky - 18_000), "Blue (12) takes the training house from Red (8): approach, stack, entry, clearing.")
+                ((kx + 10_000, ky - 30_000), "Blue (12) takes the training house from Red (8): approach, stack, entry, clearing.")
             }
         };
         self.assault = Some(a);
