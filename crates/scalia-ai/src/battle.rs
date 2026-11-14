@@ -244,6 +244,11 @@ impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
         Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0 }
     }
+    /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
+    pub fn pace(&self) -> i64 {
+        if self.moving { self.speed } else { 0 }
+    }
+
     /// Down: wounded too badly to move or fight (alive, at or below DOWN_HP).
     pub fn down(&self) -> bool {
         self.alive() && self.health <= DOWN_HP

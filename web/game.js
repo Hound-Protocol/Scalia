@@ -1390,13 +1390,31 @@ try {
     voices++; src.onended = () => { voices--; };
     src.start(c.currentTime + delay + dist / 343);
   };
+  // Soldiers' footfalls: the grass step, quiet and short-ranged, panned like the gunfire.
+  let stepBuf = null, stepVoices = 0;
+  const step = (dist, pan, loud, delay = 0) => {
+    const c = fireGraph(); if (!c || stepVoices > 16) return;
+    if (!stepBuf) { if (!step.loading) { step.loading = true; fetch('./sfx/steps-grass.mp3').then((r) => r.arrayBuffer()).then((b) => c.decodeAudioData(b)).then((d) => { stepBuf = d; }).catch(() => {}); } return; }
+    const src = c.createBufferSource(); src.buffer = stepBuf;
+    src.playbackRate.value = 0.9 + Math.random() * 0.2;
+    const g = c.createGain(); g.gain.value = Math.min(0.6, 0.55 * loud / (1 + dist / 6));
+    const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan * 0.7));
+    src.connect(g).connect(p).connect(c.destination);
+    stepVoices++; src.onended = () => { stepVoices--; };
+    src.start(c.currentTime + delay);
+  };
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
   let assaultOn = false, assaultPoll = 0, lastAlive = null;
   const assaultTick = (now) => {
-    if (!assaultOn) return;
+    // The field battle's sounds (gunfire, blasts, footfalls), whoever is fighting: tablet orders or the K demo.
     const s = v.take_sounds();
-    for (let i = 0; i + 3 < s.length; i += 4) fire(s[i], s[i + 1], s[i + 2] > 0.5, s[i + 3]);
+    if (s.length && !fireCtx) fireGraph();
+    for (let i = 0; i + 3 < s.length; i += 4) {
+      if (s[i + 2] >= 2) step(s[i], s[i + 1], s[i + 2] - 2, s[i + 3]);
+      else fire(s[i], s[i + 1], s[i + 2] > 0.5, s[i + 3]);
+    }
+    if (!assaultOn) return;
     if (now - assaultPoll < 250) return;
     assaultPoll = now;
     let st; try { st = JSON.parse(v.assault_state()); } catch (_) { return; }

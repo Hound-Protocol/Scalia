@@ -687,7 +687,16 @@ impl Viewer {
             let d = Vec3::new((snd.x - self.cmd.0) as f32, (snd.y - self.cmd.1) as f32, 0.0);
             let len = d.length();
             let delay = ((snd.at - self.frame_ms) / 1000.0).max(0.0) as f32;
-            out.extend_from_slice(&[len, if len > 0.5 { d.dot(r) / len } else { 0.0 }, if snd.blast { 1.0 } else { 0.0 }, delay]);
+            // Kind: 0 a shot, 1 a blast, 2 + loudness a footfall (2.0 to 3.0); footfalls only within 30 m.
+            let kind = match (snd.blast, snd.step) {
+                (true, _) => 1.0,
+                (false, Some(l)) => 2.0 + l,
+                _ => 0.0,
+            };
+            if snd.step.is_some() && len > 30.0 {
+                continue;
+            }
+            out.extend_from_slice(&[len, if len > 0.5 { d.dot(r) / len } else { 0.0 }, kind, delay]);
         }
         out
     }

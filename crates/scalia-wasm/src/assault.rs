@@ -4,6 +4,10 @@ use scalia_ai::battle::{Act, Bark, Battle, Event, Gait, Soldier, Stance};
 pub use scalia_ai::scenario::KILLHOUSE_ATTACKERS as ATTACKERS;
 use scalia_render::pose::{stride_m_dir, Pose};
 
+/// Leg changes by pace (m/s): running legs from RUN_FROM, sprinting legs from SPRINT_FROM (sprinters only).
+const RUN_FROM: f32 = 1.9;
+const SPRINT_FROM: f32 = 3.9;
+
 /// Battle steps are fixed, 50 ms; drawing interpolates between the last two.
 pub const STEP_MS: f64 = 50.0;
 
@@ -15,6 +19,8 @@ pub struct Sound {
     pub x: f64,
     pub y: f64,
     pub blast: bool,
+    /// A footfall (quiet, short range); louder when running.
+    pub step: Option<f32>,
     /// Viewer time (ms) it happens: rounds in a burst fall between steps.
     pub at: f64,
 }
@@ -43,6 +49,8 @@ pub struct Assault {
     /// Per soldier, smoothed: speed (m/s), direction of travel relative to his facing (rad), and until when
     /// (viewer ms) he still counts as walking, so a pause between steps never drops the legs to a stand.
     motion: Vec<(f32, f32, f64)>,
+    /// Per soldier: the legs he is on (walk, run, sprint), kept until his pace clearly calls for another.
+    legs: Vec<Pose>,
     /// Per soldier: gait phase integrated from his cadence (strides), and the viewer time it was last advanced.
     gait: Vec<(f64, f64)>,
     pub sounds: Vec<Sound>,
@@ -85,7 +93,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -96,6 +104,7 @@ impl Assault {
             self.prev.push(self.battle.soldiers[i].pos);
             self.anim.push((0.0, Pose::Stand, Pose::Stand, -1000.0));
             self.motion.push((0.0, 0.0, -1.0));
+            self.legs.push(Pose::Walk);
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
         }
     }
@@ -178,7 +187,7 @@ impl Assault {
                 match *e {
                     Event::Shot { from, to, hit, at_ms, shooter, .. } => {
                         let at = at_ms as f64 + offset;
-                        self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false, at });
+                        self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false, step: None, at });
                         // The muzzle: 0.6 m out towards the target, at shoulder height.
                         let (dx, dy) = (to.x - from.x, to.y - from.y);
                         let d = (((dx * dx + dy * dy) as f64).sqrt() as i64).max(1);
@@ -192,7 +201,7 @@ impl Assault {
                     }
                     Event::Explosion { pos } => {
                         let at = self.battle.time_ms as f64 + offset;
-                        self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, at });
+                        self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, step: None, at });
                         self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false });
                     }
                     Event::Order { squad, step } => self.steps.push((squad, step)),
@@ -238,7 +247,9 @@ impl Assault {
             let s = &self.battle.soldiers[i];
             let s_squad = s.squad;
             let m = &mut self.motion[i];
-            let raw = ((s.vel.0 * s.vel.0 + s.vel.1 * s.vel.1) as f64).sqrt() as f32 / STEP_MS as f32;
+            // His own pace (the battle's wind-up and braking), not the step's distance: being nudged aside by a
+            // neighbour must not speed up his legs.
+            let raw = s.pace() as f32 / 1000.0;
             if s.moving {
                 m.2 = self.now + 250.0;
                 let want = heading_of(s.vel) - heading_of(s.facing);
@@ -246,7 +257,23 @@ impl Assault {
             }
             let walking = self.now < m.2;
             m.0 += ((if walking { raw } else { 0.0 }) - m.0) * 0.25;
-            let (pose, steps, upper, dir) = pose_of(s, walking, m.0, m.1);
+            let (mut pose, mut steps, upper, dir) = pose_of(s, walking, m.0, m.1);
+            // Walk, run and sprint legs change only when the pace is clearly past the line (no flicker).
+            if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint) {
+                let held = self.legs[i];
+                let v = m.0;
+                let keep = match held {
+                    Pose::Walk => v < RUN_FROM + 0.25,
+                    Pose::Run => v >= RUN_FROM - 0.25 && !(pose == Pose::Sprint),
+                    Pose::Sprint => v >= SPRINT_FROM - 0.3 && s.gait == Gait::Sprint,
+                    _ => false,
+                };
+                if keep && held != pose {
+                    pose = held;
+                    steps = v / stride_m_dir(pose, dir);
+                }
+                self.legs[i] = pose;
+            }
             let a = &mut self.anim[i];
             // Heading eases round to his facing (the battle turns him at 4 rad/s; this only smooths the steps).
             let want = heading_of(s.facing);
@@ -257,7 +284,15 @@ impl Assault {
             // The phase is integrated here (cadence changes as he winds up and brakes) and handed to the shader as is.
             let g = &mut self.gait[i];
             let dt = ((self.now - g.1) / 1000.0).clamp(0.0, 0.1);
+            let before = g.0;
             *g = ((g.0 + steps as f64 * dt).fract(), self.now);
+            // A footfall at each half of the stride (feet on the ground): heard nearby.
+            let after = g.0;
+            let crossed = |at: f64| if after >= before { before < at && after >= at } else { before < at || after >= at };
+            if steps > 0.0 && matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk) && (crossed(0.0001) || crossed(0.5)) {
+                let loud = match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, _ => 0.5 };
+                self.sounds.push(Sound { x: x / 1000.0, y: y / 1000.0, blast: false, step: Some(loud), at: self.now });
+            }
             let (phase, cadence) = (g.0 as f32, if steps > 0.0 { -1.0 } else { 0.0 });
             out.extend_from_slice(&[rx, ry, z, body(s_squad), a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
@@ -328,7 +363,7 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
         (Stance::Crouch, false) => (if reload { Pose::Reload } else if aiming { if s.cover.is_some() { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, if reload { 0.4 } else { 0.0 }, None, 0.0),
         (Stance::Stand, true) => {
             // The legs go by how fast he really is, not the gait he is heading for.
-            let pose = if speed > 4.0 && s.gait == Gait::Sprint { Pose::Sprint } else if speed > 2.3 { Pose::Run } else { Pose::Walk };
+            let pose = if speed >= SPRINT_FROM && s.gait == Gait::Sprint { Pose::Sprint } else if speed >= RUN_FROM { Pose::Run } else { Pose::Walk };
             // Sprinting the rifle is across the chest: no aim layer.
             let upper = if pose == Pose::Sprint { None } else { upper };
             (pose, speed / stride_m_dir(pose, dir), upper, dir)
@@ -352,6 +387,8 @@ mod tests {
         let (p, steps, upper, dir) = pose_of(&s, true, 1.5, std::f32::consts::FRAC_PI_2);
         assert_eq!((p, upper), (Pose::Walk, Some(Pose::StandAim)));
         assert!(steps > 0.5 && dir == std::f32::consts::FRAC_PI_2, "{steps} {dir}");
+        // Sprinting legs need a sprint order and the pace for it.
+        assert_eq!(pose_of(&s, true, 4.3, 0.0).0, Pose::Run, "fast, but not told to sprint");
         // Told to run but still winding up: walking legs until he is really going, then running ones.
         s.gait = Gait::Run;
         assert_eq!(pose_of(&s, true, 1.2, 0.0).0, Pose::Walk);
@@ -371,10 +408,15 @@ mod tests {
         a.spawn_squad(4, 0, &start);
         a.order(4, Order::Move { to: (60_000, 50_000), mode: Mode::Plain });
         let mut t = 0.0;
+        let mut steps = 0;
         while t < 60_000.0 {
             t += 16.7;
             a.advance(t);
+            // Drawing advances the stride (and its footfalls).
+            let _ = a.instances(0, (t / 1000.0) as f32, |_| 6.0, |x, y| Some((x as f32, y as f32, 0.0)));
+            steps += a.sounds.drain(..).filter(|s| s.step.is_some()).count();
         }
+        assert!(steps > 50, "footfalls while they walk: {steps}");
         assert_eq!(a.squad_alive(4), 6);
         assert_eq!(a.done, vec![4], "one report, from the squad that arrived");
         let c = a.centre(4).unwrap();
