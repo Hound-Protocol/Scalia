@@ -384,6 +384,8 @@ pub fn lab_state(b: &Battle, i: usize) -> String {
     if s.down() {
         w.push(if s.stable() { "DOWN stable".into() } else { "DOWN bleeding".into() });
     } else {
+        // His mind first: what he wants and the plan for it.
+        w.push(s.mind.describe());
         w.push(match s.task {
             Task::Idle => "idle".into(),
             Task::Move { gait, .. } => format!("move {}", format!("{gait:?}").to_lowercase()),

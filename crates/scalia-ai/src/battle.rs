@@ -260,6 +260,11 @@ pub struct Soldier {
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
+    /// What he wants now and his plan for it (soldier mind, GOAP).
+    pub mind: crate::mind::Mind,
+    /// What the plan lets him do: open fire, put covering fire down.
+    pub may_fire: bool,
+    pub may_suppress: bool,
     /// The enemy he has his sights on (a new one takes a moment to get a sight picture on).
     sighted: Option<usize>,
     /// Marksmanship (‰, SKILL_ROOKIE to SKILL_MAX): grows with veterancy.
@@ -268,7 +273,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -783,46 +788,90 @@ impl Battle {
         }
     }
 
-    /// Cover decisions (with perception): pinned with known threats, run to the best cover in reach; calm again
-    /// and nothing to shoot for a while, leave it.
-    fn seek_cover(&mut self) {
-        let Some(map) = self.cover.as_ref() else { return };
+    /// Every soldier thinks (soldier mind, GOAP): his facts from what he knows and how he stands, his most
+    /// wanted thing and a plan for it; the plan's first action sets what he does (take cover, reload, fire,
+    /// covering fire, carry on with the order). Calm again and nothing to shoot for a while, he leaves cover.
+    fn think(&mut self) {
+        use crate::mind::{fact, think, Act, Situation, Want};
+        let now = self.time_ms;
         for i in 0..self.soldiers.len() {
             let s = &self.soldiers[i];
-            if !s.alive() || s.down() || s.aiding.is_some() {
+            if !s.alive() || s.down() {
+                self.soldiers[i].mind = crate::mind::Mind::default();
                 continue;
             }
-            // Inside the house the walls are the cover and the room is the job: nobody runs out of a clearing.
+            let busy = s.aiding.is_some() || s.dragging.is_some();
             let indoors = self.building.as_ref().is_some_and(|(k, _)| k.room_at(s.pos.0, s.pos.1).is_some());
-            // Shot at, or trading fire in the open at range while not creeping up on a door: get behind something
-            // (not in an assault, where the leader's bounding is the answer to fire).
-            let in_open_fight = s.target.is_some_and(|t| !near(self.soldiers[t].pos, s.pos, OPEN_FIGHT_MM)) && s.gait != Gait::Crouch && s.suppression > 0
-                && !self.brains.get(s.squad as usize).is_some_and(|b| matches!(b.order, crate::leader::Order::Capture));
             let assaulting = self.brains.get(s.squad as usize).is_some_and(|b| matches!(b.order, crate::leader::Order::Capture));
-            let too_close = s.target.is_some_and(|t| near(self.soldiers[t].pos, s.pos, CLOSE_FIGHT_MM));
-            let shot_at = s.suppression >= UNDER_FIRE && !assaulting;
-            if s.cover.is_none() && !indoors && !too_close && (s.suppression >= SEEK_COVER || shot_at || in_open_fight) {
-                // The four nearest known threats (a big fight has hundreds of contacts).
-                let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();
-                threats.sort_unstable();
-                let threats: Vec<(i64, i64)> = threats.iter().take(4).map(|t| (t.1, t.2)).collect();
-                if threats.is_empty() {
-                    continue;
+            let target_close = s.target.is_some_and(|t| near(self.soldiers[t].pos, s.pos, CLOSE_FIGHT_MM));
+            let open_fight = s.target.is_some_and(|t| !near(self.soldiers[t].pos, s.pos, OPEN_FIGHT_MM)) && s.gait != Gait::Crouch && s.suppression > 0 && !assaulting;
+            // Shot at: one round is enough, unless in an assault (then only pinned).
+            let under_fire = if assaulting { s.suppression >= SEEK_COVER } else { s.suppression >= UNDER_FIRE } || open_fight;
+            let in_cover = s.cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| near(m.spots[c].pos, s.pos, 800));
+            // Cover worth running for: the spot he is running to, or the best one in reach against the four
+            // nearest known threats.
+            let mut candidate = None;
+            let cover_near = if s.cover.is_some() {
+                true
+            } else if under_fire && !indoors && !target_close {
+                if let Some(map) = self.cover.as_ref() {
+                    let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();
+                    threats.sort_unstable();
+                    let threats: Vec<(i64, i64)> = threats.iter().take(4).map(|t| (t.1, t.2)).collect();
+                    if !threats.is_empty() {
+                        let taken: Vec<usize> = self.soldiers.iter().filter_map(|o| o.cover).collect();
+                        candidate = map.best(s.pos, &threats, COVER_REACH_MM, &self.sight, &taken);
+                    }
                 }
-                let taken: Vec<usize> = self.soldiers.iter().filter_map(|o| o.cover).collect();
-                if let Some(c) = map.best(s.pos, &threats, COVER_REACH_MM, &self.sight, &taken) {
-                    self.soldiers[i].cover = Some(c);
-                    self.soldiers[i].calm_ms = 0;
-                    self.log.push(Event::Bark { soldier: i, bark: Bark::TakingCover });
+                candidate.is_some()
+            } else {
+                false
+            };
+            let safe = in_cover || !under_fire || target_close || indoors || !cover_near;
+            let contact = self.contacts[s.squad as usize].iter().any(|c| now - c.seen_ms <= 4_000 && c.confidence >= CONF_HEARD && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
+            let bits = [
+                (fact::TARGET, s.target.is_some()),
+                (fact::IN_COVER, in_cover),
+                (fact::COVER_NEAR, cover_near),
+                (fact::UNDER_FIRE, under_fire),
+                (fact::SAFE, safe),
+                (fact::MAG_OK, s.ammo > 0),
+                (fact::SPARE_MAGS, s.mags > 0),
+                (fact::CONTACT, contact),
+            ];
+            let facts = bits.iter().fold(0u64, |a, &(b, on)| if on { a | 1 << b } else { a });
+            let sit = Situation { facts, suppression: s.suppression, target_close, mag_empty: s.ammo <= 0, aim: s.aim, aiding: busy };
+            let mind = think(&sit);
+            let doing = mind.doing();
+            let me = &mut self.soldiers[i];
+            me.may_fire = !busy && match doing {
+                Some(Act::TakeCover) => target_close,
+                _ => true,
+            };
+            me.may_suppress = doing == Some(Act::Suppress);
+            match doing {
+                Some(Act::TakeCover) => {
+                    if me.cover.is_none() {
+                        if let Some(c) = candidate {
+                            me.cover = Some(c);
+                            me.calm_ms = 0;
+                            self.log.push(Event::Bark { soldier: i, bark: Bark::TakingCover });
+                        }
+                    }
                 }
-            } else if s.cover.is_some() {
-                let calm = s.suppression < LEAVE_COVER && s.target.is_none();
-                let me = &mut self.soldiers[i];
+                Some(Act::Reload) | Some(Act::ReloadExposed) => self.reload(i),
+                _ => {}
+            }
+            // Out of cover once it is calm again: no rounds coming in and nothing to shoot for a while.
+            let me = &mut self.soldiers[i];
+            if me.cover.is_some() && mind.want != Want::Survive {
+                let calm = me.suppression < LEAVE_COVER && me.target.is_none();
                 me.calm_ms = if calm { me.calm_ms + PERCEIVE_MS } else { 0 };
                 if me.calm_ms >= CALM_MS {
                     me.cover = None;
                 }
             }
+            self.soldiers[i].mind = mind;
         }
     }
 
@@ -1016,7 +1065,7 @@ impl Battle {
         }
         self.soldiers[i].cooldown_ms = self.soldiers[i].cooldown_ms.max(-dt_ms);
         let s = &self.soldiers[i];
-        if !s.aim || s.moving || s.cooldown_ms > 0 || s.suppression >= PINNED / 2 || s.ammo <= TOP_UP {
+        if !s.may_suppress || !s.aim || s.moving || s.cooldown_ms > 0 || s.suppression >= PINNED / 2 || s.ammo <= TOP_UP {
             return;
         }
         let now = self.time_ms;
@@ -1084,7 +1133,7 @@ impl Battle {
         self.perceive_ms -= dt_ms;
         if self.perceive_ms <= 0 {
             self.perceive_ms += PERCEIVE_MS;
-            self.seek_cover();
+            self.think();
         }
         self.wounds(dt_ms);
         self.lead_ms += dt_ms as i64;
@@ -1150,9 +1199,8 @@ impl Battle {
             } else if let Task::Hold { face, .. } = me.task {
                 me.facing = turn_toward(me.facing, (face.0 - me.pos.0, face.1 - me.pos.1));
             }
-            // Running for cover he holds his fire, unless the enemy is right on top of him.
-            let to_cover = self.soldiers[i].cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| !near(m.spots[c].pos, self.soldiers[i].pos, 800));
-            if to_cover && self.soldiers[i].target.is_none_or(|t| !near(self.soldiers[t].pos, self.soldiers[i].pos, CLOSE_FIGHT_MM)) {
+            // His mind holds his fire (running for cover, say), unless the enemy is right on top of him.
+            if !self.soldiers[i].may_fire && self.soldiers[i].target.is_none_or(|t| !near(self.soldiers[t].pos, self.soldiers[i].pos, CLOSE_FIGHT_MM)) {
                 self.soldiers[i].burst_left = 0;
                 self.soldiers[i].sighted = None;
                 continue;
