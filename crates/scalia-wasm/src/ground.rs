@@ -177,3 +177,71 @@ mod lab_tests {
         PHASES.with(|p| println!("blue down by phase (per run): {}", p.borrow().iter().map(|(k, v)| format!("{k} {:.1}", *v as f64 / seeds as f64)).collect::<Vec<_>>().join(", ")));
     }
 }
+
+#[cfg(test)]
+mod lab_more {
+    use super::*;
+    use crate::assault::{Assault, DEMO_SQUAD, LAB_RED};
+    use scalia_ai::leader::{Mode, Order};
+
+    /// The lab's other scenarios, natively: (blue standing, blue total, red standing, red total).
+    fn run(name: &str, seed: u64) -> (usize, usize, usize, usize) {
+        let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
+        let props = base_props();
+        let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
+        map.killhouse = Some(KILLHOUSE_MM);
+        let house = name == "contact";
+        map.live = if house { Some(RANGE_LIVE_MM) } else { None };
+        let mut a = Assault::field_with(map, KILLHOUSE_MM, seed, 0.0, house);
+        let block = |x0: i64, y0: i64, n: i64| -> Vec<(i64, i64)> { (0..n).map(|i| (x0 + (i % 4) * 1_500, y0 + (i / 4) * 1_500)).collect() };
+        match name {
+            "contact" => {
+                a.spawn_squad(DEMO_SQUAD, 0, &block(RANGE_MM.2 - 7_000, RANGE_MM.1 + 2_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (RANGE_MM.2 - 5_000, RANGE_MM.3 - 3_000), mode: Mode::Plain });
+            }
+            "standoff-swapped" => {
+                // The same, Red brought on first (lower soldier numbers): any difference is order bias.
+                a.spawn_squad(LAB_RED, 1, &block(140_000, 92_000, 8));
+                a.order(LAB_RED, Order::Move { to: (80_000, 95_000), mode: Mode::Confirmed });
+                a.spawn_squad(DEMO_SQUAD, 0, &block(78_000, 92_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (142_000, 95_000), mode: Mode::Confirmed });
+            }
+            "standoff-mirrored" => {
+                // Sides swapped on the ground: any difference with "standoff" is the ground.
+                a.spawn_squad(DEMO_SQUAD, 0, &block(140_000, 92_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (80_000, 95_000), mode: Mode::Confirmed });
+                a.spawn_squad(LAB_RED, 1, &block(78_000, 92_000, 8));
+                a.order(LAB_RED, Order::Move { to: (142_000, 95_000), mode: Mode::Confirmed });
+            }
+            _ => {
+                a.spawn_squad(DEMO_SQUAD, 0, &block(78_000, 92_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (142_000, 95_000), mode: Mode::Confirmed });
+                a.spawn_squad(LAB_RED, 1, &block(140_000, 92_000, 8));
+                a.order(LAB_RED, Order::Move { to: (80_000, 95_000), mode: Mode::Confirmed });
+            }
+        }
+        for _ in 0..(150_000 / 50) {
+            a.battle.step(50);
+        }
+        let b = &a.battle;
+        let up = |team| b.soldiers.iter().filter(|s| s.team == team && s.alive() && !s.down()).count();
+        let all = |team| b.soldiers.iter().filter(|s| s.team == team).count();
+        (up(0), all(0), up(1), all(1))
+    }
+
+    /// `cargo test -p scalia-wasm --release lab_more_report -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn lab_more_report() {
+        for name in ["contact", "standoff", "standoff-swapped", "standoff-mirrored"] {
+            let (mut bu, mut ru, mut n) = (0, 0, 0);
+            for seed in 1..=20 {
+                let r = run(name, seed);
+                bu += r.0;
+                ru += r.2;
+                n = r.1.max(n);
+            }
+            println!("{name}: blue standing {:.1}, red standing {:.1} (of {n} / 8) after 150 s", bu as f64 / 20.0, ru as f64 / 20.0);
+        }
+    }
+}
