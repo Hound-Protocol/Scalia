@@ -2735,9 +2735,19 @@ impl Viewer {
             self.cmd_heading += d.clamp(-8.0 * dt, 8.0 * dt);
         }
         // Legs by his real pace: walking while he winds up, the sprint only once he is really going.
-        let pose = if holding { Pose::Tablet } else if t < self.radio_until { Pose::Radio } else if self.cmd_speed > 3.0 { Pose::Sprint } else if self.cmd_moving { Pose::Walk } else { Pose::Stand };
-        if self.cmd_pose.0 != pose {
-            self.cmd_pose = (pose, self.cmd_pose.0, ts);
+        // With a little give either way (hysteresis), so tapping a key or easing off near a threshold does not
+        // flick him between poses.
+        let was = self.cmd_pose.0;
+        let legs = if self.cmd_speed > if was == Pose::Sprint { 2.7 } else { 3.2 } {
+            Pose::Sprint
+        } else if self.cmd_speed > if matches!(was, Pose::Walk | Pose::Sprint) { 0.05 } else { 0.2 } {
+            Pose::Walk
+        } else {
+            Pose::Stand
+        };
+        let pose = if holding { Pose::Tablet } else if t < self.radio_until { Pose::Radio } else { legs };
+        if was != pose {
+            self.cmd_pose = (pose, was, scalia_render::pose::switch_start(self.cmd_pose.1, self.cmd_pose.2, pose, ts));
         }
         // Cadence from his real speed, integrated into the phase here: the planted foot keeps pace with the ground.
         let steps = match pose { Pose::Sprint | Pose::Walk => self.cmd_speed / stride_m(pose), _ => 0.0 };
@@ -2746,7 +2756,8 @@ impl Viewer {
         self.cmd_phase = if steps > 0.0 { self.cmd_gait as f32 } else { -1.0 };
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
-        let rec = [rx, ry, z, 9.0, self.cmd_heading, self.cmd_gait as f32, if steps > 0.0 { -1.0 } else { 0.0 }, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
+        // The phase is always handed over (frozen when he stops), so legs blending out of a stride stay where they were.
+        let rec = [rx, ry, z, 9.0, self.cmd_heading, self.cmd_gait as f32, -1.0, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
         let mut me = rec;

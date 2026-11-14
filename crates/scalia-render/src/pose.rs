@@ -1055,3 +1055,31 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
 
 /// Seconds a pose change takes.
 pub const BLEND_S: f32 = 0.35;
+
+/// When a pose change should count as having started (shader clock, s), so the figure does not jump. Going back
+/// to `prev`, the pose it was blending away from since `since`, part way through starts the return as far along
+/// as the first blend had got: the eased blend is symmetric, so the body carries on from exactly where it was.
+/// Anything else starts `now`.
+pub fn switch_start<P: PartialEq>(prev: P, since: f32, new: P, now: f32) -> f32 {
+    let w = ((now - since) / BLEND_S).clamp(0.0, 1.0);
+    if new == prev && w < 1.0 { now - (1.0 - w) * BLEND_S } else { now }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use super::{switch_start, BLEND_S};
+    fn eased(w: f32) -> f32 { let w = w.clamp(0.0, 1.0); w * w * (3.0 - 2.0 * w) }
+    #[test]
+    fn turning_back_mid_blend_carries_on_from_where_the_body_was() {
+        // Stand -> walk at 0, back to stand 0.1 s later: the stand weight just before equals the one just after.
+        let before = 1.0 - eased(0.1 / BLEND_S);
+        let start = switch_start(0u8, 0.0, 0u8, 0.1);
+        let after = eased((0.1 - start) / BLEND_S);
+        assert!((before - after).abs() < 1e-5, "{before} vs {after}");
+    }
+    #[test]
+    fn a_settled_or_new_pose_starts_now() {
+        assert_eq!(switch_start(0u8, 0.0, 0u8, 1.0), 1.0);
+        assert_eq!(switch_start(0u8, 0.0, 2u8, 0.1), 0.1);
+    }
+}
