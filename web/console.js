@@ -10,6 +10,11 @@ export function installConsole(commands) {
     box-shadow: 0 8px 28px rgba(0,0,0,0.55); font: 12px/1.4 ui-monospace, monospace; color: #d6dfcf;
     opacity: 0; visibility: hidden; transform: translateX(12px); transition: opacity 0.1s ease-out, transform 0.1s ease-out, visibility 0s 0.1s; }
   #devcon.open { opacity: 1; visibility: visible; transform: none; transition: opacity 0.1s ease-out, transform 0.1s ease-out; }
+  #devcon .sug { display: none; border-top: 1px solid #3c4a38; background: rgba(0,0,0,0.35); max-height: 9.5em; overflow-y: auto; }
+  #devcon .sug.on { display: block; } #devcon .sug div { padding: 1px 10px; display: flex; gap: 12px; cursor: pointer; }
+  #devcon .sug div b { color: #9fd0ff; font-weight: 400; min-width: 9ch; } #devcon .sug div span { color: #8a9680; }
+  #devcon .sug div.pick, #devcon .sug div:hover { background: rgba(159,208,255,0.1); }
+  #devcon .tips { padding: 3px 10px; color: #6f7c68; border-top: 1px solid #2b3528; font-size: 11px; }
   #devcon .bar { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; background: #1f261c; border-bottom: 1px solid #3c4a38;
     cursor: move; user-select: none; color: #b9c7a8; letter-spacing: 0.08em; }
   #devcon .bar span { flex: 1; } #devcon .bar button { font: inherit; color: inherit; background: none; border: 0; padding: 0 6px; cursor: pointer; }
@@ -23,7 +28,8 @@ export function installConsole(commands) {
   el.id = 'devcon';
   el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Console');
   el.innerHTML = '<div class="bar"><span>CONSOLE</span><button data-reset title="Back to the right side">Dock</button><button data-close title="Close (key under Esc)">✕</button></div>'
-    + '<div class="out"></div><input spellcheck="false" autocomplete="off" aria-label="Console command">';
+    + '<div class="out"></div><div class="sug" role="listbox"></div><input spellcheck="false" autocomplete="off" aria-label="Console command" placeholder="Type a command (help lists them all)">'
+    + '<div class="tips">Enter runs · Tab completes · ↑ ↓ history · Esc or the key under Esc closes</div>';
   document.body.appendChild(el);
   // Where the player left it: position and size, kept between visits.
   const KEY = 'scalia.console';
@@ -93,7 +99,7 @@ export function installConsole(commands) {
   }, true);
   input.addEventListener('keydown', (e) => {
     e.stopPropagation();
-    if (e.key === 'Enter') { const v = input.value; input.value = ''; if (v.trim()) { history.push(v); hpos = history.length; run(v); } }
+    if (e.key === 'Enter') { const v = input.value; input.value = ''; if (v.trim()) { history.push(v); hpos = history.length; run(v); } suggest(); }
     else if (e.key === 'Escape') toggle(false);
     else if (e.key === 'ArrowUp') { e.preventDefault(); hpos = Math.max(0, hpos - 1); input.value = history[hpos] || ''; }
     else if (e.key === 'ArrowDown') { e.preventDefault(); hpos = Math.min(history.length, hpos + 1); input.value = history[hpos] || ''; }
@@ -104,6 +110,25 @@ export function installConsole(commands) {
     }
   });
   input.addEventListener('keyup', (e) => e.stopPropagation());
-  print('Scalia console. help lists commands; the key under Esc closes it.');
+  // As you type: the commands that match, with what they do; click one to fill it in.
+  const sug = el.querySelector('.sug');
+  const suggest = () => {
+    const w = input.value.trim().toLowerCase();
+    const word = w.split(/\s+/)[0];
+    const list = w.includes(' ') ? Object.entries(all()).filter(([n]) => n === word) : Object.entries(all()).filter(([n]) => n.startsWith(word));
+    sug.innerHTML = '';
+    for (const [n, c] of (w ? list : Object.entries(all()))) {
+      const d = document.createElement('div'); d.setAttribute('role', 'option');
+      const b = document.createElement('b'); b.textContent = n; const sp = document.createElement('span'); sp.textContent = c.help;
+      d.append(b, sp); d.addEventListener('click', () => { input.value = n + ' '; input.focus(); suggest(); });
+      sug.appendChild(d);
+    }
+    sug.classList.toggle('on', sug.childNodes.length > 0 && document.activeElement === input);
+  };
+  input.addEventListener('input', suggest);
+  input.addEventListener('focus', suggest);
+  input.addEventListener('blur', () => setTimeout(() => sug.classList.remove('on'), 150));
+  print('Scalia console. Start typing to see matching commands, or type help for the full list.');
+  print('Commands: ' + Object.keys(all()).join(', '));
   return { print, run, toggle };
 }
