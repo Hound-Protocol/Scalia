@@ -12,6 +12,7 @@ use wasm_bindgen::prelude::*;
 
 pub mod assault;
 pub mod effects;
+pub mod motion;
 #[cfg(target_arch = "wasm32")]
 pub mod viewer;
 pub mod ground;

@@ -192,10 +192,13 @@ pub struct Viewer {
     /// gait phase, integrated from the cadence so the legs never jump as the pace changes.
     cmd_speed: f32,
     cmd_dir: (f32, f32),
+    /// Skidding: told to go the other way at pace, feet planted, sliding to a stop before pushing off.
+    cmd_skid: bool,
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
-    /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms): for banking into turns.
-    turns: HashMap<u64, (f32, f32, f64)>,
+    /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms), last speed (m/s), smoothed
+    /// acceleration (m/s²): for banking into turns and leaning with a push off or a stop.
+    turns: HashMap<u64, (f32, f32, f64, f32, f32)>,
     /// The commander's rifle and stance, worked by the player on foot.
     gun: Gun,
     /// The live killhouse assault, when one is running (replaces the static enemy posts).
@@ -367,6 +370,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_moving: false,
         cmd_speed: 0.0,
         cmd_dir: (0.0, 1.0),
+        cmd_skid: false,
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         turns: HashMap::new(),
@@ -2743,7 +2747,7 @@ impl Viewer {
                 let (prev_pose, since) = (entry.1, entry.2);
                 let aiming = matches!(stance, Pose::StandAim | Pose::CoverAim);
                 let upper = if moving && pose == Pose::Walk && aiming { Pose::StandAim as u32 as f32 + 1.0 } else { 0.0 };
-                let lean = if moving { self.bank_for(1u64 << 40 | key as u64, heading, mps) } else { 0.0 };
+                let lean = self.bank_for(1u64 << 40 | key as u64, heading, if moving { mps } else { 0.0 });
                 inst.extend_from_slice(&[rx, ry, z, body + lean, heading, jitter, steps, pose as u32 as f32, prev_pose as u32 as f32, since, upper, 0.0]);
             }
         }
@@ -2807,15 +2811,22 @@ impl Viewer {
             _ => CMD_JOG,
         };
         let target = if wants { pace } else { 0.0 };
-        let rate = if target > self.cmd_speed { CMD_ACCEL } else { CMD_BRAKE };
-        self.cmd_speed = if target > self.cmd_speed { (self.cmd_speed + rate * dt).min(target) } else { (self.cmd_speed - rate * dt).max(target) };
-        if wants {
-            let (ux, uy) = (vx / len, vy / len);
-            // Turning eases the heading of travel round rather than snapping it.
-            let k = (10.0 * dt).min(1.0);
-            let (dx, dy) = (self.cmd_dir.0 + (ux - self.cmd_dir.0) * k, self.cmd_dir.1 + (uy - self.cmd_dir.1) * k);
-            let l = (dx * dx + dy * dy).sqrt().max(1e-4);
-            self.cmd_dir = (dx / l, dy / l);
+        // Momentum (motion.rs): his feet can only push, brake and turn him so fast, less so the faster he goes. A
+        // sprint bends round in an arc; reversing (A then D) is a skid to a stop, then a push off the other way.
+        let want = if wants { (vx / len * target, vy / len * target) } else { (0.0, 0.0) };
+        let vel = (self.cmd_dir.0 * self.cmd_speed, self.cmd_dir.1 * self.cmd_speed);
+        self.cmd_skid = crate::motion::skidding(vel, want);
+        let vel = crate::motion::step_velocity(vel, want, dt, CMD_ACCEL, CMD_BRAKE, CMD_SPRINT);
+        let was_still = self.cmd_speed < 0.05;
+        self.cmd_speed = (vel.0 * vel.0 + vel.1 * vel.1).sqrt();
+        if self.cmd_speed > 1e-3 {
+            self.cmd_dir = (vel.0 / self.cmd_speed, vel.1 / self.cmd_speed);
+        } else if wants {
+            self.cmd_dir = (vx / len, vy / len);
+        }
+        // Setting off from still, he steps out with a foot straight away (not from the middle of a stride).
+        if was_still && self.cmd_speed >= 0.05 {
+            self.cmd_gait = 0.12;
         }
         self.cmd_moving = self.cmd_speed > 0.05;
         if self.cmd_moving {
@@ -2860,7 +2871,10 @@ impl Viewer {
         // With a little give either way (hysteresis), so tapping a key or easing off near a threshold does not
         // flick him between poses.
         let was = self.cmd_pose.0;
-        let legs = if self.cmd_speed > if was == Pose::Sprint { 3.7 } else { 4.0 } {
+        // Skidding: feet planted (standing legs) while he slides; the stop leans him back.
+        let legs = if self.cmd_skid {
+            Pose::Stand
+        } else if self.cmd_speed > if was == Pose::Sprint { 3.7 } else { 4.0 } {
             Pose::Sprint
         } else if self.cmd_speed > if matches!(was, Pose::Run | Pose::Sprint) { 2.1 } else { 2.4 } {
             Pose::Run
@@ -2905,7 +2919,8 @@ impl Viewer {
         let gun = (!self.gun.slung && scalia_render::pose::two_handed(upper.unwrap_or(pose)) > 0.0).then(|| {
             let q = scalia_render::pose::muzzle(scalia_render::pose::RIFLE, pose, upper, self.cmd_gait as f32, move_dir) * 1000.0;
             let at = Vec3::new((self.cmd.0 * 1000.0) as f32, (self.cmd.1 * 1000.0) as f32, 0.0);
-            let w = scalia_render::pose::figure_to_world(q, at, self.cmd_heading, scalia_render::pose::unpack_bank(9.0 + lean));
+            let (roll, pitch) = scalia_render::pose::unpack_tilt(9.0 + lean);
+            let w = scalia_render::pose::figure_to_world(q, at, self.cmd_heading, roll, pitch);
             (w.x as i64, w.y as i64, w.z as i64)
         });
         if let Some(a) = self.assault.as_mut() {
@@ -2980,17 +2995,20 @@ impl Viewer {
     /// turning is followed from frame to frame (smoothed, so one jerk of the heading does not tip him).
     fn bank_for(&mut self, key: u64, heading: f32, speed: f32) -> f32 {
         let now = self.frame_ms;
-        let e = self.turns.entry(key).or_insert((heading, 0.0, now));
+        let e = self.turns.entry(key).or_insert((heading, 0.0, now, speed, 0.0));
         let dt = ((now - e.2) / 1000.0) as f32;
         if dt > 0.0005 {
             let mut d = heading - e.0;
             while d > std::f32::consts::PI { d -= std::f32::consts::TAU; }
             while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
-            let rate = if dt < 0.25 { d / dt } else { 0.0 };
+            let fresh = dt < 0.25;
+            let rate = if fresh { d / dt } else { 0.0 };
+            let accel = if fresh { (speed - e.3) / dt } else { 0.0 };
             e.1 += (rate - e.1) * (dt * 6.0).min(1.0);
-            *e = (heading, e.1, now);
+            e.4 += (accel - e.4) * (dt * 8.0).min(1.0);
+            *e = (heading, e.1, now, speed, e.4);
         }
-        scalia_render::pose::pack_bank(scalia_render::pose::bank(speed, e.1))
+        scalia_render::pose::pack_tilt(scalia_render::pose::bank(speed, e.1), scalia_render::pose::accel_pitch(e.4))
     }
 
     /// Where a point (absolute metres, `up` metres over the ground) is on screen (fractions from the top left).

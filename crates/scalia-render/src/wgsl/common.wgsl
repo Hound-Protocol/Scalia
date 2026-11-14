@@ -657,11 +657,15 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     q = pose_vertex(v, part, pp);
     // Banking into a turn (pose.rs `bank`): the whole figure tips over its feet towards the inside of the bend
     // (+ to his left, about the forward axis).
-    let k = bank_of(a);
-    if (k != 0.0) {
-      let cb = cos(k);
-      let sb = sin(k);
+    // and leans with his acceleration (pitch, + forward: into a push off, back against a stop).
+    let k = tilt_of(a);
+    if (k.x != 0.0 || k.y != 0.0) {
+      let cb = cos(k.x);
+      let sb = sin(k.x);
       q = vec3f(q.x * cb - q.z * sb, q.y, q.x * sb + q.z * cb);
+      let cp = cos(k.y);
+      let sp = sin(k.y);
+      q = vec3f(q.x, q.y * cp + q.z * sp, -q.y * sp + q.z * cp);
     }
   }
   let ch = cos(b.x);
@@ -669,10 +673,15 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
   return vec3f(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + a.xyz;
 }
 
-// Instance colour a.w, fractional part: the bank into a turn (pose.rs `pack_bank`; no fraction = upright).
-fn bank_of(a: vec4f) -> f32 {
+// Instance colour a.w, fractional part: bank into a turn and lean with acceleration (pose.rs `pack_tilt`; no
+// fraction = upright). Returns (roll, pitch) in radians.
+fn tilt_of(a: vec4f) -> vec2f {
   let f = fract(a.w);
-  return select(0.0, (f - 0.5) / 0.49 * 0.26, f > 0.001);
+  if (f < 0.000001) { return vec2f(0.0); }
+  let n = i32(round(f * 16385.0)) - 1;
+  let r = n / 128;
+  let p = n - r * 128;
+  return vec2f(f32(r - 64) / 63.0 * 0.26, f32(p - 64) / 63.0 * 0.2);
 }
 
 // Instance colour a.w: palette index, +32 for a squad leader, +64 per selection level (1 stable, 2 hurt, 3 killed).

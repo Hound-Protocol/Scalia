@@ -58,8 +58,9 @@ pub struct Assault {
     on_back: Vec<bool>,
     /// Per soldier: gait phase integrated from his cadence (strides), and the viewer time it was last advanced.
     gait: Vec<(f64, f64)>,
-    /// Per soldier: how hard he is turning (rad/s, smoothed), for banking into turns.
-    turn: Vec<f32>,
+    /// Per soldier: how hard he is turning (rad/s), his last pace (m/s) and acceleration (m/s²), smoothed: for
+    /// banking into turns and leaning into a push off or back against a stop.
+    turn: Vec<(f32, f32, f32)>,
     /// Per soldier: where his muzzle was last drawn (mm, z over the ground), for flashes and tracers.
     muzzle: Vec<Option<(i64, i64, i64)>>,
     pub sounds: Vec<Sound>,
@@ -137,7 +138,7 @@ impl Assault {
             self.on_back.push(false);
             self.falls.push(None);
             self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
-            self.turn.push(0.0);
+            self.turn.push((0.0, 0.0, 0.0));
             self.muzzle.push(None);
         }
     }
@@ -357,7 +358,10 @@ impl Assault {
             // How hard he is turning (rad/s, smoothed): he banks into it at pace.
             let dt = ((self.now - self.gait[i].1) / 1000.0).clamp(0.0, 0.1) as f32;
             if dt > 0.0005 {
-                self.turn[i] += (turned / dt - self.turn[i]) * (dt * 6.0).min(1.0);
+                let t = &mut self.turn[i];
+                t.0 += (turned / dt - t.0) * (dt * 6.0).min(1.0);
+                t.2 += ((m_speed - t.1) / dt - t.2) * (dt * 8.0).min(1.0);
+                t.1 = m_speed;
             }
             let a = &mut self.anim[i];
             if a.1 != pose {
@@ -383,13 +387,13 @@ impl Assault {
             let leader = if self.battle.leader_of(s_squad as usize) == Some(i) { 32.0 } else { 0.0 };
             // A selected squad's men carry the selection tag (+64 per level) for the outline: stable, hurt, killed.
             let tag = if self.selected.contains(&s_squad) { 64.0 * select_level(readiness(s.alive(), s.down(), s.health)) } else { 0.0 };
-            let banked = if on_feet { scalia_render::pose::bank(m_speed, self.turn[i]) } else { 0.0 };
-            let lean = scalia_render::pose::pack_bank(banked);
+            let (banked, pitched) = if on_feet { (scalia_render::pose::bank(m_speed, self.turn[i].0), scalia_render::pose::accel_pitch(self.turn[i].2)) } else { (0.0, 0.0) };
+            let lean = scalia_render::pose::pack_tilt(banked, pitched);
             // Where his muzzle is now, posed exactly as drawn: rounds fired from here.
             let heading = a.0;
             self.muzzle[i] = on_feet.then(|| {
                 let q = scalia_render::pose::muzzle(scalia_render::pose::RIFLE, pose, upper, phase, dir);
-                let w = scalia_render::pose::figure_to_world(q * 1000.0, glam::Vec3::new(x as f32, y as f32, 0.0), heading, banked);
+                let w = scalia_render::pose::figure_to_world(q * 1000.0, glam::Vec3::new(x as f32, y as f32, 0.0), heading, banked, pitched);
                 (w.x as i64, w.y as i64, w.z as i64)
             });
             out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);

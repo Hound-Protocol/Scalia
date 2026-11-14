@@ -1100,16 +1100,29 @@ pub fn bank(speed: f32, turn: f32) -> f32 {
 }
 /// The steepest bank (15 degrees).
 pub const BANK_MAX: f32 = 0.26;
-/// The bank packed into the fractional part of an instance's colour (common.wgsl `bank_of`): 0.5 upright,
-/// 0.01..0.99 across -BANK_MAX..BANK_MAX. A colour with no fraction (0) reads as upright.
-pub fn pack_bank(angle: f32) -> f32 {
-    // Upright stays a whole colour (no fraction at all).
-    if angle.abs() < 1e-3 { 0.0 } else { 0.5 + (angle / BANK_MAX).clamp(-1.0, 1.0) * 0.49 }
+/// How far a figure pitches with his acceleration along his facing (radians, + forward): he leans into a push
+/// off from standing, and back against a hard stop or skid. `accel` m/s² (+ speeding up).
+pub fn accel_pitch(accel: f32) -> f32 {
+    (accel * 0.03).clamp(-PITCH_MAX, PITCH_MAX)
 }
-/// The inverse of `pack_bank` from a colour value (as the shader reads it).
-pub fn unpack_bank(colour: f32) -> f32 {
+/// The furthest lean forward or back (about 11 degrees).
+pub const PITCH_MAX: f32 = 0.2;
+/// Bank and pitch packed into the fractional part of an instance's colour (common.wgsl `tilt_of`): each to 128
+/// steps (64 upright). Upright on both leaves the colour whole (no fraction at all).
+pub fn pack_tilt(roll: f32, pitch: f32) -> f32 {
+    let q = |a: f32, max: f32| ((a / max).clamp(-1.0, 1.0) * 63.0).round() as i32 + 64;
+    let (r, p) = (q(roll, BANK_MAX), q(pitch, PITCH_MAX));
+    if r == 64 && p == 64 { 0.0 } else { (1 + r * 128 + p) as f32 / 16_385.0 }
+}
+/// The inverse of `pack_tilt` from a colour value (as the shader reads it): (roll, pitch).
+pub fn unpack_tilt(colour: f32) -> (f32, f32) {
     let f = colour - colour.floor();
-    if f > 0.001 { (f - 0.5) / 0.49 * BANK_MAX } else { 0.0 }
+    if f < 1e-6 {
+        return (0.0, 0.0);
+    }
+    let n = (f * 16_385.0).round() as i32 - 1;
+    let (r, p) = (n / 128, n % 128);
+    ((r - 64) as f32 / 63.0 * BANK_MAX, (p - 64) as f32 / 63.0 * PITCH_MAX)
 }
 
 #[cfg(test)]
@@ -1122,12 +1135,17 @@ mod bank_tests {
         assert!((4.0..9.0).contains(&deg(bank(3.0, 2.0))), "jogging: a little ({})", deg(bank(3.0, 2.0)));
         assert!(deg(bank(4.6, 2.0)) >= 12.0, "sprinting: clearly");
         assert!(bank(4.6, -2.0) < 0.0 && bank(3.0, 0.0) == 0.0);
-        for a in [-0.26f32, -0.1, 0.0, 0.07, 0.26] {
-            let c = 6.0 + 32.0 + 64.0 + pack_bank(a);
-            assert!((unpack_bank(c) - a).abs() < 1e-3, "{a} -> {}", unpack_bank(c));
-            assert_eq!(c.floor(), 102.0, "the colour's whole part is untouched");
+        for (r, p) in [(-0.26f32, 0.0f32), (-0.1, 0.12), (0.0, -0.2), (0.07, 0.05), (0.26, 0.2)] {
+            for base in [6.0f32, 9.0, 38.0, 233.0] {
+                let c = base + pack_tilt(r, p);
+                let (r2, p2) = unpack_tilt(c);
+                assert!((r2 - r).abs() < 0.005 && (p2 - p).abs() < 0.005, "{base}: ({r}, {p}) -> ({r2}, {p2})");
+                assert_eq!(c.floor(), base, "the colour's whole part is untouched");
+            }
         }
-        assert_eq!(unpack_bank(14.0), 0.0, "no bank given: upright");
+        assert_eq!(pack_tilt(0.0, 0.0), 0.0, "upright: no fraction");
+        assert_eq!(unpack_tilt(14.0), (0.0, 0.0));
+        assert!(accel_pitch(4.2) > 0.1 && accel_pitch(-6.0) < -0.15);
     }
 }
 
@@ -1156,9 +1174,11 @@ pub fn muzzle(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) 
 
 /// A point of a figure's own frame placed in the world (metres): banked into a turn (`bank`, + to his left)
 /// and turned to his heading as common.wgsl `animate` does, then moved to where he stands (`at`, z = ground).
-pub fn figure_to_world(q: Vec3, at: Vec3, heading: f32, bank: f32) -> Vec3 {
+pub fn figure_to_world(q: Vec3, at: Vec3, heading: f32, bank: f32, pitch: f32) -> Vec3 {
     let (sb, cb) = bank.sin_cos();
     let q = Vec3::new(q.x * cb - q.z * sb, q.y, q.x * sb + q.z * cb);
+    let (sp, cp) = pitch.sin_cos();
+    let q = Vec3::new(q.x, q.y * cp + q.z * sp, -q.y * sp + q.z * cp);
     let (sh, ch) = heading.sin_cos();
     Vec3::new(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + at
 }
@@ -1177,7 +1197,7 @@ mod muzzle_tests {
         let walking_aim = muzzle(RIFLE, Pose::Walk, Some(Pose::StandAim), 0.3, 0.0);
         assert!((walking_aim - aim).length() < 0.3, "aiming while walking: close to the standing aim, {walking_aim:?}");
         // Turned to face +x (heading -90 degrees): the muzzle is out along +x from where he stands.
-        let w = figure_to_world(aim, Vec3::new(10.0, 20.0, 1.0), -std::f32::consts::FRAC_PI_2, 0.0);
+        let w = figure_to_world(aim, Vec3::new(10.0, 20.0, 1.0), -std::f32::consts::FRAC_PI_2, 0.0, 0.0);
         assert!(w.x > 10.5 && (w.y - 20.0).abs() < 0.4 && w.z > 2.0, "{w:?}");
     }
 }
