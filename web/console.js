@@ -32,7 +32,7 @@ export function installConsole(commands) {
   // The game's own log lands here too.
   for (const [k, cls] of [['log', ''], ['info', ''], ['warn', 'warn'], ['error', 'err']]) {
     const orig = console[k].bind(console);
-    console[k] = (...a) => { orig(...a); try { print(a.map((x) => (typeof x === 'string' ? x : x instanceof Error ? x.message : JSON.stringify(x))).join(' '), cls); } catch (_) {} };
+    console[k] = (...a) => { orig(...a); try { const msg = a.map(String).join(' '); if (cls && window.scaliaNote && !/^\[(error|crash)\]/.test(msg)) window.scaliaNote(k, msg); print(a.map((x) => (typeof x === 'string' ? x : x instanceof Error ? x.message : JSON.stringify(x))).join(' '), cls); } catch (_) {} };
   }
   addEventListener('error', (e) => print(`error: ${e.message}`, 'err'));
 

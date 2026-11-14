@@ -191,6 +191,7 @@ pub struct Viewer {
     lab_wound: Option<(u16, usize, i32)>,
     /// The acoustic space per 2 m square of the testing ground (cleared when the map changes).
     audio_spaces: std::collections::HashMap<(i32, i32), scalia_audio::Env>,
+    audio_reflectors: std::collections::HashMap<(i32, i32), Vec<(f32, f32)>>,
     /// How the next squad move is to be made (chosen on the radio).
     order_mode: Option<scalia_ai::leader::Mode>,
     /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
@@ -343,6 +344,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         lab_prev: 0.0,
         lab_wound: None,
         audio_spaces: std::collections::HashMap::new(),
+        audio_reflectors: std::collections::HashMap::new(),
         order_mode: None,
         fx: crate::effects::Effects::default(),
         fx_lights: Vec::new(),
@@ -791,6 +793,19 @@ impl Viewer {
         let env = self.space_at(l.0, l.1);
         vec![env.enclosure, env.size_m, env.rt60_s, env.corridor, if self.tablet { 1.0 } else { 0.0 }]
     }
+    /// What a sound made at a spot bounces off, remembered per 2 m square until the map changes.
+    fn reflectors_at(&mut self, x: f32, y: f32) -> Vec<(f32, f32)> {
+        let key = ((x / 2.0).floor() as i32, (y / 2.0).floor() as i32);
+        if let Some(r) = self.audio_reflectors.get(&key) {
+            return r.clone();
+        }
+        let r = self.assault.as_ref().map_or(Vec::new(), |a| scalia_audio::reflectors(&a.battle.sight, (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
+        if self.audio_reflectors.len() > 20_000 {
+            self.audio_reflectors.clear();
+        }
+        self.audio_reflectors.insert(key, r.clone());
+        r
+    }
     /// The space at a spot (open field, room, corridor), remembered per 2 m square until the map changes.
     fn space_at(&mut self, x: f32, y: f32) -> scalia_audio::Env {
         let open = scalia_audio::Env { enclosure: 0.0, size_m: 30.0, rt60_s: 0.25, corridor: 0.0 };
@@ -805,11 +820,12 @@ impl Viewer {
         self.audio_spaces.insert(key, env);
         env
     }
-    /// Sounds since the last call, fifteen floats each, worked out by the acoustics for the ears at the camera:
+    /// Sounds since the last call, 26 floats each, worked out by the acoustics for the ears at the camera:
     /// kind (0 shot, 1 blast, 2 footfall), loudness (footfalls: 0 walk .. 1 sprint), delay from now (s, travel
-    /// time included), gain, low-pass (Hz), reverb of its own space 0..1, distant echoes 0..1, position from
-    /// the ears (m: right, ahead, below), distance (m), walls between, and its space: enclosure 0..1, size (m),
-    /// corridor 0..1.
+    /// time included), gain, low-pass (Hz), reverb of its own space 0..1, position from the ears (m: right,
+    /// ahead, below), distance (m), walls between, its space (enclosure 0..1, size m, corridor 0..1), then four
+    /// echoes off what stands around it (extra delay s, gain against the direct sound, pan -1..1; zeros when
+    /// there is nothing to bounce off).
     pub fn take_sounds(&mut self) -> Vec<f32> {
         let l = self.audio_listener();
         let (lab_t, lab_speed) = (self.lab_t, self.lab_speed);
@@ -826,8 +842,10 @@ impl Viewer {
                 continue;
             }
             let space = self.space_at(sx, sy);
+            let refl = self.reflectors_at(sx, sy);
             let Some(a) = self.assault.as_ref() else { break };
             let p = scalia_audio::path(&a.battle.sight, l, (sx, sy), &space);
+            let echoes = scalia_audio::echoes(l, (sx, sy), &refl);
             let wait = (if lab_speed <= 0.0 { 0.0 } else { (snd.at - lab_t) / lab_speed }).max(0.0) as f32 / 1000.0;
             let (kind, loud) = match (snd.blast, snd.step) {
                 (true, _) => (1.0, 1.0),
@@ -837,7 +855,13 @@ impl Viewer {
             // Right and ahead as the camera looks (ahead = up the screen, on the ground); below = the height.
             let (rx, ry) = (dx * r.x + dy * r.y, -dx * r.y + dy * r.x);
             let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
-            out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, p.wet_far, rx, ry, l.2, dist, p.walls as f32, space.enclosure, space.size_m, space.corridor]);
+            out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, rx, ry, l.2, dist, p.walls as f32, space.enclosure, space.size_m, space.corridor]);
+            for k in 0..4 {
+                match echoes.get(k) {
+                    Some(e) => out.extend_from_slice(&[e.delay_s, e.gain, (e.dir.0 * r.x + e.dir.1 * r.y).clamp(-1.0, 1.0)]),
+                    None => out.extend_from_slice(&[0.0, 0.0, 0.0]),
+                }
+            }
         }
         out
     }
@@ -2223,6 +2247,7 @@ impl Viewer {
                 self.base_props = props;
                 self.base_grid.rebuild(&self.base_props);
                 self.audio_spaces.clear();
+                self.audio_reflectors.clear();
                 let m = base_mesh(&self.base_props, self.base_h);
                 self.gpu.upload("base", m.bytes());
             }

@@ -40,9 +40,6 @@ pub struct Path {
     pub lowpass_hz: f32,
     /// 0 .. 1: how much rings in the listener's own space (a room around him); fades as he zooms out.
     pub wet_room: f32,
-    /// 0 .. 1: how much comes back as distant echoes (far off, or zoomed out): sparse echoes rolling back off
-    /// buildings and terrain, not a room.
-    pub wet_far: f32,
     /// Travel time (s), speed of sound over the real distance.
     pub delay_s: f32,
     /// Walls between source and listener.
@@ -129,9 +126,77 @@ pub fn path(sight: &SightGrid, listener: (f32, f32, f32), source: (f32, f32), at
     let lowpass_hz = (18_000.0 / (1.0 + d / 70.0) * 0.22f32.powi(walls as i32)).clamp(250.0, 20_000.0);
     // The space it is made in rings (a room, a corridor); through walls you hear more of that than of it.
     let wet_room = (at_source.enclosure * 0.6 + walls as f32 * 0.15).clamp(0.0, 0.85);
-    // Far off, the direct sound is joined by echoes rolling back from far away.
-    let wet_far = (((d - 8.0) / 90.0).clamp(0.0, 0.8) + walls as f32 * 0.08).clamp(0.0, 0.85);
-    Path { gain, lowpass_hz, wet_room, wet_far, delay_s: d / 343.0, walls }
+    Path { gain, lowpass_hz, wet_room, delay_s: d / 343.0, walls }
+}
+
+/// One echo of a sound off a surface: how much later than the direct sound it arrives (s), how loud it is
+/// against the direct sound (linear, < 1), and where it comes from (unit vector on the ground, from the ears
+/// towards the surface).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Echo {
+    pub delay_s: f32,
+    pub gain: f32,
+    pub dir: (f32, f32),
+}
+
+/// Rays from a sound looking for something to bounce off.
+const ECHO_RAYS: usize = 16;
+/// How far a surface can be from the sound and still send an echo back (m).
+const ECHO_REACH_M: f32 = 80.0;
+
+/// The surfaces around a spot that a sound made there bounces off (points on walls, buildings, containers
+/// within reach; m). Open ground has none.
+pub fn reflectors(sight: &SightGrid, at: (f32, f32)) -> Vec<(f32, f32)> {
+    let mut out = Vec::new();
+    for k in 0..ECHO_RAYS {
+        let a = (k as f32 + 0.5) * std::f32::consts::TAU / ECHO_RAYS as f32;
+        let dir = (a.cos(), a.sin());
+        if let Some(d) = ray_hit(sight, at, dir, ECHO_REACH_M, PATH_MM) {
+            // Hugging a wall (under 1.5 m) it is part of the direct sound and the room, not an echo.
+            if d > 1.5 {
+                out.push((at.0 + dir.0 * d, at.1 + dir.1 * d));
+            }
+        }
+    }
+    out
+}
+
+/// The strongest echoes (up to four) a listener hears of a sound at `source`, off its reflectors. Each comes
+/// later than the direct sound by its longer way round, weaker by distance and by what the surface swallows.
+pub fn echoes(listener: (f32, f32, f32), source: (f32, f32), reflectors: &[(f32, f32)]) -> Vec<Echo> {
+    let d3 = |a: (f32, f32, f32), b: (f32, f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt();
+    let z = PATH_MM as f32 / 1000.0;
+    let s = (source.0, source.1, z);
+    let direct = d3(listener, s);
+    let direct_gain = 1.0 / (1.0 + direct / 10.0);
+    let mut out: Vec<Echo> = reflectors
+        .iter()
+        .filter_map(|&w| {
+            let w3 = (w.0, w.1, z);
+            let path = d3(s, w3) + d3(w3, listener);
+            let delay_s = (path - direct) / 343.0;
+            // Closer than about 25 ms it fuses with the shot itself.
+            if delay_s < 0.025 {
+                return None;
+            }
+            let gain = (1.0 / (1.0 + path / 10.0)) * 0.45 / direct_gain;
+            let (dx, dy) = (w.0 - listener.0, w.1 - listener.1);
+            let len = (dx * dx + dy * dy).sqrt().max(0.001);
+            Some(Echo { delay_s, gain: gain.min(0.6), dir: (dx / len, dy / len) })
+        })
+        .collect();
+    out.sort_by(|a, b| b.gain.total_cmp(&a.gain));
+    // Several rays on the same wall make one echo: keep those at least 15 ms apart.
+    let mut kept: Vec<Echo> = Vec::new();
+    for e in out {
+        if kept.iter().all(|k| (k.delay_s - e.delay_s).abs() > 0.015) {
+            kept.push(e);
+        }
+        if kept.len() == 4 {
+            break;
+        }
+    }
+    kept
 }
 
 #[cfg(test)]
@@ -180,8 +245,19 @@ mod tests {
         let env = listener_env(&g, (50.0, 50.0));
         let close = path(&g, (50.0, 50.0, camera_height_m(12.0)), (52.0, 50.0), &env);
         let far = path(&g, (50.0, 50.0, camera_height_m(50.0)), (52.0, 50.0), &env);
-        assert!(close.wet_far < 0.15, "closest view about as heard: {close:?}");
-        assert!(far.wet_far > 0.7 && far.lowpass_hz < close.lowpass_hz && far.gain < close.gain, "furthest fully distant: {far:?}");
+        assert!(far.lowpass_hz < close.lowpass_hz && far.gain < close.gain && far.delay_s > close.delay_s);
+    }
+
+    #[test]
+    fn a_shot_in_the_open_has_no_echo_and_one_by_a_wall_does() {
+        let open = grid(&[]);
+        assert!(reflectors(&open, (50.0, 50.0)).is_empty());
+        assert!(echoes((20.0, 50.0, 20.0), (50.0, 50.0), &reflectors(&open, (50.0, 50.0))).is_empty(), "nothing to bounce off");
+        // A long wall 20 m behind the shooter: one echo, about 40 m of extra way round, from that side.
+        let g = grid(&[wall(70_000, 50_000, 60_000, 1)]);
+        let e = echoes((20.0, 50.0, 20.0), (50.0, 50.0), &reflectors(&g, (50.0, 50.0)));
+        assert!(!e.is_empty(), "the wall sends it back");
+        assert!(e[0].delay_s > 0.08 && e[0].delay_s < 0.16 && e[0].gain < 0.6 && e[0].dir.0 > 0.5, "{e:?}");
     }
 
     #[test]

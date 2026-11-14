@@ -2,10 +2,12 @@
 // (gain, low-pass, how much is heard as reverb, where it is around his head) and what space he is in; this
 // graph applies it:
 //
-//   voice: source -> gain -> low-pass -> HRTF panner -+-> dry -> mix
-//                                                      +-> the reverb of the space the sound is made in
-//                                                      |   (open slap, small room, large room, corridor)
-//                                                      +-> distant echoes (by distance)
+//   voice: source -> gain -> high-pass -> low-pass -+-> HRTF panner -+-> dry -> mix
+//                                                   |                +-> the reverb of the room it is made in
+//                                                   |                    (small room, large room, corridor)
+//                                                   +-> echoes off what stands around it (map geometry):
+//                                                       delay -> gain -> darker -> from the wall's side -> mix
+//   In the open with nothing near, a shot is just the crack: nothing to bounce off, no echo.
 //   mix -> tablet band-pass (200 Hz - 10 kHz while the PDA is up, open otherwise) -> limiter -> speakers
 //
 // Built for headphones (HRTF). Impulse responses are generated here, nothing to download.
@@ -37,27 +39,6 @@ function impulse(ctx, seconds, rt60, early, damp) {
     for (const [at, g] of early) {
       const i = Math.floor((at + (ch ? 0.0013 : 0)) * rate);
       if (i < n) d[i] += g * (ch ? 0.9 : 1);
-    }
-  }
-  return buf;
-}
-
-/// Distant echoes: a handful of separate returns spread over two seconds, each a short dark smear (no room tail).
-function echoes(ctx) {
-  const rate = ctx.sampleRate, n = Math.floor(rate * 2.6);
-  const buf = ctx.createBuffer(2, n, rate);
-  const taps = [[0.22, 0.42], [0.47, 0.3], [0.8, 0.22], [1.2, 0.15], [1.65, 0.1], [2.15, 0.06]];
-  for (let ch = 0; ch < 2; ch++) {
-    const d = buf.getChannelData(ch);
-    for (const [at, g] of taps) {
-      // Each echo arrives from its own direction (a little earlier in one ear) and is smeared over ~60 ms.
-      const start = Math.floor((at + (ch ? 0.004 : 0) * Math.sign(Math.sin(at * 7))) * rate);
-      let lp = 0;
-      for (let j = 0; j < rate * 0.09 && start + j < n; j++) {
-        const t = j / rate;
-        lp = lp * 0.92 + (Math.random() * 2 - 1) * 0.08;
-        d[start + j] += lp * g * 6 * Math.exp(-t / 0.025);
-      }
     }
   }
   return buf;
@@ -99,7 +80,8 @@ export class AudioEngine {
     const lim = c.createDynamicsCompressor();
     lim.threshold.value = -4; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.18;
     lim.connect(c.destination);
-    // Tablet band-pass: four high-passes and four low-passes in a row (about -48 dB/oct on each edge).
+    // Tablet band-pass (2 - 7 kHz while it is up): four high-passes and four low-passes in a row (about
+    // -48 dB/oct on each edge).
     this.hp = []; this.lp = [];
     let last = lim, head = null;
     const chain = [];
@@ -116,23 +98,17 @@ export class AudioEngine {
     const bus = (ir) => {
       const input = c.createGain();
       const conv = c.createConvolver(); conv.buffer = ir;
-      input.connect(conv); conv.connect(this.mix);
+      // A room's ring without the boom (the low end stays in the direct sound).
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 220; hp.Q.value = 0.6;
+      input.connect(conv); conv.connect(hp); hp.connect(this.mix);
       return input;
     };
     this.rev = {
-      // Outdoors near the listener: a short, light slap off whatever stands close, no tail to speak of.
-      open: bus(impulse(c, 0.6, 0.25, [[0.035, 0.3], [0.08, 0.15]], 0.6)),
       small: bus(impulse(c, 1.0, 0.55, [[0.006, 0.6], [0.011, 0.45], [0.017, 0.35], [0.024, 0.25]], 0.35)),
       large: bus(impulse(c, 3.0, 1.7, [[0.018, 0.45], [0.033, 0.35], [0.05, 0.25], [0.08, 0.2]], 0.4)),
       // A corridor flutters: regular echoes between the two close walls.
       corridor: bus(impulse(c, 1.8, 1.0, Array.from({ length: 14 }, (_, k) => [0.009 * (k + 1), 0.5 * Math.pow(0.8, k)]), 0.4)),
     };
-    // Distance: the direct sound plus echoes rolling back from far off (buildings, treelines, terrain), dark and
-    // spread out over two seconds; not a room.
-    this.farSend = c.createGain();
-    const far = c.createConvolver(); far.buffer = echoes(c);
-    const farOut = c.createGain(); farOut.gain.value = 0.9;
-    this.farSend.connect(far); far.connect(farOut); farOut.connect(this.mix);
     this.applyEnv(true);
     return c;
   }
@@ -159,19 +135,20 @@ export class AudioEngine {
     const c = this.ctx; if (!c) return;
     const { pda } = this.env;
     const t = c.currentTime;
-    // Through the tablet: nothing at or below 200 Hz, nothing at or above 10 kHz.
-    for (const h of this.hp) h.frequency.setTargetAtTime(pda ? 200 : 10, t, 0.08);
-    for (const l of this.lp) l.frequency.setTargetAtTime(pda ? 10000 : 22000, t, 0.08);
+    // Through the tablet's small speaker: nothing below 2 kHz, nothing above 7 kHz.
+    for (const h of this.hp) h.frequency.setTargetAtTime(pda ? 2000 : 10, t, 0.08);
+    for (const l of this.lp) l.frequency.setTargetAtTime(pda ? 7000 : 22000, t, 0.08);
   }
 
-  /// Plays a sound as the acoustics place it. `o`: { db, gain, lowpass, room, far, rx, ry, below, delay, rate,
-  /// kind, space: [enclosure, size m, corridor] }: room is how much rings in the space it is made in, far how
-  /// much comes back as distant echoes; rx/ry/below place it around the ears (the camera).
+  /// Plays a sound as the acoustics place it. `o`: { db, gain, lowpass, room, rx, ry, below, dist, delay, rate,
+  /// kind, space: [enclosure, size m, corridor], echoes: [[extra delay s, gain, pan], ...] }: room is how much
+  /// rings in the room it is made in; rx/ry/below place it around the ears (the camera); echoes come off what
+  /// stands around it.
   play(url, o) {
     const c = this.ensure(); if (!c) return;
     // Anything odd coming in (a missing or non-finite number) is made safe here: audio never stops the game.
     const num = (x, d, lo, hi) => (Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d);
-    o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), room: num(o.room, 0, 0, 1), far: num(o.far, 0, 0, 1),
+    o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), room: num(o.room, 0, 0, 1), dist: num(o.dist, 0, 0, 1e5),
       rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), below: num(o.below, 0, 0, 1e4), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
     const sp = o.space || [0, 30, 0];
     const enc = num(sp[0], 0, 0, 1), size = num(sp[1], 30, 0, 100), cor = num(sp[2], 0, 0, 1) * enc;
@@ -205,6 +182,8 @@ export class AudioEngine {
     const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.rate || 1;
     const g = c.createGain(); g.gain.value = o.gain;
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
+    // Distance thins the low end too: what carries is the crack, not the boom.
+    const hpf = c.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = Math.min(450, 40 + o.dist * 3); hpf.Q.value = 0.6;
     const p = c.createPanner();
     p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1;
     // Around the head (the camera): right is +x, ahead is -z, below is -y. Below counts for less than the
@@ -213,21 +192,29 @@ export class AudioEngine {
     const len = Math.hypot(o.rx, o.ry, by);
     const [x, y, z] = len < 0.3 ? [0, 0, -1] : [o.rx / len, -by / len, -o.ry / len];
     p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
-    // The direct sound stays: far off it is quieter and duller (gain and low-pass), not drowned in reverb.
-    const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5 - o.far * 0.35;
-    const far = c.createGain(); far.gain.value = o.far;
+    // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
+    const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5;
     const out = c.createGain();
-    src.connect(g).connect(out).connect(lp).connect(p);
+    src.connect(g).connect(out).connect(hpf).connect(lp).connect(p);
     p.connect(dry).connect(this.mix);
-    p.connect(far).connect(this.farSend);
-    // Its own space rings: small or large room by size, a corridor's flutter, or a short slap outdoors.
+    // A room it is made in rings: small or large by size, or a corridor's flutter. Open ground: no ring.
     const roomy = Math.max(0, Math.min(1, (9 - size) / 5));
-    const sends = [[this.rev.small, enc * roomy * (1 - cor)], [this.rev.large, enc * (1 - roomy) * (1 - cor)], [this.rev.corridor, cor], [this.rev.open, (1 - enc) * 0.35]];
+    const sends = [[this.rev.small, enc * roomy * (1 - cor)], [this.rev.large, enc * (1 - roomy) * (1 - cor)], [this.rev.corridor, cor]];
     for (const [busIn, w] of sends) {
-      const amount = busIn === this.rev.open ? w : w * o.room;
+      const amount = w * o.room;
       if (amount < 0.01) continue;
       const send = c.createGain(); send.gain.value = amount;
       p.connect(send).connect(busIn);
+    }
+    // Echoes off what stands around it: each a little later, weaker and darker, from the wall's side.
+    for (const e of o.echoes || []) {
+      const [edelay, egain, epan] = [num(e[0], 0, 0, 2), num(e[1], 0, 0, 1), num(e[2], 0, -1, 1)];
+      if (egain < 0.02) continue;
+      const d = c.createDelay(2); d.delayTime.value = edelay;
+      const eg = c.createGain(); eg.gain.value = egain;
+      const elp = c.createBiquadFilter(); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 5000) * 0.6; elp.Q.value = 0.5;
+      const ep = c.createStereoPanner(); ep.pan.value = epan * 0.85;
+      lp.connect(d).connect(eg).connect(elp).connect(ep).connect(this.mix);
     }
     const v = { src, pri, gain: o.gain, out, done: false };
     src.onended = () => { v.done = true; };
