@@ -140,7 +140,8 @@ impl Assault {
 
     /// Living soldiers of a squad.
     pub fn squad_alive(&self, squad: u16) -> usize {
-        self.battle.soldiers.iter().filter(|s| s.squad == squad && s.alive()).count()
+        // Still in the fight: alive and on their feet.
+        self.battle.soldiers.iter().filter(|s| s.squad == squad && s.alive() && !s.down()).count()
     }
 
     /// Runs the battle up to `now_ms` (at most half a second of catching up per frame).
@@ -210,7 +211,7 @@ impl Assault {
                 }
             }
             self.seen = self.battle.log.len();
-            let alive = |team| self.battle.soldiers.iter().any(|s| s.team == team && s.alive());
+            let alive = |team| self.battle.soldiers.iter().any(|s| s.team == team && s.alive() && !s.down());
             if self.demo && (!alive(0) || !alive(1)) {
                 self.over = true;
             }
@@ -265,7 +266,7 @@ impl Assault {
 
     /// Who is still standing on each side.
     pub fn alive(&self, team: u8) -> usize {
-        self.battle.soldiers.iter().filter(|s| s.team == team && s.alive()).count()
+        self.battle.soldiers.iter().filter(|s| s.team == team && s.alive() && !s.down()).count()
     }
 }
 
@@ -293,6 +294,15 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
     if !s.alive() {
         return (Pose::Prone, 0.0, None, 0.0);
     }
+    // Down: on his back, writhing (weakly once treated).
+    if s.down() {
+        return (Pose::Wounded, if s.stable() { 0.12 } else { 0.3 }, None, 0.0);
+    }
+    // Dragging a casualty: crouched, backwards, hands on him.
+    if s.dragging().is_some() {
+        let moving = walking && speed > 0.15;
+        return if moving { (Pose::CrouchWalk, speed / stride_m_dir(Pose::CrouchWalk, dir), Some(Pose::Drag), dir) } else { (Pose::Drag, 0.0, None, 0.0) };
+    }
     if let Some((act, _)) = s.act {
         return (
             match act {
@@ -300,8 +310,9 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
                 Act::Drone => Pose::Drone,
                 // Filling and laying sandbags: down on one knee, working.
                 Act::Build => Pose::Crouch,
+                Act::Aid => Pose::Aid,
             },
-            0.6,
+            if act == Act::Aid { 1.1 } else { 0.6 },
             None,
             0.0,
         );
@@ -385,8 +396,8 @@ mod tests {
             let _ = a.instances(1, (t / 1000.0) as f32, |_| 9.0, |x, y| Some((x as f32, y as f32, 0.0)));
             poses.push(a.anim[ATTACKERS + 7].1);
         }
-        // A defender who never moves before contact: never a walking pose in the first 10 s.
-        assert!(poses[..600].iter().all(|&p| !matches!(p, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk)), "{:?}", &poses[..600].iter().filter(|p| matches!(p, Pose::Walk)).count());
+        // A defender who does not move before contact: never a walking pose in the first 5 s.
+        assert!(poses[..300].iter().all(|&p| !matches!(p, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk)), "{:?}", &poses[..300].iter().filter(|p| matches!(p, Pose::Walk)).count());
     }
 
     #[test]

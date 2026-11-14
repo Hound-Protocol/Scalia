@@ -20,6 +20,6 @@ fn main() {
         seen = b.log.len();
         if b.squad_done(0) { break; }
     }
-    let alive = |team| b.soldiers.iter().filter(|s| s.team == team && s.alive()).count();
+    let alive = |team| b.soldiers.iter().filter(|s| s.team == team && (s.alive() && !s.down())).count();
     println!("end {:.1}s: attackers alive {}/12, defenders alive {}/8, shots {shots}, cover calls {cover_calls}", b.time_ms as f64 / 1000.0, alive(0), alive(1));
 }

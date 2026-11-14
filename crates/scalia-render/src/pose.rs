@@ -16,6 +16,8 @@ pub const NECK_Z: f32 = 1.46;
 pub const GRIP_Z: f32 = 0.81;
 /// How far the lying body is lifted so the chest rests on the ground.
 pub const PRONE_LIFT: f32 = 0.23;
+/// Lying on the back (prone < 0): the back and its kit are thinner than the chest and its pouches.
+pub const SUPINE_LIFT: f32 = 0.16;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Pose {
@@ -55,6 +57,14 @@ pub enum Pose {
     Signal = 19,
     /// Kneeling drone launch: rifle on the back, both hands lift the drone overhead and let go.
     Drone = 20,
+    /// Wounded and down: on his back, one knee drawn up, a hand pressed to the wound, the other arm out,
+    /// moving weakly over the phase.
+    Wounded = 21,
+    /// Dragging a wounded man: crouched, walking backwards, both hands low gripping his vest straps (upper body;
+    /// the legs come from the crouched walk when moving).
+    Drag = 22,
+    /// First aid: kneeling over the wounded man, hands pressing on the wound over the phase.
+    Aid = 23,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -695,6 +705,42 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             carry(&mut p, Carry::LowReady);
             p.head = 0.35;
         }
+        Pose::Wounded => {
+            p.prone = -1.0;
+            p.sling = 1.0;
+            let k = [0.0, 0.3, 0.5, 0.75, 1.0];
+            p.hip = [keyed(phase, k, [0.85, 1.05, 0.95, 0.75, 0.85]), 0.1];
+            p.knee = [keyed(phase, k, [1.45, 1.7, 1.55, 1.3, 1.45]), 0.12];
+            // Left hand pressed to the belly, right arm flung out.
+            p.shoulder = [0.55, 0.15];
+            p.elbow = [1.95, 0.3];
+            p.reach = [0.75, 0.0];
+            p.abduct = [0.0, 1.05];
+            p.head = keyed(phase, k, [-0.45, -0.6, -0.5, -0.35, -0.45]);
+            p.look = 0.25;
+        }
+        Pose::Drag => {
+            (p.hip, p.knee, p.side) = crouch_gait(0.0, 0.15, 0.6, 0.0, 0.6, 0.0);
+            p.flat = 1.0;
+            p.lean = 0.55;
+            p.sling = 1.0;
+            p.shoulder = [1.0, 1.0];
+            p.elbow = [0.25, 0.25];
+            p.reach = [0.3, 0.3];
+            p.head = 0.45;
+        }
+        Pose::Aid => {
+            kneel(&mut p);
+            p.lean = 0.4;
+            p.sling = 1.0;
+            let k = [0.0, 0.25, 0.5, 0.75, 1.0];
+            let sh = keyed(phase, k, [0.85, 1.0, 0.85, 1.0, 0.85]);
+            let el = keyed(phase, k, [0.55, 0.3, 0.55, 0.3, 0.55]);
+            p.shoulder = [sh, sh];
+            p.elbow = [el, el];
+            p.reach = [0.35, 0.35];
+            p.head = -0.55;
+        }
         Pose::CoverAim => {
             kneel(&mut p);
             aim_arms(&mut p);
@@ -882,10 +928,12 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         q = tilt(q, p.tilt);
     }
     q.z += p.drop + p.bob;
-    if p.prone > 0.0 {
+    if p.prone != 0.0 {
+        // Positive tips him forward onto his front, negative back onto his back.
         q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2 * p.prone);
         // Mid-transition the bent knees would dip into the ground: lift a little, most at the halfway point.
-        q.z += PRONE_LIFT * p.prone + 0.12 * (std::f32::consts::PI * p.prone).sin();
+        let a = p.prone.abs();
+        q.z += if p.prone > 0.0 { PRONE_LIFT } else { SUPINE_LIFT } * a + 0.12 * (std::f32::consts::PI * a).sin();
     }
     q
 }

@@ -1765,6 +1765,9 @@ impl Viewer {
                 Some(22) => Some((Pose::Drone, 0.4, None, 0.0)),
                 Some(23) => Some((Pose::CrouchWalk, 0.6 / stride_m_dir(Pose::CrouchWalk, -FRAC_PI_2), Some(Pose::StandAim), -FRAC_PI_2)),
                 Some(24) => Some((Pose::Run, 3.0 / stride_m(Pose::Run), Some(Pose::StandAim), 0.0)),
+                Some(25) => Some((Pose::Wounded, 0.3, None, 0.0)),
+                Some(26) => Some((Pose::CrouchWalk, 0.8 / stride_m_dir(Pose::CrouchWalk, PI), Some(Pose::Drag), PI)),
+                Some(27) => Some((Pose::Aid, 1.1, None, 0.0)),
                 _ => None,
             };
             let (pose, steps, upper, dir) = combo.unwrap_or_else(|| {

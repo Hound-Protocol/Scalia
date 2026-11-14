@@ -8,10 +8,10 @@ fn field(props: &[Prop]) -> SightGrid {
 fn man(team: u8, x: i64, y: i64, stance: Stance) -> Soldier {
     Soldier::new(team, 0, (x, y), stance)
 }
-/// Runs until someone dies or `ms` pass; returns the battle.
+/// Runs until someone falls (dead or down) or `ms` pass; returns the battle.
 fn run(mut b: Battle, ms: i64) -> Battle {
     let mut t = 0;
-    while t < ms && b.soldiers.iter().all(|s| s.alive()) {
+    while t < ms && b.soldiers.iter().all(|s| s.alive() && !s.down()) {
         b.step(50);
         t += 50;
     }
@@ -22,7 +22,7 @@ fn run(mut b: Battle, ms: i64) -> Battle {
 fn an_open_ground_duel_ends_and_is_deterministic() {
     let mk = || Battle::new(field(&[]), vec![man(0, 50_000, 30_000, Stance::Stand), man(1, 50_000, 60_000, Stance::Stand)], 7);
     let (a, b) = (run(mk(), 30_000), run(mk(), 30_000));
-    assert!(a.soldiers.iter().any(|s| !s.alive()), "someone falls within 30 s at 30 m");
+    assert!(a.soldiers.iter().any(|s| !s.alive() || s.down()), "someone falls within 30 s at 30 m");
     assert_eq!(a.log, b.log, "same seed, same fight");
 }
 

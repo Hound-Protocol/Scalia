@@ -176,7 +176,7 @@ fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rif
 // Idle life for soldiers standing still (port of pose.rs `idle`): breathing, weight shifts, glances, a rifle hitch.
 fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   var q = p0;
-  if (pose == 1u || pose == 2u || pose == 7u || pose == 5u || pose == 11u) { return q; }
+  if (pose == 1u || pose == 2u || pose == 7u || pose == 5u || pose == 11u || pose >= 21u) { return q; }
   let tau = 6.2831853;
   let breathe = sin(tau * (t / 3.8 + seed));
   if (pose == 6u || pose == 4u || pose == 12u || pose == 13u || pose == 14u) {
@@ -304,6 +304,42 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.el = vec2f(el);
     p.reach = vec2f(0.45);
     p.head = keyed(phase, k, array<f32, 5>(0.2, 0.2, 0.6, 0.7, 0.2));
+  } else if (pose == 21u) {
+    // Wounded, on his back (pose.rs `Pose::Wounded`).
+    p.prone = -1.0;
+    p.sling = 1.0;
+    let k = array<f32, 5>(0.0, 0.3, 0.5, 0.75, 1.0);
+    p.hip = vec2f(keyed(phase, k, array<f32, 5>(0.85, 1.05, 0.95, 0.75, 0.85)), 0.1);
+    p.knee = vec2f(keyed(phase, k, array<f32, 5>(1.45, 1.7, 1.55, 1.3, 1.45)), 0.12);
+    p.sh = vec2f(0.55, 0.15);
+    p.el = vec2f(1.95, 0.3);
+    p.reach = vec2f(0.75, 0.0);
+    p.abd = vec2f(0.0, 1.05);
+    p.head = keyed(phase, k, array<f32, 5>(-0.45, -0.6, -0.5, -0.35, -0.45));
+    p.look = 0.25;
+  } else if (pose == 22u) {
+    // Dragging a wounded man (pose.rs `Pose::Drag`).
+    crouch_gait(&p, 0.0, 0.15, 0.6, 0.0, 0.6, 0.0);
+    p.flat = 1.0;
+    p.lean = 0.55;
+    p.sling = 1.0;
+    p.sh = vec2f(1.0);
+    p.el = vec2f(0.25);
+    p.reach = vec2f(0.3);
+    p.head = 0.45;
+  } else if (pose == 23u) {
+    // First aid (pose.rs `Pose::Aid`).
+    p.hip = vec2f(1.55, -0.1);
+    p.knee = vec2f(1.8, 1.75);
+    p.lean = 0.4;
+    p.sling = 1.0;
+    let k = array<f32, 5>(0.0, 0.25, 0.5, 0.75, 1.0);
+    let sh = keyed(phase, k, array<f32, 5>(0.85, 1.0, 0.85, 1.0, 0.85));
+    let el = keyed(phase, k, array<f32, 5>(0.55, 0.3, 0.55, 0.3, 0.55));
+    p.sh = vec2f(sh);
+    p.el = vec2f(el);
+    p.reach = vec2f(0.35);
+    p.head = -0.55;
   } else if (pose == 12u || pose == 13u) {
     // Leaning out around a corner (pose.rs `Pose::LeanLeft` / `LeanRight`, LEAN_TILT 0.32).
     let g = select(-1.0, 1.0, pose == 13u);
@@ -515,9 +551,11 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
     q = vec3f(q.x * tc + tz * ts, q.y, 0.88 - q.x * ts + tz * tc);
   }
   q.z = q.z + p.drop + p.bob;
-  if (p.prone > 0.0) {
+  if (p.prone != 0.0) {
+    // Positive onto his front, negative onto his back (pose.rs PRONE_LIFT 0.23, SUPINE_LIFT 0.16).
     q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
-    q.z = q.z + 0.23 * p.prone + 0.12 * sin(3.1415927 * p.prone);
+    let ap = abs(p.prone);
+    q.z = q.z + select(0.16, 0.23, p.prone > 0.0) * ap + 0.12 * sin(3.1415927 * ap);
   }
   return q;
 }

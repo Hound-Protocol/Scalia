@@ -45,6 +45,12 @@ pub const SANDBAG_KIT: u8 = 4;
 const SANDBAG_LEN_MM: i64 = 2_000;
 const SANDBAG_THICK_MM: i64 = 700;
 const BUILD_MS: i64 = 6_000;
+/// Casualty care: first aid takes this long; enemies this close make the helper drag the wounded man into
+/// cover first, looking for it this far around him; the dragged man ends this far behind the cover spot.
+const AID_MS: i64 = 8_000;
+const DRAG_THREAT_MM: i64 = 120_000;
+const DRAG_MM: i64 = 15_000;
+const DRAG_REACH: i64 = 700;
 /// Hostiles confirmed: the length of one bound.
 const BOUND_MM: i64 = 12_000;
 /// With caution: corners this close ahead are watched.
@@ -184,11 +190,13 @@ pub struct Brain {
     /// Sandbag loads the squad carries (kept across orders), and bags being laid: (done at ms, x, y, turns).
     kit: u8,
     builds: Vec<(i64, i64, i64, u8, usize)>,
+    /// Casualty care in progress: (wounded, helper, step 0 going / 1 dragging / 2 treating, until ms, drag to).
+    aid: Vec<(usize, usize, u8, i64, (i64, i64))>,
 }
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new() }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new() }
     }
 }
 
@@ -237,8 +245,8 @@ impl Battle {
             self.brains.push(Brain::new());
         }
         // The sandbags they carry stay with them whatever the order.
-        let kit = self.brains[squad].kit;
-        self.brains[squad] = Brain { order, kit, ..Brain::new() };
+        let (kit, aid) = (self.brains[squad].kit, std::mem::take(&mut self.brains[squad].aid));
+        self.brains[squad] = Brain { order, kit, aid, ..Brain::new() };
     }
 
     /// The squad has done what it was told (the building taken and held, or arrived and secured).
@@ -503,7 +511,8 @@ impl Battle {
     }
 
     fn members(&self, squad: usize) -> Vec<usize> {
-        self.soldiers.iter().enumerate().filter(|(_, s)| s.squad as usize == squad && s.alive()).map(|(i, _)| i).collect()
+        // Those able to carry out orders: alive, not down, not busy with a casualty.
+        self.soldiers.iter().enumerate().filter(|(_, s)| s.squad as usize == squad && s.alive() && !s.down() && s.aiding.is_none()).map(|(i, _)| i).collect()
     }
 
     fn centre(&self, ms: &[usize]) -> (i64, i64) {
@@ -516,7 +525,7 @@ impl Battle {
     fn situation(&self, squad: usize) -> Situation {
         let (k, plan) = self.building.as_ref().expect("a building");
         let brain = &self.brains[squad];
-        let inside: Vec<(i64, i64)> = self.contacts[squad].iter().filter(|c| c.confidence >= 300 && self.soldiers[c.enemy].alive() && k.room_at(c.pos.0, c.pos.1).is_some()).map(|c| c.pos).collect();
+        let inside: Vec<(i64, i64)> = self.contacts[squad].iter().filter(|c| c.confidence >= 300 && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && k.room_at(c.pos.0, c.pos.1).is_some()).map(|c| c.pos).collect();
         let entry_room = brain.entry.map(|e| plan.clear_order(plan.entries[e].door)[0]);
         Situation {
             intel: brain.drone_done || !inside.is_empty(),
@@ -552,7 +561,136 @@ impl Battle {
     }
 
     /// Every leader thinks (called every LEAD_MS of battle time).
+    /// Casualty care: every man down and untreated gets the nearest fit squadmate. He goes to him; if the enemy is
+    /// near and the wounded man lies in their sight, he drags him backwards into the nearest cover from them;
+    /// then he treats him (AID_MS), which stops the bleeding. A helper who is hit is replaced.
+    fn care(&mut self) {
+        let wounded: Vec<usize> = (0..self.soldiers.len()).filter(|&i| self.soldiers[i].down() && !self.soldiers[i].stable).collect();
+        for &w in &wounded {
+            let squad = self.soldiers[w].squad as usize;
+            while self.brains.len() <= squad {
+                self.brains.push(Brain::new());
+            }
+            // Drop care whose helper can no longer give it.
+            let soldiers = &mut self.soldiers;
+            self.brains[squad].aid.retain(|a| {
+                let ok = soldiers[a.1].alive() && !soldiers[a.1].down() && soldiers[a.0].alive();
+                if !ok && soldiers[a.1].aiding == Some(a.0) {
+                    soldiers[a.1].aiding = None;
+                    soldiers[a.1].dragging = None;
+                }
+                ok
+            });
+            if self.brains[squad].aid.iter().any(|a| a.0 == w) {
+                continue;
+            }
+            let wp = self.soldiers[w].pos;
+            let helper = self
+                .soldiers
+                .iter()
+                .enumerate()
+                .filter(|(j, o)| *j != w && o.squad as usize == squad && o.alive() && !o.down() && o.aiding.is_none() && !o.passive)
+                .min_by_key(|(j, o)| (dist(o.pos, wp), *j))
+                .map(|(j, _)| j);
+            if let Some(h) = helper {
+                self.soldiers[h].aiding = Some(w);
+                self.brains[squad].aid.push((w, h, 0, 0, wp));
+                self.log.push(Event::Order { squad, step: "casualty" });
+            }
+        }
+        // Each care in progress, one step at a time.
+        for squad in 0..self.brains.len() {
+            let mut list = std::mem::take(&mut self.brains[squad].aid);
+            list.retain_mut(|a| self.give_aid(a));
+            self.brains[squad].aid.extend(list);
+        }
+    }
+
+    /// One look at a casualty being cared for; false once it is done (or can no longer be done).
+    fn give_aid(&mut self, a: &mut (usize, usize, u8, i64, (i64, i64))) -> bool {
+        let (w, h) = (a.0, a.1);
+        if !self.soldiers[w].alive() || !self.soldiers[h].alive() || self.soldiers[h].down() {
+            self.soldiers[h].aiding = None;
+            self.soldiers[h].dragging = None;
+            return false;
+        }
+        let wp = self.soldiers[w].pos;
+        match a.2 {
+            0 => {
+                if dist(self.soldiers[h].pos, wp) > 1_400 {
+                    self.soldiers[h].task = Task::Move { to: wp, gait: Gait::Run };
+                    return true;
+                }
+                // At his side: drag him out of the enemy's sight first, if they are near and can see him.
+                let squad = self.soldiers[w].squad as usize;
+                let threat = self.contacts[squad].iter().filter(|c| c.confidence >= crate::battle::CONF_HEARD && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && dist(c.pos, wp) <= DRAG_THREAT_MM).min_by_key(|c| (dist(c.pos, wp), c.enemy)).map(|c| c.pos);
+                let exposed = threat.is_some_and(|t| self.sight.clear(crate::sight::Point { x: t.0, y: t.1, z: 1_500 }, crate::sight::Point { x: wp.0, y: wp.1, z: 300 }));
+                let spot = if exposed { threat.and_then(|t| self.drag_cover(wp, t)) } else { None };
+                match spot {
+                    Some(to) => {
+                        // He walks backwards to a point past the cover, so the man in front of him ends behind it.
+                        let (dx, dy) = (to.0 - wp.0, to.1 - wp.1);
+                        let d = dist(to, wp).max(1);
+                        let dest = (to.0 + dx * DRAG_REACH / d, to.1 + dy * DRAG_REACH / d);
+                        a.2 = 1;
+                        a.4 = dest;
+                        let s = &mut self.soldiers[h];
+                        s.dragging = Some(w);
+                        s.task = Task::Move { to: dest, gait: Gait::Crouch };
+                        s.aim = false;
+                        self.log.push(Event::Order { squad, step: "drag" });
+                    }
+                    None => self.start_aid(a),
+                }
+                true
+            }
+            1 => {
+                let s = &self.soldiers[h];
+                if s.settled || dist(s.pos, a.4) <= 600 && !s.moving {
+                    self.soldiers[h].dragging = None;
+                    self.start_aid(a);
+                }
+                true
+            }
+            _ => {
+                if self.time_ms >= a.3 {
+                    self.soldiers[w].stable = true;
+                    let s = &mut self.soldiers[h];
+                    s.aiding = None;
+                    s.task = Task::Idle;
+                    return false;
+                }
+                true
+            }
+        }
+    }
+
+    fn start_aid(&mut self, a: &mut (usize, usize, u8, i64, (i64, i64))) {
+        a.2 = 2;
+        a.3 = self.time_ms + AID_MS;
+        let face = self.soldiers[a.0].pos;
+        let s = &mut self.soldiers[a.1];
+        let p = s.pos;
+        s.task = Task::Hold { at: p, face };
+        s.act = Some((Act::Aid, a.3));
+        s.posture = Some(Stance::Crouch);
+    }
+
+    /// The nearest cover from `threat` within reach of a wounded man at `wp`: a spot whose prop blocks the
+    /// threat's sight of a man lying there.
+    fn drag_cover(&self, wp: (i64, i64), threat: (i64, i64)) -> Option<(i64, i64)> {
+        let cover = self.cover.as_ref()?;
+        cover
+            .spots
+            .iter()
+            .filter(|sp| dist(sp.pos, wp) <= DRAG_MM)
+            .filter(|sp| !self.sight.clear(crate::sight::Point { x: threat.0, y: threat.1, z: 1_500 }, crate::sight::Point { x: sp.pos.0, y: sp.pos.1, z: 300 }))
+            .min_by_key(|sp| (dist(sp.pos, wp), sp.pos))
+            .map(|sp| sp.pos)
+    }
+
     pub(crate) fn lead(&mut self) {
+        self.care();
         for squad in 0..self.brains.len() {
             match self.brains[squad].order {
                 Order::None => {}
@@ -606,7 +744,7 @@ impl Battle {
     /// holds just inside it, rifle on the door he came through.
     fn fall_back(&mut self, squad: usize, ms: &[usize]) {
         let Some((k, _)) = self.building.as_ref() else { return };
-        let foes_in = |b: &Battle, r: usize| b.contacts[squad].iter().filter(|c| b.soldiers[c.enemy].alive() && k.room_at(c.pos.0, c.pos.1) == Some(r)).count();
+        let foes_in = |b: &Battle, r: usize| b.contacts[squad].iter().filter(|c| b.soldiers[c.enemy].alive() && !b.soldiers[c.enemy].down() && k.room_at(c.pos.0, c.pos.1) == Some(r)).count();
         let friends_in = |b: &Battle, r: usize| ms.iter().filter(|&&j| k.room_at(b.soldiers[j].pos.0, b.soldiers[j].pos.1) == Some(r)).count();
         let mut moves = Vec::new();
         for &i in ms {
@@ -748,7 +886,7 @@ impl Battle {
                     // The drone has looked into every room: everyone inside is now known.
                     for j in 0..self.soldiers.len() {
                         let t = &self.soldiers[j];
-                        if t.team != self.soldiers[op].team && t.alive() && k.room_at(t.pos.0, t.pos.1).is_some() {
+                        if t.team != self.soldiers[op].team && t.alive() && !t.down() && k.room_at(t.pos.0, t.pos.1).is_some() {
                             let pos = t.pos;
                             self.report_pub(squad, j, pos, 900);
                         }
@@ -836,7 +974,7 @@ impl Battle {
                         self.soldiers[i].aim = true;
                     }
                 }
-                let hostile = self.soldiers.iter().any(|t| t.alive() && t.team != self.soldiers[ms[0]].team && k.room_at(t.pos.0, t.pos.1) == Some(room));
+                let hostile = self.soldiers.iter().any(|t| t.alive() && !t.down() && t.team != self.soldiers[ms[0]].team && k.room_at(t.pos.0, t.pos.1) == Some(room));
                 // A room is clear when nobody hostile is left in it; it is never given up while someone is
                 // (if the pair falls, the next two in line take over: ranks follow the living).
                 if !hostile && (in_room >= 2.min(ms.len()) && self.brains[squad].room_ms >= 2_000 || self.brains[squad].room_ms >= ROOM_TIMEOUT_MS) {

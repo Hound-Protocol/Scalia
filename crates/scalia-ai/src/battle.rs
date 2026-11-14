@@ -60,6 +60,8 @@ pub enum Act {
     Drone,
     /// Filling and laying sandbags.
     Build,
+    /// First aid on a wounded squadmate.
+    Aid,
 }
 
 /// Radius a soldier needs to pass (doorways are 1.2 m and more).
@@ -118,6 +120,12 @@ impl Stance {
 
 pub const MAG: i32 = 30;
 pub const DAMAGE: i32 = 35;
+/// At or below this a man is down: he cannot move or fight and bleeds until treated.
+pub const DOWN_HP: i32 = 40;
+/// A man down and untreated loses one point of health this often.
+const BLEED_MS: i32 = 1_000;
+/// How far in front of his helper a dragged man lies (the helper's arms and his own shoulders).
+const DRAG_REACH_MM: i64 = 900;
 /// Squad numbers a command may name (each has a leader record and a contact list).
 pub const MAX_SQUADS: usize = 4_096;
 /// Fire modes by range: full auto close in, controlled bursts at mid range, single aimed shots beyond.
@@ -159,7 +167,7 @@ const HEAR_MM: i64 = 60_000;
 /// position is never forgotten in a fight).
 const CONF_SEEN: i32 = 1_000;
 const CONF_SHOT_AT: i32 = 700;
-const CONF_HEARD: i32 = 300;
+pub(crate) const CONF_HEARD: i32 = 300;
 const CONF_FADE_S: i32 = 100;
 const CONF_FLOOR: i32 = 100;
 /// Turning speed: 4 rad/s, as the cosine and sine (per mille) of the turn in one 50 ms step.
@@ -221,6 +229,12 @@ pub struct Soldier {
     pub(crate) posture: Option<Stance>,
     /// Where his leader wants him watching while he moves (a direction), instead of where he walks.
     pub(crate) watch: Option<(i64, i64)>,
+    /// Down and treated: the bleeding has stopped (he still needs evacuating).
+    pub(crate) stable: bool,
+    bleed_ms: i32,
+    /// The wounded man he is helping, and whether he is dragging him right now.
+    pub(crate) aiding: Option<usize>,
+    pub(crate) dragging: Option<usize>,
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
@@ -228,8 +242,23 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, speed: 0, calm_ms: 0 }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: 6, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0 }
     }
+    /// Down: wounded too badly to move or fight (alive, at or below DOWN_HP).
+    pub fn down(&self) -> bool {
+        self.alive() && self.health <= DOWN_HP
+    }
+
+    /// Down and treated: no longer bleeding.
+    pub fn stable(&self) -> bool {
+        self.stable
+    }
+
+    /// The wounded man he is dragging, if any.
+    pub fn dragging(&self) -> Option<usize> {
+        self.dragging
+    }
+
     pub fn alive(&self) -> bool {
         self.health > 0
     }
@@ -517,6 +546,65 @@ impl Battle {
         to
     }
 
+    /// Wounds: a man just gone down drops (prone, task and kit let go) and a squadmate shouts; the untreated
+    /// down bleed, and die of it.
+    fn wounds(&mut self, dt_ms: i32) {
+        for i in 0..self.soldiers.len() {
+            if !self.soldiers[i].down() {
+                continue;
+            }
+            let s = &mut self.soldiers[i];
+            if s.stance != Stance::Prone {
+                s.stance = Stance::Prone;
+                s.task = Task::Idle;
+                s.target = None;
+                s.cover = None;
+                s.act = None;
+                s.aim = false;
+                s.posture = None;
+                s.path.clear();
+                s.path_to = None;
+                s.aiding = None;
+                s.dragging = None;
+                let (sq, team, p) = (s.squad, s.team, s.pos);
+                let shout = self.soldiers.iter().enumerate().filter(|(j, o)| *j != i && o.squad == sq && o.team == team && o.alive() && !o.down()).min_by_key(|(j, o)| ((o.pos.0 - p.0).pow(2) + (o.pos.1 - p.1).pow(2), *j)).map(|(j, _)| j);
+                if let Some(j) = shout {
+                    self.log.push(Event::Bark { soldier: j, bark: Bark::ManDown });
+                }
+            }
+            let s = &mut self.soldiers[i];
+            if s.stable {
+                continue;
+            }
+            s.bleed_ms += dt_ms;
+            while s.bleed_ms >= BLEED_MS && s.alive() {
+                s.bleed_ms -= BLEED_MS;
+                s.health -= 1;
+            }
+            if !s.alive() && !self.dead_logged[i] {
+                self.dead_logged[i] = true;
+                self.log.push(Event::Killed { soldier: i, by: i });
+            }
+        }
+    }
+
+    /// A dragged man lies at his helper's hands: just in front of him (the helper walks backwards, facing him).
+    fn drag_along(&mut self) {
+        for h in 0..self.soldiers.len() {
+            let Some(w) = self.soldiers[h].dragging else { continue };
+            if !self.soldiers[h].alive() || self.soldiers[h].down() || !self.soldiers[w].alive() {
+                self.soldiers[h].dragging = None;
+                continue;
+            }
+            let (hp, wp) = (self.soldiers[h].pos, self.soldiers[w].pos);
+            let (dx, dy) = (wp.0 - hp.0, wp.1 - hp.1);
+            let d = isqrt(dx * dx + dy * dy).max(1);
+            let f = (dx * 1_000 / d, dy * 1_000 / d);
+            self.soldiers[h].facing = f;
+            self.soldiers[w].pos = (hp.0 + f.0 * DRAG_REACH_MM / 1_000, hp.1 + f.1 * DRAG_REACH_MM / 1_000);
+        }
+    }
+
     /// Moves everyone a step along their paths, keeping personal space; sets stance and pace.
     fn move_soldiers(&mut self, dt_ms: i32) {
         let before: Vec<(i64, i64)> = self.soldiers.iter().map(|s| s.pos).collect();
@@ -530,6 +618,14 @@ impl Battle {
                 s.task = Task::Idle;
                 s.act = None;
                 s.path.clear();
+                continue;
+            }
+            if self.soldiers[i].down() {
+                // Down: he lies where he fell (or where he is dragged).
+                let s = &mut self.soldiers[i];
+                s.moving = false;
+                s.vel = (0, 0);
+                s.speed = 0;
                 continue;
             }
             let mut dest = self.destination(i);
@@ -650,7 +746,7 @@ impl Battle {
         let Some(map) = self.cover.as_ref() else { return };
         for i in 0..self.soldiers.len() {
             let s = &self.soldiers[i];
-            if !s.alive() {
+            if !s.alive() || s.down() || s.aiding.is_some() {
                 continue;
             }
             if s.cover.is_none() && s.suppression >= SEEK_COVER {
@@ -869,6 +965,7 @@ impl Battle {
             self.perceive_ms += PERCEIVE_MS;
             self.seek_cover();
         }
+        self.wounds(dt_ms);
         self.lead_ms += dt_ms as i64;
         while self.lead_ms >= LEAD_MS {
             self.lead_ms -= LEAD_MS;
@@ -881,8 +978,10 @@ impl Battle {
             }
         }
         self.move_soldiers(dt_ms);
+        self.drag_along();
         for i in 0..self.soldiers.len() {
-            if !self.soldiers[i].alive() || self.soldiers[i].passive || self.soldiers[i].act.is_some() {
+            // Down men and men busy with a casualty do not fight.
+            if !self.soldiers[i].alive() || self.soldiers[i].passive || self.soldiers[i].act.is_some() || self.soldiers[i].down() || self.soldiers[i].dragging.is_some() {
                 continue;
             }
             if self.soldiers[i].reloading_ms > 0 {
@@ -897,7 +996,8 @@ impl Battle {
             let mut best: Option<(i64, usize)> = None;
             for &j in &self.visible[i] {
                 let (j, t) = (j as usize, &self.soldiers[j as usize]);
-                if !t.alive() {
+                // Nobody keeps shooting a man who is down.
+                if !t.alive() || t.down() {
                     continue;
                 }
                 let (dx, dy) = (t.pos.0 - me.pos.0, t.pos.1 - me.pos.1);
