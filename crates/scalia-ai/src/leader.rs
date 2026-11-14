@@ -79,6 +79,9 @@ pub enum Method {
     Approach,
     Drone,
     Stack,
+    /// Slicing the pie: from the stack the point man steps out in an arc in front of the door, a slice at a
+    /// time, rifle on the room, seeing it bit by bit; his number two covers from the stack.
+    Pie,
     Grenade,
     Storm,
     SlowEntry,
@@ -97,6 +100,7 @@ impl Method {
             Method::SlowEntry => "slow entry",
             Method::Clear => "clear",
             Method::Consolidate => "consolidate",
+            Method::Pie => "pie",
         }
     }
 }
@@ -123,6 +127,8 @@ const STACKED: u32 = 3;
 const INSIDE: u32 = 4;
 const CLEARED: u32 = 5;
 const HOLDING: u32 = 6;
+/// The entry room has been looked into from outside (pied).
+const PIED: u32 = 7;
 
 /// The steps from `start` (facts already true) to holding the building, cheapest first.
 fn plan_from(s: &Situation, start: State) -> Vec<Method> {
@@ -131,10 +137,13 @@ fn plan_from(s: &Situation, start: State) -> Vec<Method> {
     let mut acts: Vec<(Action, Method)> = vec![
         (Action::new("approach", 2).sets(AT, true), Method::Approach),
         (Action::new("stack", 1).needs(AT, true).sets(STACKED, true), Method::Stack),
-        (Action::new("storm", storm_cost).needs(STACKED, true).needs(INTEL, true).needs(ENTRY_HOT, false).sets(INSIDE, true), Method::Storm),
-        (Action::new("slow entry", 6).needs(STACKED, true).needs(ENTRY_HOT, false).sets(INSIDE, true), Method::SlowEntry),
+        // Nobody goes through a door without looking through it first: pie it from outside (anyone seen in the
+        // entry room makes it hot, and the leader re-plans).
+        (Action::new("pie", 1).needs(STACKED, true).needs(PIED, false).sets(PIED, true), Method::Pie),
+        (Action::new("storm", storm_cost).needs(PIED, true).needs(INTEL, true).needs(ENTRY_HOT, false).sets(INSIDE, true), Method::Storm),
+        (Action::new("slow entry", 6).needs(PIED, true).needs(ENTRY_HOT, false).sets(INSIDE, true), Method::SlowEntry),
         // Going in slowly on top of someone waiting in the entry room is the worst way in.
-        (Action::new("slow entry, hot", 10).needs(STACKED, true).needs(ENTRY_HOT, true).sets(INSIDE, true), Method::SlowEntry),
+        (Action::new("slow entry, hot", 10).needs(PIED, true).needs(ENTRY_HOT, true).sets(INSIDE, true), Method::SlowEntry),
         (Action::new("clear", 3).needs(INSIDE, true).sets(CLEARED, true), Method::Clear),
         (Action::new("consolidate", 1).needs(CLEARED, true).sets(HOLDING, true), Method::Consolidate),
     ];
@@ -148,7 +157,7 @@ fn plan_from(s: &Situation, start: State) -> Vec<Method> {
     let goal = Goal::new().want(HOLDING, true);
     match goap::plan(start, goal, &actions, Limits::default()) {
         Some(p) => p.actions.iter().map(|&i| acts[i].1).collect(),
-        None => vec![Method::Approach, Method::Stack, Method::SlowEntry, Method::Clear, Method::Consolidate],
+        None => vec![Method::Approach, Method::Stack, Method::Pie, Method::SlowEntry, Method::Clear, Method::Consolidate],
     }
 }
 
@@ -226,6 +235,28 @@ fn dist(a: (i64, i64), b: (i64, i64)) -> i64 {
 }
 
 /// A room's corners, a metre in from its walls.
+/// Slicing the pie: slices, and how long each is held (ms).
+const PIE_SLICES: usize = 6;
+const PIE_SLICE_MS: i64 = 600;
+
+/// A door's axes for pieing it: `u` along its wall towards the stack's side, `n` out of the room it opens
+/// into (towards where the stack is).
+fn pie_axes(d: &scalia_core::killhouse::Door, outside: (i64, i64)) -> ((i64, i64), (i64, i64)) {
+    if d.along_x {
+        (((outside.0 - d.x_mm).signum().max(-1), 0), (0, if outside.1 >= d.y_mm { 1 } else { -1 }))
+    } else {
+        ((0, (outside.1 - d.y_mm).signum().max(-1)), (if outside.0 >= d.x_mm { 1 } else { -1 }, 0))
+    }
+}
+
+/// Where the point man stands for slice `k` of a door: on an arc about 2.5 m out, from beside the wall on the
+/// stack's side (15°) round to across the door (165°), so each slice shows him more of the room.
+fn pie_spot(d: &scalia_core::killhouse::Door, u: (i64, i64), n: (i64, i64), k: usize) -> (i64, i64) {
+    let (c, s) = DIRS_24[1 + 2 * k.min(5)];
+    let r = 2_500 + d.width_mm / 2;
+    (d.x_mm + (u.0 * c + n.0 * s) * r / 1_000, d.y_mm + (u.1 * c + n.1 * s) * r / 1_000)
+}
+
 fn corners(k: &Killhouse, r: usize) -> [(i64, i64); 4] {
     let room = k.rooms[r];
     let (a, b) = ((room.min.0 + 1_000, room.min.1 + 1_000), (room.max.0 - 1_000, room.max.1 - 1_000));
@@ -1024,6 +1055,28 @@ impl Battle {
                     self.finish(squad, Some(STACKED));
                 }
             }
+            Some(Method::Pie) => {
+                // The point man (first in the stack) slices the door from outside; the stack holds.
+                let order = self.brains[squad].stack_order.clone();
+                let point = order.iter().copied().find(|i| ms.contains(i)).unwrap_or(ms[0]);
+                let room_c = k.rooms[entry_room].centre();
+                let (u, n) = pie_axes(&d, stack[0]);
+                let slice = (phase_ms / PIE_SLICE_MS).min(PIE_SLICES as i64 - 1) as usize;
+                let at = pie_spot(&d, u, n, slice);
+                let s = &mut self.soldiers[point];
+                s.task = Task::Hold { at, face: room_c };
+                s.watch = Some((room_c.0 - s.pos.0, room_c.1 - s.pos.1));
+                s.posture = None;
+                s.aim = true;
+                if let Some(&cover) = order.iter().find(|&&i| i != point && ms.contains(&i)) {
+                    self.soldiers[cover].aim = true;
+                }
+                if phase_ms >= PIE_SLICE_MS * PIE_SLICES as i64 {
+                    // Back to the stack, he has seen the room.
+                    self.soldiers[point].watch = None;
+                    self.finish(squad, Some(PIED));
+                }
+            }
             Some(Method::Grenade) => {
                 let thrower = ms[0];
                 if phase_ms == LEAD_MS {
@@ -1041,7 +1094,8 @@ impl Battle {
                 let spots = corners(k, entry_room);
                 let mut inside = true;
                 for (rank, &i) in ms.iter().enumerate().take(4) {
-                    let start_ms = if m == Method::SlowEntry { rank as i64 * 2_500 } else { 0 };
+                    // A flow, not a stampede: each man goes in a moment after the one in front of him.
+                    let start_ms = rank as i64 * if m == Method::SlowEntry { 2_500 } else { 600 };
                     if phase_ms >= start_ms {
                         let gait = if m == Method::Storm { Gait::Run } else { Gait::Crouch };
                         self.soldiers[i].task = Task::Move { to: spots[rank], gait };
@@ -1068,6 +1122,42 @@ impl Battle {
                 }
                 let room = rooms[r];
                 let spots = corners(k, room);
+                // The door into it from a room already cleared: the point man pies it from his side first.
+                let inner = k.doors.iter().find(|dd| match dd.rooms {
+                    (Some(a), Some(b)) => a == room && rooms[..r].contains(&b) || b == room && rooms[..r].contains(&a),
+                    _ => false,
+                });
+                let pieing = inner.is_some() && self.brains[squad].room_ms < PIE_SLICE_MS * PIE_SLICES as i64;
+                if let (true, Some(dd)) = (pieing, inner) {
+                    let near_side = |p: (i64, i64)| k.room_at(p.0, p.1).is_some_and(|x| x != room);
+                    // Outward normal: towards the cleared side.
+                    let n0 = if dd.along_x { (0, 1) } else { (1, 0) };
+                    let probe = (dd.x_mm + n0.0 * 1_500, dd.y_mm + n0.1 * 1_500);
+                    let n = if near_side(probe) { n0 } else { (-n0.0, -n0.1) };
+                    let u = if dd.along_x { (1, 0) } else { (0, 1) };
+                    let slice = (self.brains[squad].room_ms / PIE_SLICE_MS).min(PIE_SLICES as i64 - 1) as usize;
+                    let rc = k.rooms[room].centre();
+                    for (rank, &i) in ms.iter().enumerate() {
+                        let s = &mut self.soldiers[i];
+                        s.aim = true;
+                        if rank == 0 {
+                            let at = pie_spot(dd, u, n, slice);
+                            s.task = Task::Hold { at, face: rc };
+                            s.watch = Some((rc.0 - s.pos.0, rc.1 - s.pos.1));
+                        } else if rank == 1 {
+                            // His cover, beside the door on the near side.
+                            let at = (dd.x_mm + n.0 * 1_000 - u.0 * (dd.width_mm / 2 + 600), dd.y_mm + n.1 * 1_000 - u.1 * (dd.width_mm / 2 + 600));
+                            s.task = Task::Hold { at, face: rc };
+                        }
+                    }
+                    if self.brains[squad].room_ms == LEAD_MS {
+                        self.log.push(Event::Order { squad, step: "pie" });
+                    }
+                    return;
+                }
+                if let Some(&p) = ms.first() {
+                    self.soldiers[p].watch = None;
+                }
                 // Two men take the room; the rest wait where they are, watching it.
                 let mut in_room = 0;
                 for (rank, &i) in ms.iter().enumerate() {

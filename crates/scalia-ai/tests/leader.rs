@@ -20,6 +20,11 @@ fn the_leader_picks_the_method_the_situation_calls_for() {
     // Blind, no drone, not strong: slow and careful.
     let s = Situation { have_drone: false, strength: 4, ..base };
     assert!(choose(&s).contains(&Method::SlowEntry), "{:?}", choose(&s));
+    // Whatever the way in, the door is pied first.
+    for p in [choose(&base), choose(&s)] {
+        let (pie, entry) = (p.iter().position(|&m| m == Method::Pie), p.iter().position(|&m| matches!(m, Method::Storm | Method::SlowEntry)));
+        assert!(pie.is_some() && pie < entry, "{p:?}");
+    }
 }
 
 fn killhouse_battle(attackers: usize, defenders: &[(i64, i64)], seed: u64) -> Battle {
