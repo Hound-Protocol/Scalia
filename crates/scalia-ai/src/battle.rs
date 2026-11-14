@@ -79,9 +79,11 @@ pub(crate) const DIRS_24: [(i64, i64); 24] = [(1000, 0), (966, 259), (866, 500),
 const ACCEL: i64 = 4_000;
 const BRAKE: i64 = 5_000;
 /// Suppression at which he looks for cover, and below which (with nothing to shoot for a while) he leaves it.
-const SEEK_COVER: i32 = 400;
+const SEEK_COVER: i32 = 300;
 const LEAVE_COVER: i32 = 150;
 const CALM_MS: i32 = 3_000;
+/// Trading fire with someone further than this, a man in the open looks for cover even before he is pinned.
+const OPEN_FIGHT_MM: i64 = 20_000;
 const COVER_REACH_MM: i64 = 12_000;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -640,12 +642,17 @@ impl Battle {
                 dest = None;
             }
             let mut step = (0i64, 0i64);
-            if dest.is_none() {
-                self.soldiers[i].settled = false;
-            }
             if let Some((to, gait)) = dest {
                 self.soldiers[i].gait = gait;
                 let pos = self.soldiers[i].pos;
+                // Re-told to stand about where he already stands (a hold at his own feet, given again each
+                // tick): he keeps his spot rather than hunting for a new one, which made men shuffle in place.
+                let keep = self.soldiers[i].path_to != Some(to)
+                    && self.soldiers[i].goal.is_some_and(|g| near(g, to, SETTLE_MM) && near(g, pos, SETTLE_MM))
+                    && matches!(self.soldiers[i].task, Task::Hold { .. });
+                if keep {
+                    self.soldiers[i].path_to = Some(to);
+                }
                 if self.soldiers[i].path_to != Some(to) {
                     let goal = self.free_spot(i, to);
                     let straight = self.nav.as_ref().is_none_or(|n| walk_line(n, pos, goal));
@@ -704,16 +711,18 @@ impl Battle {
             self.grid.near(p, PERSONAL_MM, &mut near);
             for &j in &near {
                 let (j, o) = (j as usize, before[j as usize]);
-                if j == i || !self.soldiers[j].alive() {
+                // The wounded lie still and are tended where they lie: nobody is shoved off them.
+                if j == i || !self.soldiers[j].alive() || self.soldiers[j].down() || self.soldiers[i].aiding.is_some() {
                     continue;
                 }
                 let (dx, dy) = (p.0 - o.0, p.1 - o.1);
                 let d = isqrt(dx * dx + dy * dy);
                 // Walking men brush past each other; standing men only make room when someone is really close.
-                let near = if step != (0, 0) { BODY_MM * 2 } else { PERSONAL_MM - 150 };
+                // A settled man gives way only to someone actually brushing him, and gently: no sliding about.
+                let near = if step != (0, 0) { BODY_MM * 2 } else if self.soldiers[i].settled { BODY_MM * 2 - 50 } else { PERSONAL_MM - 150 };
                 if d < near {
-                    let (ux, uy) = if d == 0 { if i < j { (-1, 0) } else { (1, 0) } } else { (dx * 1_000 / d, dy * 1_000 / d) };
-                    let k = (near - d) * dt_ms as i64 / 100;
+                    let (ux, uy) = if d == 0 { if i < j { (-1_000, 0) } else { (1_000, 0) } } else { (dx * 1_000 / d, dy * 1_000 / d) };
+                    let k = (near - d) * dt_ms as i64 / 250;
                     push = (push.0 + ux * k / 1_000, push.1 + uy * k / 1_000);
                 }
             }
@@ -754,7 +763,11 @@ impl Battle {
             if !s.alive() || s.down() || s.aiding.is_some() {
                 continue;
             }
-            if s.cover.is_none() && s.suppression >= SEEK_COVER {
+            // Inside the house the walls are the cover and the room is the job: nobody runs out of a clearing.
+            let indoors = self.building.as_ref().is_some_and(|(k, _)| k.room_at(s.pos.0, s.pos.1).is_some());
+            // Shot at, or trading fire in the open at range while not creeping up on a door: get behind something.
+            let in_open_fight = s.target.is_some_and(|t| !near(self.soldiers[t].pos, s.pos, OPEN_FIGHT_MM)) && s.gait != Gait::Crouch && s.suppression > 0;
+            if s.cover.is_none() && !indoors && (s.suppression >= SEEK_COVER || in_open_fight) {
                 // The four nearest known threats (a big fight has hundreds of contacts).
                 let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();
                 threats.sort_unstable();
@@ -1117,6 +1130,11 @@ impl Battle {
 /// Whether `dot` (facing ×1000 · offset) ≥ ⌊√d2⌋ × CONE_COS (d2 = |offset|²), without a square root:
 /// for dot ≥ 0 that is d2 < (⌊dot / CONE_COS⌋ + 1)². (At d2 = 0 the old test said no and this says yes; that
 /// case is always within CLOSE_MM, which the caller accepts anyway.)
+/// Whether two points are within `r` of each other.
+fn near(a: (i64, i64), b: (i64, i64), r: i64) -> bool {
+    (a.0 - b.0).pow(2) + (a.1 - b.1).pow(2) <= r * r
+}
+
 fn in_cone(dot: i64, d2: i64) -> bool {
     if dot < 0 {
         return false;

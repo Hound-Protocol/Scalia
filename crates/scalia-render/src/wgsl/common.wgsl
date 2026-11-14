@@ -327,6 +327,18 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.el = vec2f(0.25);
     p.reach = vec2f(0.3);
     p.head = 0.45;
+  } else if (pose == 24u) {
+    // Killed, face down and limp (pose.rs `Pose::Dead`).
+    p.prone = 1.0;
+    p.sling = 1.0;
+    p.hip = vec2f(0.15, -0.2);
+    p.knee = vec2f(0.25, 0.6);
+    p.sh = vec2f(1.9, 0.6);
+    p.el = vec2f(0.6, 0.9);
+    p.reach = vec2f(0.0);
+    p.abd = vec2f(0.7, 0.9);
+    p.head = 0.55;
+    p.look = 0.9;
   } else if (pose == 23u) {
     // First aid (pose.rs `Pose::Aid`).
     p.hip = vec2f(1.55, -0.1);

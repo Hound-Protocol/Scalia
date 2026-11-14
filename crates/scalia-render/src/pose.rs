@@ -65,6 +65,8 @@ pub enum Pose {
     Drag = 22,
     /// First aid: kneeling over the wounded man, hands pressing on the wound over the phase.
     Aid = 23,
+    /// Killed: face down and limp, arms loose out to the sides, legs splayed, rifle slung across his back.
+    Dead = 24,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -760,6 +762,18 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.elbow[0] = 2.4;
             p.reach[0] = 1.05;
             p.head = 0.1;
+        }
+        Pose::Dead => {
+            p.prone = 1.0;
+            p.sling = 1.0;
+            p.hip = [0.15, -0.2];
+            p.knee = [0.25, 0.6];
+            p.shoulder = [1.9, 0.6];
+            p.elbow = [0.6, 0.9];
+            p.reach = [0.0, 0.0];
+            p.abduct = [0.7, 0.9];
+            p.head = 0.55;
+            p.look = 0.9;
         }
         Pose::Prone => {
             p.prone = 1.0;

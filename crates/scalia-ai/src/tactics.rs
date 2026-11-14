@@ -187,6 +187,9 @@ pub struct Building {
     first: Vec<(usize, usize)>,
 }
 
+/// Between men in a door stack: just over the spacing two men keep, so each gets his own point.
+pub const STACK_GAP_MM: i64 = 950;
+
 impl Building {
     pub fn of(k: &Killhouse) -> Building {
         let mut entries = Vec::new();
@@ -203,7 +206,7 @@ impl Building {
                     let (along, across) = if d.along_x { ((1, 0), (0, out)) } else { ((0, 1), (out, 0)) };
                     let stack = (0..4).map(|n| {
                         // Hugging the wall: out of sight of anyone inside looking out through the doorway.
-                        let a = d.width_mm / 2 + 400 + n * 750;
+                        let a = d.width_mm / 2 + 400 + n * STACK_GAP_MM;
                         (d.x_mm - along.0 * a + across.0 * 650, d.y_mm - along.1 * a + across.1 * 650)
                     }).collect();
                     entries.push(Entry { door: i, stack });

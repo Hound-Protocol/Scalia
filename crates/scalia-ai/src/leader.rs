@@ -10,7 +10,7 @@
 use crate::battle::{Act, Battle, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM};
 use crate::goap::{self, Action, Goal, Limits, State};
 use crate::sight::isqrt;
-use crate::tactics::{Building, Height};
+use crate::tactics::{Building, Height, STACK_GAP_MM};
 use scalia_core::killhouse::Killhouse;
 use scalia_core::nav::{Prop, PropKind};
 
@@ -828,9 +828,18 @@ impl Battle {
             self.brains[squad].entry = Some(e);
         }
         let e = self.brains[squad].entry.expect("chosen");
-        let stack = plan.entries[e].stack.clone();
         let door = plan.entries[e].door;
         let d = k.doors[door];
+        // The stack goes on whichever side of the door has wall to hug: mirrored if the planned side runs
+        // past the corner (unwalkable, or out round the end of the wall).
+        let mut stack = plan.entries[e].stack.clone();
+        let walk = |p: &(i64, i64)| self.nav().is_none_or(|n| n.walkable_at(p.0, p.1, 0));
+        if !stack.iter().all(walk) {
+            let flip: Vec<(i64, i64)> = stack.iter().map(|&(x, y)| if d.along_x { (2 * d.x_mm - x, y) } else { (x, 2 * d.y_mm - y) }).collect();
+            if flip.iter().all(walk) {
+                stack = flip;
+            }
+        }
         let entry_room = plan.clear_order(door)[0];
         let step = self.brains[squad].plan.first().copied();
         let phase_ms = self.brains[squad].phase_ms;
@@ -852,13 +861,22 @@ impl Battle {
                     self.finish(squad, Some(AT));
                     return;
                 }
-                // Fire teams by rank: team (leg % 2) bounds to the next point, the other watches the building.
+                // Fire teams by rank: team (leg % 2) bounds to the next point in a wedge pointing along the
+                // way in, the other watches the building from where it is.
                 let goal = legs[leg];
+                let from = if leg == 0 { self.centre(&ms) } else { legs[leg - 1] };
+                let (fx, fy) = (goal.0 - from.0, goal.1 - from.1);
+                let len = isqrt(fx * fx + fy * fy).max(1);
+                let (ux, uy) = (fx * 1_000 / len, fy * 1_000 / len);
                 let mut arrived = true;
+                let mut t = 0i64;
                 for (rank, &i) in ms.iter().enumerate() {
                     if rank % 2 == leg % 2 {
-                        let off = ((rank as i64 / 2) - 1) * 1_500;
-                        let spot = (goal.0 + off, goal.1 - (rank as i64 % 2) * 1_000);
+                        let side = if t % 2 == 0 { -1 } else { 1 };
+                        let lat = side * (700 + (t / 2) * 1_300);
+                        let back = t * 700;
+                        t += 1;
+                        let spot = (goal.0 - ux * back / 1_000 - uy * lat / 1_000, goal.1 - uy * back / 1_000 + ux * lat / 1_000);
                         self.soldiers[i].task = Task::Move { to: spot, gait: Gait::Run };
                         self.soldiers[i].aim = false;
                         if dist(self.soldiers[i].pos, spot) > 1_200 {
@@ -905,9 +923,16 @@ impl Battle {
                             ready = false;
                         }
                     } else {
-                        // Rear security behind the stack, facing away from the house.
-                        let back = (stack[3].0 + (stack[3].0 - d.x_mm).signum() * 1_500 * (rank as i64 - 3), stack[3].1 + (stack[3].1 - d.y_mm).signum() * 1_500 * (rank as i64 - 3));
-                        self.soldiers[i].task = Task::Hold { at: back, face: (2 * back.0 - kc.0, 2 * back.1 - kc.1) };
+                        // Rear security: a short arc past the end of the stack, one man on along the wall, the next
+                        // a step out from it, watching outward and down the flank.
+                        let r = rank as i64 - 4;
+                        let along = ((stack[3].0 - stack[2].0).signum(), (stack[3].1 - stack[2].1).signum());
+                        let out = ((stack[0].0 - d.x_mm).signum() * (1 - along.0.abs()), (stack[0].1 - d.y_mm).signum() * (1 - along.1.abs()));
+                        let a = STACK_GAP_MM * (1 + r / 2);
+                        let o = (r % 2) * 1_300;
+                        let back = (stack[3].0 + along.0 * a + out.0 * o, stack[3].1 + along.1 * a + out.1 * o);
+                        let look = if r % 2 == 0 { (out.0 * 10_000 + along.0 * 4_000, out.1 * 10_000 + along.1 * 4_000) } else { (along.0 * 10_000 + out.0 * 3_000, along.1 * 10_000 + out.1 * 3_000) };
+                        self.soldiers[i].task = Task::Hold { at: back, face: (back.0 + look.0, back.1 + look.1) };
                         self.soldiers[i].aim = true;
                     }
                 }

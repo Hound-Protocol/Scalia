@@ -134,3 +134,25 @@ fn he_winds_up_to_speed_and_slows_down_before_stopping() {
     assert!(speeds[last - 8] < full && speeds[last - 8] > speeds[last], "{:?}", &speeds[last - 10..=last]);
     assert!(dist(b.soldiers[0].pos, (40_000, 60_000)) < 50);
 }
+
+#[test]
+fn a_man_told_each_tick_to_hold_where_he_stands_keeps_still() {
+    // Leaders re-issue "hold here" at a man's own feet every tick; with a squadmate close by that used to send
+    // him hunting for a fresh spot each time, shuffling left and right.
+    let mut b = battle(&[], vec![man(0, 0, 50_000, 50_000), man(0, 0, 50_800, 50_000), man(0, 0, 49_300, 50_500)], 1);
+    let mut track = Vec::new();
+    for t in 0..400 {
+        for i in 0..3 {
+            let p = b.soldiers[i].pos;
+            b.order(i, Task::Hold { at: p, face: (p.0, p.1 + 10_000) });
+        }
+        b.step(50);
+        if t >= 100 {
+            track.push(b.soldiers.iter().map(|s| s.pos).collect::<Vec<_>>());
+        }
+    }
+    for i in 0..3 {
+        let moved = track.windows(2).map(|w| dist(w[0][i], w[1][i])).sum::<i64>();
+        assert!(moved < 100, "man {i} drifted {moved} mm over 15 s of holding");
+    }
+}

@@ -1026,7 +1026,9 @@ try {
   const net = [];
   // Who speaks with which recorded voice (scripts/radio_voices.py): four squad voices, one per captain.
   const VOICE_ID = { Alpha: 's1', Echo: 's1', Bravo: 's2', Foxtrot: 's2', Charlie: 's3', Golf: 's3', Delta: 's4', Hotel: 's4', Reyes: 'c1', Okafor: 'c2' };
-  const voiceOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return { id: VOICE_ID[name.split(' ')[0]], pitch: 0.6 + (h % 50) / 100, rate: 1.0 + (h % 7) / 40 }; };
+  // For testing, every unit speaks with Hotel 08's voice (no variations); VOICE_ID keeps the per-squad table.
+  const ONE_VOICE = 'Hotel 08';
+  const voiceOf = (name) => { name = ONE_VOICE; let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return { id: VOICE_ID[name.split(' ')[0]], pitch: 0.6 + (h % 50) / 100, rate: 1.0 + (h % 7) / 40 }; };
   // Recorded lines: the manifest maps each voice's exact line text to its clip. Clips load on first use and stay
   // decoded; they play through the handset's radio chain (narrow band, overdriven speaker, compression) into the
   // analyser, so the trace follows the real voice. A line with no clip falls back to the browser's speech voice.

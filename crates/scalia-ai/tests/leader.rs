@@ -48,7 +48,8 @@ fn a_squad_takes_the_killhouse_from_two_defenders() {
         b.step(50);
         ms += 50;
     }
-    let defenders_alive = b.soldiers.iter().filter(|s| s.team == 1 && s.alive()).count();
+    // Down men are out of the fight (they bleed out where they lie).
+    let defenders_alive = b.soldiers.iter().filter(|s| s.team == 1 && s.alive() && !s.down()).count();
     assert_eq!(defenders_alive, 0, "building cleared in {ms} ms");
     assert!(b.squad_done(0), "holding the building");
     let inside = b.soldiers.iter().filter(|s| s.team == 0 && s.alive() && b.building().unwrap().room_at(s.pos.0, s.pos.1).is_some()).count();
@@ -117,4 +118,42 @@ fn an_outnumbered_defender_falls_back_to_the_next_room() {
     assert!(b.log.iter().any(|e| matches!(e, Event::Order { squad: 1, step: "fall back" })));
     // His mate who was not threatened holds where he was.
     assert_eq!(k.room_at(b.soldiers[3].pos.0, b.soldiers[3].pos.1), room_c);
+}
+
+
+#[test]
+fn the_stack_hugs_the_wall_beside_the_door() {
+    use scalia_ai::battle::Event;
+    let mut b = killhouse_battle(8, &[(16_000, 2_000), (5_000, 12_000)], 21);
+    // Run until the leader moves on from the stack (it was ready, or timed out), and look at it then.
+    let mut stacked_at = None;
+    let mut ms = 0;
+    while ms < 120_000 {
+        let before = b.log.len();
+        b.step(50);
+        ms += 50;
+        let fresh: Vec<&'static str> = b.log[before..].iter().filter_map(|e| if let Event::Order { squad: 0, step } = e { Some(*step) } else { None }).collect();
+        if stacked_at.is_some() && !fresh.is_empty() {
+            break;
+        }
+        if fresh.contains(&"stack") {
+            stacked_at = Some(ms);
+        }
+    }
+    assert!(stacked_at.is_some(), "the squad stacked up");
+    let k = b.building().unwrap();
+    let men: Vec<(i64, i64)> = b.soldiers.iter().filter(|s| s.team == 0 && s.alive() && !s.down()).map(|s| s.pos).take(4).collect();
+    let door = k.doors.iter().filter(|d| d.rooms.0.is_none() || d.rooms.1.is_none()).min_by_key(|d| men.iter().map(|m| (m.0 - d.x_mm).pow(2) + (m.1 - d.y_mm).pow(2)).min().unwrap()).unwrap();
+    for m in &men {
+        let d = (((m.0 - door.x_mm).pow(2) + (m.1 - door.y_mm).pow(2)) as f64).sqrt() as i64;
+        assert!(d < 5_500, "stack man at {m:?} is {d} mm from the door");
+        let off = if door.along_x { (m.1 - door.y_mm).abs() } else { (m.0 - door.x_mm).abs() };
+        assert!(off < 1_400, "stack man at {m:?} is {off} mm off the wall, not hugging it");
+    }
+    for a in 0..men.len() {
+        for c in a + 1..men.len() {
+            let d = (((men[a].0 - men[c].0).pow(2) + (men[a].1 - men[c].1).pow(2)) as f64).sqrt() as i64;
+            assert!(d >= 800, "two stack men {d} mm apart");
+        }
+    }
 }
