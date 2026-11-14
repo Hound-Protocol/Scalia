@@ -216,3 +216,36 @@ fn shot_at_in_the_open_he_sprints_for_cover_before_shooting_back() {
     let spot = b.cover.as_ref().unwrap().spots[b.soldiers[0].cover.unwrap()].pos;
     assert!((b.soldiers[0].pos.0 - spot.0).abs() + (b.soldiers[0].pos.1 - spot.1).abs() < 1_500, "behind the rock now");
 }
+
+#[test]
+fn flanked_in_cover_he_finds_new_cover() {
+    // A wall running east-west; fire from the north sends him behind it (south side).
+    let wall = Prop { kind: PropKind::Wall { length_mm: 12_000, thickness_mm: 600 }, x_mm: 50_000, y_mm: 50_000, quarter_turns: 0 };
+    let rock = Prop { kind: PropKind::Rock { radius_mm: 1_200 }, x_mm: 44_000, y_mm: 46_000, quarter_turns: 0 };
+    let mut b = battle_with(&[wall, rock], vec![man(0, 50_000, 53_000, Stance::Stand), Soldier::new(1, 1, (50_000, 75_000), Stance::Stand)], 4);
+    b.soldiers[0].health = i32::MAX;
+    b.soldiers[1].health = i32::MAX;
+    // Until he is behind it.
+    let mut first = None;
+    for _ in 0..300 {
+        b.step(50);
+        if let Some(c) = b.soldiers[0].cover {
+            let at = b.cover.as_ref().unwrap().spots[c].pos;
+            if (b.soldiers[0].pos.0 - at.0).abs() + (b.soldiers[0].pos.1 - at.1).abs() < 600 && !b.soldiers[0].moving {
+                first = Some(c);
+                break;
+            }
+        }
+    }
+    let first = first.expect("in cover from the north");
+    // The enemy comes round to the east, level with him: the wall no longer covers him.
+    b.soldiers[1].pos = (75_000, 49_000);
+    // Within two seconds (leaving cover when it goes calm takes three): the flank, not the calm, moves him.
+    assert_eq!(b.soldiers[0].cover, Some(first));
+    let mut moved = false;
+    for _ in 0..40 {
+        b.step(50);
+        moved |= b.soldiers[0].cover.is_some_and(|c| c != first);
+    }
+    assert!(moved, "he left the flanked spot for another");
+}

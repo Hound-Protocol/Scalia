@@ -807,11 +807,24 @@ impl Battle {
             let open_fight = s.target.is_some_and(|t| !near(self.soldiers[t].pos, s.pos, OPEN_FIGHT_MM)) && s.gait != Gait::Crouch && s.suppression > 0 && !assaulting;
             // Shot at: one round is enough, unless in an assault (then only pinned).
             let under_fire = if assaulting { s.suppression >= SEEK_COVER } else { s.suppression >= UNDER_FIRE } || open_fight;
-            let in_cover = s.cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| near(m.spots[c].pos, s.pos, 800));
+            let mut in_cover = s.cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| near(m.spots[c].pos, s.pos, 800));
+            // Flanked: the cover he is in no longer stands between him and the nearest threat. It is no cover
+            // any more; he looks for another.
+            let mut flanked = false;
+            if in_cover && s.suppression >= UNDER_FIRE {
+                if let (Some(c), Some(map)) = (s.cover, self.cover.as_ref()) {
+                    let nearest = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD && now - c.seen_ms <= 3_000).min_by_key(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.enemy)).map(|c| c.pos);
+                    if nearest.is_some_and(|t| map.protection(&map.spots[c], t, &self.sight) < 2) {
+                        in_cover = false;
+                        flanked = true;
+                    }
+                }
+            }
+            let s = &self.soldiers[i];
             // Cover worth running for: the spot he is running to, or the best one in reach against the four
             // nearest known threats.
             let mut candidate = None;
-            let cover_near = if s.cover.is_some() {
+            let cover_near = if s.cover.is_some() && !flanked {
                 true
             } else if under_fire && !indoors && !target_close {
                 if let Some(map) = self.cover.as_ref() {
@@ -851,6 +864,9 @@ impl Battle {
             me.may_suppress = doing == Some(Act::Suppress);
             match doing {
                 Some(Act::TakeCover) => {
+                    if flanked && candidate.is_some() {
+                        me.cover = None;
+                    }
                     if me.cover.is_none() {
                         if let Some(c) = candidate {
                             me.cover = Some(c);
@@ -865,7 +881,8 @@ impl Battle {
             // Out of cover once it is calm again: no rounds coming in and nothing to shoot for a while.
             let me = &mut self.soldiers[i];
             if me.cover.is_some() && mind.want != Want::Survive {
-                let calm = me.suppression < LEAVE_COVER && me.target.is_none();
+                // The calm counts from when he is behind it, not from when he set off for it.
+                let calm = in_cover && me.suppression < LEAVE_COVER && me.target.is_none();
                 me.calm_ms = if calm { me.calm_ms + PERCEIVE_MS } else { 0 };
                 if me.calm_ms >= CALM_MS {
                     me.cover = None;
