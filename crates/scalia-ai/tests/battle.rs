@@ -189,3 +189,30 @@ fn a_pinned_man_fires_far_less_than_a_calm_one() {
     let (calm, pinned) = (fired(0), fired(950));
     assert!(pinned * 3 < calm, "calm {calm} rounds, pinned {pinned}");
 }
+
+fn battle_with(props: &[Prop], soldiers: Vec<Soldier>, seed: u64) -> Battle {
+    let mut nav = scalia_core::nav::NavGrid::new(0, 0, 200, 200);
+    nav.rebuild(props);
+    let cover = scalia_ai::tactics::CoverMap::build(props, &nav);
+    Battle::with_map(nav, field(props), cover, soldiers, seed)
+}
+
+#[test]
+fn shot_at_in_the_open_he_sprints_for_cover_before_shooting_back() {
+    // A rock 6 m to his side; an enemy 50 m off opens up on him.
+    let rock = Prop { kind: PropKind::Rock { radius_mm: 1_200 }, x_mm: 56_000, y_mm: 20_000, quarter_turns: 0 };
+    let mut b = battle_with(&[rock], vec![man(0, 50_000, 20_000, Stance::Stand), Soldier::new(1, 1, (50_000, 70_000), Stance::Stand)], 4);
+    b.soldiers[0].health = i32::MAX;
+    b.soldiers[1].health = i32::MAX;
+    let mut took_cover_at = None;
+    for t in 0..200 {
+        b.step(50);
+        if took_cover_at.is_none() && b.soldiers[0].cover.is_some() {
+            took_cover_at = Some(t);
+        }
+    }
+    assert!(took_cover_at.is_some(), "under fire he goes for the rock");
+    // No rounds from him while he was running for it.
+    let spot = b.cover.as_ref().unwrap().spots[b.soldiers[0].cover.unwrap()].pos;
+    assert!((b.soldiers[0].pos.0 - spot.0).abs() + (b.soldiers[0].pos.1 - spot.1).abs() < 1_500, "behind the rock now");
+}

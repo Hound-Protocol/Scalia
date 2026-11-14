@@ -84,6 +84,10 @@ const LEAVE_COVER: i32 = 150;
 const CALM_MS: i32 = 3_000;
 /// Trading fire with someone further than this, a man in the open looks for cover even before he is pinned.
 const OPEN_FIGHT_MM: i64 = 20_000;
+/// Rounds coming in at all (one near miss is enough): out of an assault, he gets behind something first.
+const UNDER_FIRE: i32 = 100;
+/// An enemy this close is fought where he stands: no running for cover with him that near.
+const CLOSE_FIGHT_MM: i64 = 10_000;
 const COVER_REACH_MM: i64 = 12_000;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -529,7 +533,8 @@ impl Battle {
     fn destination(&self, i: usize) -> Option<((i64, i64), Gait)> {
         let s = &self.soldiers[i];
         if let (Some(c), Some(map)) = (s.cover, self.cover.as_ref()) {
-            return Some((map.spots[c].pos, Gait::Run));
+            // Under fire, cover is the first thing: he sprints for it.
+            return Some((map.spots[c].pos, Gait::Sprint));
         }
         match s.task {
             Task::Idle => None,
@@ -786,7 +791,10 @@ impl Battle {
             // (not in an assault, where the leader's bounding is the answer to fire).
             let in_open_fight = s.target.is_some_and(|t| !near(self.soldiers[t].pos, s.pos, OPEN_FIGHT_MM)) && s.gait != Gait::Crouch && s.suppression > 0
                 && !self.brains.get(s.squad as usize).is_some_and(|b| matches!(b.order, crate::leader::Order::Capture));
-            if s.cover.is_none() && !indoors && (s.suppression >= SEEK_COVER || in_open_fight) {
+            let assaulting = self.brains.get(s.squad as usize).is_some_and(|b| matches!(b.order, crate::leader::Order::Capture));
+            let too_close = s.target.is_some_and(|t| near(self.soldiers[t].pos, s.pos, CLOSE_FIGHT_MM));
+            let shot_at = s.suppression >= UNDER_FIRE && !assaulting;
+            if s.cover.is_none() && !indoors && !too_close && (s.suppression >= SEEK_COVER || shot_at || in_open_fight) {
                 // The four nearest known threats (a big fight has hundreds of contacts).
                 let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();
                 threats.sort_unstable();
@@ -1129,6 +1137,13 @@ impl Battle {
                 me.facing = turn_toward(me.facing, c);
             } else if let Task::Hold { face, .. } = me.task {
                 me.facing = turn_toward(me.facing, (face.0 - me.pos.0, face.1 - me.pos.1));
+            }
+            // Running for cover he holds his fire, unless the enemy is right on top of him.
+            let to_cover = self.soldiers[i].cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| !near(m.spots[c].pos, self.soldiers[i].pos, 800));
+            if to_cover && self.soldiers[i].target.is_none_or(|t| !near(self.soldiers[t].pos, self.soldiers[i].pos, CLOSE_FIGHT_MM)) {
+                self.soldiers[i].burst_left = 0;
+                self.soldiers[i].sighted = None;
+                continue;
             }
             let Some(j) = self.soldiers[i].target else {
                 self.soldiers[i].burst_left = 0;
