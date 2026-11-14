@@ -35,6 +35,27 @@ function impulse(ctx, seconds, rt60, early, damp) {
   return buf;
 }
 
+/// Distant echoes: a handful of separate returns spread over two seconds, each a short dark smear (no room tail).
+function echoes(ctx) {
+  const rate = ctx.sampleRate, n = Math.floor(rate * 2.6);
+  const buf = ctx.createBuffer(2, n, rate);
+  const taps = [[0.22, 0.42], [0.47, 0.3], [0.8, 0.22], [1.2, 0.15], [1.65, 0.1], [2.15, 0.06]];
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (const [at, g] of taps) {
+      // Each echo arrives from its own direction (a little earlier in one ear) and is smeared over ~60 ms.
+      const start = Math.floor((at + (ch ? 0.004 : 0) * Math.sign(Math.sin(at * 7))) * rate);
+      let lp = 0;
+      for (let j = 0; j < rate * 0.09 && start + j < n; j++) {
+        const t = j / rate;
+        lp = lp * 0.92 + (Math.random() * 2 - 1) * 0.08;
+        d[start + j] += lp * g * 6 * Math.exp(-t / 0.025);
+      }
+    }
+  }
+  return buf;
+}
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -78,13 +99,19 @@ export class AudioEngine {
       return g;
     };
     this.rev = {
-      // Outdoors: a short slap off whatever stands near, and distant echoes rolling back.
-      open: bus(impulse(c, 1.6, 0.9, [[0.045, 0.35], [0.11, 0.22], [0.23, 0.14], [0.41, 0.09], [0.7, 0.06]], 0.55)),
+      // Outdoors near the listener: a short, light slap off whatever stands close, no tail to speak of.
+      open: bus(impulse(c, 0.6, 0.25, [[0.035, 0.3], [0.08, 0.15]], 0.6)),
       small: bus(impulse(c, 1.0, 0.55, [[0.006, 0.6], [0.011, 0.45], [0.017, 0.35], [0.024, 0.25]], 0.35)),
       large: bus(impulse(c, 3.0, 1.7, [[0.018, 0.45], [0.033, 0.35], [0.05, 0.25], [0.08, 0.2]], 0.4)),
       // A corridor flutters: regular echoes between the two close walls.
       corridor: bus(impulse(c, 1.8, 1.0, Array.from({ length: 14 }, (_, k) => [0.009 * (k + 1), 0.5 * Math.pow(0.8, k)]), 0.4)),
     };
+    // Distance: the direct sound plus echoes rolling back from far off (buildings, treelines, terrain), dark and
+    // spread out over two seconds; not a room.
+    this.farSend = c.createGain();
+    const far = c.createConvolver(); far.buffer = echoes(c);
+    const farOut = c.createGain(); farOut.gain.value = 0.9;
+    this.farSend.connect(far); far.connect(farOut); farOut.connect(this.mix);
     this.applyEnv(true);
     return c;
   }
@@ -123,7 +150,8 @@ export class AudioEngine {
     for (const l of this.lp) l.frequency.setTargetAtTime(pda ? 10000 : 22000, t, 0.08);
   }
 
-  /// Plays a sound as the acoustics place it. `o`: { gain, lowpass, wet, rx, ry, delay, rate, kind }.
+  /// Plays a sound as the acoustics place it. `o`: { gain, lowpass, room, far, rx, ry, delay, rate, kind }:
+  /// room is how much rings in the listener's own space, far how much comes back as distant echoes.
   play(url, o) {
     const c = this.ensure(); if (!c) return;
     const buf = this.buffer(url); if (!buf) return;
@@ -145,11 +173,14 @@ export class AudioEngine {
     const len = Math.hypot(o.rx, o.ry);
     const [x, z] = len < 0.3 ? [0, -1] : [o.rx / len, -o.ry / len];
     p.positionX.value = x; p.positionY.value = 0; p.positionZ.value = z;
-    const dry = c.createGain(); dry.gain.value = 1 - o.wet * 0.85;
-    const wet = c.createGain(); wet.gain.value = o.wet;
+    // The direct sound stays: far off it is quieter and duller (gain and low-pass), not drowned in reverb.
+    const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5 - o.far * 0.35;
+    const wet = c.createGain(); wet.gain.value = o.room;
+    const far = c.createGain(); far.gain.value = o.far;
     src.connect(g).connect(lp).connect(p);
     p.connect(dry).connect(this.mix);
     p.connect(wet).connect(this.send);
+    p.connect(far).connect(this.farSend);
     const v = { src, pri, gain: o.gain, done: false };
     src.onended = () => { v.done = true; };
     this.active.push(v);

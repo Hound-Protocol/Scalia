@@ -799,10 +799,10 @@ impl Viewer {
         self.audio_env_cache = Some((self.frame_ms, env));
         env
     }
-    /// Sounds since the last call, ten floats each, worked out by the acoustics for the listener:
+    /// Sounds since the last call, eleven floats each, worked out by the acoustics for the listener:
     /// kind (0 shot, 1 blast, 2 footfall), loudness (footfalls: 0 walk .. 1 sprint), delay from now (s, travel
-    /// time included), gain, low-pass (Hz), wet 0..1, position relative to the listener (m: right, ahead),
-    /// distance (m), walls between.
+    /// time included), gain, low-pass (Hz), room reverb 0..1, distant echoes 0..1, position relative to the
+    /// listener (m: right, ahead), distance (m), walls between.
     pub fn take_sounds(&mut self) -> Vec<f32> {
         let env = self.listener_env();
         let l = self.audio_listener();
@@ -827,7 +827,7 @@ impl Viewer {
             };
             // Right and ahead as the camera looks (ahead = up the screen, on the ground).
             let (rx, ry) = (dx * r.x + dy * r.y, -dx * r.y + dy * r.x);
-            out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet, rx, ry, dist, p.walls as f32]);
+            out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, p.wet_far, rx, ry, dist, p.walls as f32]);
         }
         out
     }

@@ -1448,11 +1448,11 @@ try {
     const s = v.take_sounds();
     if (s.length) fireGraph();
     if (audio.ctx && now - envAt > 100) { envAt = now; audio.setEnv(v.audio_env()); }
-    for (let i = 0; i + 9 < s.length; i += 10) {
-      const [kind, loud, delay, gain, lowpass, wet, rx, ry] = s.subarray(i, i + 8);
-      if (kind === 2) audio.play(STEPS, { kind: 'step', gain: gain * (0.25 + 0.35 * loud), lowpass, wet: wet * 0.6, rx, ry, delay, rate: 0.9 + Math.random() * 0.2 });
-      else if (kind === 1) audio.play(SHOT, { kind: 'blast', gain: Math.min(4, gain * 6), lowpass, wet, rx, ry, delay, rate: 0.45 });
-      else audio.play(SHOT, { kind: 'shot', gain: Math.min(2.5, gain * 2.2), lowpass, wet, rx, ry, delay, rate: 0.94 + Math.random() * 0.12 });
+    for (let i = 0; i + 10 < s.length; i += 11) {
+      const [kind, loud, delay, gain, lowpass, room, far, rx, ry] = s.subarray(i, i + 9);
+      if (kind === 2) audio.play(STEPS, { kind: 'step', gain: gain * (0.25 + 0.35 * loud), lowpass, room: room * 0.6, far: far * 0.5, rx, ry, delay, rate: 0.9 + Math.random() * 0.2 });
+      else if (kind === 1) audio.play(SHOT, { kind: 'blast', gain: Math.min(4, gain * 6), lowpass, room, far, rx, ry, delay, rate: 0.45 });
+      else audio.play(SHOT, { kind: 'shot', gain: Math.min(2.5, gain * 2.2), lowpass, room, far, rx, ry, delay, rate: 0.94 + Math.random() * 0.12 });
     }
     if (!assaultOn) return;
     if (now - assaultPoll < 250) return;
