@@ -114,6 +114,7 @@ export function createMenu({ viewer, store, onEnter }) {
   const enter = sound('./sfx/menu-enter.mp3', 0.85);
   const musicOn = () => store.get('music.on') !== '0';
 
+  const foot = root.querySelector('.mn-foot');
   // 'menu' (waiting for Start), 'fly' (the intro), 'done'.
   let state = 'hidden', t0 = 0, skipAt = null, raf = 0;
   const v = () => viewer();
@@ -145,8 +146,8 @@ export function createMenu({ viewer, store, onEnter }) {
     const ox = (hx - 0.5) * size, oy = (hy - 0.5) * size;
     const rx = ox * Math.cos(spin) - oy * Math.sin(spin), ry = (ox * Math.sin(spin) + oy * Math.cos(spin)) * tilt;
     const pull = smooth(Math.log(zoom) / Math.log(4));
-    // Resting, the galaxy sits a little right of centre (the menu is on the left).
-    const rest = [W * 0.58, H * 0.5];
+    // Resting, the galaxy is centred behind the title.
+    const rest = [W * 0.5, H * 0.5];
     const cx = rest[0] + (W / 2 - rest[0] - rx) * pull, cy = rest[1] + (H / 2 - rest[1] - ry) * pull;
     ctx.save();
     ctx.translate(cx, cy); ctx.scale(1, tilt); ctx.rotate(spin);
@@ -268,6 +269,7 @@ export function createMenu({ viewer, store, onEnter }) {
     state = 'fly';
     t0 = performance.now();
     root.classList.add('flying');
+    if (foot) foot.style.opacity = '0';
     // The menu music stops dead; the boom; a soft flash.
     tune.pause();
     boom.play().catch(() => {});
