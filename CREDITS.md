@@ -26,6 +26,10 @@
   168854" and "desert eagle 168857", supplied by the project lead (Pixabay sound library naming). Changes: each
   recording cut into its single shot and handling pieces (magazine out, in, bolt or slide, dry click), levelled,
   mono (`scripts/gun_sounds_split.py`).
+- **Menu sounds** (`web/sfx/menu-*.mp3`): "soundreality cinematic tension 2 504666" (menu music), "submority boom
+  geomorphism cinematic trailer sound effects 123876" (start, cut to 8 s), "chrysalyn intense cinematic wind whoosh
+  transition 543526" (the travel in, cut to 6 s) and "biww whoosh fly by sound effect 561945" (entering the
+  commander); supplied by the project lead (Pixabay sound library naming). Re-encoded at 128 kbit/s.
 - **"walkie talkie"** by [FayBall](https://sketchfab.com/FayBall), licensed under
   [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
   Source: https://sketchfab.com/3d-models/walkie-talkie-88d0177b7801448397b69fcd81220c3a
