@@ -904,6 +904,17 @@ impl Viewer {
         let kind = if crate::ground::concrete_at(self.cmd.0, self.cmd.1) { 3.0 } else { 2.0 };
         let mut out = Vec::new();
         self.sound_record(&mut out, l, r, (self.cmd.0 as f32, self.cmd.1 as f32), kind, loud, 0.0);
+        // His own steps are heard as his, not from a place round the camera: centred, close and clear (no travel
+        // time, no fall-off with the camera's height); the room and the echoes stay.
+        if out.len() >= 10 {
+            out[2] = 0.0; // delay
+            out[3] = 1.0; // gain
+            out[4] = 20000.0; // low-pass
+            out[6] = 0.0; // right
+            out[7] = 0.0; // ahead
+            out[8] = 0.0; // below
+            out[9] = 1.0; // distance
+        }
         out
     }
     /// Appends one sound record (see `take_sounds`) for a sound made at `at` (metres), heard at the listener `l`.
