@@ -451,6 +451,16 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
     let moving = walking && speed > 0.15;
     let dir = if moving { dir } else { 0.0 };
     let reload = s.reloading_ms > 0;
+    // Standing still at a step the leader has him on: how that step looks (the stack, a peek round an
+    // edge, sweeping a room); in cover the cover poses come first.
+    if !moving && !reload && s.cover.is_none() {
+        match s.cue {
+            scalia_ai::battle::Cue::Stack => return (Pose::Stack, 0.0, None, 0.0),
+            scalia_ai::battle::Cue::Peek(right) => return (if right { Pose::LeanRight } else { Pose::LeanLeft }, 0.0, None, 0.0),
+            scalia_ai::battle::Cue::Sweep => return (Pose::Sweep, 0.3, None, 0.0),
+            scalia_ai::battle::Cue::None => {}
+        }
+    }
     let upper = if reload { Some(Pose::Reload) } else if s.aim { Some(Pose::StandAim) } else { None };
     let aiming = s.aim || s.target.is_some();
     match (s.stance, moving) {

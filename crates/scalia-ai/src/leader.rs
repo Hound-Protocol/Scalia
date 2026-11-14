@@ -7,7 +7,7 @@
 //! what happens next. Each step is a drill that hands the soldiers their tasks; the soldiers' own survival
 //! (cover when pinned, fighting what they see) runs underneath it.
 
-use crate::battle::{Act, Battle, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM};
+use crate::battle::{Act, Battle, Cue, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM};
 use crate::goap::{self, Action, Goal, Limits, State};
 use crate::sight::isqrt;
 use crate::tactics::{Building, Height, STACK_GAP_MM};
@@ -262,6 +262,14 @@ const CHOKE_FLOW_MS: i64 = 900;
 /// Slicing the pie: slices, and how long each is held (ms).
 const PIE_SLICES: usize = 6;
 const PIE_SLICE_MS: i64 = 600;
+
+/// Pieing an opening at `edge`, looking at `look`: whether the edge he leans round is on his right.
+fn edge_on_right(me: (i64, i64), look: (i64, i64), edge: (i64, i64)) -> bool {
+    let f = (look.0 - me.0, look.1 - me.1);
+    // His right is the facing turned clockwise.
+    let right = (f.1, -f.0);
+    (edge.0 - me.0) * right.0 + (edge.1 - me.1) * right.1 > 0
+}
 
 /// A door's axes for pieing it: `u` along its wall towards the stack's side, `n` out of the room it opens
 /// into (towards where the stack is).
@@ -754,6 +762,9 @@ impl Battle {
                         s.task = Task::Hold { at, face: look };
                         s.watch = Some((look.0 - s.pos.0, look.1 - s.pos.1));
                         s.posture = None;
+                        s.cue = Cue::Peek(edge_on_right(s.pos, look, ch.at));
+                    } else {
+                        s.cue = Cue::None;
                     }
                 }
                 if now - ch.since >= PIE_SLICE_MS * PIE_SLICES as i64 {
@@ -1095,6 +1106,10 @@ impl Battle {
     }
 
     fn lead_capture(&mut self, squad: usize) {
+        // Cues are set afresh by the step being done.
+        for i in self.members(squad) {
+            self.soldiers[i].cue = Cue::None;
+        }
         if self.brains[squad].holding {
             return;
         }
@@ -1220,6 +1235,7 @@ impl Battle {
                 let ms = self.brains[squad].stack_order.clone();
                 for (rank, &i) in ms.iter().enumerate() {
                     if rank < 4 {
+                        self.soldiers[i].cue = Cue::Stack;
                         self.soldiers[i].task = Task::Move { to: stack[rank], gait: Gait::Crouch };
                         self.soldiers[i].aim = rank == 0;
                         // The pie needs the point man and his cover in place; the rest close up during it.
@@ -1266,6 +1282,7 @@ impl Battle {
                 s.watch = Some((room_c.0 - s.pos.0, room_c.1 - s.pos.1));
                 s.posture = None;
                 s.aim = true;
+                s.cue = Cue::Peek(edge_on_right(s.pos, room_c, (d.x_mm, d.y_mm)));
                 if let Some(&cover) = order.iter().find(|&&i| i != point && ms.contains(&i)) {
                     self.soldiers[cover].aim = true;
                 }
@@ -1342,6 +1359,7 @@ impl Battle {
                             let at = pie_spot(dd, u, n, slice);
                             s.task = Task::Hold { at, face: rc };
                             s.watch = Some((rc.0 - s.pos.0, rc.1 - s.pos.1));
+                            s.cue = Cue::Peek(edge_on_right(s.pos, rc, (dd.x_mm, dd.y_mm)));
                         } else if rank == 1 {
                             // His cover, beside the door on the near side.
                             let at = (dd.x_mm + n.0 * 1_000 - u.0 * (dd.width_mm / 2 + 600), dd.y_mm + n.1 * 1_000 - u.1 * (dd.width_mm / 2 + 600));
@@ -1362,6 +1380,7 @@ impl Battle {
                     if rank < 2 {
                         self.soldiers[i].task = Task::Move { to: spots[rank * 2], gait: Gait::Walk };
                         self.soldiers[i].aim = true;
+                        self.soldiers[i].cue = Cue::Sweep;
                         if k.room_at(self.soldiers[i].pos.0, self.soldiers[i].pos.1) == Some(room) {
                             in_room += 1;
                         }

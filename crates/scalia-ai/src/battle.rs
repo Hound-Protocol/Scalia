@@ -43,6 +43,20 @@ pub enum Task {
     Hold { at: (i64, i64), face: (i64, i64) },
 }
 
+/// What the leader has a man doing, for how he is drawn (the animation layer reads it; nothing in the
+/// simulation does).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum Cue {
+    #[default]
+    None,
+    /// In a door stack: shoulder to the wall, rifle at high ready.
+    Stack,
+    /// Pieing a door or gap: leaning out to look round its edge (true: the edge is on his right).
+    Peek(bool),
+    /// Inside a room being cleared: sweeping it.
+    Sweep,
+}
+
 /// What a soldier calls out (the radio voices and on-screen labels pick these up).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Bark {
@@ -260,6 +274,8 @@ pub struct Soldier {
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
+    /// How he is to be drawn for what the leader has him doing.
+    pub cue: Cue,
     /// What he wants now and his plan for it (soldier mind, GOAP).
     pub mind: crate::mind::Mind,
     /// What the plan lets him do: open fire, put covering fire down.
@@ -273,7 +289,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
