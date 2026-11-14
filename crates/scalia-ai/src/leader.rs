@@ -50,6 +50,8 @@ const BUILD_MS: i64 = 6_000;
 const AID_MS: i64 = 8_000;
 const DRAG_THREAT_MM: i64 = 120_000;
 const DRAG_MM: i64 = 15_000;
+/// From the casualty's feet to where the helper takes him by the shoulder straps (body length and reach).
+const GRAB_MM: i64 = 2_150;
 const DRAG_REACH: i64 = 700;
 /// Hostiles confirmed: the length of one bound.
 const BOUND_MM: i64 = 12_000;
@@ -619,30 +621,39 @@ impl Battle {
         let wp = self.soldiers[w].pos;
         match a.2 {
             0 => {
-                if dist(self.soldiers[h].pos, wp) > 1_400 {
-                    self.soldiers[h].task = Task::Move { to: wp, gait: Gait::Run };
-                    return true;
-                }
-                // At his side: drag him out of the enemy's sight first, if they are near and can see him.
+                // Is he in the enemy's sight? Then he comes out of it first: dragged behind cover.
                 let squad = self.soldiers[w].squad as usize;
                 let threat = self.contacts[squad].iter().filter(|c| c.confidence >= crate::battle::CONF_HEARD && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && dist(c.pos, wp) <= DRAG_THREAT_MM).min_by_key(|c| (dist(c.pos, wp), c.enemy)).map(|c| c.pos);
                 let exposed = threat.is_some_and(|t| self.sight.clear(crate::sight::Point { x: t.0, y: t.1, z: 1_500 }, crate::sight::Point { x: wp.0, y: wp.1, z: 300 }));
                 let spot = if exposed { threat.and_then(|t| self.drag_cover(wp, t)) } else { None };
                 match spot {
                     Some(to) => {
-                        // He walks backwards to a point past the cover, so the man in front of him ends behind it.
+                        // He takes him by the shoulder straps at the cover side: head towards the cover, the
+                        // helper kneeling at his head, then walks backwards to a point past the cover.
                         let (dx, dy) = (to.0 - wp.0, to.1 - wp.1);
                         let d = dist(to, wp).max(1);
-                        let dest = (to.0 + dx * DRAG_REACH / d, to.1 + dy * DRAG_REACH / d);
+                        let grab = (wp.0 + dx * GRAB_MM / d, wp.1 + dy * GRAB_MM / d);
+                        if dist(self.soldiers[h].pos, grab) > 600 {
+                            self.soldiers[h].task = Task::Move { to: grab, gait: Gait::Run };
+                            return true;
+                        }
+                        let dest = (to.0 + dx * (DRAG_REACH + GRAB_MM) / d, to.1 + dy * (DRAG_REACH + GRAB_MM) / d);
                         a.2 = 1;
                         a.4 = dest;
                         let s = &mut self.soldiers[h];
                         s.dragging = Some(w);
                         s.task = Task::Move { to: dest, gait: Gait::Crouch };
                         s.aim = false;
+                        s.target = None;
                         self.log.push(Event::Order { squad, step: "drag" });
                     }
-                    None => self.start_aid(a),
+                    None => {
+                        if dist(self.soldiers[h].pos, wp) > 1_400 {
+                            self.soldiers[h].task = Task::Move { to: wp, gait: Gait::Run };
+                            return true;
+                        }
+                        self.start_aid(a);
+                    }
                 }
                 true
             }

@@ -144,7 +144,10 @@ pub const DOWN_HP: i32 = 40;
 /// A man down and untreated loses one point of health this often.
 const BLEED_MS: i32 = 1_000;
 /// How far in front of his helper a dragged man lies (the helper's arms and his own shoulders).
-const DRAG_REACH_MM: i64 = 900;
+/// From the dragger to the casualty's head (his hands on the shoulder straps).
+const DRAG_REACH_MM: i64 = 450;
+/// A man lying down: from his feet (where he stands) to the top of his head.
+const BODY_LEN_MM: i64 = 1_700;
 /// Squad numbers a command may name (each has a leader record and a contact list).
 pub const MAX_SQUADS: usize = 4_096;
 /// Fire modes by range: full auto close in, controlled bursts at mid range, single aimed shots beyond.
@@ -630,7 +633,11 @@ impl Battle {
             let d = isqrt(dx * dx + dy * dy).max(1);
             let f = (dx * 1_000 / d, dy * 1_000 / d);
             self.soldiers[h].facing = f;
-            self.soldiers[w].pos = (hp.0 + f.0 * DRAG_REACH_MM / 1_000, hp.1 + f.1 * DRAG_REACH_MM / 1_000);
+            // He is pulled by the shoulder straps, head first: lying on his back facing away from the man
+            // dragging him, so his head (a body length behind his feet) is at the dragger's hands.
+            self.soldiers[w].facing = f;
+            let at = DRAG_REACH_MM + BODY_LEN_MM;
+            self.soldiers[w].pos = (hp.0 + f.0 * at / 1_000, hp.1 + f.1 * at / 1_000);
         }
     }
 
@@ -1096,6 +1103,11 @@ impl Battle {
         for i in 0..self.soldiers.len() {
             // Down men and men busy with a casualty do not fight.
             if !self.soldiers[i].alive() || self.soldiers[i].passive || self.soldiers[i].act.is_some() || self.soldiers[i].down() || self.soldiers[i].dragging.is_some() {
+                // Hands busy (or down): no target held, no burst half-fired.
+                if self.soldiers[i].dragging.is_some() || self.soldiers[i].act.is_some() || self.soldiers[i].down() {
+                    self.soldiers[i].target = None;
+                    self.soldiers[i].burst_left = 0;
+                }
                 continue;
             }
             if self.soldiers[i].reloading_ms > 0 {

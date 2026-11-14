@@ -819,7 +819,9 @@ try {
         if (!started) { started = true; start(cur); setSpeed(1); }
         const f = v.lab_feed();
         if (f) { feed.textContent += (feed.textContent ? '\n' : '') + f; feed.scrollTop = feed.scrollHeight; }
-        marks.hidden = !labels || tabletUp;
+        // The tablet comes first: the lab panel and labels step aside while it is up.
+        panel.hidden = tabletUp || tabletShown;
+        marks.hidden = !labels || tabletUp || tabletShown;
         if (marks.hidden) return;
         const w = canvas.clientWidth, h = canvas.clientHeight, seen = new Set();
         for (const m of JSON.parse(v.lab_marks())) {
