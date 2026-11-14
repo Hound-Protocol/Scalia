@@ -11,6 +11,7 @@ const canvas = $('view'), hud = $('hud');
 const errors = createErrors('__UPDATE__');
 
 function showError(msg) {
+  const boot = $('boot'); if (boot) boot.remove();
   const e = $('error');
   e.style.display = 'flex';
   e.textContent = msg;
@@ -199,8 +200,21 @@ try {
     boxEl.hidden = false;
   };
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  // On foot the mouse works the commander's rifle: left fires (from the hip), right held aims (and shows the
+  // line the rounds will take). Units are commanded through the tablet's map.
+  const gun = { trigger: false, aim: false, x: 0, y: 0 };
+  const gunSend = () => v.commander_weapon(gun.trigger, gun.aim, gun.x * dpr(), gun.y * dpr());
   canvas.addEventListener('pointerdown', (e) => {
-    if (scene === 'ground') return; // units are commanded through the tablet's map
+    if (scene === 'ground') {
+      if (tabletUp) return;
+      gun.x = e.offsetX; gun.y = e.offsetY;
+      if (e.button === 0) gun.trigger = true;
+      else if (e.button === 2) gun.aim = true;
+      else return;
+      canvas.setPointerCapture(e.pointerId);
+      gunSend();
+      return;
+    }
     if (e.button === 2) {
       const msg = v.command(e.offsetX * dpr(), e.offsetY * dpr(), performance.now(), e.shiftKey);
       if (msg) flash(msg);
@@ -219,6 +233,7 @@ try {
     canvas.classList.add('dragging');
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (scene === 'ground') { gun.x = e.offsetX; gun.y = e.offsetY; gunSend(); return; }
     if (box) { box.x1 = e.offsetX; box.y1 = e.offsetY; showBox(); return; }
     if (!drag) return;
     const dx = e.clientX - drag[0], dy = e.clientY - drag[1];
@@ -227,6 +242,12 @@ try {
     drag = [e.clientX, e.clientY];
   });
   const endDrag = (e) => {
+    if (scene === 'ground') {
+      if (e.button === 0 || e.type === 'pointercancel') gun.trigger = false;
+      if (e.button === 2 || e.type === 'pointercancel') gun.aim = false;
+      gunSend();
+      return;
+    }
     if (box) {
       if (e.type === 'pointerup') {
         const msg = v.select_box(box.x0 * dpr(), box.y0 * dpr(), box.x1 * dpr(), box.y1 * dpr(), performance.now());
@@ -541,6 +562,33 @@ try {
   // The commander's footsteps: one step each time a heel strikes (gait phase 0 and 0.5), a little different
   // every time; grass or concrete by where he is.
   let lastPhase = -1;
+  // The rifle on screen: rounds left, the aim line while aiming, and a small kick of the view on every shot.
+  let lastShots = 0, kick = 0;
+  const weaponTick = () => {
+    const box = $('weapon'), line = $('aimLine');
+    const on = scene === 'ground' && !tabletUp && !tabletShown;
+    box.hidden = !on; line.hidden = true;
+    if (!on) { canvas.style.transform = ''; return; }
+    const w = JSON.parse(v.commander_weapon_state());
+    box.querySelector('b').textContent = w.slung ? 'SLUNG' : String(w.ammo);
+    box.querySelector('small').textContent = w.reloading ? 'RELOADING' : `/ ${w.spare}`;
+    box.querySelector('em').textContent = ['STANDING', 'CROUCHED', 'PRONE'][w.stance] || '';
+    box.classList.toggle('low', !w.slung && w.ammo <= 5);
+    if (w.line) {
+      const [x0, y0, x1, y1] = w.line, cw = canvas.clientWidth, ch = canvas.clientHeight;
+      const l = line.firstElementChild;
+      l.setAttribute('x1', (x0 * cw).toFixed(1)); l.setAttribute('y1', (y0 * ch).toFixed(1));
+      l.setAttribute('x2', (x1 * cw).toFixed(1)); l.setAttribute('y2', (y1 * ch).toFixed(1));
+      line.hidden = false;
+    }
+    if (w.shots > lastShots) kick = Math.min(1, kick + 0.6 * (w.shots - lastShots));
+    lastShots = w.shots;
+    if (kick > 0.01 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const a = 3 * kick;
+      canvas.style.transform = `translate(${((Math.random() - 0.5) * a).toFixed(2)}px, ${((Math.random() - 0.5) * a).toFixed(2)}px)`;
+      kick *= 0.78;
+    } else { kick = 0; canvas.style.transform = ''; }
+  };
   const footsteps = () => {
     const ph = v.scene_name() === 'ground' ? v.commander_phase() : -1;
     if (ph >= 0 && lastPhase >= 0) {
@@ -1624,7 +1672,14 @@ try {
     const k = e.key.toLowerCase();
     held.add(k);
     if (k === 'k' && !e.repeat && !tabletUp) { toggleAssault(); return; }
-    if (k === 'h' && !e.repeat) { const c = $('controls'); c.hidden = !c.hidden; store.set('scalia.controls', c.hidden ? '0' : '1'); return; }
+    if (e.key === 'F1') { e.preventDefault(); const c = $('controls'); c.hidden = !c.hidden; store.set('scalia.controls', c.hidden ? '0' : '1'); return; }
+    // The commander's rifle and stance (on foot, tablet down).
+    if (scene === 'ground' && !tabletUp && !e.repeat && !invOpen) {
+      if (k === 'h') { const slung = v.commander_holster(); if (slung) { gun.trigger = gun.aim = false; } flash(slung ? 'Rifle slung' : 'Rifle in hand'); return; }
+      if (k === 'c') { v.commander_stance(1); return; }
+      if (k === 'x') { v.commander_stance(2); return; }
+      if (k === 'r') { v.commander_reload(); return; }
+    }
     if (k === 'tab') {
       e.preventDefault();
       if (e.repeat) return;
@@ -1645,7 +1700,7 @@ try {
     else if (k === 'c' && tabletUp && page === 'map') { v.map_center_commander(); pdaTap(); }
     else if (k === 'f') v.follow();
     else if (k === 'o') { outline = !outline; v.set_outline(outline); }
-    else if (k === 'r') { fullres = !fullres; v.set_full(fullres); }
+    else if (e.key === 'F2') { e.preventDefault(); fullres = !fullres; v.set_full(fullres); }
     else if (k === 't') flash(v.cycle_day_speed(performance.now()));
     else if (k === 'n') flash(v.cycle_army());
     else if (k === 'p') flash(v.cycle_stance());
@@ -1801,6 +1856,7 @@ Click to copy and close.`;
       if (lab) errors.guard('lab', () => lab.draw());
       errors.guard('map', () => { drawMapMarks(); drawScan(); });
       errors.guard('footsteps', footsteps);
+      errors.guard('weapon', weaponTick);
       errors.guard('battle sound', () => assaultTick(now));
       const cpuFrame = performance.now() - t0;
       cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
@@ -1832,7 +1888,14 @@ const UPDATE = '__UPDATE__';
   let ready = false;
   const goBtn = document.getElementById('protoGo');
   goBtn.disabled = true;
-  loaded.then(() => { ready = true; goBtn.disabled = false; goBtn.focus(); });
+  loaded.then(() => {
+    // Loading done: the loading screen fades and the notice comes up.
+    ready = true; goBtn.disabled = false;
+    box.classList.remove('wait');
+    const boot = document.getElementById('boot');
+    if (boot) { boot.classList.add('done'); setTimeout(() => boot.remove(), 400); }
+    goBtn.focus();
+  });
   const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); music.start(); ambience(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
   const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };

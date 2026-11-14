@@ -618,7 +618,7 @@ impl Battle {
 
     fn members(&self, squad: usize) -> Vec<usize> {
         // Those able to carry out orders: alive, not down, not busy with a casualty.
-        self.soldiers.iter().enumerate().filter(|(_, s)| s.squad as usize == squad && s.alive() && !s.down() && s.aiding.is_none()).map(|(i, _)| i).collect()
+        self.soldiers.iter().enumerate().filter(|(_, s)| s.squad as usize == squad && s.alive() && !s.down() && s.aiding.is_none() && !s.player).map(|(i, _)| i).collect()
     }
 
     fn centre(&self, ms: &[usize]) -> (i64, i64) {

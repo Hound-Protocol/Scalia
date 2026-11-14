@@ -93,7 +93,14 @@ const STEP_SYSTEM: usize = 19;
 /// Furthest zoom on foot, with the tablet away (the tablet's map zooms all the way).
 const STEP_FIELD_MAX: usize = 2;
 /// The commander's walking and sprinting speeds (m/s), and how long radioing an order takes (ms).
+/// The commander's own squad number on the field battle (he is its only member) and his spare magazines (150
+/// rounds behind the 30 in the rifle; later the inventory decides).
+const COMMANDER_SQUAD: u16 = 1_000;
+const COMMANDER_MAGS: i32 = 5;
 const CMD_WALK: f32 = 1.7;
+const CMD_AIM_WALK: f32 = 1.2;
+const CMD_CROUCH: f32 = 1.4;
+const CMD_CRAWL: f32 = 0.5;
 const CMD_SPRINT: f32 = 4.6;
 /// The commander winds up (m/s²) and brakes.
 /// Selection tag on an instance's colour (the shader outlines tagged figures): +64 stable, +128 wounded or
@@ -183,6 +190,8 @@ pub struct Viewer {
     cmd_dir: (f32, f32),
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
+    /// The commander's rifle and stance, worked by the player on foot.
+    gun: Gun,
     /// The live killhouse assault, when one is running (replaces the static enemy posts).
     assault: Option<crate::assault::Assault>,
     /// The K training assault is running on the field.
@@ -342,6 +351,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_dir: (0.0, 1.0),
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
+        gun: Gun::default(),
         assault: None,
         demo: false,
         lab_speed: 1.0,
@@ -1257,6 +1267,43 @@ impl Viewer {
     /// Commander movement for this frame: x to the screen's right, y to its top (-1..1 each), and sprinting.
     pub fn move_commander(&mut self, x: f32, y: f32, sprint: bool) {
         self.cmd_input = (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0), sprint);
+    }
+    /// The commander's trigger and aim (held or not), and where the mouse is (device px).
+    pub fn commander_weapon(&mut self, trigger: bool, aim: bool, px: f64, py: f64) {
+        self.gun.trigger = trigger && !self.gun.slung;
+        self.gun.aim = aim && !self.gun.slung;
+        self.gun.at_px = Some((px, py));
+    }
+    /// Crouch (1) or go prone (2), or back up to standing when already so.
+    pub fn commander_stance(&mut self, k: u8) {
+        self.gun.stance = if self.gun.stance == k { 0 } else { k.min(2) };
+    }
+    /// Slings the rifle on his back, or brings it back to his hands.
+    pub fn commander_holster(&mut self) -> bool {
+        self.gun.slung = !self.gun.slung;
+        if self.gun.slung {
+            self.gun.trigger = false;
+            self.gun.aim = false;
+        }
+        self.gun.slung
+    }
+    /// A fresh magazine, if he has a spare.
+    pub fn commander_reload(&mut self) {
+        let at = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
+        if let Some(a) = self.assault.as_mut() {
+            let i = commander_soldier(a, at);
+            a.battle.player_reload(i);
+        }
+    }
+    /// The commander's weapon for the page, as JSON: rounds in the rifle and spare, reloading, slung, stance,
+    /// rounds fired so far, health (0..100), and the aim line [x0, y0, x1, y1] (screen fractions) while aiming.
+    pub fn commander_weapon_state(&mut self) -> String {
+        let (ammo, spare, reloading, health) = match self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)) {
+            Some(s) => (s.ammo, s.mags * scalia_ai::battle::MAG, s.reloading_ms > 0, s.health.max(0)),
+            None => (scalia_ai::battle::MAG, COMMANDER_MAGS * scalia_ai::battle::MAG, false, 100),
+        };
+        let line = self.gun.line.map_or("null".to_string(), |l| format!("[{:.4},{:.4},{:.4},{:.4}]", l[0], l[1], l[2], l[3]));
+        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots)
     }
     /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
     /// starts over the commander.
@@ -2707,10 +2754,29 @@ impl Viewer {
         let (mut vx, mut vy) = (right.0 * ix + fwd.0 * iy, right.1 * ix + fwd.1 * iy);
         let len = (vx * vx + vy * vy).sqrt();
         let holding = self.tablet || self.cine.is_some();
-        let wants = len > 0.01 && t >= self.radio_until && !holding;
+        // Where the rifle points: the ground under the mouse.
+        if let Some((px, py)) = self.gun.at_px.filter(|_| !holding) {
+            let p = self.pick(px, py);
+            let (dx, dy) = (p.x - self.cmd.0 as f32, p.y - self.cmd.1 as f32);
+            if dx * dx + dy * dy > 0.25 {
+                self.gun.toward = Some((dx, dy));
+            }
+        }
+        let ready = (self.gun.aim || self.gun.trigger) && !self.gun.slung && !holding && self.gun.toward.is_some();
+        // His man on the field battle: shot down or killed, he no longer moves or fires.
+        let (down, dead) = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)).map_or((false, false), |s| (s.down(), !s.alive()));
+        let wants = len > 0.01 && t >= self.radio_until && !holding && !down && !dead;
         // Like a person, not a cursor: about half a second up to a walk, a second up to a sprint, and a few
-        // steps to brake (GTA-style). Changing direction keeps most of the pace.
-        let target = if wants { if sprint { CMD_SPRINT } else { CMD_WALK } } else { 0.0 };
+        // steps to brake (GTA-style). Changing direction keeps most of the pace. Low he goes slower; on his
+        // belly he crawls; with the rifle up he walks, never sprints.
+        let pace = match self.gun.stance {
+            2 => CMD_CRAWL,
+            1 => CMD_CROUCH,
+            _ if self.gun.aim && ready => CMD_AIM_WALK,
+            _ if sprint && !ready => CMD_SPRINT,
+            _ => CMD_WALK,
+        };
+        let target = if wants { pace } else { 0.0 };
         let rate = if target > self.cmd_speed { CMD_ACCEL } else { CMD_BRAKE };
         self.cmd_speed = if target > self.cmd_speed { (self.cmd_speed + rate * dt).min(target) } else { (self.cmd_speed - rate * dt).max(target) };
         if wants {
@@ -2746,13 +2812,20 @@ impl Viewer {
             } else {
                 self.cmd_speed = 0.0;
             }
-            // Turn smoothly towards where he walks.
-            let want = (-vx).atan2(vy);
-            let mut d = want - self.cmd_heading;
-            while d > std::f32::consts::PI { d -= std::f32::consts::TAU; }
-            while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
-            self.cmd_heading += d.clamp(-8.0 * dt, 8.0 * dt);
         }
+        // Turn smoothly: towards where the rifle points while it is up (quicker), else where he walks.
+        let wrap = |mut d: f32| { while d > std::f32::consts::PI { d -= std::f32::consts::TAU; } while d < -std::f32::consts::PI { d += std::f32::consts::TAU; } d };
+        let travel = (-self.cmd_dir.0).atan2(self.cmd_dir.1);
+        let face = match self.gun.toward.filter(|_| ready) {
+            Some((tx, ty)) => Some(((-tx).atan2(ty), 12.0)),
+            None if self.cmd_moving => Some((travel, 8.0)),
+            None => None,
+        };
+        if let Some((want, rate)) = face {
+            self.cmd_heading += wrap(want - self.cmd_heading).clamp(-rate * dt, rate * dt);
+        }
+        // The way he moves from the way he faces (strafing, backing off with the rifle up).
+        let move_dir = if self.cmd_moving { wrap(travel - self.cmd_heading) } else { 0.0 };
         // Legs by his real pace: walking while he winds up, the sprint only once he is really going.
         // With a little give either way (hysteresis), so tapping a key or easing off near a threshold does not
         // flick him between poses.
@@ -2764,19 +2837,37 @@ impl Viewer {
         } else {
             Pose::Stand
         };
-        let pose = if holding { Pose::Tablet } else if t < self.radio_until { Pose::Radio } else { legs };
+        // Low, prone, rifle up or slung: the legs from his pace, the upper body from the rifle.
+        let (pose, upper) = if holding {
+            (Pose::Tablet, None)
+        } else if t < self.radio_until {
+            (Pose::Radio, None)
+        } else if dead {
+            (Pose::Dead, None)
+        } else if down {
+            (Pose::Wounded, None)
+        } else {
+            match self.gun.stance {
+                2 => (Pose::Prone, None),
+                1 if self.cmd_moving => (Pose::CrouchWalk, ready.then_some(Pose::CrouchAim)),
+                1 => (if ready { Pose::CrouchAim } else { Pose::Crouch }, None),
+                _ if legs == Pose::Stand => (if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Stand }, None),
+                _ => (legs, if ready { Some(Pose::StandAim) } else if self.gun.slung { Some(Pose::Slung) } else { None }),
+            }
+        };
         if was != pose {
             self.cmd_pose = (pose, was, scalia_render::pose::switch_start(self.cmd_pose.1, self.cmd_pose.2, pose, ts));
         }
         // Cadence from his real speed, integrated into the phase here: the planted foot keeps pace with the ground.
-        let steps = match pose { Pose::Sprint | Pose::Walk => self.cmd_speed / stride_m(pose), _ => 0.0 };
+        let steps = match pose { Pose::Sprint | Pose::Walk | Pose::CrouchWalk => self.cmd_speed / stride_m(pose), _ => 0.0 };
         self.cmd_gait = (self.cmd_gait + (steps * dt) as f64).fract();
         // His gait phase (exactly what the shader is handed), for the footsteps.
         self.cmd_phase = if steps > 0.0 { self.cmd_gait as f32 } else { -1.0 };
+        self.commander_fight(ready, pose);
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
         // The phase is always handed over (frozen when he stops), so legs blending out of a stride stay where they were.
-        let rec = [rx, ry, z, 9.0, self.cmd_heading, self.cmd_gait as f32, -1.0, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, 0.0, 0.0];
+        let rec = [rx, ry, z, 9.0, self.cmd_heading, self.cmd_gait as f32, -1.0, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
         let mut me = rec;
@@ -2786,6 +2877,58 @@ impl Viewer {
         // The tablet appears in his hands once they have come up to hold it.
         // The tablet itself is the page's close-up, which slides up once the camera is in place: the 3D model
         // is not drawn (it would show behind the close-up whenever that moves).
+    }
+
+    /// The commander on the field battle: his man there follows him (place, facing, stance, pace); with the
+    /// trigger held and the rifle up he fires where it points, on the battle's rules; while aiming, the line his
+    /// rounds would take is worked out for the page (to the first solid thing, 120 m at most).
+    fn commander_fight(&mut self, ready: bool, pose: Pose) {
+        let at = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
+        let toward = self.gun.toward;
+        let stance = match self.gun.stance { 0 => scalia_ai::battle::Stance::Stand, 1 => scalia_ai::battle::Stance::Crouch, _ => scalia_ai::battle::Stance::Prone };
+        let (h, pace) = (self.cmd_heading, (self.cmd_speed * 1000.0) as i64);
+        let mut reach = 120.0f32;
+        if let Some(mut a) = self.assault.take() {
+            let i = commander_soldier(&mut a, at);
+            a.battle.player_set(i, at, ((-h.sin() * 1000.0) as i64, (h.cos() * 1000.0) as i64), stance, pace);
+            if let Some((tx, ty)) = toward {
+                if self.gun.trigger && ready && pose != Pose::Sprint {
+                    if let scalia_ai::battle::PlayerShot::Fired { .. } = a.battle.player_fire(i, ((tx * 1000.0) as i64, (ty * 1000.0) as i64), self.gun.aim) {
+                        self.gun.shots += 1;
+                    }
+                }
+                let l = (tx * tx + ty * ty).sqrt().max(1e-3);
+                let eye = stance.eye();
+                let mut d = 0.5;
+                while d < reach && !a.battle.sight.solid_at(at.0 + (tx / l * d * 1000.0) as i64, at.1 + (ty / l * d * 1000.0) as i64, eye) {
+                    d += 0.5;
+                }
+                reach = d;
+            }
+            self.assault = Some(a);
+        }
+        self.gun.line = match toward.filter(|_| self.gun.aim && ready) {
+            Some((tx, ty)) => {
+                let l = (tx * tx + ty * ty).sqrt().max(1e-3);
+                let hgt = match self.gun.stance { 0 => 1.45, 1 => 0.95, _ => 0.3 };
+                let a0 = (self.cmd.0 + (tx / l * 0.7) as f64, self.cmd.1 + (ty / l * 0.7) as f64);
+                let a1 = (self.cmd.0 + (tx / l * reach) as f64, self.cmd.1 + (ty / l * reach) as f64);
+                let p0 = self.screen_of(a0, hgt);
+                let p1 = self.screen_of(a1, hgt);
+                Some([p0.0, p0.1, p1.0, p1.1])
+            }
+            None => None,
+        };
+    }
+
+    /// Where a point (absolute metres, `up` metres over the ground) is on screen (fractions from the top left).
+    fn screen_of(&mut self, at: (f64, f64), up: f32) -> (f32, f32) {
+        let z = self.height_at(at.0 as f32, at.1 as f32) + up;
+        let (target, yaw, view_h) = self.last_cam;
+        let (r, u, _) = scalia_render::camera::basis(yaw);
+        let d = Vec3::new((at.0 - self.origin.0) as f32, (at.1 - self.origin.1) as f32, z) - target;
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        (0.5 + d.dot(r) / (view_h * aspect), 0.5 - d.dot(u) / view_h)
     }
 
     /// How far the commander has dissolved for the tablet close-up (0 solid, 1 gone).
@@ -3739,4 +3882,32 @@ fn you_marker(at: [f32; 3], pix: f32) -> MeshBuilder {
     }
     m.diamond([at[0], at[1], at[2] + 2.2 + pix * 8.0], (pix * 4.0).max(0.3), RED);
     m
+}
+
+/// The commander's weapon handling on foot: trigger and aim held, where the mouse points (screen px), his stance
+/// (0 standing, 1 crouched, 2 prone), the rifle slung, rounds fired (the page shakes the view on each), and the
+/// aim line's ends this frame (screen fractions) while aiming.
+#[derive(Default)]
+struct Gun {
+    trigger: bool,
+    aim: bool,
+    at_px: Option<(f64, f64)>,
+    stance: u8,
+    slung: bool,
+    shots: u32,
+    line: Option<[f32; 4]>,
+    /// The way the rifle points (absolute metres, from him), once the mouse has been seen.
+    toward: Option<(f32, f32)>,
+}
+
+/// The battle's man standing for the commander (joined on first use).
+fn commander_soldier(a: &mut crate::assault::Assault, at_mm: (i64, i64)) -> usize {
+    match a.battle.soldiers.iter().position(|s| s.player) {
+        Some(i) => i,
+        None => {
+            let i = a.battle.join_player(0, COMMANDER_SQUAD, at_mm);
+            a.battle.soldiers[i].mags = COMMANDER_MAGS;
+            i
+        }
+    }
 }

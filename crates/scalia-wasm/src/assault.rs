@@ -208,7 +208,7 @@ impl Assault {
             let offset = self.clock - self.battle.time_ms as f64 + STEP_MS;
             for e in &self.battle.log[self.seen..] {
                 match *e {
-                    Event::Shot { from, to, hit, at_ms, shooter, .. } => {
+                    Event::Shot { from, to, hit, at_ms, shooter, target } => {
                         let at = at_ms as f64 + offset;
                         self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false, step: None, at });
                         // The muzzle: 0.6 m out towards the target, at shoulder height.
@@ -217,7 +217,8 @@ impl Assault {
                         let muzzle = (from.x + dx * 600 / d, from.y + dy * 600 / d, from.z - 250);
                         // A miss lands short, long or wide: in the dirt a few metres around him.
                         let r = scalia_core::hash::mix64(at_ms as u64 ^ (shooter as u64) << 32);
-                        let impact = if hit { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
+                        // A round at nobody (the commander firing into the open) lands where it flew to.
+                        let impact = if hit || target == shooter { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
                         // One round in four is a tracer.
                         let tracer = (r >> 40) % 4 == 0;
                         self.fx.push(Fx { at, from: muzzle, to: impact, hit, blast: false, tracer });
@@ -273,7 +274,8 @@ impl Assault {
     pub fn instances(&mut self, team: u8, ts: f32, body: impl Fn(u16) -> f32, mut place: impl FnMut(f64, f64) -> Option<(f32, f32, f32)>) -> Vec<f32> {
         let mut out = Vec::new();
         for i in 0..self.battle.soldiers.len() {
-            if self.battle.soldiers[i].team != team {
+            // The commander's man is drawn as the commander.
+            if self.battle.soldiers[i].team != team || self.battle.soldiers[i].player {
                 continue;
             }
             let (x, y) = self.position(i);

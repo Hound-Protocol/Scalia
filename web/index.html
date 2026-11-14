@@ -111,9 +111,14 @@
   #proto h2 { margin: 6px 0 12px; font-size: 22px; letter-spacing: .12em; color: #f2f4ee; }
   #proto p { margin: 0 0 10px; color: #c3cab6; }
   #proto ul { margin: 0 0 18px; padding-left: 18px; color: #9aa58a; }
-  #proto .load { position: relative; height: 3px; margin: 0 0 18px; background: rgba(255,255,255,0.1); --p: 0%; }
-  #proto .load::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: #e0a526; transition: width 0.15s linear; }
-  #proto .load::after { content: attr(data-text); position: absolute; left: 0; top: 7px; font-size: 11px; letter-spacing: 0.08em; color: #9aa58a; white-space: pre; }
+  #boot { position: fixed; inset: 0; z-index: 101; display: flex; align-items: center; justify-content: center; background: #0d100c; transition: opacity 0.3s ease-out; }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot .bx { width: min(320px, 70vw); }
+  #boot h1 { margin: 0 0 14px; font: 400 26px/1 'Saira Stencil One', 'Saira Condensed', sans-serif; letter-spacing: 0.3em; color: #e3d6aa; text-align: center; }
+  #proto.wait .card { visibility: hidden; }
+  #boot .load { position: relative; height: 3px; background: rgba(255,255,255,0.1); --p: 0%; }
+  #boot .load::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: #e0a526; transition: width 0.15s linear; }
+  #boot .load::after { content: attr(data-text); position: absolute; left: 0; right: 0; text-align: center; top: 9px; font-size: 11px; letter-spacing: 0.08em; color: #9aa58a; white-space: pre; }
   #proto button:disabled { opacity: 0.45; cursor: progress; filter: grayscale(0.6); }
   #proto .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   #proto .ver { color: #7c8670; font-size: 11px; letter-spacing: .1em; }
@@ -238,6 +243,16 @@
   #tablet .hw:hover { box-shadow: 0 0 0 2px rgba(150, 220, 160, 0.55); }
   #tablet .hw:active { background: rgba(0,0,0,0.25); }
   /* Unit recognition: call sign and number over each unit in the field; open-corner markers on the PDA map. */
+  #weapon { position: fixed; right: 18px; bottom: 18px; z-index: 21; display: grid; grid-template-columns: auto auto; align-items: baseline; gap: 0 6px;
+    font-family: 'Saira Condensed', sans-serif; color: #e3d6aa; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
+  #weapon[hidden] { display: none; }
+  #weapon b { font: 600 30px/1 'Saira Condensed', sans-serif; letter-spacing: 0.04em; }
+  #weapon small { font-size: 14px; color: #b9c7a8; letter-spacing: 0.08em; }
+  #weapon em { grid-column: 1 / -1; font-style: normal; font-size: 11px; letter-spacing: 0.16em; color: #8a9680; text-align: right; }
+  #weapon.low b { color: #e0703a; }
+  #aimLine { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 19; pointer-events: none; }
+  #aimLine[hidden] { display: none; }
+  #aimLine line { stroke: rgba(255, 236, 170, 0.55); stroke-width: 1; stroke-dasharray: 6 4; }
   #fieldLabels { position: fixed; inset: 0; z-index: 20; pointer-events: none; overflow: hidden; }
   #fieldLabels i { position: absolute; left: 0; top: 0; font: 600 12px/1 'Saira Condensed', sans-serif; font-style: normal; letter-spacing: 0.1em; text-transform: uppercase;
     color: #e9e2c4; text-shadow: 0 0 3px #000, 0 1px 2px #000; white-space: nowrap; will-change: transform; }
@@ -568,7 +583,13 @@
   <div><kbd>Q</kbd><span>Inventory</span></div>
   <div><kbd>Wheel</kbd><span>Zoom</span></div>
   <div><kbd>F</kbd><span>Camera follows</span></div>
-  <h4>Command</h4>
+  <h4>Rifle</h4>
+  <div><kbd>Left click</kbd><span>Fire</span></div>
+  <div><kbd>Hold right</kbd><span>Aim</span></div>
+  <div><kbd>R</kbd><span>Reload</span></div>
+  <div><kbd>C / X</kbd><span>Crouch / prone</span></div>
+  <div><kbd>H</kbd><span>Sling rifle</span></div>
+  <h4>Command (on the map)</h4>
   <div><kbd>Tab</kbd><span>PDA / map</span></div>
   <div><kbd>Left click</kbd><span>Select unit</span></div>
   <div><kbd>Right click</kbd><span>Orders</span></div>
@@ -577,8 +598,10 @@
   <h4>Other</h4>
   <div><kbd>K</kbd><span>Training assault</span></div>
   <div><kbd>T</kbd><span>Day speed</span></div>
-  <div><kbd>H</kbd><span>Hide this</span></div>
+  <div><kbd>F1</kbd><span>Hide this</span></div>
 </div>
+<div id="weapon" hidden><b>30</b><small>/ 150</small><em>STANDING</em></div>
+<svg id="aimLine" hidden><line x1="0" y1="0" x2="0" y2="0"/></svg>
 <div id="radio"><img class="body" src="./img/walkie.webp" alt="" draggable="false"><div class="scr">
   <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
   <div class="who"><small id="rDir">STANDBY</small><b id="rWho">—</b></div>
@@ -663,14 +686,14 @@
   </div>
 </div>
 </div>
-<div id="proto"><div class="card">
+<div id="boot" role="status" aria-live="polite"><div class="bx"><h1>SCALIA</h1><div class="load" id="protoLoad" data-text="Loading…"></div></div></div>
+<div id="proto" class="wait"><div class="card">
   <div class="owner">Courtesy and property of Erik J. aka TrueMan</div>
   <div class="tag">⚠ PROTOTYPE</div>
   <h2>PROJECT SCALIA</h2>
   <p>You are playing an early prototype of Scalia. The gameplay is a heavy subject of change: what you see today may work differently, or be gone, tomorrow.</p>
   <ul><li>You will encounter bugs.</li><li>Many features are unfinished or placeholders.</li><li>Your feedback shapes what comes next.</li></ul>
-  <div class="load" id="protoLoad" data-text="Loading…" role="status" aria-live="polite"></div>
-  <div class="row"><span class="ver" id="protoVer"></span><button id="protoGo">UNDERSTOOD · ENTER</button></div>
+<div class="row"><span class="ver" id="protoVer"></span><button id="protoGo">UNDERSTOOD · ENTER</button></div>
 </div></div>
 <div id="update" hidden><span class="sig"></span><span class="txt"><span class="ttl">UPDATE RECEIVED</span><span class="sub" id="update-sub">A new build is ready for deployment.</span></span><button id="update-reload">REDEPLOY</button><button id="update-close" title="Later">✕</button></div>
 <script type="module" src="./game.js"></script>

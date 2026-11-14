@@ -76,6 +76,8 @@ pub enum Pose {
     /// Killed while lying on his back (wounded, then bled out or hit again): limp on his back, arms fallen
     /// out, head rolled to the side. No turning over.
     DeadBack = 27,
+    /// Rifle slung on the back, arms loose at the sides (weapon holstered).
+    Slung = 28,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -106,6 +108,7 @@ impl Pose {
             18 => Pose::Reload,
             19 => Pose::Signal,
             20 => Pose::Drone,
+            28 => Pose::Slung,
             _ => Pose::Stand,
         }
     }
@@ -763,6 +766,11 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.elbow = [1.5, 1.5];
             p.reach = [-0.07, -0.07];
             p.head = -0.45;
+            p.sling = 1.0;
+        }
+        Pose::Slung => {
+            p.shoulder = [0.08, 0.08];
+            p.elbow = [0.3, 0.3];
             p.sling = 1.0;
         }
         Pose::Radio => {

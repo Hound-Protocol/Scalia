@@ -251,6 +251,10 @@ pub struct Soldier {
     pub target: Option<usize>,
     /// Never shoots (tests, and soldiers told to hold fire).
     pub passive: bool,
+    /// Played by a person (the commander on foot): no mind, no squad orders, no paths; he is placed, turned and
+    /// fired from outside (`player_*`), under the same rules as everyone else.
+    #[serde(default)]
+    pub player: bool,
     /// Which way he faces: a unit vector scaled to 1000 (north is (0, 1000)).
     pub facing: (i64, i64),
     pub task: Task,
@@ -305,7 +309,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -741,6 +745,10 @@ impl Battle {
     fn move_soldiers(&mut self, dt_ms: i32) {
         let before: Vec<(i64, i64)> = self.soldiers.iter().map(|s| s.pos).collect();
         for i in 0..self.soldiers.len() {
+            // The player's man is placed from outside.
+            if self.soldiers[i].player && self.soldiers[i].alive() && !self.soldiers[i].down() {
+                continue;
+            }
             if !self.soldiers[i].alive() {
                 // The dead drop where they are: no motion, no task, nothing in hand.
                 let s = &mut self.soldiers[i];
@@ -906,7 +914,7 @@ impl Battle {
         let now = self.time_ms;
         for i in 0..self.soldiers.len() {
             let s = &self.soldiers[i];
-            if !s.alive() || s.down() {
+            if !s.alive() || s.down() || s.player {
                 self.soldiers[i].mind = crate::mind::Mind::default();
                 continue;
             }
@@ -1320,6 +1328,18 @@ impl Battle {
         self.drag_along();
         for i in 0..self.soldiers.len() {
             // Down men and men busy with a casualty do not fight.
+            // The player's man: his magazine change runs here; he picks no targets of his own.
+            if self.soldiers[i].player {
+                let s = &mut self.soldiers[i];
+                if s.reloading_ms > 0 && s.alive() && !s.down() {
+                    s.reloading_ms -= dt_ms;
+                    if s.reloading_ms <= 0 {
+                        s.ammo = MAG;
+                    }
+                }
+                s.burst_fired = if s.cooldown_ms < -300 { 0 } else { s.burst_fired };
+                continue;
+            }
             if !self.soldiers[i].alive() || self.soldiers[i].passive || self.soldiers[i].act.is_some() || self.soldiers[i].down() || self.soldiers[i].dragging.is_some() {
                 // Hands busy (or down): no target held, no burst half-fired.
                 if self.soldiers[i].dragging.is_some() || self.soldiers[i].act.is_some() || self.soldiers[i].down() {
@@ -1444,11 +1464,26 @@ impl Battle {
                     let r = (mix64(self.seed ^ (at_ms as u64) << 8 ^ i as u64) % 1_000) as i32;
                     (lo + (hi - lo) * r / 1_000) * (1_000 + me.suppression * 2) / 1_000
                 };
-                self.log.push(Event::Shot { shooter: i, target: j, from, to, hit, at_ms });
+                self.land_shot(i, Some(j), from, to, hit, at_ms);
+            }
+            if !self.soldiers[j].alive() {
+                self.soldiers[i].burst_left = 0;
+            }
+        }
+    }
+
+    /// One round fired by `i`: logged, heard by every squad within earshot, and on `target` (if it went at a
+    /// man) it suppresses, and a hit wounds or kills.
+    fn land_shot(&mut self, i: usize, target: Option<usize>, from: Point, to: Point, hit: bool, at_ms: i64) {
+        {
+            {
+                self.log.push(Event::Shot { shooter: i, target: target.unwrap_or(i), from, to, hit, at_ms });
                 // The target's squad learns where the fire came from; each squad within earshot hears it.
                 let (shooter_pos, shooter_team) = (self.soldiers[i].pos, self.soldiers[i].team);
-                let tsq = self.soldiers[j].squad as usize;
-                self.report(tsq, i, shooter_pos, CONF_SHOT_AT);
+                if let Some(j) = target {
+                    let tsq = self.soldiers[j].squad as usize;
+                    self.report(tsq, i, shooter_pos, CONF_SHOT_AT);
+                }
                 let mut near = std::mem::take(&mut self.scratch);
                 self.grid.near(shooter_pos, HEAR_MM, &mut near);
                 let mut told: Vec<usize> = Vec::new();
@@ -1467,6 +1502,7 @@ impl Battle {
                     }
                 }
                 self.scratch = near;
+                let Some(j) = target else { return };
                 let now = self.time_ms;
                 let t = &mut self.soldiers[j];
                 t.shot_by = Some((i as u32, now));
@@ -1479,12 +1515,128 @@ impl Battle {
                     }
                 }
             }
-            if !self.soldiers[j].alive() {
-                self.soldiers[i].burst_left = 0;
+        }
+    }
+
+    /// Adds a soldier the player controls (see `Soldier::player`). Returns his index.
+    pub fn join_player(&mut self, team: u8, squad: u16, pos: (i64, i64)) -> usize {
+        let mut s = Soldier::new(team, squad, pos, Stance::Stand);
+        s.player = true;
+        s.skill = SKILL_VETERAN;
+        let i = self.join(s);
+        self.soldiers[i].pos = pos;
+        i
+    }
+
+    /// Puts the player's man where the player has him: place (mm), facing (any length), stance, pace (mm/s).
+    pub fn player_set(&mut self, i: usize, pos: (i64, i64), facing: (i64, i64), stance: Stance, pace_mm_s: i64) {
+        let Some(s) = self.soldiers.get_mut(i).filter(|s| s.player && s.alive() && !s.down()) else { return };
+        s.pos = pos;
+        let len = isqrt(facing.0 * facing.0 + facing.1 * facing.1);
+        if len > 0 {
+            s.facing = (facing.0 * 1_000 / len, facing.1 * 1_000 / len);
+        }
+        s.stance = stance;
+        s.moving = pace_mm_s > 100;
+        s.speed = pace_mm_s;
+    }
+
+    /// Starts a magazine change for the player's man (if he has a spare and is not full).
+    pub fn player_reload(&mut self, i: usize) {
+        if self.soldiers.get(i).is_some_and(|s| s.player && s.alive() && !s.down() && s.ammo < MAG) {
+            self.reload(i);
+        }
+    }
+
+    /// The player pulls the trigger, pointing along `dir` (any length): a round goes if the rifle is ready (one
+    /// every CYCLIC_MS while held). It goes at the first man of the other side in the line of fire (within the
+    /// spread: tight on the sights, wide from the hip), and hits on the same odds as any soldier's round at
+    /// him; nobody in the line, it flies on until something solid stops it.
+    pub fn player_fire(&mut self, i: usize, dir: (i64, i64), aimed: bool) -> PlayerShot {
+        let Some(s) = self.soldiers.get(i).filter(|s| s.player && s.alive() && !s.down()) else { return PlayerShot::Cannot };
+        if s.reloading_ms > 0 {
+            return PlayerShot::Reloading;
+        }
+        if s.cooldown_ms > 0 {
+            return PlayerShot::Cycling;
+        }
+        if s.ammo <= 0 {
+            self.reload(i);
+            return PlayerShot::Empty;
+        }
+        let len = isqrt(dir.0 * dir.0 + dir.1 * dir.1);
+        if len == 0 {
+            return PlayerShot::Cannot;
+        }
+        let u = (dir.0 * 1_000 / len, dir.1 * 1_000 / len);
+        let (me, team, eye) = (s.pos, s.team, s.eye());
+        // The line of fire: whom it passes close enough to be the one shot at (the cone of his aim).
+        let spread = if aimed { 15 } else { 45 }; // mm off the line per metre
+        let mut best: Option<(i64, i64, usize)> = None;
+        for (k, t) in self.soldiers.iter().enumerate() {
+            if k == i || t.team == team || !t.alive() {
+                continue;
+            }
+            let (vx, vy) = (t.pos.0 - me.0, t.pos.1 - me.1);
+            let along = (vx * u.0 + vy * u.1) / 1_000;
+            if along <= 0 || along > PLAYER_RANGE_MM {
+                continue;
+            }
+            let off = ((vx * u.1 - vy * u.0) / 1_000).abs();
+            let reach = BODY_MM * 2 + along * spread / 1_000;
+            if off <= reach && best.is_none_or(|b| along < b.0) && self.in_sight(i, k) {
+                best = Some((along, off * 1_000 / reach.max(1), k));
+            }
+        }
+        let at_ms = self.time_ms;
+        let s = &mut self.soldiers[i];
+        let recoil = RECOIL[(s.burst_fired as usize).min(RECOIL.len() - 1)];
+        s.ammo -= 1;
+        s.burst_fired = s.burst_fired.saturating_add(1);
+        s.cooldown_ms = CYCLIC_MS;
+        match best {
+            Some((_, off, j)) => {
+                // His odds at that man, as any soldier's: from the hip about half, and less the further off
+                // the line he passes.
+                let p = self.hit_permille(i, j) * recoil / 1_000 * if aimed { 1_000 } else { 450 } / 1_000 * (1_000 - off / 2) / 1_000;
+                self.rolls += 1;
+                let hit = self.roll(i, self.rolls) < p;
+                let t = &self.soldiers[j];
+                let to = Point { x: t.pos.0, y: t.pos.1, z: t.stance.body()[1] };
+                self.land_shot(i, Some(j), eye, to, hit, at_ms);
+                PlayerShot::Fired { at: Some(j), hit }
+            }
+            None => {
+                // On until something solid: walked out in half-metre steps.
+                let mut d = 500;
+                while d < PLAYER_RANGE_MM && !self.sight.solid_at(me.0 + u.0 * d / 1_000, me.1 + u.1 * d / 1_000, eye.z) {
+                    d += 500;
+                }
+                let to = Point { x: me.0 + u.0 * d / 1_000, y: me.1 + u.1 * d / 1_000, z: eye.z };
+                self.land_shot(i, None, eye, to, false, at_ms);
+                PlayerShot::Fired { at: None, hit: false }
             }
         }
     }
 }
+
+/// What came of the player pulling the trigger.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PlayerShot {
+    /// A round went (at a man, or into the open), and whether it hit.
+    Fired { at: Option<usize>, hit: bool },
+    /// Between rounds (the rifle's cycle).
+    Cycling,
+    /// Changing magazines.
+    Reloading,
+    /// The magazine is empty (a reload starts if there is a spare).
+    Empty,
+    /// Not his to fire (down, dead, or not a player's man).
+    Cannot,
+}
+
+/// How far the player's rounds count (mm).
+const PLAYER_RANGE_MM: i64 = 300_000;
 
 
 /// Whether `dot` (facing ×1000 · offset) ≥ ⌊√d2⌋ × CONE_COS (d2 = |offset|²), without a square root:
