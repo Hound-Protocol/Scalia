@@ -463,6 +463,8 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
                 // Filling and laying sandbags: down on one knee, working.
                 Act::Build => Pose::Crouch,
                 Act::Aid => Pose::Aid,
+                // Opening a door: the free hand out to the handle.
+                Act::Open => Pose::Signal,
             },
             if act == Act::Aid { 1.1 } else { 0.6 },
             None,

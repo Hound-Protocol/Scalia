@@ -18,6 +18,8 @@ pub enum Command {
     Squad { squad: usize, order: Order },
     /// A soldier joins the battle (a squad arriving on this ground).
     Spawn { team: u8, squad: u16, pos: (i64, i64), stance: crate::battle::Stance },
+    /// A door is opened, closed, locked or breached (by the commander, a script, the console).
+    Door { door: usize, state: crate::doors::DoorState },
 }
 
 /// The ground a battle is fought on: its area (mm), its props, and the training house if there is one.
@@ -35,6 +37,9 @@ pub struct MapSpec {
     /// The live-fire zone (x0, y0, x1, y1; mm): only soldiers inside it see and fight each other. None: the
     /// whole map is live.
     pub live: Option<(i64, i64, i64, i64)>,
+    /// The doors as the battle starts.
+    #[serde(default)]
+    pub doors: Vec<crate::doors::Door>,
 }
 
 /// Navigation cells are 500 mm, sight cells 250 mm.
@@ -43,7 +48,7 @@ const SIGHT_CELL: i64 = 250;
 
 impl MapSpec {
     pub fn new(x0: i64, y0: i64, w_mm: i64, h_mm: i64, props: &[Prop]) -> MapSpec {
-        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None, placed: 0, live: None }
+        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None, placed: 0, live: None, doors: Vec::new() }
     }
 
     /// The training house with its south-west corner at `origin`, on 100 × 80 m of open ground around it.
@@ -68,15 +73,27 @@ impl MapSpec {
         let base = props.len() - self.placed;
         let mut nav = NavGrid::new(self.x0, self.y0, (self.w_mm / NAV_CELL) as usize, (self.h_mm / NAV_CELL) as usize);
         nav.rebuild(&props[..base]);
-        let sight = SightGrid::build(self.x0, self.y0, (self.w_mm / SIGHT_CELL) as usize, (self.h_mm / SIGHT_CELL) as usize, &props);
+        let mut sight = SightGrid::build(self.x0, self.y0, (self.w_mm / SIGHT_CELL) as usize, (self.h_mm / SIGHT_CELL) as usize, &props);
+        sight.doors = self.doors.clone();
         let mut cover = CoverMap::build(&props[..base], &nav);
         // Props placed during the battle, replayed in order exactly as they were added (cover indices included).
         for k in base..props.len() {
             nav.rebuild(&props[..=k]);
             cover.add_prop(k, &props[k], &nav);
         }
+        // Locked doors bar the way (walls across their doorways).
+        if self.doors.iter().any(|d| d.state == crate::doors::DoorState::Locked) {
+            nav.rebuild(&nav_props(&props, &self.doors));
+        }
         (nav, sight, cover)
     }
+}
+
+/// What the walking grid is built from: the props, and a wall across each locked doorway.
+pub(crate) fn nav_props(props: &[Prop], doors: &[crate::doors::Door]) -> Vec<Prop> {
+    let mut v = props.to_vec();
+    v.extend(doors.iter().filter(|d| d.state == crate::doors::DoorState::Locked).map(|d| d.as_prop()));
+    v
 }
 
 /// `scalia_core::nav::Prop` as saved (the core crate stays free of dependencies).
@@ -118,7 +135,7 @@ impl From<PropSpec> for Prop {
 
 /// "SCAB" (Scalia battle) and the format version: a save from another version is refused, not misread.
 const MAGIC: [u8; 4] = *b"SCAB";
-pub const SAVE_VERSION: u32 = 10;
+pub const SAVE_VERSION: u32 = 11;
 
 /// Frames a state as magic, version, payload and a checksum over the payload.
 pub(crate) fn frame(payload: &[u8]) -> Vec<u8> {

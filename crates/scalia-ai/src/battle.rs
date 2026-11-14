@@ -84,6 +84,8 @@ pub enum Act {
     Build,
     /// First aid on a wounded squadmate.
     Aid,
+    /// Opening a door (the one in `opening`).
+    Open,
 }
 
 /// Radius a soldier needs to pass (doorways are 1.2 m and more).
@@ -293,6 +295,8 @@ pub struct Soldier {
     pub may_suppress: bool,
     /// Who last fired at him, and when (he turns on a man shooting at him, and notices him close by).
     pub shot_by: Option<(u32, i64)>,
+    /// The door he is opening.
+    pub opening: Option<u16>,
     /// The enemy he has his sights on (a new one takes a moment to get a sight picture on).
     sighted: Option<usize>,
     /// Marksmanship (‰, SKILL_ROOKIE to SKILL_MAX): grows with veterancy.
@@ -301,7 +305,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -333,6 +337,8 @@ impl Soldier {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    /// A door changed state (opened, closed, locked, breached), by a soldier or from outside.
+    Door { door: usize, state: crate::doors::DoorState, by: Option<usize> },
     /// A round fired, at `at_ms` (battle time; several can fall within one step in a burst).
     Shot { shooter: usize, target: usize, from: Point, to: Point, hit: bool, at_ms: i64 },
     Killed { soldier: usize, by: usize },
@@ -357,6 +363,8 @@ pub const SMOKE_BUILD_MS: i64 = 2_500;
 pub const SMOKE_MS: i64 = 40_000;
 
 pub struct Battle {
+    /// The doors on this ground and their state (see `set_door`).
+    pub doors: Vec<crate::doors::Door>,
     /// Smoke clouds thrown (kept until they have thinned out).
     pub smoke: Vec<Smoke>,
     pub soldiers: Vec<Soldier>,
@@ -414,6 +422,7 @@ struct State {
     history: Vec<(i64, Command)>,
     rolls: u64,
     smoke: Vec<Smoke>,
+    doors: Vec<crate::doors::Door>,
 }
 
 impl Battle {
@@ -421,7 +430,37 @@ impl Battle {
         let (sight_x0, sight_y0, sight_w, sight_h) = (sight.x_mm, sight.y_mm, sight.w as i64 * 250, sight.h as i64 * 250);
         let squads = soldiers.iter().map(|s| s.squad as usize + 1).max().unwrap_or(0);
         let n = soldiers.len();
-        Battle { smoke: Vec::new(), soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![Vec::new(); n], grid: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), goals: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), scratch: Vec::new(), paths_this_step: 0, perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
+        Battle { doors: Vec::new(), smoke: Vec::new(), soldiers, sight, seed, time_ms: 0, log: Vec::new(), contacts: vec![Vec::new(); squads], heard: vec![None; squads], visible: vec![Vec::new(); n], grid: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), goals: SoldierGrid::new(sight_x0, sight_y0, sight_w, sight_h), scratch: Vec::new(), paths_this_step: 0, perceive_ms: 0, nav: None, cover: None, building: None, brains: Vec::new(), dead_logged: vec![false; n], lead_ms: 0, map: None, queue: Vec::new(), history: Vec::new(), rolls: 0 }
+    }
+
+    /// Sets a door's state: sight through it at once, the walking grid when it is locked or unlocked, and
+    /// routes planned through a newly locked door are planned again. A door that cannot be locked is shut
+    /// instead.
+    pub fn set_door(&mut self, i: usize, state: crate::doors::DoorState, by: Option<usize>) {
+        use crate::doors::DoorState;
+        let Some(d) = self.doors.get_mut(i) else { return };
+        let state = if state == DoorState::Locked && !d.lockable { DoorState::Closed } else { state };
+        if d.state == state {
+            return;
+        }
+        let was_locked = d.state == DoorState::Locked;
+        d.state = state;
+        d.changed_ms = self.time_ms;
+        d.by = by.map(|b| b as u32);
+        self.sight.doors = self.doors.clone();
+        self.log.push(Event::Door { door: i, state, by });
+        if was_locked != (state == DoorState::Locked) {
+            self.rebuild_nav();
+            for s in &mut self.soldiers {
+                s.path_to = None;
+            }
+        }
+    }
+
+    /// The walking grid from the map's props, with walls across locked doorways.
+    fn rebuild_nav(&mut self) {
+        let (Some(map), Some(nav)) = (self.map.as_ref(), self.nav.as_mut()) else { return };
+        nav.rebuild(&crate::save::nav_props(&map.props(), &self.doors));
     }
 
     /// Puts a prop on the ground mid-battle (sandbags): it blocks sight and movement and gives cover from now on.
@@ -482,6 +521,7 @@ impl Battle {
         if let Some(o) = map.killhouse {
             b.set_building(Killhouse::new(o.0, o.1));
         }
+        b.doors = map.doors.clone();
         b.map = Some(map);
         b
     }
@@ -508,6 +548,7 @@ impl Battle {
                 Command::Spawn { team, squad, pos, stance } if (squad as usize) < MAX_SQUADS => {
                     self.join(Soldier::new(team, squad, pos, stance));
                 }
+                Command::Door { door, state } if door < self.doors.len() => self.set_door(door, state, None),
                 _ => continue,
             }
             self.history.push((now, c));
@@ -531,6 +572,7 @@ impl Battle {
             history: self.history.clone(),
             rolls: self.rolls,
             smoke: self.smoke.clone(),
+            doors: self.doors.clone(),
         }
     }
 
@@ -562,6 +604,9 @@ impl Battle {
         b.history = st.history;
         b.rolls = st.rolls;
         b.smoke = st.smoke;
+        b.doors = st.doors;
+        b.sight.doors = b.doors.clone();
+        b.rebuild_nav();
         Ok(b)
     }
 
@@ -716,6 +761,10 @@ impl Battle {
                 continue;
             }
             let mut dest = self.destination(i);
+            // Opening a door: he stands at it until it is open.
+            if matches!(self.soldiers[i].act, Some((Act::Open, _))) {
+                dest = None;
+            }
             // Rifle up and an enemy in sight: stop and shoot, then carry on (not when running for cover).
             let s = &self.soldiers[i];
             if s.aim && s.target.is_some() && s.cover.is_none() && dest.is_some_and(|d| d.1 != Gait::Sprint) {
@@ -781,6 +830,21 @@ impl Battle {
                         s.speed = if want > s.speed { (s.speed + dv).min(want) } else { (s.speed - dv).max(want) };
                         let len = (s.speed * dt_ms as i64 / 1_000).max(1).min(d);
                         step = (ax * len / d, ay * len / d);
+                    }
+                }
+            }
+            // A shut door just ahead: he stops at it, and opens it if it is only closed (locked: routes avoid it).
+            if step != (0, 0) && !self.doors.is_empty() {
+                let p = self.soldiers[i].pos;
+                let len = isqrt(step.0 * step.0 + step.1 * step.1).max(1);
+                let ahead = (p.0 + step.0 + step.0 * BODY_MM / len, p.1 + step.1 + step.1 * BODY_MM / len);
+                if let Some(d) = self.doors.iter().position(|d| d.shut() && d.crossed_by(p, ahead)) {
+                    step = (0, 0);
+                    let s = &mut self.soldiers[i];
+                    s.speed = 0;
+                    if self.doors[d].state == crate::doors::DoorState::Closed && s.act.is_none() {
+                        s.act = Some((Act::Open, self.time_ms + crate::doors::OPEN_MS));
+                        s.opening = Some(d as u16);
                     }
                 }
             }
@@ -927,8 +991,9 @@ impl Battle {
             // Out of cover once it is calm again: no rounds coming in and nothing to shoot for a while.
             let me = &mut self.soldiers[i];
             if me.cover.is_some() && mind.want != Want::Survive {
-                // The calm counts from when he is behind it, not from when he set off for it.
-                let calm = in_cover && me.suppression < LEAVE_COVER && me.target.is_none();
+                // The calm counts from when he is behind it (or stopped short of it, held up), not from when he
+                // set off for it.
+                let calm = (in_cover || !me.moving) && me.suppression < LEAVE_COVER && me.target.is_none();
                 me.calm_ms = if calm { me.calm_ms + PERCEIVE_MS } else { 0 };
                 if me.calm_ms >= CALM_MS {
                     me.cover = None;
@@ -1232,9 +1297,23 @@ impl Battle {
             self.lead();
         }
         let now = self.time_ms;
-        for s in &mut self.soldiers {
+        let mut opened = Vec::new();
+        for (i, s) in self.soldiers.iter_mut().enumerate() {
             if s.act.is_some_and(|(_, until)| now >= until) {
+                if let (Some((Act::Open, _)), Some(d)) = (s.act, s.opening.take()) {
+                    if s.alive() && !s.down() {
+                        opened.push((d as usize, i));
+                    }
+                }
                 s.act = None;
+            }
+        }
+        for (d, i) in opened {
+            // A closed door opens; a locked one is forced (breached).
+            match self.doors.get(d).map(|d| d.state) {
+                Some(crate::doors::DoorState::Closed) => self.set_door(d, crate::doors::DoorState::Open, Some(i)),
+                Some(crate::doors::DoorState::Locked) => self.set_door(d, crate::doors::DoorState::Breached, Some(i)),
+                _ => {}
             }
         }
         self.move_soldiers(dt_ms);

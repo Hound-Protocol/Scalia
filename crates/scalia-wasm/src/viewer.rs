@@ -678,6 +678,7 @@ impl Viewer {
     fn new_field(&self) -> crate::assault::Assault {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
+        map.doors = battle_doors();
         map.killhouse = Some(killhouse_mm());
         map.live = Some(range_live_mm());
         crate::assault::Assault::field(map, killhouse_mm(), 7, self.lab_t)
@@ -698,6 +699,7 @@ impl Viewer {
         use scalia_ai::leader::{Mode, Order};
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
+        map.doors = battle_doors();
         map.killhouse = Some(killhouse_mm());
         // The house scenarios are on the live-fire range (live only inside its walls); the open-ground ones
         // are live everywhere.
@@ -713,6 +715,10 @@ impl Viewer {
                 // Inside the range, along its east side, past the house 6 m off its east wall.
                 a.spawn_squad(DEMO_SQUAD, 0, &block(range_mm().2 - 7_000, range_mm().1 + 2_000, 8));
                 a.order(DEMO_SQUAD, Order::Move { to: (range_mm().2 - 5_000, range_mm().3 - 3_000), mode: Mode::Plain });
+                // The house's doors stand open: its defenders see (and are seen) through them as Blue goes by.
+                for d in 0..a.battle.doors.len() {
+                    a.battle.set_door(d, scalia_ai::doors::DoorState::Open, None);
+                }
                 ((range_mm().2 - 8_000, door.1), "On the range, Blue walks up past the house 6 m off its east wall; the defenders open up through the windows and the east door. Watch who takes cover, where, and when they move on.")
             }
             "wounded" => {

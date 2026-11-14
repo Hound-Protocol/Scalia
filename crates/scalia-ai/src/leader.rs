@@ -841,6 +841,14 @@ impl Battle {
                 let point = *ms.iter().min_by_key(|&&i| (dist(self.soldiers[i].pos, ch.at), i)).expect("someone");
                 let door = scalia_core::killhouse::Door { x_mm: ch.at.0, y_mm: ch.at.1, along_x: ch.dir.1.abs() > ch.dir.0.abs(), width_mm: ch.width, rooms: (None, None) };
                 let (u, n) = pie_axes(&door, stage_at);
+                // A door in the gap: opened first (the pie starts once it is).
+                if let Some(di) = self.door_near(ch.at) {
+                    if !self.ensure_open(point, di, n) {
+                        ch.since = now;
+                        self.brains[squad].choke = Some(ch);
+                        return true;
+                    }
+                }
                 let slice = ((now - ch.since) / PIE_SLICE_MS).min(PIE_SLICES as i64 - 1) as usize;
                 let at = pie_spot(&door, u, n, slice);
                 let look = (ch.at.0 + ch.dir.0 * 10, ch.at.1 + ch.dir.1 * 10);
@@ -1190,6 +1198,45 @@ impl Battle {
             s.gait = Gait::Run;
             s.cover = None;
         }
+    }
+
+    /// The door hanging in a doorway centred near `p` (within half a metre), if any.
+    pub(crate) fn door_near(&self, p: (i64, i64)) -> Option<usize> {
+        self.doors.iter().position(|d| dist(d.at, p) <= 500)
+    }
+
+    /// Has `opener` get a door open before anyone goes through or looks in: he steps up beside it on his
+    /// side (`side`: the doorway's normal pointing at his side) and opens it, or forces it if it is locked.
+    /// True once it is open (or breached).
+    pub(crate) fn ensure_open(&mut self, opener: usize, door: usize, side: (i64, i64)) -> bool {
+        use crate::doors::DoorState;
+        let Some(d) = self.doors.get(door).copied() else { return true };
+        if !d.shut() {
+            return true;
+        }
+        // Beside the doorway on his side: at the frame, out of the line through it (clear of the wall).
+        let u = if d.along_x { (1, 0) } else { (0, 1) };
+        let edge = d.width_mm / 2 + 350;
+        let a = (d.at.0 + side.0 * 800 + u.0 * edge, d.at.1 + side.1 * 800 + u.1 * edge);
+        let b = (d.at.0 + side.0 * 800 - u.0 * edge, d.at.1 + side.1 * 800 - u.1 * edge);
+        let me = self.soldiers[opener].pos;
+        let at = if dist(me, a) <= dist(me, b) { a } else { b };
+        let s = &mut self.soldiers[opener];
+        // Close enough to reach the handle: within a metre of his place, or of the doorway itself (or held up
+        // short of it, by the fallen in the doorway or the press of men: he reaches over and pushes it).
+        let held_up = !s.moving && dist(s.pos, d.at) <= 2_500 && matches!(s.task, Task::Move { to, .. } if to == at);
+        if dist(s.pos, at) > 700 && dist(s.pos, d.at) > 1_100 && !held_up {
+            s.task = Task::Move { to: at, gait: Gait::Walk };
+            s.cue = Cue::None;
+            return false;
+        }
+        s.task = Task::Hold { at, face: d.at };
+        if s.act.is_none() {
+            let ms = if d.state == DoorState::Locked { crate::doors::BREACH_MS } else { crate::doors::OPEN_MS };
+            s.act = Some((Act::Open, self.time_ms + ms));
+            s.opening = Some(door as u16);
+        }
+        false
     }
 
     /// Smoke over a crossing (from the gap `at` to `past`) that the objective's openings look onto: a cloud
@@ -1555,6 +1602,13 @@ impl Battle {
                 let point = order.iter().copied().find(|i| ms.contains(i)).unwrap_or(ms[0]);
                 let room_c = k.rooms[entry_room].centre();
                 let (u, n) = pie_axes(&d, stack[0]);
+                // A shut door first: he opens it (forces it if locked) from beside it, then pies.
+                if let Some(di) = self.door_near((d.x_mm, d.y_mm)) {
+                    if !self.ensure_open(point, di, n) {
+                        self.brains[squad].phase_ms = 0;
+                        return;
+                    }
+                }
                 let slice = (phase_ms / PIE_SLICE_MS).min(PIE_SLICES as i64 - 1) as usize;
                 let at = pie_spot(&d, u, n, slice);
                 let s = &mut self.soldiers[point];
@@ -1663,6 +1717,13 @@ impl Battle {
                     let n0 = if dd.along_x { (0, 1) } else { (1, 0) };
                     let probe = (dd.x_mm + n0.0 * 1_500, dd.y_mm + n0.1 * 1_500);
                     let n = if near_side(probe) { n0 } else { (-n0.0, -n0.1) };
+                    // A shut door first: the point man opens it from beside it, then pies it.
+                    if let Some(di) = self.door_near((dd.x_mm, dd.y_mm)) {
+                        if !self.ensure_open(ms[0], di, n) {
+                            self.brains[squad].room_ms = 0;
+                            return;
+                        }
+                    }
                     let u = if dd.along_x { (1, 0) } else { (0, 1) };
                     let slice = (self.brains[squad].room_ms / PIE_SLICE_MS).min(PIE_SLICES as i64 - 1) as usize;
                     let rc = k.rooms[room].centre();

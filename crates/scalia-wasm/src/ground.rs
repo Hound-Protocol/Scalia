@@ -88,6 +88,24 @@ pub(crate) fn billet(squad: usize, man: usize) -> Option<Spot> {
     place_of(squad, man, Use::Stand)
 }
 
+/// The testing ground's doors as a battle on it starts (from the world map).
+pub(crate) fn battle_doors() -> Vec<scalia_ai::doors::Door> {
+    use scalia_ai::doors::{Door, DoorState};
+    world()
+        .doors()
+        .iter()
+        .map(|d| {
+            let state = match d.state {
+                scalia_world::State::Open => DoorState::Open,
+                scalia_world::State::Closed => DoorState::Closed,
+                scalia_world::State::Locked => DoorState::Locked,
+                scalia_world::State::Breached => DoorState::Breached,
+            };
+            Door { lockable: d.lockable, ..Door::new(d.at, d.along_x, d.width_mm, d.height_mm, state) }
+        })
+        .collect()
+}
+
 /// The middle of a bay's floor (the squad's home position).
 pub(crate) fn bay_centre(squad: usize) -> (i64, i64) {
     let r = area(&format!("barracks_bay_{squad}"));
@@ -106,6 +124,7 @@ mod lab_tests {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let props = base_props();
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
+        map.doors = if std::env::var("NODOORS").is_ok() { Vec::new() } else { battle_doors() };
         map.killhouse = Some(killhouse_mm());
         map.live = Some(range_live_mm());
         let mut a = Assault::field_with(map, killhouse_mm(), seed, 0.0, true);
@@ -119,6 +138,12 @@ mod lab_tests {
         let mut was_down2 = vec![false; 64];
         for _ in 0..(240_000 / 50) {
             b.step(50);
+            if print && std::env::var("AT").ok().and_then(|v| v.parse::<i64>().ok()) == Some(b.time_ms) {
+                for (i, s) in b.soldiers.iter().enumerate().filter(|(_, s)| s.team == 0) {
+                    println!("  #{i} ({:.1},{:.1}) {:?} act {:?} cover {:?} [{}]", s.pos.0 as f64 / 1e3, s.pos.1 as f64 / 1e3, s.task, s.act, s.cover.map(|c| b.cover.as_ref().map(|m| m.spots[c].pos)), crate::assault::lab_state(b, i));
+                }
+                println!("  doors {:?}", b.doors.iter().map(|d| d.state).collect::<Vec<_>>());
+            }
             {
                 for (i, s) in b.soldiers.iter().enumerate() {
                     let d = s.down() || !s.alive();
@@ -138,6 +163,7 @@ mod lab_tests {
                             println!("{t:6.1}s  hit {soldier} (team {}) by {by} at ({:.1},{:.1}) {}", s.team, s.pos.0 as f64 / 1000.0, s.pos.1 as f64 / 1000.0, if s.alive() { "down" } else { "dead" })
                         }
                         Event::Explosion { .. } => println!("{t:6.1}s  explosion"),
+                        Event::Door { door, state, by } => println!("{t:6.1}s  door {door} at {:?} -> {state:?} by {by:?}", b.doors[*door].at),
                         Event::Shot { shooter, target, hit: true, .. } if std::env::var("HITS").is_ok() && print => {
                             let (a, z) = (&b.soldiers[*shooter], &b.soldiers[*target]);
                             println!("{t:6.1}s    hit #{shooter}({:.1},{:.1}) -> #{target}({:.1},{:.1}) [{}] -> [{}]", a.pos.0 as f64 / 1e3, a.pos.1 as f64 / 1e3, z.pos.0 as f64 / 1e3, z.pos.1 as f64 / 1e3, crate::assault::lab_state(b, *shooter), crate::assault::lab_state(b, *target))
@@ -208,6 +234,7 @@ mod lab_more {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let props = base_props();
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
+        map.doors = if std::env::var("NODOORS").is_ok() { Vec::new() } else { battle_doors() };
         map.killhouse = Some(killhouse_mm());
         let house = name == "contact";
         map.live = if house { Some(range_live_mm()) } else { None };
@@ -217,6 +244,10 @@ mod lab_more {
             "contact" => {
                 a.spawn_squad(DEMO_SQUAD, 0, &block(range_mm().2 - 7_000, range_mm().1 + 2_000, 8));
                 a.order(DEMO_SQUAD, Order::Move { to: (range_mm().2 - 5_000, range_mm().3 - 3_000), mode: Mode::Plain });
+                // The house's doors stand open: its defenders see (and are seen) through them as Blue goes by.
+                for d in 0..a.battle.doors.len() {
+                    a.battle.set_door(d, scalia_ai::doors::DoorState::Open, None);
+                }
             }
             "standoff-swapped" => {
                 // The same, Red brought on first (lower soldier numbers): any difference is order bias.

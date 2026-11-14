@@ -27,6 +27,8 @@ pub struct SightGrid {
     /// Per block of BLOCK×BLOCK cells (4 m): any band filled anywhere in it. Rays cross empty blocks in one jump.
     coarse: Vec<u32>,
     bw: usize,
+    /// The battle's doors (a shut one blocks sight up to its top).
+    pub doors: Vec<crate::doors::Door>,
 }
 
 /// Cells per coarse block side.
@@ -70,7 +72,7 @@ pub fn bands_of(p: &Prop) -> u32 {
 impl SightGrid {
     pub fn build(x_mm: i64, y_mm: i64, w: usize, h: usize, props: &[Prop]) -> SightGrid {
         let bw = w.div_ceil(BLOCK);
-        let mut g = SightGrid { x_mm, y_mm, w, h, bands: vec![0; w * h], coarse: vec![0; bw * h.div_ceil(BLOCK)], bw };
+        let mut g = SightGrid { x_mm, y_mm, w, h, bands: vec![0; w * h], coarse: vec![0; bw * h.div_ceil(BLOCK)], bw, doors: Vec::new() };
         for p in props {
             g.stamp(p);
         }
@@ -121,6 +123,9 @@ impl SightGrid {
     /// Whether nothing solid lies between two points. Samples every SAMPLE_MM along the line (skipping
     /// END_SKIP_MM at each end), sample k at a + d·k/n (truncated); empty 4 m blocks are crossed in one jump.
     pub fn clear(&self, a: Point, b: Point) -> bool {
+        if self.doors.iter().any(|d| d.blocks(a, b)) {
+            return false;
+        }
         let (a, b) = if (a.x, a.y, a.z) <= (b.x, b.y, b.z) { (a, b) } else { (b, a) };
         let (dx, dy, dz) = (b.x - a.x, b.y - a.y, b.z - a.z);
         let len = isqrt(dx * dx + dy * dy);
