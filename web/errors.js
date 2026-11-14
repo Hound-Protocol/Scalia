@@ -40,6 +40,17 @@ export function createErrors(version) {
   window.scaliaNote = (kind, text) => note(kind === 'error' ? 'error' : 'warn', text);
   const seen = new Map();
   let crashed = false, noticeEl = null, noticeTimer = 0;
+  // The engine's own account of a panic (its message and file:line, then the call chain), passed here by the
+  // panic hook just before the module dies; the crash screen leads with it.
+  let panic = '';
+  window.scaliaPanic = (msg) => {
+    const chain = String(new Error().stack || '').split('\n').filter((l) => l.includes('wasm')).slice(0, 14).map((l) => l.trim()).join('\n');
+    panic = `${msg}\n${chain}`;
+  };
+  // What the game was doing (set by the game: scene, tablet, recent inputs, commander, battle), for reports.
+  let context = () => '';
+  const setContext = (fn) => { context = fn; };
+  const ctx = () => { try { return context(); } catch (_) { return '(context unavailable)'; } };
 
   const notice = (text) => {
     if (!noticeEl) {
@@ -58,8 +69,9 @@ export function createErrors(version) {
   const crash = (where, e) => {
     if (crashed) return;
     crashed = true;
-    recent.push({ at: new Date().toISOString(), where, error: describe(e), fatal: true });
-    note('crash', `${where}: ${describe(e)}`);
+    const what = panic ? `PANIC ${panic}` : describe(e);
+    recent.push({ at: new Date().toISOString(), where, error: what, fatal: true, context: ctx() });
+    note('crash', `${where}: ${what.split('\n').slice(0, 3).join(' | ')}`);
     save();
     console.error(`[crash] ${where}: ${e && e.message ? e.message : e}`);
     const el = document.createElement('div');
@@ -67,7 +79,7 @@ export function createErrors(version) {
     el.innerHTML = `<div style="max-width:560px;padding:24px;border:1px solid #6b2a20;background:#140c0a">
       <div style="color:#ff9b8a;font-weight:600;margin-bottom:8px">The game engine stopped</div>
       <div style="margin-bottom:12px">Something went wrong inside the engine (${where}). Copy the report and send it over, then reload.</div>
-      <pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;background:#0a0606;padding:8px">${describe(e).replace(/</g, '&lt;')}</pre>
+      <pre style="white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto;background:#0a0606;padding:8px">${what.replace(/</g, '&lt;')}</pre>
       <button data-copy style="margin-right:8px">Copy report</button><button data-reload>Reload</button></div>`;
     el.querySelector('[data-copy]').onclick = () => navigator.clipboard.writeText(report()).then(() => { el.querySelector('[data-copy]').textContent = 'Copied'; }).catch(() => {});
     el.querySelector('[data-reload]').onclick = () => location.reload();
@@ -75,6 +87,8 @@ export function createErrors(version) {
   };
 
   const handle = (where, e) => {
+    // After a crash, every later call into the dead engine fails with "recursive use": noise, not news.
+    if (crashed) return;
     // A dead WebAssembly module (panic, out of memory) cannot recover: crash screen.
     if (e instanceof WebAssembly.RuntimeError || /unreachable|memory access out of bounds/i.test(String(e && e.message))) {
       crash(where, e);
@@ -101,12 +115,12 @@ export function createErrors(version) {
     let gpu = '';
     try { gpu = navigator.gpu ? 'WebGPU' : 'no WebGPU'; } catch (_) {}
     return [`Scalia ${version} ${location.href}`, `${navigator.userAgent}`, gpu, `screen ${innerWidth}x${innerHeight} @${devicePixelRatio}`, '',
-      ...recent.map((r) => `${r.at} ${r.fatal ? 'CRASH ' : ''}${r.where}\n${r.error}`), '', 'Log:', logText()].join('\n');
+      ...recent.map((r) => `${r.at} ${r.fatal ? 'CRASH ' : ''}${r.where}\n${r.error}${r.context ? `\nContext: ${r.context}` : ''}`), '', `Now: ${ctx()}`, '', 'Log:', logText()].join('\n');
   };
 
   addEventListener('error', (e) => handle('uncaught', e.error || e.message));
   addEventListener('unhandledrejection', (e) => handle('promise', e.reason));
   /// Clears the saved log.
   const clearLog = () => { log = []; byKey.clear(); dirty = true; save(); };
-  return { guard, handle, report, recent, note, logText, clearLog, get crashed() { return crashed; } };
+  return { guard, handle, report, recent, note, logText, clearLog, setContext, get crashed() { return crashed; } };
 }

@@ -565,13 +565,22 @@ try {
   // every time; grass or concrete by where he is.
   let lastPhase = -1;
   // The rifle on screen: rounds left, the aim line while aiming, and a small kick of the view on every shot.
-  let lastShots = 0, kick = 0;
+  let lastShots = 0, kick = 0, lastWeapon = '';
+  // For crash reports: what the player last did (keys and mouse buttons), kept on the page side so a report can be
+  // written even when the engine has died.
+  const inputs = [];
+  const remember = (what) => { inputs.push(`${(performance.now() / 1000).toFixed(1)}s ${what}`); if (inputs.length > 16) inputs.shift(); };
+  addEventListener('keydown', (e) => { if (!e.repeat) remember(`key ${e.key}`); }, true);
+  addEventListener('pointerdown', (e) => remember(`mouse ${e.button} down`), true);
+  addEventListener('pointerup', (e) => remember(`mouse ${e.button} up`), true);
+  errors.setContext(() => `scene ${scene}, tablet ${tabletUp ? 'up' : 'down'}${tabletUp ? ' (' + page + ')' : ''}, weapon ${lastWeapon || '-'}, inputs: ${inputs.join(', ')}`);
   const weaponTick = () => {
     const box = $('weapon'), line = $('aimLine');
     const on = scene === 'ground' && !tabletUp && !tabletShown;
     box.hidden = !on; line.hidden = true;
     if (!on) { canvas.style.transform = ''; return; }
-    const w = JSON.parse(v.commander_weapon_state());
+    lastWeapon = v.commander_weapon_state();
+    const w = JSON.parse(lastWeapon);
     box.querySelector('b').textContent = w.slung ? 'SLUNG' : String(w.ammo);
     box.querySelector('small').textContent = w.reloading ? 'RELOADING' : `/ ${w.spare}`;
     box.querySelector('em').textContent = ['STANDING', 'CROUCHED', 'PRONE'][w.stance] || '';
@@ -1824,7 +1833,8 @@ Click to copy and close.`;
     if (cap && now - lastDraw < 1000 / cap - 2) { requestAnimationFrame(loop); return; }
     lastDraw = now;
     // A hitch: a frame that took far too long (logged, once per kind and rounded size).
-    if (last && now - last > 120 && !document.hidden) errors.note('hitch', `frame took ${Math.round((now - last) / 50) * 50} ms (${scene})`);
+    // Gaps over 5 s are the browser pausing a background or covered window, not the game hanging.
+    if (last && now - last > 120 && now - last < 5000 && !document.hidden) errors.note('hitch', `frame took ${Math.round((now - last) / 50) * 50} ms (${scene})`);
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (!document.hidden) {

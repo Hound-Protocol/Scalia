@@ -124,6 +124,54 @@ pub(crate) fn bay_centre(squad: usize) -> (i64, i64) {
 }
 
 #[cfg(test)]
+mod commander_tests {
+    use super::*;
+
+    /// The commander on the testing ground, played roughly: he walks everywhere (base, range, barracks, the
+    /// house), changes stance, aims and fires in every direction and reloads, while the battle runs and is
+    /// drawn every frame. Nothing may panic.
+    #[test]
+    fn the_commander_fights_anywhere_without_breaking_anything() {
+        use crate::assault::Assault;
+        use scalia_ai::battle::Stance;
+        let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
+        let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &base_props());
+        map.doors = battle_doors();
+        map.killhouse = Some(killhouse_mm());
+        map.live = Some(range_live_mm());
+        let mut a = Assault::field(map, killhouse_mm(), 7, 0.0);
+        let mut now = 0.0;
+        let mut rng = 0x9e37_79b9_7f4a_7c15u64;
+        let mut r = move || { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; rng };
+        let mut at = (90_000i64, 20_000i64);
+        let me = a.battle.join_player(0, 1_000, at);
+        for frame in 0..6_000 {
+            if frame % 120 == 0 {
+                // A new heading and stance now and then; sometimes far off the map edge on purpose.
+                at = (lo + (r() % size as u64) as i64, lo + (r() % size as u64) as i64);
+            }
+            let stance = [Stance::Stand, Stance::Crouch, Stance::Prone][(r() % 3) as usize];
+            let dir = ((r() % 2001) as i64 - 1000, (r() % 2001) as i64 - 1000);
+            a.battle.player_set(me, at, dir, stance, (r() % 6000) as i64);
+            let _ = a.battle.player_fire(me, dir, r() % 2 == 0);
+            if r() % 50 == 0 {
+                a.battle.player_reload(me);
+            }
+            now += 16.7;
+            a.advance(now);
+            for team in 0..2 {
+                let _ = a.instances(team, now as f32 / 1000.0, |_| 6.0, |x, y| Some((x as f32, y as f32, 0.0)));
+            }
+            for i in 0..a.battle.soldiers.len() {
+                let _ = a.position(i);
+            }
+        }
+        assert!(a.battle.soldiers[me].player);
+        assert!(a.battle.time_ms > 90_000, "the battle ran: {} ms", a.battle.time_ms);
+    }
+}
+
+#[cfg(test)]
 mod lab_tests {
     use super::*;
 

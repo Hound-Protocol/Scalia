@@ -309,7 +309,18 @@ pub struct Viewer {
 
 /// Creates the viewer on a canvas. Fails with a readable message when WebGPU is unavailable.
 #[wasm_bindgen]
+extern "C" {
+    /// The page's crash reporter (errors.js): told the panic's message and place before the module dies.
+    #[wasm_bindgen(js_namespace = window, js_name = scaliaPanic, catch)]
+    fn scalia_panic(msg: &str) -> Result<(), JsValue>;
+}
+
+#[wasm_bindgen]
 pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, JsError> {
+    // A panic says what and where (message, file:line) to the crash screen instead of a bare "unreachable".
+    std::panic::set_hook(Box::new(|info| {
+        let _ = scalia_panic(&info.to_string());
+    }));
     let size = (canvas.width(), canvas.height());
     let gpu = Gpu::new(wgpu_target(canvas), size.0, size.1).await.map_err(|e: String| JsError::new(&e))?;
     let mut v = Viewer {
