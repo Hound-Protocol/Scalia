@@ -514,6 +514,12 @@ fn grass_for(hm: &[f32], cx: i64, cy: i64, origin: (f64, f64)) -> Vec<f32> {
             }
             let fx = ((h >> 8) & 0xff) as f32 / 255.0;
             let fy = ((h >> 16) & 0xff) as f32 / 255.0;
+            // None through the concrete floors (the live-fire range, the barracks).
+            let (wx, wy) = (((cx * CELLS as i64 + i as i64) as f64 + fx as f64) * 1000.0, ((cy * CELLS as i64 + j as i64) as f64 + fy as f64) * 1000.0);
+            let on = |r: (i64, i64, i64, i64)| wx >= r.0 as f64 && wx <= r.2 as f64 && wy >= r.1 as f64 && wy <= r.3 as f64;
+            if on(RANGE_MM) || on(BARRACKS_MM) {
+                continue;
+            }
             let colour = [7.0, 12.0, 11.0, 12.0][((h >> 24) % 4) as usize];
             let z0 = bilinear(hm, n, i, j, fx, fy);
             let x = ((cx * CELLS as i64 + i as i64) as f64 + fx as f64 - origin.0) as f32;
