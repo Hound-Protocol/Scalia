@@ -122,8 +122,12 @@ impl Assault {
 
     /// Grows the per-soldier drawing tables to the battle's soldiers (new ones join between steps).
     fn sync_tables(&mut self) {
-        for i in self.prev.len()..self.battle.soldiers.len() {
-            self.prev.push(self.battle.soldiers[i].pos);
+        // Counted on a table only this grows: `prev` is refilled every step (to every soldier, including one who
+        // joined between steps, like the commander), so it cannot say who is still missing.
+        for i in self.anim.len()..self.battle.soldiers.len() {
+            if self.prev.len() <= i {
+                self.prev.push(self.battle.soldiers[i].pos);
+            }
             self.anim.push((0.0, Pose::Stand, Pose::Stand, -1000.0));
             self.motion.push((0.0, 0.0, -1.0));
             self.legs.push(Pose::Walk);
@@ -275,6 +279,8 @@ impl Assault {
     /// Instance records (12 floats each) for one team. `place` turns absolute metres into the renderer's
     /// (x, y, z), or None when off screen; `ts` is the shader clock (seconds); `body` the palette colour.
     pub fn instances(&mut self, team: u8, ts: f32, body: impl Fn(u16) -> f32, mut place: impl FnMut(f64, f64) -> Option<(f32, f32, f32)>) -> Vec<f32> {
+        // Anyone who joined since the last step (the commander does, between steps) gets his tables first.
+        self.sync_tables();
         let mut out = Vec::new();
         for i in 0..self.battle.soldiers.len() {
             // The commander's man is drawn as the commander.

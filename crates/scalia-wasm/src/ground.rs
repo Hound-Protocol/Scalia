@@ -167,6 +167,15 @@ mod commander_tests {
             }
         }
         assert!(a.battle.soldiers[me].player);
+        // A squad sent in after the commander joined (the user's crash: ordering a unit to clear a building).
+        let n = a.battle.soldiers.len();
+        a.spawn_squad(42, 0, &[(80_000, 30_000), (81_000, 30_000), (82_000, 30_000)]);
+        for _ in 0..30 {
+            now += 16.7;
+            a.advance(now);
+            let _ = a.instances(0, now as f32 / 1000.0, |_| 6.0, |x, y| Some((x as f32, y as f32, 0.0)));
+        }
+        assert_eq!(a.battle.soldiers.len(), n + 3);
         assert!(a.battle.time_ms > 90_000, "the battle ran: {} ms", a.battle.time_ms);
     }
 }
