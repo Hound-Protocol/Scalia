@@ -4,6 +4,7 @@ import { AudioEngine } from './audio.js';
 import { installConsole } from './console.js';
 import { createErrors } from './errors.js';
 import { preload, fileBytes } from './preload.js';
+import { createMenu } from './menu.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
@@ -110,7 +111,7 @@ const SOUNDS = ['./sfx/context-menu.mp3', './sfx/dive-whoosh.mp3', './sfx/m4-sho
   './sfx/update-alert.mp3', './sfx/urgent-alert.mp3', './sfx/walkie-down.mp3', './sfx/walkie-ring.mp3', './sfx/walkie-up.mp3',
   './sfx/weapons/ar15-shot.mp3', './sfx/weapons/ar15-mag-out.mp3', './sfx/weapons/ar15-mag-in.mp3', './sfx/weapons/ar15-bolt.mp3',
   './sfx/weapons/ak47-shot.mp3', './sfx/weapons/ak47-mag-out.mp3', './sfx/weapons/ak47-mag-in.mp3', './sfx/weapons/ak47-bolt.mp3',
-  './sfx/weapons/m1911-dry.mp3'];
+  './sfx/weapons/m1911-dry.mp3', './sfx/menu-boom.mp3', './sfx/menu-travel.mp3', './sfx/menu-enter.mp3'];
 const BUILD = new URL(import.meta.url).searchParams.get('v');
 const WASM_URL = new URL(`./pkg/scalia_wasm_bg.wasm${BUILD ? '?v=' + BUILD : ''}`, import.meta.url).href;
 const loaded = (() => {
@@ -1968,7 +1969,12 @@ const UPDATE = '__UPDATE__';
     if (boot) { boot.classList.add('done'); setTimeout(() => boot.remove(), 400); }
     goBtn.focus();
   });
-  const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); music.start(); ambience(); };
+  // Past the notice: the main menu (its music, then Start and the flight in); the game's music and the wind
+  // come in once the commander's eyes are open.
+  const menu = createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); } });
+  menu.preview();
+  const ver = document.getElementById('menuVer'); if (ver) ver.textContent = UPDATE.startsWith('__') ? '(local)' : UPDATE;
+  const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); menu.show(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
   const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };
   document.getElementById('protoGo').addEventListener('click', go);

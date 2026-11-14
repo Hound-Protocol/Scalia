@@ -323,6 +323,9 @@ pub struct Viewer {
     /// Time of the last frame (ms) and the cinematic camera it used, if any.
     frame_ms: f64,
     last_cine: Option<(Vec3, f32, f32, f32)>,
+    /// The main menu's intro flight, driven frame by frame from the page: view height (m), camera elevation
+    /// (radians) and how far the commander has dissolved (the camera passing into him).
+    intro: Option<(f32, f32, f32)>,
     size: (u32, u32),
 }
 
@@ -482,6 +485,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         fps_t: 0.0,
         frame_ms: 0.0,
         last_cine: None,
+        intro: None,
         size,
     };
     v.add_captains();
@@ -1765,6 +1769,21 @@ impl Viewer {
         vec![self.fps, self.last_internal.0 as f32, self.last_internal.1 as f32, g[0], g[1], g[2]]
     }
 
+    /// The menu's intro flight holds the camera: `view_m` metres of view height (from the star system all the
+    /// way down to the commander), looking down at `elev` radians, centred on his head; `fade` dissolves him.
+    pub fn set_intro(&mut self, view_m: f32, elev: f32, fade: f32) {
+        if self.scene == Scene::Ships {
+            return;
+        }
+        self.ground_cam = None;
+        self.intro = Some((view_m.clamp(0.5, LADDER[LADDER.len() - 1]), elev.clamp(0.2, 1.55), fade.clamp(0.0, 1.0)));
+    }
+    /// The intro is over: the camera is the player's again, at the widest field zoom.
+    pub fn end_intro(&mut self) {
+        self.intro = None;
+        self.zoom_step = STEP_FIELD_MAX;
+    }
+
     pub fn scene_name(&self) -> String {
         match self.scene {
             Scene::Ships => "ships",
@@ -1865,6 +1884,15 @@ impl Viewer {
         };
         // The tablet cinematic takes the main camera over: up above the commander, then down onto his hands.
         let (target, yaw, view_height, cine_elev) = match (self.scene, second) {
+            (Scene::Ground, false) if self.intro.is_some() => {
+                let (view_m, elev, _) = self.intro.unwrap_or((25.0, scalia_render::camera::ELEV, 0.0));
+                let head = Vec3::new((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32, self.height_at(self.cmd.0 as f32, self.cmd.1 as f32) + 1.5);
+                // Far out the view is centred where the game would centre it; closing in, it settles on his head.
+                let w = (1.0 - ((view_m / 60.0).ln() / (2_000.0f32 / 60.0).ln()).clamp(0.0, 1.0)).powi(2);
+                let c = (target + (head - target) * w, yaw, view_m, elev);
+                self.last_cine = Some(c);
+                (c.0, c.1, c.2, Some(c.3))
+            }
             (Scene::Ground, false) => match self.cine_cam(now_ms, (target, yaw, view_height)) {
                 Some(c) => {
                     self.last_cine = Some(c);
@@ -3171,6 +3199,9 @@ impl Viewer {
 
     /// How far the commander has dissolved for the tablet close-up (0 solid, 1 gone).
     fn cine_fade(&self, now_ms: f64) -> f32 {
+        if let Some((_, _, fade)) = self.intro {
+            return fade;
+        }
         let s = |a: f64, b: f64, x: f64| { let k = ((x - a) / (b - a)).clamp(0.0, 1.0) as f32; k * k * (3.0 - 2.0 * k) };
         match self.cine {
             Some((true, start, _)) => s(CINE_OPEN_MS - 280.0, CINE_OPEN_MS - 80.0, now_ms - start),
@@ -3400,6 +3431,10 @@ impl Viewer {
         let mut z = (a + (b - a) * k as f32).exp();
         if (z / goal - 1.0).abs() < 1e-3 {
             z = goal;
+        }
+        // The menu's intro flight sets the zoom outright.
+        if let Some((view_m, _, _)) = self.intro {
+            z = view_m;
         }
         if self.scene == Scene::System && self.sys_follow != Some(HOME_BODY) {
             z = z.max(GROUND_TOP * 1.001);
