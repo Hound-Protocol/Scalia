@@ -198,6 +198,8 @@ pub struct Viewer {
     cmd_skid: crate::motion::Skid,
     /// How fast he is turning (rad/s, + to the left): turns build up and ease off.
     cmd_spin: f32,
+    /// Console god mode: the commander cannot be hurt.
+    god: bool,
     /// His upper body (the layer, or the pose's own): now, the one before, since when (shader clock, s).
     cmd_upper: (Pose, Pose, f32),
     cmd_gait: f64,
@@ -378,6 +380,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_dir: (0.0, 1.0),
         cmd_skid: crate::motion::Skid::None,
         cmd_spin: 0.0,
+        god: false,
         cmd_upper: (Pose::Stand, Pose::Stand, -1000.0),
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
@@ -1317,6 +1320,56 @@ impl Viewer {
         self.gun.trigger = trigger && !self.gun.slung;
         self.gun.aim = aim && !self.gun.slung;
         self.gun.at_px = Some((px, py));
+    }
+    /// Console: puts the commander at (x, y) metres on the ground (his man in the battle follows next frame).
+    pub fn commander_teleport(&mut self, x: f64, y: f64) {
+        self.cmd = (x, y);
+        self.cmd_speed = 0.0;
+    }
+    /// Console: a full magazine and `mags` spares.
+    pub fn commander_refill(&mut self, mags: i32) {
+        let at = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
+        if let Some(a) = self.assault.as_mut() {
+            let i = commander_soldier(a, at);
+            let s = &mut a.battle.soldiers[i];
+            s.ammo = scalia_ai::battle::MAG;
+            s.mags = mags.max(0);
+            s.reloading_ms = 0;
+        }
+    }
+    /// Console: back on his feet at full health.
+    pub fn commander_heal(&mut self) {
+        let at = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
+        if let Some(a) = self.assault.as_mut() {
+            let i = commander_soldier(a, at);
+            a.battle.revive(i);
+        }
+    }
+    /// Console: rounds pass through him harmlessly (true) or not; returns the new setting.
+    pub fn commander_god(&mut self) -> bool {
+        self.god = !self.god;
+        self.god
+    }
+    /// Console: everyone on `team` (0 ours, 1 the enemy) drops dead; how many.
+    pub fn battle_kill(&mut self, team: u8) -> u32 {
+        let Some(a) = self.assault.as_mut() else { return 0 };
+        let mut n = 0;
+        for s in a.battle.soldiers.iter_mut().filter(|s| s.team == team && s.alive() && !s.player) {
+            s.health = 0;
+            n += 1;
+        }
+        n
+    }
+    /// Console: where the commander is and what he is doing.
+    pub fn commander_info(&self) -> String {
+        let s = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player));
+        format!(
+            "at ({:.1}, {:.1}) m, heading {:.0} deg, speed {:.1} m/s, pose {:?}, stance {}, health {}, rounds {} + {}{}",
+            self.cmd.0, self.cmd.1, self.cmd_heading.to_degrees().rem_euclid(360.0), self.cmd_speed, self.cmd_pose.0,
+            ["standing", "crouched", "prone"][self.gun.stance.min(2) as usize],
+            s.map_or(100, |s| s.health.max(0)), s.map_or(30, |s| s.ammo), s.map_or(150, |s| s.mags * scalia_ai::battle::MAG),
+            if self.god { ", god mode" } else { "" }
+        )
     }
     /// Crouch (1) or go prone (2), or back up to standing when already so.
     pub fn commander_stance(&mut self, k: u8) {
@@ -2814,6 +2867,11 @@ impl Viewer {
             let (dx, dy) = (p.x - self.cmd.0 as f32, p.y - self.cmd.1 as f32);
             if dx * dx + dy * dy > 0.25 {
                 self.gun.toward = Some((dx, dy));
+            }
+        }
+        if self.god {
+            if let Some(s) = self.assault.as_mut().and_then(|a| a.battle.soldiers.iter_mut().find(|s| s.player)) {
+                s.health = 100;
             }
         }
         let ready = (self.gun.aim || self.gun.trigger) && !self.gun.slung && !holding && self.gun.toward.is_some();

@@ -1678,22 +1678,54 @@ try {
   // Developer console (the key under Esc).
   const LAB_SCENARIOS = ['clear', 'contact', 'wounded', 'standoff'];
   installConsole({
-    lab: { help: `lab <${LAB_SCENARIOS.join('|')}>: run an AI lab scenario`, run: (a) => {
+    lab: { group: 'Battle', help: `lab <${LAB_SCENARIOS.join('|')}>: run an AI lab scenario`, run: (a) => {
       const k = LAB_SCENARIOS.includes(a[0]) ? a[0] : 'clear';
       if (lab) { lab.start(k); return `lab: ${k}`; }
       const u = new URL(location.href); u.searchParams.set('lab', k); location.href = u.toString();
     } },
-    speed: { help: 'speed <0..4>: battle time scale (0 pauses)', run: (a) => { const x = Number(a[0]); if (!Number.isFinite(x)) return 'speed <0..4>'; v.lab_set_speed(x); if (lab) lab.setSpeed(x); return `speed ${x}`; } },
-    pause: { help: 'pause or resume battle time', run: () => { const p = !pause.on; pause.on = p; v.lab_set_speed(p ? 0 : 1); if (lab) lab.setSpeed(p ? 0 : 1); return p ? 'paused' : 'running'; } },
-    labels: { help: 'toggle the AI lab labels', run: () => (lab ? `labels ${lab.toggleLabels() ? 'on' : 'off'}` : 'labels need the AI lab (lab <scenario>)') },
-    field: { help: 'squads on the testing ground', run: () => v.field_debug() },
-    door: { help: 'door [n open|close|lock|breach]: list the doors, or set one', run: (a) => (a.length ? v.door_cmd(Number(a[0]), a[1] || '') : v.door_cmd(-1, '')) },
-    steps: { help: 'leader steps and shouts since last asked', run: () => v.lab_feed() || '(none)' },
-    report: { help: 'copy a bug report (version, browser, last errors) to the clipboard', run: () => { const r = errors.report(); navigator.clipboard.writeText(r).catch(() => {}); return `${errors.recent.length} error(s); report copied`; } },
-    log: { help: 'log [clear]: errors, warnings and hitches (kept across reloads)', run: (a) => { if (a[0] === 'clear') { errors.clearLog(); return 'log cleared'; } return errors.logText() || '(empty)'; } },
-    errors: { help: 'list the last errors', run: () => errors.recent.map((r) => `${r.at} ${r.fatal ? 'CRASH ' : ''}${r.where}: ${r.error.split('\n')[0]}`).join('\n') || '(none)' },
-    hdr: { help: 'hdr <wartapes|hifi>: audio dynamic range (25 dB, the default, or 60 dB window)', run: (a) => (audio.setHdr(a[0]) ? `hdr ${a[0]}` : `hdr is ${audio.hdr}; hdr <hifi|wartapes>`) },
-    audio: { help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
+    speed: { group: 'Battle', help: 'speed <0..4>: battle time scale (0 pauses)', run: (a) => { const x = Number(a[0]); if (!Number.isFinite(x)) return 'speed <0..4>'; v.lab_set_speed(x); if (lab) lab.setSpeed(x); return `speed ${x}`; } },
+    pause: { group: 'Battle', help: 'pause or resume battle time', run: () => { const p = !pause.on; pause.on = p; v.lab_set_speed(p ? 0 : 1); if (lab) lab.setSpeed(p ? 0 : 1); return p ? 'paused' : 'running'; } },
+    labels: { group: 'Battle', help: 'toggle the AI lab labels', run: () => (lab ? `labels ${lab.toggleLabels() ? 'on' : 'off'}` : 'labels need the AI lab (lab <scenario>)') },
+    field: { group: 'Battle', help: 'squads on the testing ground', run: () => v.field_debug() },
+    door: { group: 'Battle', help: 'door [n open|close|lock|breach]: list the doors, or set one', run: (a) => (a.length ? v.door_cmd(Number(a[0]), a[1] || '') : v.door_cmd(-1, '')) },
+    steps: { group: 'Battle', help: 'leader steps and shouts since last asked', run: () => v.lab_feed() || '(none)' },
+    report: { group: 'Game', help: 'copy a bug report (version, browser, last errors) to the clipboard', run: () => { const r = errors.report(); navigator.clipboard.writeText(r).catch(() => {}); return `${errors.recent.length} error(s); report copied`; } },
+    log: { group: 'Game', help: 'log [clear]: errors, warnings and hitches (kept across reloads)', run: (a) => { if (a[0] === 'clear') { errors.clearLog(); return 'log cleared'; } return errors.logText() || '(empty)'; } },
+    errors: { group: 'Game', help: 'list the last errors', run: () => errors.recent.map((r) => `${r.at} ${r.fatal ? 'CRASH ' : ''}${r.where}: ${r.error.split('\n')[0]}`).join('\n') || '(none)' },
+    hdr: { group: 'Audio', help: 'hdr <wartapes|hifi>: audio dynamic range (25 dB, the default, or 60 dB window)', run: (a) => (audio.setHdr(a[0]) ? `hdr ${a[0]}` : `hdr is ${audio.hdr}; hdr <hifi|wartapes>`) },
+    // The commander (on foot).
+    pos: { group: 'Commander', help: 'where the commander is and what he is doing', run: () => v.commander_info() },
+    tp: { group: 'Commander', help: 'tp <x> <y>: put the commander at x, y metres (pos shows where he is)', run: (a) => {
+      const x = Number(a[0]), y = Number(a[1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return 'tp <x> <y> (metres; e.g. tp 90 20)';
+      v.commander_teleport(x, y); return `commander at ${x}, ${y}`; } },
+    ammo: { group: 'Commander', help: 'ammo [spare magazines]: a full rifle and spares (default 5)', run: (a) => { const n = a.length ? Math.max(0, Math.floor(Number(a[0]) || 0)) : 5; v.commander_refill(n); return `30 in the rifle, ${n * 30} spare`; } },
+    heal: { group: 'Commander', help: 'back on his feet at full health', run: () => { v.commander_heal(); return 'commander healed'; } },
+    god: { group: 'Commander', help: 'toggle god mode (rounds cannot hurt the commander)', run: () => `god mode ${v.commander_god() ? 'on' : 'off'}` },
+    stance: { group: 'Commander', help: 'stance <stand|crouch|prone>', run: (a) => {
+      const k = { stand: 0, crouch: 1, prone: 2 }[a[0]];
+      if (k === undefined) return 'stance <stand|crouch|prone>';
+      const cur = JSON.parse(v.commander_weapon_state()).stance;
+      if (cur !== k) v.commander_stance(k === 0 ? cur : k);
+      return `stance ${a[0]}`; } },
+    // The battle.
+    slowmo: { group: 'Battle', help: 'battle at quarter speed (speed 1 to go back)', run: () => { v.lab_set_speed(0.25); if (lab) lab.setSpeed(0.25); return 'battle speed 0.25'; } },
+    kill: { group: 'Battle', help: 'kill <red|blue>: everyone on that side drops (not the commander)', run: (a) => {
+      const team = { red: 1, enemy: 1, blue: 0, ours: 0 }[a[0]];
+      if (team === undefined) return 'kill <red|blue>';
+      return `${v.battle_kill(team)} down`; } },
+    assault: { group: 'Battle', help: 'start or call off the training assault (as K)', run: () => { toggleAssault(); return assaultOn ? 'assault on' : 'assault off'; } },
+    // Sound.
+    play: { group: 'Audio', help: 'play <gun> <piece>: hear a weapon sound (ar15 ak47 mp5 m1911 deagle; shot mag-out mag-in bolt slide dry)', run: (a) => {
+      if (a.length < 2) return 'play <gun> <piece>, e.g. play ak47 shot';
+      const url = `./sfx/weapons/${a[0]}-${a[1]}.mp3`;
+      fireGraph(); audio.play(url, { kind: 'shot', db: 120, gain: 1, room: 0, rx: 0, ry: 1, below: 0, dist: 2, lowpass: 20000, space: v.audio_env().slice(0, 3), echoes: [] });
+      return `playing ${url} (it may take a moment the first time)`; } },
+    // The game itself.
+    version: { group: 'Game', help: 'which build this is', run: () => `${document.title} ${new URL(import.meta.url).searchParams.get('v') || 'local build'}` },
+    perf: { group: 'Game', help: 'show or hide the performance panel', run: () => { const p = $('perf'); p.hidden = !p.hidden; return `performance panel ${p.hidden ? 'hidden' : 'shown'}`; } },
+    reload: { group: 'Game', help: 'reload the page', run: () => { setTimeout(() => location.reload(), 150); return 'reloading'; } },
+    audio: { group: 'Audio', help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
   });
   const pause = { on: false };
   const toggleAssault = () => {

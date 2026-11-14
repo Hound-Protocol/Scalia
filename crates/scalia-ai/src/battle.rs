@@ -1518,6 +1518,22 @@ impl Battle {
         }
     }
 
+    /// Brings soldier `i` back to full health on his feet (console, tests): bleeding stopped, nobody dragging or
+    /// treating him, and he may die again.
+    pub fn revive(&mut self, i: usize) {
+        let Some(s) = self.soldiers.get_mut(i) else { return };
+        s.health = 100;
+        s.stable = false;
+        s.bleed_ms = 0;
+        s.suppression = 0;
+        if s.stance == Stance::Prone && s.player {
+            s.stance = Stance::Stand;
+        }
+        if let Some(d) = self.dead_logged.get_mut(i) {
+            *d = false;
+        }
+    }
+
     /// Adds a soldier the player controls (see `Soldier::player`). Returns his index.
     pub fn join_player(&mut self, team: u8, squad: u16, pos: (i64, i64)) -> usize {
         let mut s = Soldier::new(team, squad, pos, Stance::Stand);
