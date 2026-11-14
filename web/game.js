@@ -571,7 +571,9 @@ try {
   // every time; grass or concrete by where he is.
   let lastPhase = -1;
   // The rifle on screen: rounds left, the aim line while aiming, and a small kick of the view on every shot.
-  let lastShots = 0, kick = 0, lastWeapon = '';
+  // `climb` is the crosshair's recoil (0 settled): each round throws it out along the barrel and opens the ring,
+  // and it settles back on its own; `side` is that round's sideways twitch.
+  let lastShots = 0, kick = 0, lastWeapon = '', climb = 0, side = 0, lastTick = performance.now();
   // For crash reports: what the player last did (keys and mouse buttons), kept on the page side so a report can be
   // written even when the engine has died.
   const inputs = [];
@@ -600,8 +602,15 @@ try {
       l.setAttribute('x1', (x0 * cw).toFixed(1)); l.setAttribute('y1', (y0 * ch).toFixed(1));
       l.setAttribute('x2', (x1 * cw).toFixed(1)); l.setAttribute('y2', (y1 * ch).toFixed(1));
       line.hidden = false;
-      const r = 7 + 16 * (w.spread || 0);
-      ret.style.transform = `translate(${(x1 * cw).toFixed(1)}px, ${(y1 * ch).toFixed(1)}px)`;
+      const now = performance.now(), dt = Math.min(0.1, (now - lastTick) / 1000);
+      lastTick = now;
+      if (w.shots > lastShots) { climb = Math.min(1.6, climb + 0.55 * (w.shots - lastShots)); side = (Math.random() - 0.5) * 2; }
+      climb *= Math.exp(-dt / 0.11);
+      // Out along the barrel (screen direction from the muzzle to the mark), with a little twitch across it.
+      const dx = (x1 - x0) * cw, dy = (y1 - y0) * ch, dl = Math.hypot(dx, dy) || 1;
+      const kx = (dx / dl) * 12 * climb - (dy / dl) * 4 * side * climb, ky = (dy / dl) * 12 * climb + (dx / dl) * 4 * side * climb;
+      const r = 7 + 16 * (w.spread || 0) + 7 * climb;
+      ret.style.transform = `translate(${(x1 * cw + kx).toFixed(1)}px, ${(y1 * ch + ky).toFixed(1)}px)`;
       ret.style.setProperty('--r', r.toFixed(1) + 'px');
       ret.hidden = false;
       dot.style.transform = `translate(${gun.x}px, ${gun.y}px)`;

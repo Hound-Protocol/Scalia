@@ -102,6 +102,8 @@ pub struct Assault {
     muzzle: Vec<Option<(i64, i64, i64)>>,
     /// Per soldier: which way his barrel pointed when last drawn (unit, world; zero = unknown).
     bore: Vec<[f32; 3]>,
+    /// Per soldier: when he last fired (viewer ms, as `now`), for the rifle's kick.
+    fired: Vec<f64>,
     /// Per soldier: his upper body (layer or pose) now, the one before, since when (shader clock): for blending
     /// the arms when the rifle comes up or down.
     uppers: Vec<(Pose, Pose, f32)>,
@@ -160,7 +162,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), uppers: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), uppers: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -183,6 +185,7 @@ impl Assault {
             self.turn.push((0.0, 0.0, 0.0));
             self.muzzle.push(None);
             self.bore.push([0.0; 3]);
+            self.fired.push(f64::NEG_INFINITY);
             self.uppers.push((Pose::Stand, Pose::Stand, -1000.0));
         }
     }
@@ -277,6 +280,7 @@ impl Assault {
                         let impact = if hit || target == shooter { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
                         // One round in four is a tracer.
                         let tracer = (r >> 40) % 4 == 0;
+                        if let Some(f) = self.fired.get_mut(shooter) { *f = at; }
                         let bore = self.bore.get(shooter).copied().filter(|b| b.iter().any(|c| *c != 0.0));
                         self.fx.push(Fx { at, from: muzzle, to: impact, hit, blast: false, tracer, bore });
                     }
@@ -413,6 +417,7 @@ impl Assault {
                 }
                 self.legs[i] = pose;
             }
+            let kick = self.kick(i);
             let a = &mut self.anim[i];
             // Heading eases round to his facing (the battle turns him at 4 rad/s; this only smooths the steps).
             let want = heading_of(s.facing);
@@ -467,7 +472,7 @@ impl Assault {
                 *u = (eff, u.0, ts);
             }
             let layer_back = scalia_render::pose::pack_fade_layer(0.0, Some(u.1), 1.0 - ((ts - u.2) / scalia_render::pose::LAYER_BLEND_S).clamp(0.0, 1.0));
-            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), layer_back]);
+            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, scalia_render::pose::pack_kick(pose, kick), a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), layer_back]);
         }
         out
     }
@@ -479,6 +484,11 @@ impl Assault {
         }
     }
 
+    /// How hard soldier `i`'s rifle is kicking now (1 as a round leaves, gone in about a fifth of a second).
+    pub fn kick(&self, i: usize) -> f32 {
+        let age = self.now - self.fired.get(i).copied().unwrap_or(f64::NEG_INFINITY);
+        if (0.0..400.0).contains(&age) { (-age / 70.0).exp() as f32 } else { 0.0 }
+    }
     /// Where soldier `i`'s muzzle was last drawn (mm, z over the ground).
     pub fn muzzle_of(&self, i: usize) -> Option<(i64, i64, i64)> {
         self.muzzle.get(i).copied().flatten()

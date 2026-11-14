@@ -3071,7 +3071,8 @@ impl Viewer {
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
         // The phase is always handed over (frozen when he stops), so legs blending out of a stride stay where they were.
         let lean = self.bank_for(u64::MAX, self.cmd_heading, self.cmd_speed);
-        let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, if steps == 0.0 && ts - self.cmd_pose.2 > 0.4 { 0.0 } else { -1.0 }, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
+        let kick = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().position(|s| s.player).map(|i| a.kick(i))).unwrap_or(0.0);
+        let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, if steps == 0.0 && ts - self.cmd_pose.2 > 0.4 { 0.0 } else { -1.0 }, scalia_render::pose::pack_kick(pose, kick), self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
         // His muzzle as drawn, so his rounds leave from the end of his barrel.
         let (roll, pitch) = scalia_render::pose::unpack_tilt(9.0 + lean);
         let (q, b) = scalia_render::pose::barrel(scalia_render::pose::RIFLE, pose, upper, self.cmd_gait as f32, move_dir);

@@ -1268,6 +1268,27 @@ pub fn barrel(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) 
     (tip, (tip - pose_vertex(w.breech, Part::Rifle, &p)).normalize_or_zero())
 }
 
+/// A shot's kick (`k` 1 the instant it fires, easing to 0): the muzzle flips up, the rifle drives back into the
+/// shoulder with the arms, and the upper body rocks back a touch. Visual only: where rounds go is the battle's.
+pub fn recoil(p: &mut PoseParams, k: f32) {
+    if k <= 0.0 {
+        return;
+    }
+    p.rifle += 0.16 * k;
+    p.shoulder[0] -= 0.08 * k;
+    p.shoulder[1] -= 0.08 * k;
+    p.lean -= 0.04 * k;
+    p.head += 0.03 * k;
+}
+
+/// An instance's pose id (b.w) carrying the shot kick in its fraction (common.wgsl reads the id with `u32()`).
+pub fn pack_kick(pose: Pose, k: f32) -> f32 {
+    pose as u32 as f32 + k.clamp(0.0, 0.99)
+}
+pub fn unpack_kick(w: f32) -> f32 {
+    w.fract()
+}
+
 /// A point of a figure's own frame placed in the world (metres): banked into a turn (`bank`, + to his left)
 /// and turned to his heading as common.wgsl `animate` does, then moved to where he stands (`at`, z = ground).
 pub fn figure_to_world(q: Vec3, at: Vec3, heading: f32, bank: f32, pitch: f32) -> Vec3 {
@@ -1352,5 +1373,29 @@ mod fade_layer_tests {
         assert!(code == 0.0 && rem > 0.99, "leaving the legs' own upper body");
         let (_, code, _) = unpack_fade_layer(pack_fade_layer(0.0, Some(Pose::Ready), 0.9));
         assert_eq!(code, Pose::Ready as u32 as f32 + 1.0);
+    }
+
+    #[test]
+    fn a_shot_kicks_the_rifle_up_and_back_and_lets_it_settle() {
+        let base = params(Pose::StandAim, 0.0);
+        let mut hit = base;
+        recoil(&mut hit, 1.0);
+        let at = |p: &PoseParams| { let p = grip(p, 1.0); pose_vertex(RIFLE.muzzle, Part::Rifle, &p) };
+        let (a, b) = (at(&base), at(&hit));
+        assert!(b.z > a.z + 0.02, "muzzle flips up: {a:?} -> {b:?}");
+        assert!(b.y < a.y - 0.01, "rifle comes back into the shoulder: {a:?} -> {b:?}");
+        assert!((b - a).length() < 0.15, "a kick, not a throw: {:?}", b - a);
+        let mut none = base;
+        recoil(&mut none, 0.0);
+        assert_eq!(at(&none), a, "no kick, no change");
+    }
+
+    #[test]
+    fn the_kick_rides_on_the_pose_id_without_changing_it() {
+        let packed = pack_kick(Pose::StandAim, 0.7);
+        assert_eq!(packed as u32, Pose::StandAim as u32);
+        assert!((unpack_kick(packed) - 0.7).abs() < 0.01);
+        assert_eq!(pack_kick(Pose::Ready, 0.0), Pose::Ready as u32 as f32);
+        assert!(unpack_kick(pack_kick(Pose::Ready, 5.0)) < 1.0);
     }
 }
