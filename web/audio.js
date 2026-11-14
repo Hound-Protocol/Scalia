@@ -44,6 +44,32 @@ function impulse(ctx, seconds, rt60, early, damp) {
   return buf;
 }
 
+/// The open air: a loud sound outdoors does not stop dead, it rolls away in a soft, gentle echo (scattered off
+/// the ground and into the distance). No room in it: a late, smooth start, a few soft swells, a long fade, and
+/// neither boom nor hiss.
+function airTail(ctx) {
+  const rate = ctx.sampleRate, n = Math.floor(rate * 2.0);
+  const buf = ctx.createBuffer(2, n, rate);
+  const swells = [[0.28, 0.55], [0.62, 0.35], [1.05, 0.2]];
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    let lo = 0, lo2 = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / rate;
+      // Band-limited noise (roughly 300 Hz - 3 kHz): two one-pole low-passes, minus a slower one for the lows.
+      const x = Math.random() * 2 - 1;
+      lo = lo * 0.82 + x * 0.18;
+      lo2 = lo2 * 0.985 + lo * 0.015;
+      const band = lo - lo2;
+      const onset = t < 0.04 ? 0 : Math.min(1, (t - 0.04) / 0.08);
+      let env = Math.exp(-t / 0.5);
+      for (const [at, g] of swells) env += g * Math.exp(-((t - at) * (t - at)) / 0.006) * (ch ? 0.85 : 1);
+      d[i] = band * env * onset * 0.9;
+    }
+  }
+  return buf;
+}
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -109,6 +135,10 @@ export class AudioEngine {
       // A corridor flutters: regular echoes between the two close walls.
       corridor: bus(impulse(c, 1.8, 1.0, Array.from({ length: 14 }, (_, k) => [0.009 * (k + 1), 0.5 * Math.pow(0.8, k)]), 0.4)),
     };
+    // The open air's gentle tail, for loud sounds outdoors.
+    this.air = c.createGain();
+    const airConv = c.createConvolver(); airConv.buffer = airTail(c);
+    this.air.connect(airConv); airConv.connect(this.mix);
     this.applyEnv(true);
     return c;
   }
@@ -205,6 +235,14 @@ export class AudioEngine {
       if (amount < 0.01) continue;
       const send = c.createGain(); send.gain.value = amount;
       p.connect(send).connect(busIn);
+    }
+    // Outdoors a loud sound trails off in a soft echo rather than stopping dead: more the louder it is and the
+    // more open the ground (rooms have their own ring).
+    const loudness = Math.max(0, Math.min(1, (num(o.db, 100, 0, 200) - 110) / 40));
+    const airAmount = (1 - enc) * loudness * 0.45;
+    if (airAmount > 0.01) {
+      const send = c.createGain(); send.gain.value = airAmount;
+      p.connect(send).connect(this.air);
     }
     // Echoes off what stands around it: each a little later, weaker and darker, from the wall's side.
     for (const e of o.echoes || []) {
