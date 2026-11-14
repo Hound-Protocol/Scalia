@@ -580,19 +580,31 @@ try {
     const box = $('weapon'), line = $('aimLine');
     const on = scene === 'ground' && !tabletUp && !tabletShown;
     box.hidden = !on; line.hidden = true;
-    if (!on) { canvas.style.transform = ''; return; }
+    if (!on) { canvas.style.transform = ''; $('reticle').hidden = true; $('aimDot').hidden = true; canvas.style.cursor = ''; return; }
     lastWeapon = v.commander_weapon_state();
     const w = JSON.parse(lastWeapon);
     box.querySelector('b').textContent = w.slung ? 'SLUNG' : String(w.ammo);
     box.querySelector('small').textContent = w.reloading ? 'RELOADING' : `/ ${w.spare}`;
     box.querySelector('em').textContent = ['STANDING', 'CROUCHED', 'PRONE'][w.stance] || '';
     box.classList.toggle('low', !w.slung && w.ammo <= 5);
+    // Aiming (as in Helldivers): the reticle sits where the rifle really points, trailing the mouse while he
+    // swings round, sized by how wide his rounds go; a small dot marks the mouse itself, whose cursor is hidden.
+    const ret = $('reticle'), dot = $('aimDot');
     if (w.line) {
       const [x0, y0, x1, y1] = w.line, cw = canvas.clientWidth, ch = canvas.clientHeight;
       const l = line.firstElementChild;
       l.setAttribute('x1', (x0 * cw).toFixed(1)); l.setAttribute('y1', (y0 * ch).toFixed(1));
       l.setAttribute('x2', (x1 * cw).toFixed(1)); l.setAttribute('y2', (y1 * ch).toFixed(1));
       line.hidden = false;
+      const r = 7 + 16 * (w.spread || 0);
+      ret.style.transform = `translate(${(x1 * cw).toFixed(1)}px, ${(y1 * ch).toFixed(1)}px)`;
+      ret.style.setProperty('--r', r.toFixed(1) + 'px');
+      ret.hidden = false;
+      dot.style.transform = `translate(${gun.x}px, ${gun.y}px)`;
+      dot.hidden = false;
+      canvas.style.cursor = 'none';
+    } else {
+      ret.hidden = true; dot.hidden = true; canvas.style.cursor = '';
     }
     if (w.shots > lastShots) kick = Math.min(1, kick + 0.6 * (w.shots - lastShots));
     lastShots = w.shots;

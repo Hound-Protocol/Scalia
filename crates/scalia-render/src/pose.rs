@@ -865,12 +865,17 @@ fn stride(p: &mut PoseParams, phase: f32, bob: f32, twist: f32, arms: f32, rifle
     p.bob = bob * (2.0 * t).cos();
     p.twist = twist * t.sin();
     p.look -= 0.8 * p.twist;
+    // The weapon swings more than the body (SWAY_GAIN): a carried rifle never sits still on the move.
     let sway = (2.0 * t + 0.5).sin();
-    p.shoulder[0] += arms * sway;
-    p.shoulder[1] += arms * sway;
-    p.rifle += rifle * (2.0 * t).sin();
+    p.shoulder[0] += SWAY_GAIN * arms * sway;
+    p.shoulder[1] += SWAY_GAIN * arms * sway;
+    // The pitch and the swing across the body less: more pulls the handguard out of the left hand at a sprint.
+    p.rifle += 1.25 * rifle * (2.0 * t).sin();
     p.rifle_yaw += swing * t.sin();
 }
+
+/// How much livelier the weapon is than the stride numbers alone (both moving and aiming).
+pub const SWAY_GAIN: f32 = 1.6;
 
 /// Idle life for a soldier standing still (`t` seconds, `seed` 0..1 per soldier, so a squad is never in step):
 /// breathing, a slow shift of weight, glances around, and now and then a hitch of the rifle. Moving soldiers get
@@ -887,6 +892,9 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
         q.shoulder[0] += 0.008 * breathe;
         q.shoulder[1] += 0.008 * breathe;
         q.look += 0.03 * (tau * (t / 7.0 + seed)).sin();
+        // Aiming: the muzzle wanders in a slow loop around the aim point (breath and pulse).
+        q.rifle += 0.018 * (tau * (t / 2.3 + seed)).sin();
+        q.rifle_yaw += 0.022 * (tau * (t / 3.1 + seed * 1.3)).sin();
         return q;
     }
     q.shoulder[0] += 0.03 * breathe;

@@ -168,8 +168,9 @@ fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rif
   (*p).twist = twist * sin(t);
   (*p).look = (*p).look - 0.8 * (*p).twist;
   let sway = sin(2.0 * t + 0.5);
-  (*p).sh = (*p).sh + vec2f(arms * sway);
-  (*p).rifle = (*p).rifle + rifle * sin(2.0 * t);
+  // SWAY_GAIN (pose.rs) 1.6: the weapon swings more than the body.
+  (*p).sh = (*p).sh + vec2f(1.6 * arms * sway);
+  (*p).rifle = (*p).rifle + 1.25 * rifle * sin(2.0 * t);
   (*p).ryaw = (*p).ryaw + swing * sin(t);
 }
 
@@ -183,6 +184,8 @@ fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   if (pose == 6u || pose == 4u || pose == 12u || pose == 13u || pose == 14u) {
     q.sh = q.sh + vec2f(0.008 * breathe);
     q.look = q.look + 0.03 * sin(tau * (t / 7.0 + seed));
+    q.rifle = q.rifle + 0.018 * sin(tau * (t / 2.3 + seed));
+    q.ryaw = q.ryaw + 0.022 * sin(tau * (t / 3.1 + seed * 1.3));
     return q;
   }
   q.sh = q.sh + vec2f(0.03 * breathe);

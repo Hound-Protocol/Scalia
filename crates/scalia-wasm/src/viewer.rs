@@ -108,8 +108,8 @@ const CMD_JOG: f32 = 3.0;
 /// Selection tag on an instance's colour (the shader outlines tagged figures): +64 stable, +128 wounded or
 /// incapacitated, +192 killed.
 const SEL_STABLE: f32 = 64.0;
-const CMD_ACCEL: f32 = 4.2;
-const CMD_BRAKE: f32 = 6.0;
+/// His feet (motion.rs): sharp up to a jog, a build-up into a sprint, a quick stop, a gentle ease off a sprint.
+const CMD_FEET: crate::motion::Footing = crate::motion::Footing { push: 10.0, kick: 3.0, brake: 10.0, coast: 3.0, cruise: CMD_JOG, top: CMD_SPRINT };
 
 /// How quickly the camera glides to the next step (time constant, ms).
 const GLIDE_MS: f64 = 90.0;
@@ -192,8 +192,8 @@ pub struct Viewer {
     /// gait phase, integrated from the cadence so the legs never jump as the pace changes.
     cmd_speed: f32,
     cmd_dir: (f32, f32),
-    /// Skidding: told to go the other way at pace, feet planted, sliding to a stop before pushing off.
-    cmd_skid: bool,
+    /// Skidding: a 180 cut (plant, pivot, push off) or a sprint let go of (a short slide to a stop).
+    cmd_skid: crate::motion::Skid,
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
     /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms), last speed (m/s), smoothed
@@ -370,7 +370,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_moving: false,
         cmd_speed: 0.0,
         cmd_dir: (0.0, 1.0),
-        cmd_skid: false,
+        cmd_skid: crate::motion::Skid::None,
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         turns: HashMap::new(),
@@ -1334,7 +1334,10 @@ impl Viewer {
             None => (scalia_ai::battle::MAG, COMMANDER_MAGS * scalia_ai::battle::MAG, false, 100),
         };
         let line = self.gun.line.map_or("null".to_string(), |l| format!("[{:.4},{:.4},{:.4},{:.4}]", l[0], l[1], l[2], l[3]));
-        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots)
+        // How wide the rounds go now (0 steady .. 1 wild): moving, standing up and the hip open it; crouched or
+        // prone and still close it. The page sizes the reticle by it.
+        let spread = (0.25 + 0.45 * (self.cmd_speed / CMD_SPRINT).min(1.0) + [0.15, 0.05, 0.0][self.gun.stance.min(2) as usize] + if self.gun.aim { 0.0 } else { 0.3 }).min(1.0);
+        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"spread\":{spread:.3},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots)
     }
     /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
     /// starts over the commander.
@@ -2802,6 +2805,10 @@ impl Viewer {
         // Like a person, not a cursor: about half a second up to a walk, a second up to a sprint, and a few
         // steps to brake (GTA-style). Changing direction keeps most of the pace. Low he goes slower; on his
         // belly he crawls; with the rifle up he walks, never sprints.
+        // Shift from a crouch or kneel: he gets up and drives off into a sprint (building up, not at once).
+        if sprint && wants && self.gun.stance != 0 && !ready {
+            self.gun.stance = 0;
+        }
         let pace = match self.gun.stance {
             2 => CMD_CRAWL,
             1 => CMD_CROUCH,
@@ -2816,7 +2823,7 @@ impl Viewer {
         let want = if wants { (vx / len * target, vy / len * target) } else { (0.0, 0.0) };
         let vel = (self.cmd_dir.0 * self.cmd_speed, self.cmd_dir.1 * self.cmd_speed);
         self.cmd_skid = crate::motion::skidding(vel, want);
-        let vel = crate::motion::step_velocity(vel, want, dt, CMD_ACCEL, CMD_BRAKE, CMD_SPRINT);
+        let vel = crate::motion::step_velocity(vel, want, dt, CMD_FEET);
         let was_still = self.cmd_speed < 0.05;
         self.cmd_speed = (vel.0 * vel.0 + vel.1 * vel.1).sqrt();
         if self.cmd_speed > 1e-3 {
@@ -2859,6 +2866,8 @@ impl Viewer {
         let travel = (-self.cmd_dir.0).atan2(self.cmd_dir.1);
         let face = match self.gun.toward.filter(|_| ready) {
             Some((tx, ty)) => Some(((-tx).atan2(ty), 12.0)),
+            // In a cut he pivots round to where he is going while his body still slides the old way.
+            None if self.cmd_skid == crate::motion::Skid::Cut && len > 0.01 => Some(((-vx).atan2(vy), 14.0)),
             None if self.cmd_moving => Some((travel, 8.0)),
             None => None,
         };
@@ -2871,8 +2880,10 @@ impl Viewer {
         // With a little give either way (hysteresis), so tapping a key or easing off near a threshold does not
         // flick him between poses.
         let was = self.cmd_pose.0;
-        // Skidding: feet planted (standing legs) while he slides; the stop leans him back.
-        let legs = if self.cmd_skid {
+        // Skidding: feet planted while he slides (the stop leans him back); in a cut he drops low to pivot.
+        let legs = if self.cmd_skid == crate::motion::Skid::Cut {
+            Pose::Crouch
+        } else if self.cmd_skid == crate::motion::Skid::Stop {
             Pose::Stand
         } else if self.cmd_speed > if was == Pose::Sprint { 3.7 } else { 4.0 } {
             Pose::Sprint
@@ -2914,7 +2925,7 @@ impl Viewer {
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
         // The phase is always handed over (frozen when he stops), so legs blending out of a stride stay where they were.
         let lean = self.bank_for(u64::MAX, self.cmd_heading, self.cmd_speed);
-        let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, -1.0, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
+        let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, if steps == 0.0 && ts - self.cmd_pose.2 > 0.4 { 0.0 } else { -1.0 }, pose as u32 as f32, self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
         // His muzzle as drawn, so his rounds leave from the end of his barrel.
         let gun = (!self.gun.slung && scalia_render::pose::two_handed(upper.unwrap_or(pose)) > 0.0).then(|| {
             let q = scalia_render::pose::muzzle(scalia_render::pose::RIFLE, pose, upper, self.cmd_gait as f32, move_dir) * 1000.0;
@@ -2944,9 +2955,12 @@ impl Viewer {
     /// rounds would take is worked out for the page (to the first solid thing, 120 m at most).
     fn commander_fight(&mut self, ready: bool, pose: Pose) {
         let at = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
-        let toward = self.gun.toward;
         let stance = match self.gun.stance { 0 => scalia_ai::battle::Stance::Stand, 1 => scalia_ai::battle::Stance::Crouch, _ => scalia_ai::battle::Stance::Prone };
         let (h, pace) = (self.cmd_heading, (self.cmd_speed * 1000.0) as i64);
+        // The rifle points the way he faces, not straight at the mouse: while he swings round, his rounds (and the
+        // reticle) lag behind the cursor, as in Helldivers. The mouse only says how far out to look.
+        let mouse_m = self.gun.toward.map_or(30.0, |(x, y)| (x * x + y * y).sqrt());
+        let toward = self.gun.toward.map(|_| (-h.sin(), h.cos()));
         let mut reach = 120.0f32;
         if let Some(mut a) = self.assault.take() {
             let i = commander_soldier(&mut a, at);
@@ -2977,7 +2991,8 @@ impl Viewer {
                 let l = (tx * tx + ty * ty).sqrt().max(1e-3);
                 let hgt = match self.gun.stance { 0 => 1.45, 1 => 0.95, _ => 0.3 };
                 let a0 = (self.cmd.0 + (tx / l * 0.7) as f64, self.cmd.1 + (ty / l * 0.7) as f64);
-                let a1 = (self.cmd.0 + (tx / l * reach) as f64, self.cmd.1 + (ty / l * reach) as f64);
+                let out = reach.min(mouse_m.max(2.0));
+                let a1 = (self.cmd.0 + (tx / l * out) as f64, self.cmd.1 + (ty / l * out) as f64);
                 // From the end of his barrel (as drawn last frame) when known.
                 let barrel = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().position(|s| s.player).and_then(|i| a.muzzle_of(i)));
                 let p0 = match barrel {

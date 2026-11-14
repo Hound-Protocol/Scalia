@@ -252,7 +252,14 @@
   #weapon.low b { color: #e0703a; }
   #aimLine { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 19; pointer-events: none; }
   #aimLine[hidden] { display: none; }
-  #aimLine line { stroke: rgba(255, 236, 170, 0.55); stroke-width: 1; stroke-dasharray: 6 4; }
+  #aimLine line { stroke: rgba(255, 236, 170, 0.28); stroke-width: 1; stroke-dasharray: 4 6; }
+  #reticle { position: fixed; left: 0; top: 0; z-index: 20; pointer-events: none; --r: 10px; }
+  #reticle[hidden], #aimDot[hidden] { display: none; }
+  #reticle i { position: absolute; left: calc(-1 * var(--r)); top: calc(-1 * var(--r)); width: calc(2 * var(--r)); height: calc(2 * var(--r));
+    border: 1.5px solid rgba(255, 244, 214, 0.9); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(0,0,0,0.35);
+    box-sizing: border-box; transition: width 0.08s, height 0.08s, left 0.08s, top 0.08s; }
+  #reticle b { position: absolute; left: -1.5px; top: -1.5px; width: 3px; height: 3px; background: #fff4d6; box-shadow: 0 0 0 1px rgba(0,0,0,0.6); }
+  #aimDot { position: fixed; left: -2px; top: -2px; width: 4px; height: 4px; z-index: 20; pointer-events: none; border-radius: 50%; background: rgba(255,255,255,0.55); box-shadow: 0 0 0 1px rgba(0,0,0,0.5); }
   #fieldLabels { position: fixed; inset: 0; z-index: 20; pointer-events: none; overflow: hidden; }
   #fieldLabels i { position: absolute; left: 0; top: 0; font: 600 12px/1 'Saira Condensed', sans-serif; font-style: normal; letter-spacing: 0.1em; text-transform: uppercase;
     color: #e9e2c4; text-shadow: 0 0 3px #000, 0 1px 2px #000; white-space: nowrap; will-change: transform; }
@@ -604,6 +611,8 @@
 </div>
 <div id="weapon" hidden><b>30</b><small>/ 150</small><em>STANDING</em></div>
 <svg id="aimLine" hidden><line x1="0" y1="0" x2="0" y2="0"/></svg>
+<div id="reticle" hidden><i></i><b></b></div>
+<div id="aimDot" hidden></div>
 <div id="radio"><img class="body" src="./img/walkie.webp" alt="" draggable="false"><div class="scr">
   <div class="top"><span id="rNet">BN NET · CH 04</span><span class="bars"><i></i><i></i><i></i><i></i></span></div>
   <div class="who"><small id="rDir">STANDBY</small><b id="rWho">—</b></div>

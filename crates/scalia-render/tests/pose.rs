@@ -387,7 +387,8 @@ fn standing_soldiers_breathe_shift_and_look_around() {
     for k in 0..30 {
         let p = idle(&aim, Pose::StandAim, k as f32, 0.5);
         assert!((p.look - aim.look).abs() < 0.08);
-        assert_eq!(p.rifle, aim.rifle, "the sight picture stays steady");
+        // The muzzle wanders a little round the aim point (breath and pulse), never far.
+        assert!((p.rifle - aim.rifle).abs() < 0.03 && (p.rifle_yaw - aim.rifle_yaw).abs() < 0.03, "the sight picture stays close");
     }
 }
 
@@ -510,7 +511,10 @@ fn the_stock_sits_in_the_right_shoulder_pocket() {
         for k in 0..8 {
             let pp = params(pose, k as f32 / 8.0);
             let off = held(butt, &pp).distance(pocket);
-            assert!(off < 0.04, "{pose:?} phase {k}/8: stock {off:.3} m from the shoulder pocket");
+            // On the move the carried rifle sways with the stride (the user asked for a livelier weapon), so the
+            // stock may ride out of the pocket a little more than when he stands or aims.
+            let room = if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint) { 0.075 } else { 0.04 };
+            assert!(off < room, "{pose:?} phase {k}/8: stock {off:.3} m from the shoulder pocket");
         }
     }
 }
