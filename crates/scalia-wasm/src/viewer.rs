@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use glam::Vec3;
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
-use scalia_core::nav::{NavGrid, Prop, PropKind};
+use scalia_core::nav::{Furnish, NavGrid, Prop, PropKind};
 use crate::ground::*;
 use scalia_core::nav_agents::AgentGroup;
 use scalia_core::planet::Planet;
@@ -31,7 +31,7 @@ use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
 
 /// Army sizes the N key cycles through, as (groups, soldiers per group).
-/// Army sizes (groups, soldiers each). The first is the testing ground's: eight squads of twelve in the base.
+/// Army sizes (groups, soldiers each). The first is the testing ground's: two squads of twelve in the barracks.
 /// Squad call signs, in group order.
 const SQUADS: [&str; 10] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett"];
 /// The testing ground's captains.
@@ -65,7 +65,7 @@ const CINE_CLOSE_MS: f64 = 500.0;
 /// face-on to the tablet, framing it so it covers exactly the close-up's box, so the close-up fades in seamlessly.
 const TABLET_IMG_H: f32 = 0.2182;
 
-const ARMIES: [(u32, u32); 5] = [(8, 12), (1, 2000), (10, 2000), (50, 2000), (250, 2000)];
+const ARMIES: [(u32, u32); 5] = [(2, 12), (1, 2000), (10, 2000), (50, 2000), (250, 2000)];
 /// The testing ground: a military base on a levelled pad, (BASE_LO..BASE_HI) metres on both axes.
 /// Most soldiers drawn in one frame.
 const MAX_DRAWN: usize = 60_000;
@@ -453,9 +453,13 @@ fn build_army(groups: u32, per_group: u32) -> World {
     let side = (groups as f64).sqrt().ceil().max(1.0) as u32;
     let testing = per_group <= 20;
     for g in 0..groups {
-        // Testing squads stand on the base's parade ground; big armies spread over the plain.
-        let pos = if testing {
-            Pos { region: RegionId(1), x: 60_000 + (g % 4) as i64 * 14_000, y: 40_000 + (g / 4) as i64 * 14_000, z: 0 }
+        // Testing squads live in the barracks (one bay each, more on the parade ground south of HQ); big armies
+        // spread over the plain.
+        let pos = if testing && g < 2 {
+            let (x, y) = bay_centre(g as usize);
+            Pos { region: RegionId(1), x, y, z: 0 }
+        } else if testing {
+            Pos { region: RegionId(1), x: 80_000 + (g % 4) as i64 * 10_000, y: 50_000 + (g / 4) as i64 * 10_000, z: 0 }
         } else {
             Pos { region: RegionId(1), x: (g % side) as i64 * 200_000, y: (g / side) as i64 * 200_000, z: 0 }
         };
@@ -1660,6 +1664,31 @@ impl Viewer {
         (target + r * (nx * view_h / 2.0 * w / h) + u * (ny * view_h / 2.0) + o, -to_cam)
     }
 
+    /// The barracks place of a soldier of the testing ground's barracks squads while his squad is at home (not
+    /// marching, not out as agents or on the field): standing at the foot of his bunk.
+    fn billeted(&self, g: u32, slot: u32) -> Option<crate::ground::Spot> {
+        if self.army != 0 || g >= 2 || self.agents.contains_key(&g) || self.assault.as_ref().is_some_and(|a| a.has_squad(g as u16)) {
+            return None;
+        }
+        let id = GroupId(g);
+        let home = bay_centre(g as usize);
+        let p = self.world.groups.pos(id);
+        if !matches!(self.world.groups.process(id).kind, ProcessKind::Idle) || (p.x, p.y) != home {
+            return None;
+        }
+        billet(g as usize, slot as usize)
+    }
+
+    /// Puts the barracks squads' men at their bunks (instead of in formation round the bay's middle).
+    fn billet(&self, out: &mut [Derived]) {
+        for d in out.iter_mut() {
+            if let Some(b) = self.billeted(d.group.0, d.slot) {
+                d.pos.x = b.at.0;
+                d.pos.y = b.at.1;
+            }
+        }
+    }
+
     /// Where a group's formation is centred at time t (render metres).
     /// The testing ground's captains: two officers, each his own unit, answering to the commander.
     fn add_captains(&mut self) {
@@ -1669,7 +1698,8 @@ impl Viewer {
             return;
         }
         for k in 0..CAPTAINS.len() as i64 {
-            let pos = Pos { region: RegionId(1), x: 52_000 + k * 28_000, y: 30_000, z: 0 };
+            // Outside headquarters.
+            let pos = Pos { region: RegionId(1), x: 86_000 + k * 8_000, y: 62_000, z: 0 };
             let spec = GroupSpec { pos, composition: Composition([1, 0, 0, 0]), needs: Needs::full() };
             let id = self.world.groups.spawn(spec, &mut self.world.roster);
             self.chain.add_captain(id);
@@ -2068,6 +2098,7 @@ impl Viewer {
         let mut out = std::mem::take(&mut self.derived);
         if self.ground_view <= UNITS_MAX {
             derive_visible(&self.world, tick, &view, MAX_DRAWN, &mut out);
+            self.billet(&mut out);
         } else {
             out.clear();
         }
@@ -2090,11 +2121,15 @@ impl Viewer {
             if !self.on_screen(x, y, z, 3.0) {
                 continue;
             }
-            // Facing: along the march, else the formation's front with a little personal variation.
+            // Facing: along the march, at his bunk the aisle, else the formation's front with a little personal
+            // variation.
             let jitter = (scalia_core::hash::mix64(d.slot as u64 ^ 0x5ca1) % 1000) as f32 / 1000.0;
             let heading = match self.world.groups.process(d.group).kind {
                 ProcessKind::March { from, to, .. } => ((from.x - to.x) as f32).atan2((to.y - from.y) as f32),
-                _ => (jitter - 0.5) * 0.4,
+                _ => match self.billeted(d.group.0, d.slot) {
+                    Some(b) => (-(b.face.0 as f32)).atan2(b.face.1 as f32) + (jitter - 0.5) * 0.25,
+                    None => (jitter - 0.5) * 0.4,
+                },
             };
             let walking = d.phase == Phase::Marching || d.phase == Phase::Walking || d.phase == Phase::Climbing;
             let running = walking && matches!(self.world.groups.process(d.group).kind, ProcessKind::March { speed_mm_s, .. } if speed_mm_s >= RUN_SPEED_MM_S);
@@ -2563,7 +2598,9 @@ impl Viewer {
             vx = self.cmd_dir.0 * self.cmd_speed * dt;
             vy = self.cmd_dir.1 * self.cmd_speed * dt;
             let (nx, ny) = (self.cmd.0 + vx as f64, self.cmd.1 + vy as f64);
-            let free = |x: f64, y: f64| !in_base(x as f32, y as f32) || self.base_grid.walkable_at((x * 1000.0) as i64, (y * 1000.0) as i64, 300);
+            // Against the props themselves (not the coarse nav grid, whose half-metre cells close a 1.6 m door to
+            // a man of his width): free when no prop's footprint comes within his body's radius.
+            let free = |x: f64, y: f64| !in_base(x as f32, y as f32) || body_clear(&self.base_props, (x * 1000.0) as i64, (y * 1000.0) as i64, CMD_RADIUS_MM);
             if free(nx, ny) {
                 self.cmd = (nx, ny);
             } else if free(nx, self.cmd.1) {
@@ -3135,6 +3172,11 @@ fn prop_box(p: &Prop, h: f32) -> (Vec3, Vec3) {
             let top = if size_mm >= 2_500 { 6.6 } else { s * 2.0 };
             (Vec3::new(x - s, y - s, h), Vec3::new(x + s, y + s, h + top))
         }
+        PropKind::Furniture { item, .. } => {
+            let (hx, hy) = p.half_extent();
+            let (hx, hy) = (hx as f32 / 1000.0, hy as f32 / 1000.0);
+            (Vec3::new(x - hx, y - hy, h), Vec3::new(x + hx, y + hy, h + item.height_mm() as f32 / 1000.0))
+        }
     }
 }
 
@@ -3149,6 +3191,13 @@ fn prop_kind(p: &Prop) -> &'static str {
         PropKind::Crate { size_mm } if size_mm >= 2_500 => "tower",
         PropKind::Crate { .. } => "crate",
         PropKind::Panel { .. } => "killhouse",
+        PropKind::Furniture { item, .. } => match item {
+            Furnish::Bunk => "bunk",
+            Furnish::Locker => "locker",
+            Furnish::Table => "table",
+            Furnish::Bench => "bench",
+            Furnish::Rack => "weapons rack",
+        },
     }
 }
 
@@ -3237,6 +3286,77 @@ fn structure_of(p: &Prop, h: f32) -> Structure {
     s
 }
 
+/// A piece of barracks furniture: steel bunks with olive mattresses, grey lockers, wooden tables and benches,
+/// a weapons rack with rifles standing in it.
+fn furniture_mesh(m: &mut MeshBuilder, p: &Prop, item: Furnish, h: f32) {
+    use scalia_render::mesh::kit;
+    let c = |q: u8| scalia_render::mesh::code(q, scalia_render::mesh::Part::Body);
+    let (x, y) = (p.x_mm as f32 / 1000.0, p.y_mm as f32 / 1000.0);
+    let (hx, hy) = p.half_extent();
+    let (hx, hy) = (hx as f32 / 1000.0, hy as f32 / 1000.0);
+    let top = item.height_mm() as f32 / 1000.0;
+    let legs = |m: &mut MeshBuilder, up: f32, w: f32, col: u8| {
+        for (sx, sy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            let (lx, ly) = (x + sx * (hx - w), y + sy * (hy - w));
+            m.cuboid([lx - w, ly - w, h], [lx + w, ly + w, h + up], c(col));
+        }
+    };
+    match item {
+        Furnish::Bunk => {
+            legs(m, top, 0.03, kit::METAL);
+            for z in [0.38f32, 1.38] {
+                m.cuboid([x - hx, y - hy, h + z], [x + hx, y + hy, h + z + 0.06], c(kit::METAL));
+                m.cuboid([x - hx + 0.04, y - hy + 0.04, h + z + 0.06], [x + hx - 0.04, y + hy - 0.04, h + z + 0.2], c(kit::UNIFORM_DARK));
+            }
+            // Pillows at the head (the end against the wall: whichever end is nearer the barracks' long walls).
+            let head = if (y - BARRACKS_MM.1 as f32 / 1000.0).abs() < (y - BARRACKS_MM.3 as f32 / 1000.0).abs() { -1.0 } else { 1.0 };
+            for z in [0.58f32, 1.58] {
+                let py = y + head * (hy - 0.25);
+                m.cuboid([x - hx + 0.1, py - 0.15, h + z], [x + hx - 0.1, py + 0.15, h + z + 0.1], c(15));
+            }
+        }
+        Furnish::Locker => {
+            m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + top], c(kit::STRAP));
+            m.cuboid([x - 0.01, y - hy - 0.01, h + 0.1], [x + 0.01, y + hy + 0.01, h + top - 0.1], c(kit::METAL));
+        }
+        Furnish::Table => {
+            legs(m, top - 0.04, 0.04, kit::COYOTE_DARK);
+            m.cuboid([x - hx, y - hy, h + top - 0.04], [x + hx, y + hy, h + top], c(13));
+        }
+        Furnish::Bench => {
+            legs(m, top - 0.05, 0.04, kit::COYOTE_DARK);
+            m.cuboid([x - hx, y - hy, h + top - 0.05], [x + hx, y + hy, h + top], c(13));
+        }
+        Furnish::Rack => {
+            m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + 0.12], c(kit::METAL));
+            m.cuboid([x - hx, y - 0.03, h + top - 0.08], [x + hx, y + 0.03, h + top], c(kit::METAL));
+            let n = ((hx * 2.0) / 0.25) as i32;
+            for k in 0..n {
+                let rx = x - hx + 0.125 + k as f32 * 0.25;
+                m.cuboid([rx - 0.025, y - 0.06, h + 0.12], [rx + 0.025, y + 0.06, h + top - 0.05], c(1));
+            }
+        }
+    }
+}
+
+/// The commander's body radius for walking into things (mm).
+const CMD_RADIUS_MM: i64 = 280;
+
+/// Whether a man of radius `r` standing at (x, y) (mm) touches no prop.
+fn body_clear(props: &[Prop], x: i64, y: i64, r: i64) -> bool {
+    props.iter().all(|p| {
+        let (dx, dy) = (x - p.x_mm, y - p.y_mm);
+        match p.kind {
+            PropKind::Rock { radius_mm } => dx * dx + dy * dy >= (radius_mm + r) * (radius_mm + r),
+            _ => {
+                let (hx, hy) = p.half_extent();
+                let (ox, oy) = ((dx.abs() - hx).max(0), (dy.abs() - hy).max(0));
+                ox * ox + oy * oy >= r * r
+            }
+        }
+    })
+}
+
 /// Low-poly mesh for the base's props, standing on the levelled pad at height `h` (same style as the soldiers).
 fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
     use scalia_render::mesh::kit;
@@ -3245,6 +3365,9 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
     // The range's concrete floor.
     let (x0, y0, x1, y1) = (RANGE_MM.0 as f32 / 1000.0, RANGE_MM.1 as f32 / 1000.0, RANGE_MM.2 as f32 / 1000.0, RANGE_MM.3 as f32 / 1000.0);
     m.cuboid([x0, y0, h - 0.05], [x1, y1, h + 0.03], c(2));
+    // The barracks' concrete floor.
+    let (x0, y0, x1, y1) = (BARRACKS_MM.0 as f32 / 1000.0, BARRACKS_MM.1 as f32 / 1000.0, BARRACKS_MM.2 as f32 / 1000.0, BARRACKS_MM.3 as f32 / 1000.0);
+    m.cuboid([x0, y0, h - 0.05], [x1, y1, h + 0.03], c(19));
     for p in props {
         let (x, y) = (p.x_mm as f32 / 1000.0, p.y_mm as f32 / 1000.0);
         match p.kind {
@@ -3279,6 +3402,7 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
                     }
                 }
             }
+            PropKind::Furniture { item, .. } => furniture_mesh(&mut m, p, item, h),
             PropKind::Panel { length_mm, window } => {
                 // Plywood on a dark frame: posts at the ends, a window as a sill wall and a header.
                 use scalia_core::killhouse::{WALL_TOP_M, WINDOW_SILL_M, WINDOW_TOP_M};

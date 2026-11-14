@@ -43,6 +43,7 @@ fn top_of(p: &Prop) -> i64 {
         PropKind::Crate { size_mm } if size_mm >= 2_500 => 0,
         PropKind::Crate { size_mm } => size_mm,
         PropKind::Rock { radius_mm } => radius_mm * 9 / 10,
+        PropKind::Furniture { item, .. } => item.height_mm(),
     }
 }
 
@@ -52,6 +53,7 @@ fn halves(p: &Prop) -> Option<(i64, i64)> {
         PropKind::Wall { length_mm, thickness_mm } => (length_mm, thickness_mm),
         PropKind::Panel { length_mm, .. } => (length_mm, PropKind::PANEL_MM),
         PropKind::Crate { size_mm } => (size_mm, size_mm),
+        PropKind::Furniture { width_mm, depth_mm, .. } => (width_mm, depth_mm),
         PropKind::Rock { .. } => return None,
     };
     Some(if p.quarter_turns % 2 == 0 { (l / 2, t / 2) } else { (t / 2, l / 2) })

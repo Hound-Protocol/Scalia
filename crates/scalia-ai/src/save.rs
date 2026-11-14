@@ -6,7 +6,7 @@ use crate::sight::SightGrid;
 use crate::tactics::CoverMap;
 use scalia_core::hash::mix64;
 use scalia_core::killhouse::Killhouse;
-use scalia_core::nav::{NavGrid, Prop, PropKind};
+use scalia_core::nav::{Furnish, NavGrid, Prop, PropKind};
 use serde::{Deserialize, Serialize};
 
 /// Everything that can change a battle from outside: a player's or a leader's order.
@@ -97,6 +97,7 @@ impl From<Prop> for PropSpec {
             PropKind::Wall { length_mm, thickness_mm } => (1, length_mm, thickness_mm),
             PropKind::Crate { size_mm } => (2, size_mm, 0),
             PropKind::Panel { length_mm, window } => (3, length_mm, window as i64),
+            PropKind::Furniture { item, width_mm, depth_mm } => (4 + Furnish::ALL.iter().position(|&f| f == item).unwrap_or(0) as u8, width_mm, depth_mm),
         };
         PropSpec { kind, a, b, x_mm: p.x_mm, y_mm: p.y_mm, quarter_turns: p.quarter_turns }
     }
@@ -108,7 +109,8 @@ impl From<PropSpec> for Prop {
             0 => PropKind::Rock { radius_mm: p.a },
             1 => PropKind::Wall { length_mm: p.a, thickness_mm: p.b },
             2 => PropKind::Crate { size_mm: p.a },
-            _ => PropKind::Panel { length_mm: p.a, window: p.b != 0 },
+            3 => PropKind::Panel { length_mm: p.a, window: p.b != 0 },
+            k => PropKind::Furniture { item: Furnish::ALL[((k - 4) as usize).min(Furnish::ALL.len() - 1)], width_mm: p.a, depth_mm: p.b },
         };
         Prop { kind, x_mm: p.x_mm, y_mm: p.y_mm, quarter_turns: p.quarter_turns }
     }

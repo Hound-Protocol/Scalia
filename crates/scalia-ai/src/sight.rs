@@ -39,6 +39,7 @@ fn reach(p: &Prop) -> i64 {
         PropKind::Wall { length_mm, thickness_mm } => length_mm / 2 + thickness_mm,
         PropKind::Crate { size_mm } => size_mm,
         PropKind::Panel { length_mm, .. } => length_mm / 2 + PropKind::PANEL_MM,
+        PropKind::Furniture { width_mm, depth_mm, .. } => width_mm.max(depth_mm),
     }
 }
 
@@ -61,6 +62,8 @@ pub fn bands_of(p: &Prop) -> u32 {
         PropKind::Crate { size_mm } if size_mm >= 2_500 => 0,
         PropKind::Crate { size_mm } => up_to(size_mm),
         PropKind::Rock { radius_mm } => up_to(radius_mm * 9 / 10),
+        // Bunks and lockers hide a man; tables and benches only his legs.
+        PropKind::Furniture { item, .. } => up_to(item.height_mm()),
     }
 }
 

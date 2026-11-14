@@ -16,6 +16,39 @@ pub enum PropKind {
     /// A plywood training-house panel, `PANEL_MM` thick and 2.4 m high, running east-west before turning; with
     /// `window` it has an opening from 1.0 to 2.0 m (still blocks walking, not sight).
     Panel { length_mm: i64, window: bool },
+    /// Furniture: an item `width_mm` along x and `depth_mm` along y before turning (blocks walking; low ones not
+    /// sight).
+    Furniture { item: Furnish, width_mm: i64, depth_mm: i64 },
+}
+
+/// What a piece of furniture is (its height and how it is drawn; where men sit, lie and stand at it is the
+/// building's business).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Furnish {
+    /// A two-tier bunk bed (bunks at 0.45 and 1.45 m).
+    Bunk,
+    /// A steel wall locker.
+    Locker,
+    /// A table (top at 0.75 m).
+    Table,
+    /// A bench or footlocker to sit on (0.45 m).
+    Bench,
+    /// A weapons rack.
+    Rack,
+}
+
+impl Furnish {
+    pub const ALL: [Furnish; 5] = [Furnish::Bunk, Furnish::Locker, Furnish::Table, Furnish::Bench, Furnish::Rack];
+    /// Its height (mm).
+    pub fn height_mm(self) -> i64 {
+        match self {
+            Furnish::Bunk => 1_700,
+            Furnish::Locker => 1_900,
+            Furnish::Table => 780,
+            Furnish::Bench => 470,
+            Furnish::Rack => 1_300,
+        }
+    }
 }
 
 impl PropKind {
@@ -64,13 +97,16 @@ impl Prop {
     }
 
     /// Half the width and height of the prop's bounding box.
-    fn half_extent(&self) -> (i64, i64) {
+    pub fn half_extent(&self) -> (i64, i64) {
         match self.kind {
             PropKind::Rock { radius_mm } => (radius_mm, radius_mm),
             PropKind::Wall { length_mm, thickness_mm } => {
                 if self.quarter_turns % 2 == 0 { (length_mm / 2, thickness_mm / 2) } else { (thickness_mm / 2, length_mm / 2) }
             }
             PropKind::Crate { size_mm } => (size_mm / 2, size_mm / 2),
+            PropKind::Furniture { width_mm, depth_mm, .. } => {
+                if self.quarter_turns % 2 == 0 { (width_mm / 2, depth_mm / 2) } else { (depth_mm / 2, width_mm / 2) }
+            }
             PropKind::Panel { length_mm, .. } => {
                 let t = PropKind::PANEL_MM;
                 if self.quarter_turns % 2 == 0 { (length_mm / 2, t / 2) } else { (t / 2, length_mm / 2) }
