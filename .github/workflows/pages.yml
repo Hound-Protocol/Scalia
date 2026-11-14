@@ -44,7 +44,7 @@ jobs:
           sed -i "s#scalia_wasm_bg.wasm', import.meta.url#scalia_wasm_bg.wasm?v=$v', import.meta.url#" web/pkg/scalia_wasm.js
           sed -i "s#src=\"./game.js\"#src=\"./game.js?v=$v\"#; s#src=\"./debug.js\"#src=\"./debug.js?v=$v\"#; s#src=\"./models.js\"#src=\"./models.js?v=$v\"#" web/*.html
           # Images and sounds too: a changed picture under the same name must not come from the cache.
-          sed -i -E "s#\./(img|sfx)/([A-Za-z0-9_.-]+\.(webp|png|mp3))#./\1/\2?v=$v#g" web/*.html web/game.js
+          sed -i -E "s#\./(img|sfx)/([A-Za-z0-9_./-]+\.(webp|png|mp3))#./\1/\2?v=$v#g" web/*.html web/game.js
           # Updates are named by area with a running number per area, e.g. "Tablet update V 001": the area is the
           # commit's "Update:" trailer (no trailer: "Build"), the number counts that area's updates so far.
           area=$(git log -1 --format='%(trailers:key=Update,valueonly)' | head -1 | xargs)

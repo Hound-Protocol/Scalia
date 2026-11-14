@@ -921,8 +921,13 @@ impl Viewer {
             if snd.step.is_some() && (dx * dx + dy * dy + l.2 * l.2).sqrt() > 60.0 {
                 continue;
             }
+            // Weapon handling is heard close by only.
+            if snd.cue.quiet() && (dx * dx + dy * dy + l.2 * l.2).sqrt() > 30.0 {
+                continue;
+            }
             let wait = (if lab_speed <= 0.0 { 0.0 } else { (snd.at - lab_t) / lab_speed }).max(0.0) as f32 / 1000.0;
             let (kind, loud) = match (snd.blast, snd.step) {
+                _ if snd.cue.kind().is_some() => (snd.cue.kind().unwrap_or(0.0), 1.0),
                 (true, _) => (1.0, 1.0),
                 // Footfalls: 2 on grass, 3 on concrete.
                 (false, Some(l)) => (if crate::ground::concrete_at(snd.x, snd.y) { 3.0 } else { 2.0 }, l),
@@ -2979,6 +2984,14 @@ impl Viewer {
                             self.gun.pull = false;
                         }
                         scalia_ai::battle::PlayerShot::Cycling => {}
+                        // Out of rounds: the click of an empty rifle (once per pull).
+                        scalia_ai::battle::PlayerShot::Empty => {
+                            if self.frame_ms - self.gun.dry_at > 350.0 {
+                                self.gun.dry_at = self.frame_ms;
+                                a.cue(i, crate::assault::Cue::Dry);
+                            }
+                            self.gun.pull = false;
+                        }
                         _ => self.gun.pull = false,
                     }
                 }
@@ -4011,6 +4024,8 @@ struct Gun {
     line: Option<[f32; 4]>,
     /// The way the rifle points (absolute metres, from him), once the mouse has been seen.
     toward: Option<(f32, f32)>,
+    /// When the empty rifle last clicked (ms): once per squeeze, not every frame.
+    dry_at: f64,
 }
 
 /// The battle's man standing for the commander (joined on first use).

@@ -23,6 +23,41 @@ pub struct Sound {
     pub step: Option<f32>,
     /// Viewer time (ms) it happens: rounds in a burst fall between steps.
     pub at: f64,
+    /// Which weapon sound (`Cue`), when it is a gun's: shot, or a piece of its handling.
+    pub cue: Cue,
+}
+
+/// A gun's sounds: each side carries its own rifle (ours an AR-15, the enemy an AK-47), so you hear who is
+/// firing; the handling (magazine out, in, the bolt) and the click of an empty rifle are heard close by only.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Cue {
+    /// Not a gun's (a blast or a footfall: see the other fields).
+    #[default]
+    None,
+    Shot { enemy: bool },
+    MagOut { enemy: bool },
+    MagIn { enemy: bool },
+    Bolt { enemy: bool },
+    Dry,
+}
+
+impl Cue {
+    /// The sound record's kind for `take_sounds` (and game.js `playSounds`): 0 our shot, 4 theirs, 5-7 our
+    /// magazine out, in, bolt, 8-10 theirs, 11 the empty click; None for everything else.
+    pub fn kind(self) -> Option<f32> {
+        Some(match self {
+            Cue::None => return None,
+            Cue::Shot { enemy } => if enemy { 4.0 } else { 0.0 },
+            Cue::MagOut { enemy } => if enemy { 8.0 } else { 5.0 },
+            Cue::MagIn { enemy } => if enemy { 9.0 } else { 6.0 },
+            Cue::Bolt { enemy } => if enemy { 10.0 } else { 7.0 },
+            Cue::Dry => 11.0,
+        })
+    }
+    /// Handling sounds carry only a few metres.
+    pub fn quiet(self) -> bool {
+        !matches!(self, Cue::None | Cue::Shot { .. })
+    }
 }
 
 /// A round or a blast to draw: viewer time, muzzle (or blast centre) and impact, in absolute millimetres above
@@ -221,7 +256,7 @@ impl Assault {
                 match *e {
                     Event::Shot { from, to, hit, at_ms, shooter, target } => {
                         let at = at_ms as f64 + offset;
-                        self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false, step: None, at });
+                        self.sounds.push(Sound { x: from.x as f64 / 1000.0, y: from.y as f64 / 1000.0, blast: false, step: None, at, cue: Cue::Shot { enemy: self.battle.soldiers[shooter].team != 0 } });
                         // From the end of his barrel as he was last drawn (any weapon, any pose); if he has not been
                         // drawn yet, 0.6 m out towards the target at shoulder height.
                         let (dx, dy) = (to.x - from.x, to.y - from.y);
@@ -235,9 +270,19 @@ impl Assault {
                         let tracer = (r >> 40) % 4 == 0;
                         self.fx.push(Fx { at, from: muzzle, to: impact, hit, blast: false, tracer });
                     }
+                    // A magazine change, heard through: the old one out, the fresh one in about halfway, the bolt
+                    // sent home near the end (over however long his change takes).
+                    Event::Reload { soldier } => {
+                        let s = &self.battle.soldiers[soldier];
+                        let (at, len, enemy) = (self.battle.time_ms as f64 + offset, s.reloading_ms.max(600) as f64, s.team != 0);
+                        let (x, y) = (s.pos.0 as f64 / 1000.0, s.pos.1 as f64 / 1000.0);
+                        for (frac, cue) in [(0.05, Cue::MagOut { enemy }), (0.5, Cue::MagIn { enemy }), (0.82, Cue::Bolt { enemy })] {
+                            self.sounds.push(Sound { x, y, blast: false, step: None, at: at + len * frac, cue });
+                        }
+                    }
                     Event::Explosion { pos } => {
                         let at = self.battle.time_ms as f64 + offset;
-                        self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, step: None, at });
+                        self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, step: None, at, cue: Cue::None });
                         self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false });
                     }
                     Event::Briefed { leader, soldier, role } => {
@@ -377,7 +422,7 @@ impl Assault {
             let crossed = |at: f64| if after >= before { before < at && after >= at } else { before < at || after >= at };
             if steps > 0.0 && matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk) && (crossed(0.0001) || crossed(0.5)) {
                 let loud = match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, _ => 0.5 };
-                self.sounds.push(Sound { x: x / 1000.0, y: y / 1000.0, blast: false, step: Some(loud), at: self.now });
+                self.sounds.push(Sound { x: x / 1000.0, y: y / 1000.0, blast: false, step: Some(loud), at: self.now, cue: Cue::None });
             }
             let (phase, cadence) = match falling {
                 Some((_, t)) => (t, -1.0),
@@ -399,6 +444,13 @@ impl Assault {
             out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, pose as u32 as f32, a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), 0.0]);
         }
         out
+    }
+
+    /// A gun sound not from the battle's log (the commander's empty click), at soldier `i`, now.
+    pub fn cue(&mut self, i: usize, cue: Cue) {
+        if let Some(s) = self.battle.soldiers.get(i) {
+            self.sounds.push(Sound { x: s.pos.0 as f64 / 1000.0, y: s.pos.1 as f64 / 1000.0, blast: false, step: None, at: self.now, cue });
+        }
     }
 
     /// Where soldier `i`'s muzzle was last drawn (mm, z over the ground).

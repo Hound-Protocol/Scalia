@@ -107,7 +107,10 @@ const music = (() => {
 const SOUNDS = ['./sfx/context-menu.mp3', './sfx/dive-whoosh.mp3', './sfx/m4-shot.mp3', './sfx/map-zoom.mp3', './sfx/pda-close.mp3',
   './sfx/pda-leave.mp3', './sfx/pda-open.mp3', './sfx/pda-tap.mp3', './sfx/radio-key.mp3', './sfx/steps-concrete-1.mp3',
   './sfx/steps-concrete-2.mp3', './sfx/steps-concrete-3.mp3', './sfx/steps-grass.mp3', './sfx/unit-select.mp3',
-  './sfx/update-alert.mp3', './sfx/urgent-alert.mp3', './sfx/walkie-down.mp3', './sfx/walkie-ring.mp3', './sfx/walkie-up.mp3'];
+  './sfx/update-alert.mp3', './sfx/urgent-alert.mp3', './sfx/walkie-down.mp3', './sfx/walkie-ring.mp3', './sfx/walkie-up.mp3',
+  './sfx/weapons/ar15-shot.mp3', './sfx/weapons/ar15-mag-out.mp3', './sfx/weapons/ar15-mag-in.mp3', './sfx/weapons/ar15-bolt.mp3',
+  './sfx/weapons/ak47-shot.mp3', './sfx/weapons/ak47-mag-out.mp3', './sfx/weapons/ak47-mag-in.mp3', './sfx/weapons/ak47-bolt.mp3',
+  './sfx/weapons/m1911-dry.mp3'];
 const BUILD = new URL(import.meta.url).searchParams.get('v');
 const WASM_URL = new URL(`./pkg/scalia_wasm_bg.wasm${BUILD ? '?v=' + BUILD : ''}`, import.meta.url).href;
 const loaded = (() => {
@@ -1613,8 +1616,15 @@ try {
   const audio = new AudioEngine();
   audio.fetchBytes = fileBytes;
   const SHOT = './sfx/m4-shot.mp3', STEPS = './sfx/steps-grass.mp3';
+  // Each side's rifle (Rust assault.rs `Cue`): ours an AR-15, theirs an AK-47; the handling heard close by.
+  const GUN = {
+    0: './sfx/weapons/ar15-shot.mp3', 4: './sfx/weapons/ak47-shot.mp3',
+    5: './sfx/weapons/ar15-mag-out.mp3', 6: './sfx/weapons/ar15-mag-in.mp3', 7: './sfx/weapons/ar15-bolt.mp3',
+    8: './sfx/weapons/ak47-mag-out.mp3', 9: './sfx/weapons/ak47-mag-in.mp3', 10: './sfx/weapons/ak47-bolt.mp3',
+    11: './sfx/weapons/m1911-dry.mp3',
+  };
   const STEPS_CONCRETE = ['./sfx/steps-concrete-1.mp3', './sfx/steps-concrete-2.mp3', './sfx/steps-concrete-3.mp3'];
-  const fireGraph = () => { const c = audio.ensure(); if (c) { audio.buffer(SHOT); audio.buffer(STEPS); STEPS_CONCRETE.forEach((u) => audio.buffer(u)); } return c; };
+  const fireGraph = () => { const c = audio.ensure(); if (c) { audio.buffer(SHOT); audio.buffer(STEPS); Object.values(GUN).forEach((u) => audio.buffer(u)); STEPS_CONCRETE.forEach((u) => audio.buffer(u)); } return c; };
   let envAt = 0;
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
@@ -1635,7 +1645,8 @@ try {
       if (kind === 3) audio.play(concreteTake(), { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16 });
       else if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2 });
       else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, rate: 0.45 });
-      else audio.play(SHOT, { ...at, kind: 'shot', db: 130, gain: Math.min(3, gain * 4), room, rate: 0.94 + Math.random() * 0.12 });
+      else if (kind === 0 || kind === 4) audio.play(GUN[kind], { ...at, kind: 'shot', db: 130, gain: Math.min(3, gain * 4), room, rate: 0.95 + Math.random() * 0.1 });
+      else if (GUN[kind]) audio.play(GUN[kind], { ...at, kind: 'step', db: 62, gain: Math.min(2, gain * 1.4), room: room * 0.5, echoes: [], rate: 0.96 + Math.random() * 0.08 });
     }
     } catch (e) { console.warn('audio', e); }
   };

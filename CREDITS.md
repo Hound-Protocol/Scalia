@@ -22,6 +22,10 @@
 - **UI sounds** (`web/sfx/pda-open.mp3`, `pda-close.mp3` reversed from it, `pda-tap.mp3`): "juniorsoundays ui sound 10
   527836" and "ui sound 39 527833"; **dive swoosh** (`web/sfx/dive-whoosh.mp3`): "stereogenicstudio swish swoosh woosh
   sfx 25 357177"; all supplied by the project lead (Pixabay sound library naming).
+- **Weapon sounds** (`web/sfx/weapons/`): "jigokukarano_sisya ar15 168855", "ak47 168856", "mp5 168858", "m1911a1
+  168854" and "desert eagle 168857", supplied by the project lead (Pixabay sound library naming). Changes: each
+  recording cut into its single shot and handling pieces (magazine out, in, bolt or slide, dry click), levelled,
+  mono (`scripts/gun_sounds_split.py`).
 - **"walkie talkie"** by [FayBall](https://sketchfab.com/FayBall), licensed under
   [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
   Source: https://sketchfab.com/3d-models/walkie-talkie-88d0177b7801448397b69fcd81220c3a
