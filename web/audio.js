@@ -51,7 +51,7 @@ export class AudioEngine {
     this.active = [];
     this.env = { enclosure: 0, size: 30, rt60: 0.25, corridor: 0, pda: 0 };
     this.peak = PEAK_FLOOR_DB; this.peakAt = 0;
-    this.hdr = 'hifi'; this.windowDb = HDR.hifi;
+    this.hdr = 'wartapes'; this.windowDb = HDR.wartapes;
   }
 
   /// HDR preset: 'hifi' (60 dB window) or 'wartapes' (25 dB).

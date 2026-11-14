@@ -1503,7 +1503,7 @@ try {
     report: { help: 'copy a bug report (version, browser, last errors) to the clipboard', run: () => { const r = errors.report(); navigator.clipboard.writeText(r).catch(() => {}); return `${errors.recent.length} error(s); report copied`; } },
     log: { help: 'log [clear]: errors, warnings and hitches (kept across reloads)', run: (a) => { if (a[0] === 'clear') { errors.clearLog(); return 'log cleared'; } return errors.logText() || '(empty)'; } },
     errors: { help: 'list the last errors', run: () => errors.recent.map((r) => `${r.at} ${r.fatal ? 'CRASH ' : ''}${r.where}: ${r.error.split('\n')[0]}`).join('\n') || '(none)' },
-    hdr: { help: 'hdr <hifi|wartapes>: audio dynamic range (60 or 25 dB window)', run: (a) => (audio.setHdr(a[0]) ? `hdr ${a[0]}` : `hdr is ${audio.hdr}; hdr <hifi|wartapes>`) },
+    hdr: { help: 'hdr <wartapes|hifi>: audio dynamic range (25 dB, the default, or 60 dB window)', run: (a) => (audio.setHdr(a[0]) ? `hdr ${a[0]}` : `hdr is ${audio.hdr}; hdr <hifi|wartapes>`) },
     audio: { help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
   });
   const pause = { on: false };
