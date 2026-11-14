@@ -725,7 +725,7 @@ impl Viewer {
                 // Outside the range by its door (safe: not live): the briefing, then in through the door.
                 a.spawn_squad(DEMO_SQUAD, 0, &block(door.0 + 8_000, door.1 - 3_000, 12));
                 a.order(DEMO_SQUAD, Order::Capture);
-                ((door.0 - 4_000, door.1), "Blue (12) takes the training house on the range from Red (8): briefing outside, in through the range door (pied), approach, stack, pie, entry, clearing.")
+                ((door.0 + 5_000, door.1 - 4_000), "Blue (12) takes the training house on the range from Red (8): briefing outside, in through the range door (pied), approach, stack, pie, entry, clearing.")
             }
         };
         self.assault = Some(a);

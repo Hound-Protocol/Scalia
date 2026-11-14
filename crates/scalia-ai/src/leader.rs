@@ -1378,9 +1378,12 @@ impl Battle {
                 s.posture = None;
                 s.aim = false;
                 s.cue = if phase_ms >= 4_000 { Cue::Brief } else { Cue::None };
-                if phase_ms >= 4_000 && (phase_ms - 4_000) % per_man == 0 && ((phase_ms - 4_000) / per_man) < men.len() as i64 {
-                    let who = men[((phase_ms - 4_000) / per_man) as usize];
-                    let role = match ((phase_ms - 4_000) / per_man) as usize {
+                // Each man's turn, once: the first tick at or after it starts.
+                let turn = (phase_ms - 4_000) / per_man;
+                let turn_began = phase_ms >= 4_000 && phase_ms - 4_000 - turn * per_man < LEAD_MS;
+                if turn_began && turn < men.len() as i64 {
+                    let who = men[turn as usize];
+                    let role = match turn as usize {
                         0 => "point",
                         1 => "number two",
                         2 | 3 => "stack",

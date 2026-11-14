@@ -211,3 +211,17 @@ fn a_gap_on_the_way_in_is_staged_pied_and_crossed_one_at_a_time() {
     assert!(t[0] >= 0, "they got through: {first_through:?}");
     assert!(t.windows(2).all(|w| w[1] - w[0] >= 300), "one at a time: {t:?}");
 }
+
+#[test]
+fn out_of_contact_the_leader_briefs_every_man_before_the_approach() {
+    use scalia_ai::battle::Event;
+    // The defenders hold far inside, out of sight: the squad starts quiet.
+    let mut b = killhouse_battle(6, &[(10_000, 7_000)], 9);
+    for _ in 0..(30_000 / 50) {
+        b.step(50);
+    }
+    let briefed: Vec<usize> = b.log.iter().filter_map(|e| if let Event::Briefed { soldier, .. } = e { Some(*soldier) } else { None }).collect();
+    assert_eq!(briefed.len(), 5, "each of the five men briefed once: {briefed:?}");
+    let steps: Vec<&str> = b.log.iter().filter_map(|e| if let Event::Order { squad: 0, step } = e { Some(*step) } else { None }).collect();
+    assert_eq!(steps.first(), Some(&"briefing"), "{steps:?}");
+}
