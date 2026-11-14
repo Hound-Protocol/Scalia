@@ -234,6 +234,10 @@ pub struct Brain {
     frags: u8,
     /// The entry room could not be seen into (smoke across the door when it was pied): treated as held.
     blind_entry: bool,
+    /// The room (index in the clearing order) a frag last went into: the pair goes in on the bang, fast.
+    fragged: Option<usize>,
+    /// The pair going into the current room (to see if one falls).
+    pair: Vec<usize>,
     /// Where the men not clearing wait, out of sight of the rooms not yet cleared (for room `wait.0`).
     wait: Option<(usize, Vec<(i64, i64)>)>,
 }
@@ -252,7 +256,7 @@ pub struct Choke {
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false }
+        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new() }
     }
 }
 
@@ -277,6 +281,8 @@ const FRAGS: u8 = 3;
 const SMOKE_THROW_MM: i64 = 35_000;
 const FUSE_MS: i64 = 1_500;
 const BLAST_MM: i64 = 4_000;
+/// How long a grenade's blast leaves the men near it unable to shoot.
+const STUN_MS: i32 = 2_500;
 const ROOM_TIMEOUT_MS: i64 = 25_000;
 
 fn dist(a: (i64, i64), b: (i64, i64)) -> i64 {
@@ -1300,6 +1306,8 @@ impl Battle {
             if s.alive() && d < BLAST_MM * 2 {
                 if s.squad as usize != by || d < BLAST_MM {
                     s.suppression = 1_000;
+                    // Stunned by the bang in a closed room: a moment before he can fight back.
+                    s.cooldown_ms = s.cooldown_ms.max(STUN_MS);
                 }
                 if d < BLAST_MM {
                     s.health = s.health.saturating_sub((120 * (BLAST_MM - d) / BLAST_MM) as i32 + 20);
@@ -1617,6 +1625,14 @@ impl Battle {
                     let outside = self.brains[squad].entry.map(|e| plan.entries[e].stack.clone()).unwrap_or_default();
                     let spots = self.safe_spots(k, &rooms[..r], &rooms[r..], &outside);
                     self.brains[squad].wait = Some((r, spots));
+                    self.brains[squad].pair.clear();
+                }
+                // One of the pair going in is hit: nobody follows him into the same fire. Back to the door: pie it
+                // again (fighting from its edges), a frag if there is one left, then the next pair goes.
+                if self.brains[squad].pair.iter().any(|&i| self.soldiers[i].down() || !self.soldiers[i].alive()) {
+                    self.brains[squad].pair.clear();
+                    self.brains[squad].room_ms = LEAD_MS;
+                    self.log.push(Event::Order { squad, step: "pull back" });
                 }
                 let mut free = self.brains[squad].wait.as_ref().map(|w| w.1.clone()).unwrap_or_default();
                 for &i in ms.iter().skip(2) {
@@ -1686,6 +1702,7 @@ impl Battle {
                     if known && self.brains[squad].frags > 0 && first_past_pie {
                         let thrower = ms[0];
                         self.brains[squad].frags -= 1;
+                        self.brains[squad].fragged = Some(r);
                         self.soldiers[thrower].act = Some((Act::Throw, now + THROW_MS));
                         self.brains[squad].blast_at = Some((now + THROW_MS + FUSE_MS, k.rooms[room].centre()));
                         self.log.push(Event::Bark { soldier: thrower, bark: crate::battle::Bark::Frag });
@@ -1706,7 +1723,11 @@ impl Battle {
                 let mut in_room = 0;
                 for (rank, &i) in ms.iter().enumerate() {
                     if rank < 2 {
-                        self.soldiers[i].task = Task::Move { to: spots[rank * 2], gait: Gait::Walk };
+                        if !self.brains[squad].pair.contains(&i) {
+                            self.brains[squad].pair.push(i);
+                        }
+                        let gait = if self.brains[squad].fragged == Some(r) { Gait::Run } else { Gait::Walk };
+                        self.soldiers[i].task = Task::Move { to: spots[rank * 2], gait };
                         self.soldiers[i].aim = true;
                         self.soldiers[i].cue = Cue::Sweep;
                         if k.room_at(self.soldiers[i].pos.0, self.soldiers[i].pos.1) == Some(room) {
@@ -1721,6 +1742,7 @@ impl Battle {
                     self.log.push(Event::Order { squad, step: "room clear" });
                     self.brains[squad].room += 1;
                     self.brains[squad].room_ms = 0;
+                    self.brains[squad].pair.clear();
                 }
             }
             Some(Method::Consolidate) => {

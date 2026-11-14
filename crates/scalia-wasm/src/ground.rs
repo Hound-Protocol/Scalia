@@ -97,14 +97,12 @@ mod lab_tests {
         let b = &mut a.battle;
         let mut seen = 0;
         let mut was_down = vec![false; 64];
+        let mut was_down2 = vec![false; 64];
         for _ in 0..(240_000 / 50) {
             b.step(50);
             {
                 for (i, s) in b.soldiers.iter().enumerate() {
                     let d = s.down() || !s.alive();
-                    if d && !was_down[i] && s.team == 0 {
-                        PHASES.with(|p| *p.borrow_mut().entry(b.squad_phase(s.squad as usize).to_string()).or_insert(0) += 1);
-                    }
                     if d && !was_down[i] && print {
                         println!("{:6.1}s  DOWN #{i} team {} at ({:.1},{:.1}) phase '{}' {}", b.time_ms as f64 / 1000.0, s.team, s.pos.0 as f64 / 1000.0, s.pos.1 as f64 / 1000.0, b.squad_phase(s.squad as usize), crate::assault::lab_state(b, i));
                     }
@@ -121,12 +119,33 @@ mod lab_tests {
                             println!("{t:6.1}s  hit {soldier} (team {}) by {by} at ({:.1},{:.1}) {}", s.team, s.pos.0 as f64 / 1000.0, s.pos.1 as f64 / 1000.0, if s.alive() { "down" } else { "dead" })
                         }
                         Event::Explosion { .. } => println!("{t:6.1}s  explosion"),
-                        Event::Shot { shooter, target, hit: true, .. } if std::env::var("HITS").is_ok() => {
+                        Event::Shot { shooter, target, hit: true, .. } if std::env::var("HITS").is_ok() && print => {
                             let (a, z) = (&b.soldiers[*shooter], &b.soldiers[*target]);
                             println!("{t:6.1}s    hit #{shooter}({:.1},{:.1}) -> #{target}({:.1},{:.1}) [{}] -> [{}]", a.pos.0 as f64 / 1e3, a.pos.1 as f64 / 1e3, z.pos.0 as f64 / 1e3, z.pos.1 as f64 / 1e3, crate::assault::lab_state(b, *shooter), crate::assault::lab_state(b, *target))
                         }
                         Event::Bark { soldier, bark: scalia_ai::battle::Bark::Smoke } => println!("{t:6.1}s  smoke by #{soldier} -> {:?}", b.smoke.last().map(|c| c.pos)),
                         _ => {}
+                    }
+                }
+            }
+            for e in &b.log[seen..] {
+                if let Event::Shot { shooter, target, hit: true, .. } = e {
+                    let (sh, t) = (&b.soldiers[*shooter], &b.soldiers[*target]);
+                    if t.team == 0 && (t.down() || !t.alive()) && !was_down2[*target] {
+                        was_down2[*target] = true;
+                        let k = b.building().expect("house");
+                        let (rs, rt) = (k.room_at(sh.pos.0, sh.pos.1), k.room_at(t.pos.0, t.pos.1));
+                        let how = match (rt, rs) {
+                            (None, None) => "out<-out",
+                            (None, Some(_)) => "out<-in",
+                            (Some(_), None) => "in<-out",
+                            (Some(a), Some(c)) if a == c => "same room",
+                            _ => "other room",
+                        };
+                        PHASES.with(|p| *p.borrow_mut().entry(format!("{} {how}", b.squad_phase(t.squad as usize))).or_insert(0) += 1);
+                        if std::env::var("WHY").is_ok() && how == "same room" {
+                            println!("  {:.1}s same-room: #{shooter} ({:.1},{:.1}) [{}] -> #{target} ({:.1},{:.1}) room {:?} cleared-order {}", b.time_ms as f64 / 1e3, sh.pos.0 as f64 / 1e3, sh.pos.1 as f64 / 1e3, crate::assault::lab_state(b, *shooter), t.pos.0 as f64 / 1e3, t.pos.1 as f64 / 1e3, rt, b.squad_phase(t.squad as usize));
+                        }
                     }
                 }
             }
