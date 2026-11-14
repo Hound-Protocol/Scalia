@@ -189,8 +189,8 @@ pub struct Viewer {
     lab_prev: f64,
     /// A lab scenario's casualty, applied once his squad has joined: (squad, which man, health).
     lab_wound: Option<(u16, usize, i32)>,
-    /// The listener's space and when it was worked out (viewer ms).
-    audio_env_cache: Option<(f64, scalia_audio::Env)>,
+    /// The acoustic space per 2 m square of the testing ground (cleared when the map changes).
+    audio_spaces: std::collections::HashMap<(i32, i32), scalia_audio::Env>,
     /// How the next squad move is to be made (chosen on the radio).
     order_mode: Option<scalia_ai::leader::Mode>,
     /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
@@ -342,7 +342,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         lab_t: 0.0,
         lab_prev: 0.0,
         lab_wound: None,
-        audio_env_cache: None,
+        audio_spaces: std::collections::HashMap::new(),
         order_mode: None,
         fx: crate::effects::Effects::default(),
         fx_lights: Vec::new(),
@@ -772,62 +772,72 @@ impl Viewer {
     pub fn field_debug(&self) -> String {
         self.assault.as_ref().map_or("no field".into(), |a| a.describe())
     }
-    /// Where the ears are: the commander on foot, or the middle of the tablet's map while it is up (m).
-    fn audio_listener(&self) -> (f64, f64) {
+    /// Where the ears are: the camera (x, y, height; m). Above the middle of the view, as high as the view is
+    /// big; while the tablet is up, above the middle of its map.
+    fn audio_listener(&self) -> (f32, f32, f32) {
         if self.tablet {
             if let Some(c) = self.map_cam.ground_cam {
-                return (c.x as f64, c.y as f64);
+                return (c.x, c.y, scalia_audio::camera_height_m(self.map_cam.ground_view));
             }
         }
-        self.cmd
+        let (target, _, view_h) = self.last_cam;
+        let (x, y) = (target.x as f64 + self.origin.0, target.y as f64 + self.origin.1);
+        (x as f32, y as f32, scalia_audio::camera_height_m(view_h))
     }
-    /// The listener's space (Pack Engine acoustics), recomputed at most ten times a second:
+    /// The space at the listener's spot on the ground (ambience and the console):
     /// [enclosure 0..1, size (m), reverb time (s), corridor 0..1, through the tablet 0/1].
     pub fn audio_env(&mut self) -> Vec<f32> {
-        let env = self.listener_env();
+        let l = self.audio_listener();
+        let env = self.space_at(l.0, l.1);
         vec![env.enclosure, env.size_m, env.rt60_s, env.corridor, if self.tablet { 1.0 } else { 0.0 }]
     }
-    fn listener_env(&mut self) -> scalia_audio::Env {
+    /// The space at a spot (open field, room, corridor), remembered per 2 m square until the map changes.
+    fn space_at(&mut self, x: f32, y: f32) -> scalia_audio::Env {
         let open = scalia_audio::Env { enclosure: 0.0, size_m: 30.0, rt60_s: 0.25, corridor: 0.0 };
-        if let Some((at, env)) = self.audio_env_cache {
-            if self.frame_ms - at < 100.0 {
-                return env;
-            }
+        let key = ((x / 2.0).floor() as i32, (y / 2.0).floor() as i32);
+        if let Some(e) = self.audio_spaces.get(&key) {
+            return *e;
         }
-        let l = self.audio_listener();
-        let env = self.assault.as_ref().map_or(open, |a| scalia_audio::listener_env(&a.battle.sight, (l.0 as f32, l.1 as f32)));
-        self.audio_env_cache = Some((self.frame_ms, env));
+        let env = self.assault.as_ref().map_or(open, |a| scalia_audio::listener_env(&a.battle.sight, (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
+        if self.audio_spaces.len() > 20_000 {
+            self.audio_spaces.clear();
+        }
+        self.audio_spaces.insert(key, env);
         env
     }
-    /// Sounds since the last call, eleven floats each, worked out by the acoustics for the listener:
+    /// Sounds since the last call, fifteen floats each, worked out by the acoustics for the ears at the camera:
     /// kind (0 shot, 1 blast, 2 footfall), loudness (footfalls: 0 walk .. 1 sprint), delay from now (s, travel
-    /// time included), gain, low-pass (Hz), room reverb 0..1, distant echoes 0..1, position relative to the
-    /// listener (m: right, ahead), distance (m), walls between.
+    /// time included), gain, low-pass (Hz), reverb of its own space 0..1, distant echoes 0..1, position from
+    /// the ears (m: right, ahead, below), distance (m), walls between, and its space: enclosure 0..1, size (m),
+    /// corridor 0..1.
     pub fn take_sounds(&mut self) -> Vec<f32> {
-        let env = self.listener_env();
         let l = self.audio_listener();
         let (lab_t, lab_speed) = (self.lab_t, self.lab_speed);
-        let extra = if self.tablet { 0.0 } else { scalia_audio::zoom_extra_m(self.zoom_step) };
         let (r, _, _) = scalia_render::camera::basis(self.last_cam.1);
-        let Some(a) = self.assault.as_mut() else { return Vec::new() };
+        let Some(mut a) = self.assault.take() else { return Vec::new() };
+        let sounds: Vec<crate::assault::Sound> = a.sounds.drain(..).collect();
+        self.assault = Some(a);
         let mut out = Vec::new();
-        for snd in a.sounds.drain(..) {
-            let (dx, dy) = ((snd.x - l.0) as f32, (snd.y - l.1) as f32);
-            let dist = (dx * dx + dy * dy).sqrt();
-            // Footfalls carry 30 m at most; anything else as far as it goes.
-            if snd.step.is_some() && dist > 30.0 {
+        for snd in sounds {
+            let (sx, sy) = (snd.x as f32, snd.y as f32);
+            let (dx, dy) = (sx - l.0, sy - l.1);
+            // Footfalls carry 60 m at most (the mix drops them earlier when anything louder is going on).
+            if snd.step.is_some() && (dx * dx + dy * dy + l.2 * l.2).sqrt() > 60.0 {
                 continue;
             }
-            let p = scalia_audio::path(&a.battle.sight, (l.0 as f32, l.1 as f32), (snd.x as f32, snd.y as f32), extra, &env);
+            let space = self.space_at(sx, sy);
+            let Some(a) = self.assault.as_ref() else { break };
+            let p = scalia_audio::path(&a.battle.sight, l, (sx, sy), &space);
             let wait = (if lab_speed <= 0.0 { 0.0 } else { (snd.at - lab_t) / lab_speed }).max(0.0) as f32 / 1000.0;
             let (kind, loud) = match (snd.blast, snd.step) {
                 (true, _) => (1.0, 1.0),
                 (false, Some(l)) => (2.0, l),
                 _ => (0.0, 1.0),
             };
-            // Right and ahead as the camera looks (ahead = up the screen, on the ground).
+            // Right and ahead as the camera looks (ahead = up the screen, on the ground); below = the height.
             let (rx, ry) = (dx * r.x + dy * r.y, -dx * r.y + dy * r.x);
-            out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, p.wet_far, rx, ry, dist, p.walls as f32]);
+            let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
+            out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, p.wet_far, rx, ry, l.2, dist, p.walls as f32, space.enclosure, space.size_m, space.corridor]);
         }
         out
     }
@@ -2212,6 +2222,7 @@ impl Viewer {
             if let Some(props) = a.battle.map_spec().map(|m| m.props()).filter(|p| p.len() > self.base_props.len()) {
                 self.base_props = props;
                 self.base_grid.rebuild(&self.base_props);
+                self.audio_spaces.clear();
                 let m = base_mesh(&self.base_props, self.base_h);
                 self.gpu.upload("base", m.bytes());
             }

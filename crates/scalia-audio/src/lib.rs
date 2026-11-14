@@ -89,16 +89,18 @@ pub fn listener_env(sight: &SightGrid, at: (f32, f32)) -> Env {
     Env { enclosure, size_m, rt60_s, corridor }
 }
 
-/// Solid walls crossed on the straight line from `a` to `b` (m), at chest height.
-pub fn walls_between(sight: &SightGrid, a: (f32, f32), b: (f32, f32)) -> u32 {
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+/// Solid walls crossed on the straight line from `a` to `b` (x, y, height; m): a camera high above hears
+/// over the walls, one at ground level through them.
+pub fn walls_between(sight: &SightGrid, a: (f32, f32, f32), b: (f32, f32, f32)) -> u32 {
+    let (dx, dy, dz) = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
     let len = (dx * dx + dy * dy).sqrt();
-    let n = (len * 1000.0 / STEP_MM).ceil() as usize;
+    let n = (len * 1000.0 / STEP_MM).ceil().max(1.0) as usize;
     let (mut walls, mut inside) = (0, false);
     for k in 1..n {
         let t = k as f32 / n as f32;
-        let (x, y) = (a.0 + dx * t, a.1 + dy * t);
-        let solid = sight.solid_at((x * 1000.0) as i64, (y * 1000.0) as i64, PATH_MM);
+        let (x, y, z) = (a.0 + dx * t, a.1 + dy * t, a.2 + dz * t);
+        // Above anything that stands on the testing ground: nothing more to cross.
+        let solid = z < 8.0 && sight.solid_at((x * 1000.0) as i64, (y * 1000.0) as i64, (z * 1000.0) as i64);
         if solid && !inside {
             walls += 1;
         }
@@ -107,33 +109,29 @@ pub fn walls_between(sight: &SightGrid, a: (f32, f32), b: (f32, f32)) -> u32 {
     walls
 }
 
-/// How a sound at `source` reaches a listener at `listener` (m) in `env`. `extra_m` is distance added on top
-/// of the real one (zoomed out, the commander hears the fight as if further off): it dulls and wets the sound
-/// but does not delay it.
-pub fn path(sight: &SightGrid, listener: (f32, f32), source: (f32, f32), extra_m: f32, env: &Env) -> Path {
-    let (dx, dy) = (source.0 - listener.0, source.1 - listener.1);
-    let real = (dx * dx + dy * dy).sqrt();
-    let walls = if real > 0.5 { walls_between(sight, listener, source) } else { 0 };
-    let d = real + extra_m;
+/// How high the ears sit above the middle of the view (m) for a view this many metres tall: the camera's
+/// distance, so zooming out takes you further from the fight (closest view about as heard, furthest fully
+/// distant).
+pub fn camera_height_m(view_h_m: f32) -> f32 {
+    (view_h_m * 1.6).clamp(3.0, 400.0)
+}
+
+/// How a sound at `source` (m, on the ground; chest height) reaches ears at `listener` (x, y, height; m).
+/// `at_source` is the space the sound is made in: its reverb rings there and is heard as such.
+pub fn path(sight: &SightGrid, listener: (f32, f32, f32), source: (f32, f32), at_source: &Env) -> Path {
+    let src = (source.0, source.1, PATH_MM as f32 / 1000.0);
+    let (dx, dy, dz) = (src.0 - listener.0, src.1 - listener.1, src.2 - listener.2);
+    let d = (dx * dx + dy * dy + dz * dz).sqrt();
+    let walls = if d > 0.5 { walls_between(sight, listener, src) } else { 0 };
     // Distance: about -6 dB per doubling past 10 m; each wall takes most of what remains.
     let gain = 1.0 / (1.0 + d / 10.0) * 0.32f32.powi(walls as i32);
     // Air takes the highs over distance; a wall leaves a thump.
     let lowpass_hz = (18_000.0 / (1.0 + d / 70.0) * 0.22f32.powi(walls as i32)).clamp(250.0, 20_000.0);
-    // The room around the listener rings with what is near him; zoomed out he is no longer in it.
-    let near = (1.0 - extra_m / 150.0).clamp(0.0, 1.0);
-    let wet_room = ((env.enclosure * 0.55 + walls as f32 * 0.15) * near).clamp(0.0, 0.8);
-    // Far off (or zoomed out) the direct sound is joined by echoes coming back from far away.
-    let wet_far = (((d - 15.0) / 180.0).clamp(0.0, 0.7) + walls as f32 * 0.08).clamp(0.0, 0.8);
-    Path { gain, lowpass_hz, wet_room, wet_far, delay_s: real / 343.0, walls }
-}
-
-/// Distance the commander's zoom adds (m), by on-foot zoom step: as heard, closest; slightly muffled; fully wet.
-pub fn zoom_extra_m(step: usize) -> f32 {
-    match step {
-        0 => 0.0,
-        1 => 40.0,
-        _ => 150.0,
-    }
+    // The space it is made in rings (a room, a corridor); through walls you hear more of that than of it.
+    let wet_room = (at_source.enclosure * 0.6 + walls as f32 * 0.15).clamp(0.0, 0.85);
+    // Far off, the direct sound is joined by echoes rolling back from far away.
+    let wet_far = (((d - 8.0) / 90.0).clamp(0.0, 0.8) + walls as f32 * 0.08).clamp(0.0, 0.85);
+    Path { gain, lowpass_hz, wet_room, wet_far, delay_s: d / 343.0, walls }
 }
 
 #[cfg(test)]
@@ -165,35 +163,35 @@ mod tests {
     }
 
     #[test]
-    fn a_wall_between_muffles_and_quietens() {
+    fn at_ground_level_a_wall_muffles_but_from_above_you_hear_over_it() {
         let g = grid(&[wall(50_000, 50_000, 20_000, 1)]);
-        let env = listener_env(&g, (40.0, 50.0));
-        let through = path(&g, (40.0, 50.0), (60.0, 50.0), 0.0, &env);
-        let clear = path(&grid(&[]), (40.0, 50.0), (60.0, 50.0), 0.0, &env);
-        assert_eq!(through.walls, 1);
-        assert!(through.gain < clear.gain * 0.5 && through.lowpass_hz < clear.lowpass_hz * 0.3, "{through:?} vs {clear:?}");
-        assert!(through.wet_room > clear.wet_room);
+        let open = listener_env(&grid(&[]), (60.0, 50.0));
+        let low = path(&g, (40.0, 50.0, 1.6), (60.0, 50.0), &open);
+        let clear = path(&grid(&[]), (40.0, 50.0, 1.6), (60.0, 50.0), &open);
+        assert_eq!(low.walls, 1);
+        assert!(low.gain < clear.gain * 0.5 && low.lowpass_hz < clear.lowpass_hz * 0.3, "{low:?} vs {clear:?}");
+        let above = path(&g, (45.0, 50.0, 30.0), (60.0, 50.0), &open);
+        assert_eq!(above.walls, 0, "{above:?}");
     }
 
     #[test]
-    fn distance_dulls_delays_and_wets() {
+    fn zooming_out_takes_you_further_from_the_fight() {
         let g = grid(&[]);
-        let env = listener_env(&g, (10.0, 10.0));
-        let near = path(&g, (10.0, 10.0), (15.0, 10.0), 0.0, &env);
-        let far = path(&g, (10.0, 10.0), (95.0, 10.0), 0.0, &env);
-        assert!(far.gain < near.gain && far.lowpass_hz < near.lowpass_hz && far.wet_far > near.wet_far && far.delay_s > near.delay_s);
-        // Zoomed out: duller, with distant echoes, but not later.
-        let zoomed = path(&g, (10.0, 10.0), (15.0, 10.0), zoom_extra_m(2), &env);
-        assert!(zoomed.lowpass_hz < near.lowpass_hz && zoomed.wet_far > near.wet_far && zoomed.delay_s == near.delay_s);
+        let env = listener_env(&g, (50.0, 50.0));
+        let close = path(&g, (50.0, 50.0, camera_height_m(12.0)), (52.0, 50.0), &env);
+        let far = path(&g, (50.0, 50.0, camera_height_m(50.0)), (52.0, 50.0), &env);
+        assert!(close.wet_far < 0.15, "closest view about as heard: {close:?}");
+        assert!(far.wet_far > 0.7 && far.lowpass_hz < close.lowpass_hz && far.gain < close.gain, "furthest fully distant: {far:?}");
     }
 
     #[test]
-    fn zoomed_out_the_room_around_the_commander_no_longer_rings() {
+    fn a_shot_in_a_room_rings_with_the_room_wherever_you_hear_it_from() {
         let room = [wall(50_000, 47_000, 6_300, 0), wall(50_000, 53_000, 6_300, 0), wall(47_000, 50_000, 6_300, 1), wall(53_000, 50_000, 6_300, 1)];
         let g = grid(&room);
-        let env = listener_env(&g, (50.0, 50.0));
-        let close = path(&g, (50.0, 50.0), (51.0, 50.0), zoom_extra_m(0), &env);
-        let far = path(&g, (50.0, 50.0), (51.0, 50.0), zoom_extra_m(2), &env);
-        assert!(close.wet_room > 0.3 && far.wet_room < 0.01 && far.wet_far > 0.5, "{close:?} {far:?}");
+        let inside = listener_env(&g, (50.0, 50.0));
+        let open = listener_env(&g, (20.0, 20.0));
+        let a = path(&g, (50.0, 40.0, 30.0), (50.0, 50.0), &inside);
+        let b = path(&g, (20.0, 10.0, 30.0), (20.0, 20.0), &open);
+        assert!(a.wet_room > 0.4 && b.wet_room < 0.05, "{a:?} {b:?}");
     }
 }

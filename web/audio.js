@@ -2,9 +2,10 @@
 // (gain, low-pass, how much is heard as reverb, where it is around his head) and what space he is in; this
 // graph applies it:
 //
-//   voice: source -> gain -> low-pass -> HRTF panner -+-> dry  -> mix
-//                                                      +-> send -> reverb buses (open slap, small room,
-//                                                                 large room, corridor), weighted by the space
+//   voice: source -> gain -> low-pass -> HRTF panner -+-> dry -> mix
+//                                                      +-> the reverb of the space the sound is made in
+//                                                      |   (open slap, small room, large room, corridor)
+//                                                      +-> distant echoes (by distance)
 //   mix -> tablet band-pass (200 Hz - 10 kHz while the PDA is up, open otherwise) -> limiter -> speakers
 //
 // Built for headphones (HRTF). Impulse responses are generated here, nothing to download.
@@ -13,7 +14,9 @@ const VOICES = 64;
 // HDR audio (as Frostbite): every sound has a logical loudness (dB at the source); what reaches the ear is that
 // plus the acoustics' gain. The loudest thing heard lately sets a window: anything more than WINDOW_DB below it
 // is not played at all, anything well below it is pushed down further, and the peak relaxes over seconds.
-const WINDOW_DB = 50, QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
+// Presets as in Battlefield: HiFi keeps a wide range (60 dB), War Tapes squeezes it (25 dB: punchy, loud).
+const HDR = { hifi: 60, wartapes: 25 };
+const QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
 const PRIORITY = { blast: 3, shot: 2, step: 1 };
 
 /// A stereo impulse response: decaying noise (darker as it decays), plus early reflections.
@@ -67,6 +70,14 @@ export class AudioEngine {
     this.active = [];
     this.env = { enclosure: 0, size: 30, rt60: 0.25, corridor: 0, pda: 0 };
     this.peak = PEAK_FLOOR_DB; this.peakAt = 0;
+    this.hdr = 'hifi'; this.windowDb = HDR.hifi;
+  }
+
+  /// HDR preset: 'hifi' (60 dB window) or 'wartapes' (25 dB).
+  setHdr(name) {
+    if (!(name in HDR)) return false;
+    this.hdr = name; this.windowDb = HDR[name];
+    return true;
   }
 
   /// The HDR peak now: the loudest sound lately, relaxing at RELEASE_DB_S.
@@ -101,13 +112,12 @@ export class AudioEngine {
     for (let k = chain.length - 1; k >= 0; k--) { chain[k].connect(last); last = chain[k]; }
     head = last;
     this.mix = c.createGain(); this.mix.connect(head);
-    // Reverb buses.
-    this.send = c.createGain();
+    // Reverb buses: each sound is sent to the space it is made in (its own sends, per voice).
     const bus = (ir) => {
+      const input = c.createGain();
       const conv = c.createConvolver(); conv.buffer = ir;
-      const g = c.createGain(); g.gain.value = 0;
-      this.send.connect(conv); conv.connect(g); g.connect(this.mix);
-      return g;
+      input.connect(conv); conv.connect(this.mix);
+      return input;
     };
     this.rev = {
       // Outdoors near the listener: a short, light slap off whatever stands close, no tail to speak of.
@@ -147,33 +157,29 @@ export class AudioEngine {
 
   applyEnv(now) {
     const c = this.ctx; if (!c) return;
-    const { enclosure, size, corridor, pda } = this.env;
-    const t = c.currentTime, tc = now ? 0.001 : 0.25;
-    const small = enclosure * Math.max(0, Math.min(1, (9 - size) / 5));
-    const large = enclosure * (1 - Math.max(0, Math.min(1, (9 - size) / 5)));
-    const cor = Math.min(1, corridor) * enclosure;
-    this.rev.open.gain.setTargetAtTime(Math.max(0, 1 - enclosure) * 0.9, t, tc);
-    this.rev.small.gain.setTargetAtTime(small * (1 - cor) * 1.1, t, tc);
-    this.rev.large.gain.setTargetAtTime(large * (1 - cor) * 1.0, t, tc);
-    this.rev.corridor.gain.setTargetAtTime(cor * 1.1, t, tc);
+    const { pda } = this.env;
+    const t = c.currentTime;
     // Through the tablet: nothing at or below 200 Hz, nothing at or above 10 kHz.
     for (const h of this.hp) h.frequency.setTargetAtTime(pda ? 200 : 10, t, 0.08);
     for (const l of this.lp) l.frequency.setTargetAtTime(pda ? 10000 : 22000, t, 0.08);
   }
 
-  /// Plays a sound as the acoustics place it. `o`: { gain, lowpass, room, far, rx, ry, delay, rate, kind }:
-  /// room is how much rings in the listener's own space, far how much comes back as distant echoes.
+  /// Plays a sound as the acoustics place it. `o`: { db, gain, lowpass, room, far, rx, ry, below, delay, rate,
+  /// kind, space: [enclosure, size m, corridor] }: room is how much rings in the space it is made in, far how
+  /// much comes back as distant echoes; rx/ry/below place it around the ears (the camera).
   play(url, o) {
     const c = this.ensure(); if (!c) return;
     // Anything odd coming in (a missing or non-finite number) is made safe here: audio never stops the game.
     const num = (x, d, lo, hi) => (Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d);
     o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), room: num(o.room, 0, 0, 1), far: num(o.far, 0, 0, 1),
-      rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
+      rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), below: num(o.below, 0, 0, 1e4), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
+    const sp = o.space || [0, 30, 0];
+    const enc = num(sp[0], 0, 0, 1), size = num(sp[1], 30, 0, 100), cor = num(sp[2], 0, 0, 1) * enc;
     if (o.gain <= 0.0005) return;
     // HDR: how loud it is at the ear, against the loudest lately.
     const heard = num(o.db, 100, 0, 200) + 20 * Math.log10(o.gain);
     const peak = this.peakNow();
-    if (heard < peak - WINDOW_DB) return;
+    if (heard < peak - this.windowDb) return;
     if (heard > peak) {
       // A new loudest: everything already playing well under it ducks for a moment (the ears clamp).
       const jump = heard - peak;
@@ -201,19 +207,28 @@ export class AudioEngine {
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
     const p = c.createPanner();
     p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1;
-    // Around the head: right is +x, ahead is -z. A sound right on top of him sits just ahead.
-    const len = Math.hypot(o.rx, o.ry);
-    const [x, z] = len < 0.3 ? [0, -1] : [o.rx / len, -o.ry / len];
-    p.positionX.value = x; p.positionY.value = 0; p.positionZ.value = z;
+    // Around the head (the camera): right is +x, ahead is -z, below is -y. Below counts for less than the
+    // ground direction, so left and right stay clear from high up.
+    const by = o.below * 0.35;
+    const len = Math.hypot(o.rx, o.ry, by);
+    const [x, y, z] = len < 0.3 ? [0, 0, -1] : [o.rx / len, -by / len, -o.ry / len];
+    p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
     // The direct sound stays: far off it is quieter and duller (gain and low-pass), not drowned in reverb.
     const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5 - o.far * 0.35;
-    const wet = c.createGain(); wet.gain.value = o.room;
     const far = c.createGain(); far.gain.value = o.far;
     const out = c.createGain();
     src.connect(g).connect(out).connect(lp).connect(p);
     p.connect(dry).connect(this.mix);
-    p.connect(wet).connect(this.send);
     p.connect(far).connect(this.farSend);
+    // Its own space rings: small or large room by size, a corridor's flutter, or a short slap outdoors.
+    const roomy = Math.max(0, Math.min(1, (9 - size) / 5));
+    const sends = [[this.rev.small, enc * roomy * (1 - cor)], [this.rev.large, enc * (1 - roomy) * (1 - cor)], [this.rev.corridor, cor], [this.rev.open, (1 - enc) * 0.35]];
+    for (const [busIn, w] of sends) {
+      const amount = busIn === this.rev.open ? w : w * o.room;
+      if (amount < 0.01) continue;
+      const send = c.createGain(); send.gain.value = amount;
+      p.connect(send).connect(busIn);
+    }
     const v = { src, pri, gain: o.gain, out, done: false };
     src.onended = () => { v.done = true; };
     this.active.push(v);

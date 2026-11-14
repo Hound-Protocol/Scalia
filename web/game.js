@@ -1456,11 +1456,13 @@ try {
     if (s.length) fireGraph();
     if (audio.ctx && now - envAt > 100) { envAt = now; audio.setEnv(v.audio_env()); }
     try {
-    for (let i = 0; i + 10 < s.length; i += 11) {
-      const [kind, loud, delay, gain, lowpass, room, far, rx, ry] = s.subarray(i, i + 9);
-      if (kind === 2) audio.play(STEPS, { kind: 'step', db: 52 + 16 * loud, gain: gain * (0.25 + 0.35 * loud), lowpass, room: room * 0.6, far: far * 0.5, rx, ry, delay, rate: 0.9 + Math.random() * 0.2 });
-      else if (kind === 1) audio.play(SHOT, { kind: 'blast', db: 155, gain: Math.min(4, gain * 6), lowpass, room, far, rx, ry, delay, rate: 0.45 });
-      else audio.play(SHOT, { kind: 'shot', db: 130, gain: Math.min(2.5, gain * 2.2), lowpass, room, far, rx, ry, delay, rate: 0.94 + Math.random() * 0.12 });
+    for (let i = 0; i + 14 < s.length; i += 15) {
+      const [kind, loud, delay, gain, lowpass, room, far, rx, ry, below] = s.subarray(i, i + 10);
+      const space = s.subarray(i + 12, i + 15);
+      const at = { lowpass, rx, ry, below, delay, space };
+      if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, far: far * 0.5, rate: 0.9 + Math.random() * 0.2 });
+      else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, far, rate: 0.45 });
+      else audio.play(SHOT, { ...at, kind: 'shot', db: 130, gain: Math.min(3, gain * 4), room, far, rate: 0.94 + Math.random() * 0.12 });
     }
     } catch (e) { console.warn('audio', e); }
     if (!assaultOn) return;
@@ -1499,6 +1501,7 @@ try {
     steps: { help: 'leader steps and shouts since last asked', run: () => v.lab_feed() || '(none)' },
     report: { help: 'copy a bug report (version, browser, last errors) to the clipboard', run: () => { const r = errors.report(); navigator.clipboard.writeText(r).catch(() => {}); return `${errors.recent.length} error(s); report copied`; } },
     errors: { help: 'list the last errors', run: () => errors.recent.map((r) => `${r.at} ${r.fatal ? 'CRASH ' : ''}${r.where}: ${r.error.split('\n')[0]}`).join('\n') || '(none)' },
+    hdr: { help: 'hdr <hifi|wartapes>: audio dynamic range (60 or 25 dB window)', run: (a) => (audio.setHdr(a[0]) ? `hdr ${a[0]}` : `hdr is ${audio.hdr}; hdr <hifi|wartapes>`) },
     audio: { help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
   });
   const pause = { on: false };
