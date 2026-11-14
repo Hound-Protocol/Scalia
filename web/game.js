@@ -1451,9 +1451,9 @@ try {
     try {
     for (let i = 0; i + 10 < s.length; i += 11) {
       const [kind, loud, delay, gain, lowpass, room, far, rx, ry] = s.subarray(i, i + 9);
-      if (kind === 2) audio.play(STEPS, { kind: 'step', gain: gain * (0.25 + 0.35 * loud), lowpass, room: room * 0.6, far: far * 0.5, rx, ry, delay, rate: 0.9 + Math.random() * 0.2 });
-      else if (kind === 1) audio.play(SHOT, { kind: 'blast', gain: Math.min(4, gain * 6), lowpass, room, far, rx, ry, delay, rate: 0.45 });
-      else audio.play(SHOT, { kind: 'shot', gain: Math.min(2.5, gain * 2.2), lowpass, room, far, rx, ry, delay, rate: 0.94 + Math.random() * 0.12 });
+      if (kind === 2) audio.play(STEPS, { kind: 'step', db: 52 + 16 * loud, gain: gain * (0.25 + 0.35 * loud), lowpass, room: room * 0.6, far: far * 0.5, rx, ry, delay, rate: 0.9 + Math.random() * 0.2 });
+      else if (kind === 1) audio.play(SHOT, { kind: 'blast', db: 155, gain: Math.min(4, gain * 6), lowpass, room, far, rx, ry, delay, rate: 0.45 });
+      else audio.play(SHOT, { kind: 'shot', db: 130, gain: Math.min(2.5, gain * 2.2), lowpass, room, far, rx, ry, delay, rate: 0.94 + Math.random() * 0.12 });
     }
     } catch (e) { console.warn('audio', e); }
     if (!assaultOn) return;

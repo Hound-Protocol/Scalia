@@ -10,6 +10,10 @@
 // Built for headphones (HRTF). Impulse responses are generated here, nothing to download.
 
 const VOICES = 64;
+// HDR audio (as Frostbite): every sound has a logical loudness (dB at the source); what reaches the ear is that
+// plus the acoustics' gain. The loudest thing heard lately sets a window: anything more than WINDOW_DB below it
+// is not played at all, anything well below it is pushed down further, and the peak relaxes over seconds.
+const WINDOW_DB = 50, QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
 const PRIORITY = { blast: 3, shot: 2, step: 1 };
 
 /// A stereo impulse response: decaying noise (darker as it decays), plus early reflections.
@@ -62,6 +66,13 @@ export class AudioEngine {
     this.buffers = new Map();
     this.active = [];
     this.env = { enclosure: 0, size: 30, rt60: 0.25, corridor: 0, pda: 0 };
+    this.peak = PEAK_FLOOR_DB; this.peakAt = 0;
+  }
+
+  /// The HDR peak now: the loudest sound lately, relaxing at RELEASE_DB_S.
+  peakNow() {
+    const t = this.ctx ? this.ctx.currentTime : 0;
+    return Math.max(PEAK_FLOOR_DB, this.peak - RELEASE_DB_S * Math.max(0, t - this.peakAt));
   }
 
   /// Creates the graph on first use (browsers allow audio only after a user gesture).
@@ -159,6 +170,22 @@ export class AudioEngine {
     o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), room: num(o.room, 0, 0, 1), far: num(o.far, 0, 0, 1),
       rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
     if (o.gain <= 0.0005) return;
+    // HDR: how loud it is at the ear, against the loudest lately.
+    const heard = num(o.db, 100, 0, 200) + 20 * Math.log10(o.gain);
+    const peak = this.peakNow();
+    if (heard < peak - WINDOW_DB) return;
+    if (heard > peak) {
+      // A new loudest: everything already playing well under it ducks for a moment (the ears clamp).
+      const jump = heard - peak;
+      if (jump > 12) {
+        const duck = Math.pow(10, -Math.min(24, (jump - 12) * 0.6) / 20);
+        for (const v of this.active) if (!v.done) { v.out.gain.cancelScheduledValues(c.currentTime); v.out.gain.setTargetAtTime(v.out.gain.value * duck, c.currentTime, 0.02); v.out.gain.setTargetAtTime(v.out.gain.value, c.currentTime + 0.4, 0.6); }
+      }
+      this.peak = heard; this.peakAt = c.currentTime;
+    }
+    // Well under the peak: pushed down further (the loud fight masks the quiet things).
+    const under = Math.max(0, peak - heard - QUIET_DB);
+    o.gain *= Math.pow(10, -under * 0.5 / 20);
     const buf = this.buffer(url); if (!buf) return;
     const pri = PRIORITY[o.kind] || 1;
     this.active = this.active.filter((v) => !v.done);
@@ -182,11 +209,12 @@ export class AudioEngine {
     const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5 - o.far * 0.35;
     const wet = c.createGain(); wet.gain.value = o.room;
     const far = c.createGain(); far.gain.value = o.far;
-    src.connect(g).connect(lp).connect(p);
+    const out = c.createGain();
+    src.connect(g).connect(out).connect(lp).connect(p);
     p.connect(dry).connect(this.mix);
     p.connect(wet).connect(this.send);
     p.connect(far).connect(this.farSend);
-    const v = { src, pri, gain: o.gain, done: false };
+    const v = { src, pri, gain: o.gain, out, done: false };
     src.onended = () => { v.done = true; };
     this.active.push(v);
     src.start(c.currentTime + Math.max(0, o.delay || 0));
