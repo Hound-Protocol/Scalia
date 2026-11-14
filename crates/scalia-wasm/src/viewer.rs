@@ -885,11 +885,6 @@ impl Viewer {
             if snd.step.is_some() && (dx * dx + dy * dy + l.2 * l.2).sqrt() > 60.0 {
                 continue;
             }
-            let space = self.space_at(sx, sy);
-            let refl = self.reflectors_at(sx, sy);
-            let Some(a) = self.assault.as_ref() else { break };
-            let p = scalia_audio::path(&a.battle.sight, l, (sx, sy), &space);
-            let echoes = scalia_audio::echoes(l, (sx, sy), &refl);
             let wait = (if lab_speed <= 0.0 { 0.0 } else { (snd.at - lab_t) / lab_speed }).max(0.0) as f32 / 1000.0;
             let (kind, loud) = match (snd.blast, snd.step) {
                 (true, _) => (1.0, 1.0),
@@ -897,18 +892,43 @@ impl Viewer {
                 (false, Some(l)) => (if crate::ground::concrete_at(snd.x, snd.y) { 3.0 } else { 2.0 }, l),
                 _ => (0.0, 1.0),
             };
-            // Right and ahead as the camera looks (ahead = up the screen, on the ground); below = the height.
-            let (rx, ry) = (dx * r.x + dy * r.y, -dx * r.y + dy * r.x);
-            let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
-            out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, rx, ry, l.2, dist, p.walls as f32, space.enclosure, space.size_m, space.corridor]);
-            for k in 0..4 {
-                match echoes.get(k) {
-                    Some(e) => out.extend_from_slice(&[e.delay_s, e.gain, (e.dir.0 * r.x + e.dir.1 * r.y).clamp(-1.0, 1.0)]),
-                    None => out.extend_from_slice(&[0.0, 0.0, 0.0]),
-                }
-            }
+            self.sound_record(&mut out, l, r, (sx, sy), kind, loud, wait);
         }
         out
+    }
+    /// One footfall of the commander's, `loud` 0..1, as one record of `take_sounds`: the room he is in rings
+    /// with it and nearby walls throw it back, like the soldiers' steps.
+    pub fn commander_step(&mut self, loud: f32) -> Vec<f32> {
+        let l = self.audio_listener();
+        let (r, _, _) = scalia_render::camera::basis(self.last_cam.1);
+        let kind = if crate::ground::concrete_at(self.cmd.0, self.cmd.1) { 3.0 } else { 2.0 };
+        let mut out = Vec::new();
+        self.sound_record(&mut out, l, r, (self.cmd.0 as f32, self.cmd.1 as f32), kind, loud, 0.0);
+        out
+    }
+    /// Appends one sound record (see `take_sounds`) for a sound made at `at` (metres), heard at the listener `l`.
+    #[allow(clippy::too_many_arguments)]
+    fn sound_record(&mut self, out: &mut Vec<f32>, l: (f32, f32, f32), r: Vec3, at: (f32, f32), kind: f32, loud: f32, wait: f32) {
+        let (sx, sy) = at;
+        let (dx, dy) = (sx - l.0, sy - l.1);
+        let space = self.space_at(sx, sy);
+        let refl = self.reflectors_at(sx, sy);
+        // Off the field battle there is no sight grid: the sound comes straight, the room still rings.
+        let p = match self.assault.as_ref() {
+            Some(a) => scalia_audio::path(&a.battle.sight, l, (sx, sy), &space),
+            None => scalia_audio::Path { delay_s: 0.0, gain: 1.0, lowpass_hz: 20000.0, wet_room: space.enclosure, walls: 0 },
+        };
+        let echoes = scalia_audio::echoes(l, (sx, sy), &refl);
+        // Right and ahead as the camera looks (ahead = up the screen, on the ground); below = the height.
+        let (rx, ry) = (dx * r.x + dy * r.y, -dx * r.y + dy * r.x);
+        let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
+        out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, rx, ry, l.2, dist, p.walls as f32, space.enclosure, space.size_m, space.corridor]);
+        for k in 0..4 {
+            match echoes.get(k) {
+                Some(e) => out.extend_from_slice(&[e.delay_s, e.gain, (e.dir.0 * r.x + e.dir.1 * r.y).clamp(-1.0, 1.0)]),
+                None => out.extend_from_slice(&[0.0, 0.0, 0.0]),
+            }
+        }
     }
     /// Benchmark scene: `squads` squads of 12 around the commander (see `bench_army`). Returns the soldier count.
     pub fn bench_army(&mut self, squads: u32) -> u32 {
@@ -1333,7 +1353,9 @@ impl Viewer {
         format!("[{}]", out.join(","))
     }
     /// Every unit as seen by the camera that is active right now (the field camera, or the tablet map's inside
-    /// `use_map(true)`): JSON [{id, cs, n, x, y, r, sel, you}] with x, y as fractions of the canvas (0..1, y down) and r
+    /// `use_map(true)`): JSON [{id, cs, n, x, y, r, sel, you, men: [[x, y, readiness, health]], ready: [stable, wounded,
+    /// incapacitated, deceased], u}] with x, y as fractions of the canvas (0..1, y down), u a metre as a fraction of
+    /// its height and r
     /// the unit's radius as a fraction of the canvas height. The commander is id -1. Units off screen are left out.
     pub fn unit_marks(&mut self) -> String {
         let (target, yaw, view_h) = self.last_cam;
@@ -1346,15 +1368,56 @@ impl Viewer {
             units.push((i as i64, self.call_sign(i), i + 1, c.x as f64, c.y as f64, rad, self.selection.contains(&i)));
         }
         units.push((-1, "Actual".into(), 0, self.cmd.0, self.cmd.1, 1.2, false));
+        let origin = self.origin;
+        let mut screen = |me: &mut Self, ax: f64, ay: f64| {
+            let rel = Vec3::new((ax - origin.0) as f32, (ay - origin.1) as f32, me.height_at(ax as f32, ay as f32));
+            let d = rel - target;
+            (0.5 + d.dot(r) / (view_h * aspect), 0.5 - d.dot(u) / view_h)
+        };
         let mut out = Vec::new();
         for (id, cs, n, ax, ay, rad_m, sel) in units {
-            let rel = Vec3::new((ax - self.origin.0) as f32, (ay - self.origin.1) as f32, self.height_at(ax as f32, ay as f32));
-            let d = rel - target;
-            let (x, y) = (0.5 + d.dot(r) / (view_h * aspect), 0.5 - d.dot(u) / view_h);
+            // Each man where he is drawn, with his readiness (0 stable, 1 wounded, 2 incapacitated, 3 deceased)
+            // and health; the squad's place is their middle when they are known.
+            let men = if id >= 0 { self.men_mm(id as u32) } else { Vec::new() };
+            let (ax, ay) = if men.is_empty() {
+                (ax, ay)
+            } else {
+                let k = men.len() as f64;
+                (men.iter().map(|m| m.0).sum::<f64>() / k / 1000.0, men.iter().map(|m| m.1).sum::<f64>() / k / 1000.0)
+            };
+            let (x, y) = screen(self, ax, ay);
             if !(-0.1..=1.1).contains(&x) || !(-0.1..=1.1).contains(&y) { continue; }
-            out.push(format!("{{\"id\":{id},\"cs\":\"{cs}\",\"n\":{n},\"x\":{x:.4},\"y\":{y:.4},\"r\":{:.4},\"sel\":{sel},\"you\":{}}}", rad_m / view_h, id < 0));
+            let mut ready = [0u32; 4];
+            let mut list: Vec<String> = Vec::with_capacity(men.len());
+            for &(mx, my, st, hp) in &men {
+                ready[st as usize] += 1;
+                let (sx, sy) = screen(self, mx / 1000.0, my / 1000.0);
+                list.push(format!("[{sx:.4},{sy:.4},{st},{hp}]"));
+            }
+            out.push(format!(
+                "{{\"id\":{id},\"cs\":\"{cs}\",\"n\":{n},\"x\":{x:.4},\"y\":{y:.4},\"r\":{:.4},\"sel\":{sel},\"you\":{},\"men\":[{}],\"ready\":[{},{},{},{}],\"u\":{:.5}}}",
+                rad_m / view_h, id < 0, list.join(","), ready[0], ready[1], ready[2], ready[3], 1.0 / view_h
+            ));
         }
         format!("[{}]", out.join(","))
+    }
+
+    /// A group's men where they are drawn (mm), leader first, each with his readiness (0 stable, 1 wounded,
+    /// 2 incapacitated, 3 deceased) and health (0..100). Empty when the men are not drawn anywhere.
+    fn men_mm(&self, g: u32) -> Vec<(f64, f64, u8, i32)> {
+        if let Some(a) = self.assault.as_ref().filter(|a| a.has_squad(g as u16)) {
+            return (0..a.battle.soldiers.len()).filter(|&k| a.battle.soldiers[k].squad == g as u16).map(|k| {
+                let s = &a.battle.soldiers[k];
+                let (x, y) = a.position(k);
+                (x, y, crate::assault::readiness(s.alive(), s.down(), s.health), s.health.max(0))
+            }).collect();
+        }
+        if let Some(a) = self.agents.get(&g) {
+            return a.positions().iter().map(|p| (p.0 as f64, p.1 as f64, 0, 100)).collect();
+        }
+        let mut mine: Vec<&Derived> = self.derived.iter().filter(|s| s.group.0 == g).collect();
+        mine.sort_by_key(|s| s.slot);
+        mine.iter().map(|s| (s.pos.x as f64, s.pos.y as f64, 0, 100)).collect()
     }
     /// What is under a pixel (the active camera; the tablet map inside `use_map(true)`), as JSON:
     /// {kind: unit|commander|barracks|tower|wall|sandbags|container|crate|rock|ground, id, grid, ...}.
@@ -3647,4 +3710,3 @@ fn you_marker(at: [f32; 3], pix: f32) -> MeshBuilder {
     m.diamond([at[0], at[1], at[2] + 2.2 + pix * 8.0], (pix * 4.0).max(0.3), RED);
     m
 }
-

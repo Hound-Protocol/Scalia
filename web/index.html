@@ -250,10 +250,18 @@
   #labPanel .note { margin: 4px 0 6px; color: #b9c4ae; }
   #labPanel .feed { height: 220px; overflow-y: auto; white-space: pre; background: rgba(0,0,0,0.35); padding: 4px; border-radius: 3px; font-size: 11px; }
   #tablet #mapMarks { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-  #tablet #mapMarks svg { position: absolute; left: 0; top: 0; overflow: visible; will-change: transform; }
-  #tablet #mapMarks path { fill: none; stroke: #e6c229; stroke-width: 1.5; stroke-linecap: butt; vector-effect: non-scaling-stroke; transition: stroke 0.12s; }
-  #tablet #mapMarks svg.sel path { stroke: #4ae06b; stroke-width: 1.5; }
-  #tablet #mapMarks b { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 3px; font: 700 14px/1 'Saira Condensed', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: #f2d34a; white-space: nowrap; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+  #tablet #mapMarks svg.rings { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  #tablet #mapMarks circle { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  #tablet #mapMarks circle.sel { stroke: #4ae06b; } #tablet #mapMarks circle.hov { stroke: rgba(230,194,41,0.55); stroke-dasharray: 3 2; }
+  #tablet #mapMarks circle.sel.r1 { stroke: #e6c229; } #tablet #mapMarks circle.sel.r2 { stroke: #e0703a; } #tablet #mapMarks circle.sel.r3 { stroke: #7d7d72; }
+  #tablet #mapMarks .utag { position: absolute; left: 0; top: 0; will-change: transform; display: flex; flex-direction: column; align-items: center; gap: 2px; white-space: nowrap; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+  #tablet #mapMarks .utag b { font: 700 13px/1 'Saira Condensed', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: #f2d34a; }
+  #tablet #mapMarks .utag.sel b { color: #4ae06b; } #tablet #mapMarks .utag.you b { color: #ffdf7a; }
+  #tablet #mapMarks .utag .pips { display: flex; gap: 2px; } #tablet #mapMarks .utag .pips:empty { display: none; }
+  #tablet #mapMarks .utag s { width: 4px; height: 4px; background: #4ae06b; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); }
+  #tablet #mapMarks .utag em { font: 600 11px/1 'Saira Condensed', sans-serif; font-style: normal; letter-spacing: 0.06em; color: #b9c7a8; } #tablet #mapMarks .utag em:empty { display: none; }
+  #tablet s.r1 { background: #e6c229 !important; } #tablet s.r2 { background: #e0703a !important; } #tablet s.r3 { background: #55554d !important; }
+  #tablet em.r1 { color: #e6c229 !important; } #tablet em.r2 { color: #e0703a !important; } #tablet em.r3 { color: #8d8d82 !important; }
   #tablet #mapBox { position: absolute; border: 1px solid #4ae06b; background: rgba(74,224,107,0.1); pointer-events: none; z-index: 5; }
   #tablet #mapBox[hidden] { display: none; }
   #tablet #unitPanel { position: absolute; left: 10px; top: 10px; width: 21%; min-width: 200px; z-index: 3; pointer-events: auto; background: rgba(12,16,10,0.9); border: 1px solid var(--drab); padding: 10px 12px; color: var(--sand); animation: up-in 0.18s ease-out; }
@@ -263,6 +271,17 @@
   #tablet #unitPanel dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; }
   #tablet #unitPanel dt { color: var(--dim); } #tablet #unitPanel dd { margin: 0; }
   #tablet #unitPanel .note { margin: 8px 0 0; font-size: 11px; }
+  #tablet #unitPanel .ready { font-size: 14px; color: var(--dim); } #tablet #unitPanel .ready b { color: #4ae06b; font-weight: 600; }
+  #tablet #unitPanel .ready.r1 b { color: #e6c229; } #tablet #unitPanel .ready.r2 b { color: #e0703a; } #tablet #unitPanel .ready.r3 b { color: #8d8d82; }
+  #tablet #unitPanel .counts { font-size: 11px; color: var(--dim); margin: 2px 0 8px; }
+  #tablet #unitPanel ol.men, #tablet #unitPanel ul.many { list-style: none; margin: 8px 0 0; padding: 6px 0 0; border-top: 1px solid var(--drab); display: grid; gap: 3px; font-size: 12px; max-height: 40vh; overflow: auto; }
+  #tablet #unitPanel .men li { display: grid; grid-template-columns: 1fr 48px 92px; align-items: center; gap: 8px; }
+  #tablet #unitPanel .many li { display: flex; justify-content: space-between; }
+  #tablet #unitPanel li i { height: 4px; background: rgba(255,255,255,0.08); } #tablet #unitPanel li i b { display: block; height: 100%; background: #4ae06b; }
+  #tablet #unitPanel li em { font-style: normal; text-align: right; color: #4ae06b; }
+  #tablet #unitPanel li.r1 em { color: #e6c229; } #tablet #unitPanel li.r1 i b { background: #e6c229; }
+  #tablet #unitPanel li.r2 em { color: #e0703a; } #tablet #unitPanel li.r2 i b { background: #e0703a; }
+  #tablet #unitPanel li.r3 em, #tablet #unitPanel li.r3 span { color: #8d8d82; } #tablet #unitPanel li.r3 i b { background: #55554d; }
   @keyframes up-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
   #mapCanvas.zoomblur { filter: blur(3px) contrast(1.06); }
   #mapCanvas { transition: filter 0.05s linear; }

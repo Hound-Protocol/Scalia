@@ -518,23 +518,17 @@ try {
     setTimeout(() => { thumb.classList.remove('press'); }, 450);
     setTimeout(() => { pressingOff = false; setTablet(false); }, 520);
   };
-  // The commander's footsteps on grass: one step each time a heel strikes (gait phase 0 and 0.5), a little
-  // different every time.
-  const stepSound = new Audio('./sfx/steps-grass.mp3'); stepSound.preload = 'auto';
-  // On concrete (the range, the barracks): three takes, never the same twice running.
-  const concreteSteps = [1, 2, 3].map((k) => { const a = new Audio(`./sfx/steps-concrete-${k}.mp3`); a.preload = 'auto'; return a; });
-  let lastConcrete = -1;
-  const concreteStep = () => { let k = Math.floor(Math.random() * 3); if (k === lastConcrete) k = (k + 1) % 3; lastConcrete = k; return k; };
+  // The commander's footsteps: one step each time a heel strikes (gait phase 0 and 0.5), a little different
+  // every time; grass or concrete by where he is.
   let lastPhase = -1;
   const footsteps = () => {
     const ph = v.scene_name() === 'ground' ? v.commander_phase() : -1;
     if (ph >= 0 && lastPhase >= 0) {
       const crossed = (at) => (lastPhase < at && ph >= at) || (lastPhase > ph && (lastPhase < at || ph >= at));
       if (crossed(0.0) || crossed(0.5)) {
-        const a = (v.commander_surface() === 1 ? concreteSteps[concreteStep()] : stepSound).cloneNode(); worldAudio.add(a);
-        a.volume = (v.commander_gait() === 2 ? 0.7 : 0.5) * (0.85 + Math.random() * 0.3);
-        a.playbackRate = 0.9 + Math.random() * 0.2;
-        a.play().catch(() => {});
+        // Through the same acoustics as the soldiers' steps: the room he is in rings, nearby walls answer.
+        const loud = (v.commander_gait() === 2 ? 0.8 : 0.35) * (0.85 + Math.random() * 0.3);
+        playSounds(v.commander_step(loud));
       }
     }
     lastPhase = ph;
@@ -642,8 +636,13 @@ try {
     const h = mapCanvas.clientHeight, w = mapCanvas.clientWidth;
     let hit = null, best = 1e9;
     for (const m of lastMarks) {
+      // On a man (or close by), else inside the squad's reach round its middle.
+      for (const x of m.men || []) {
+        const d = Math.hypot(x[0] * w - e.offsetX, x[1] * h - e.offsetY);
+        if (d <= Math.max(10, 0.9 * m.u * h) && d < best) { best = d; hit = m.id; }
+      }
       const d = Math.hypot(m.x * w - e.offsetX, m.y * h - e.offsetY);
-      if (d <= Math.max(14, m.r * h) && d < best) { best = d; hit = m.id; }
+      if (d <= Math.max(14, m.r * h) && d + 6 < best) { best = d + 6; hit = m.id; }
     }
     hoverId = hit;
     showTip(e);
@@ -877,67 +876,101 @@ try {
   })() : null;
   const markEls = new Map();
   let lastMarks = [], commanderPicked = false, panelKey = '';
-  const SPEC = { weapon: 'Assault rifle', armor: 'Standard fatigues', gear: 'Radio, first-aid kit' };
-  const drawUnitPanel = (units, marks) => {
+  // Readiness: what shape a squad is in. The squad's word is what most of its men are (a tie goes to the worse);
+  // the pips under the call sign show every man, so the few hurt ones are never hidden.
+  const READY = ['Stable', 'Wounded', 'Incapacitated', 'Deceased'];
+  const readyOf = (r) => { let k = 0; for (let i = 1; i < 4; i++) if (r[i] >= r[k]) k = i; return r[k] > 0 ? k : 0; };
+  const callOf = (m) => (m.you ? 'Actual 00' : `${m.cs} ${String(m.n).padStart(2, '0')}`);
+  const panelSquad = (u, m) => {
     const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const r = m.ready, word = READY[readyOf(r)];
+    const counts = r.map((c, k) => (c ? `${c} ${READY[k].toLowerCase()}` : '')).filter(Boolean).join(' · ');
+    const boss = u.boss >= 0 ? (lastUnits.find((x) => x.id === u.boss) || {}).name : 'Battalion command';
+    const men = m.men.map((x, k) => `<li class="r${x[2]}"><span>${k === 0 ? 'Leader' : 'Rifleman ' + (k + 1)}</span><i><b style="width:${x[3]}%"></b></i><em>${READY[x[2]]}</em></li>`).join('');
+    return `<h4>${callOf(m)}</h4><div class="role">${u.captain ? 'Captain' : 'Squad'} · ${u.soldiers} men</div>
+      <div class="ready r${readyOf(r)}">Readiness: <b>${word}</b></div><div class="counts">${counts}</div>
+      <dl><dt>Status</dt><dd>${cap(u.status)}${u.task ? ' · ' + u.task : ''}</dd><dt>Stance</dt><dd>${cap(u.stance)}</dd><dt>Answers to</dt><dd>${boss}</dd></dl>
+      ${men ? `<ol class="men">${men}</ol>` : ''}`;
+  };
+  let lastUnits = [];
+  const drawUnitPanel = (units, marks) => {
+    lastUnits = units;
     const panel = $('unitPanel');
-    const sel = marks.find((m) => m.id === hoverId && m.id >= 0);
     let key = '', html = '';
-    if (sel) {
-      const u = units.find((x) => x.id === sel.id);
-      if (u) {
-        const boss = u.boss >= 0 ? (units.find((x) => x.id === u.boss) || {}).name : 'Battalion command';
-        key = `${u.id}|${u.soldiers}|${u.status}|${u.stance}|${u.task}`;
-        html = `<h4>${sel.cs} ${String(sel.n).padStart(2, '0')}</h4><div class="role">${u.captain ? 'Captain' : 'Squad'}</div><dl>
-          <dt>Manpower</dt><dd>${u.soldiers}</dd><dt>Status</dt><dd>${cap(u.status)}${u.task ? ' · ' + u.task : ''}</dd><dt>Stance</dt><dd>${cap(u.stance)}</dd>
-          <dt>Answers to</dt><dd>${boss}</dd><dt>Weapon</dt><dd>${SPEC.weapon}</dd><dt>Armor</dt><dd>${SPEC.armor}</dd><dt>Equipment</dt><dd>${SPEC.gear}</dd></dl>`;
-      }
-    } else if (hoverId === -1) {
+    const hovered = marks.find((m) => m.id === hoverId && m.id >= 0);
+    const picked = marks.filter((m) => m.sel && m.id >= 0);
+    const one = hovered || (picked.length === 1 ? picked[0] : null);
+    if (one) {
+      const u = units.find((x) => x.id === one.id);
+      if (u) { key = `${u.id}|${u.status}|${u.stance}|${u.task}|${one.men.map((x) => x[2] * 1000 + x[3]).join(',')}`; html = panelSquad(u, one); }
+    } else if (hoverId === -1 || (commanderPicked && !picked.length)) {
       key = 'cmd';
-      html = `<h4>Actual 00</h4><div class="role">Commander</div><dl><dt>Name</dt><dd>${ident.cmdr}</dd><dt>Manpower</dt><dd>1</dd><dt>Weapon</dt><dd>Rifle, slung</dd>
-        <dt>Armor</dt><dd>Black uniform</dd><dt>Equipment</dt><dd>Command PDA, handheld radio</dd></dl>`;
+      html = `<h4>Actual 00</h4><div class="role">Commander</div><div class="ready r0">Readiness: <b>Stable</b></div><dl><dt>Name</dt><dd>${ident.cmdr}</dd><dt>Weapon</dt><dd>Rifle, slung</dd>
+        <dt>Equipment</dt><dd>Command PDA, handheld radio</dd></dl>`;
+    } else if (picked.length > 1) {
+      // Several squads: one line each; hover one on the map for its card.
+      key = 'many|' + picked.map((m) => `${m.id}:${m.ready.join('.')}`).join(',');
+      html = `<h4>${picked.length} squads</h4><div class="role">Selected</div><ul class="many">${picked.map((m) =>
+        `<li class="r${readyOf(m.ready)}"><span>${callOf(m)}</span><em>${READY[readyOf(m.ready)]}</em></li>`).join('')}</ul>`;
     }
     panel.hidden = !html;
-    if (key !== panelKey) { panelKey = key; if (html) panel.innerHTML = html + '<p class="note">Placeholder details until equipment is simulated.</p>'; }
+    if (key !== panelKey) { panelKey = key; if (html) panel.innerHTML = html; }
   };
-  const MARK_SVG = '<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M10 0 H100 V90"/><path d="M0 10 V100 H90"/></svg>';
+  // On the map each squad carries a small tag above its men: call sign, one pip per man by readiness, and the
+  // squad's readiness in words when it is selected, hovered or has anyone hurt. The selected squad's men are
+  // ringed one by one (green; a fainter ring under the mouse) instead of boxing the whole squad.
+  const SVGNS = 'http://www.w3.org/2000/svg';
   const drawMapMarks = () => {
     if (!(tabletUp && tabletShown && page === 'map')) return;
     const box = $('mapMarks'), w = mapCanvas.clientWidth, h = mapCanvas.clientHeight;
     const marks = onMap(() => JSON.parse(v.unit_marks()));
     lastMarks = marks;
+    let rings = box.querySelector('svg.rings');
+    if (!rings) { rings = document.createElementNS(SVGNS, 'svg'); rings.setAttribute('class', 'rings'); box.prepend(rings); }
     const seen = new Set(), placed = [];
     const order = [...marks].sort((a, b) => (b.sel || b.you) - (a.sel || a.you));
-    // Zoomed out, units that would sit on top of each other merge into one marker labelled with the count.
+    // Each tag sits just above its highest man.
+    const top = (m) => (m.men.length ? Math.min(...m.men.map((x) => x[1])) : m.y) * h - Math.max(8, 0.9 * m.u * h);
+    // Zoomed out, squads whose tags would sit on top of each other merge into one tag with the count.
     const heads = [], under = new Map();
     for (const m of order) {
-      if (m.you) { heads.push(m); continue; }
-      const hd = heads.find((q) => !q.you && Math.hypot((q.x - m.x) * w, (q.y - m.y) * h) < 22);
+      if (m.you || m.sel) { heads.push(m); continue; }
+      const hd = heads.find((q) => !q.you && Math.hypot((q.x - m.x) * w, top(q) - top(m)) < 22);
       if (hd) under.set(hd.id, (under.get(hd.id) || 1) + 1); else heads.push(m);
     }
-    const hidden = new Set(order.filter((m) => !heads.includes(m)).map((m) => m.id));
+    let ringHtml = '';
     for (const m of order) {
+      const on = m.sel || (m.you && commanderPicked), hov = hoverId === m.id;
+      if (on || hov) {
+        const rr = Math.max(5, 0.6 * m.u * h);
+        const pts = m.men.length ? m.men : [[m.x, m.y, 0, 100]];
+        for (const x of pts) ringHtml += `<circle class="${on ? 'sel' : 'hov'} r${x[2]}" cx="${(x[0] * w).toFixed(1)}" cy="${(x[1] * h).toFixed(1)}" r="${rr.toFixed(1)}"/>`;
+      }
       let el = markEls.get(m.id);
       if (!el) {
-        el = document.createElement('div'); el.innerHTML = MARK_SVG; el.firstChild.style.position = 'absolute';
-        const b = document.createElement('b'); b.textContent = `${m.cs} ${String(m.n).padStart(2, '0')}`;
-        el.style.cssText = 'position:absolute;left:0;top:0;will-change:transform'; el.appendChild(b); box.appendChild(el); markEls.set(m.id, el);
+        el = document.createElement('div'); el.className = 'utag' + (m.you ? ' you' : '');
+        el.innerHTML = '<b></b><span class="pips"></span><em></em>';
+        box.appendChild(el); markEls.set(m.id, el);
       }
-      el.style.display = hidden.has(m.id) ? 'none' : '';
       const n = under.get(m.id) || 1;
-      el.lastChild.textContent = n > 1 ? `${n} units` : (m.you ? 'Actual 00' : `${m.cs} ${String(m.n).padStart(2, '0')}`);
-      const size = Math.max(26, m.r * h * 2);
-      const svg = el.firstChild;
-      svg.style.width = svg.style.height = `${size}px`; svg.style.left = svg.style.top = `${-size / 2}px`;
-      svg.classList.toggle('sel', m.sel || (m.you && commanderPicked));
-      el.style.transform = `translate(${(m.x * w).toFixed(1)}px, ${(m.y * h).toFixed(1)}px)`;
-      const lx = m.x * w, ly = m.y * h - size / 2 - 8;
-      const clash = placed.some((q) => Math.abs(q[0] - lx) < 84 && Math.abs(q[1] - ly) < 12);
+      if (!heads.includes(m)) { el.style.display = 'none'; seen.add(m.id); continue; }
+      el.style.display = '';
+      const name = n > 1 ? `${n} units` : callOf(m);
+      if (el.firstChild.textContent !== name) el.firstChild.textContent = name;
+      const k = readyOf(m.ready), hurt = m.ready[1] + m.ready[2] + m.ready[3] > 0;
+      const pips = n > 1 || m.you ? '' : m.men.map((x) => `<s class="r${x[2]}"></s>`).join('');
+      if (el.dataset.pips !== pips) { el.dataset.pips = pips; el.children[1].innerHTML = pips; }
+      const say = n === 1 && !m.you && (m.sel || hov || hurt) ? `Readiness: ${READY[k]}` : '';
+      if (el.lastChild.textContent !== say) { el.lastChild.textContent = say; el.lastChild.className = 'r' + k; }
+      el.classList.toggle('sel', on);
+      const lx = m.x * w, ly = top(m);
+      const clash = !on && placed.some((q) => Math.abs(q[0] - lx) < 84 && Math.abs(q[1] - ly) < 14);
       if (!clash) placed.push([lx, ly]);
-      el.lastChild.style.visibility = clash ? 'hidden' : 'visible';
-      el.lastChild.style.bottom = `${size / 2}px`; el.lastChild.style.left = '0'; el.lastChild.style.marginBottom = '3px';
+      el.style.visibility = clash ? 'hidden' : 'visible';
+      el.style.transform = `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px) translate(-50%, -100%)`;
       seen.add(m.id);
     }
+    if (rings.dataset.html !== ringHtml) { rings.dataset.html = ringHtml; rings.innerHTML = ringHtml; }
     for (const [id, el] of markEls) if (!seen.has(id)) { el.remove(); markEls.delete(id); }
     drawUnitPanel(JSON.parse(v.roster()), marks);
   };
@@ -1483,23 +1516,30 @@ try {
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
   let assaultOn = false, assaultPoll = 0, lastAlive = null;
-  const assaultTick = (now) => {
-    // The field battle's sounds (gunfire, blasts, footfalls), whoever is fighting: tablet orders or the K demo.
-    const s = v.take_sounds();
-    if (s.length) fireGraph();
-    if (audio.ctx && now - envAt > 100) { envAt = now; audio.setEnv(v.audio_env()); }
+  // Sound records from the acoustics (26 floats each, see the viewer's take_sounds), into the mix.
+  const STEPS_CONCRETE_N = STEPS_CONCRETE.length;
+  let lastConcrete = -1;
+  const concreteTake = () => { let k = Math.floor(Math.random() * STEPS_CONCRETE_N); if (k === lastConcrete) k = (k + 1) % STEPS_CONCRETE_N; lastConcrete = k; return STEPS_CONCRETE[k]; };
+  const playSounds = (s) => {
+    if (!s || !s.length) return;
+    fireGraph();
     try {
     for (let i = 0; i + 25 < s.length; i += 26) {
       const [kind, loud, delay, gain, lowpass, room, rx, ry, below, dist] = s.subarray(i, i + 10);
       const space = s.subarray(i + 11, i + 14);
       const echoes = [0, 1, 2, 3].map((k) => s.subarray(i + 14 + k * 3, i + 17 + k * 3));
       const at = { lowpass, rx, ry, below, dist, delay, space, echoes };
-      if (kind === 3) audio.play(STEPS_CONCRETE[Math.floor(Math.random() * 3)], { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16 });
+      if (kind === 3) audio.play(concreteTake(), { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16 });
       else if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2 });
       else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, rate: 0.45 });
       else audio.play(SHOT, { ...at, kind: 'shot', db: 130, gain: Math.min(3, gain * 4), room, rate: 0.94 + Math.random() * 0.12 });
     }
     } catch (e) { console.warn('audio', e); }
+  };
+  const assaultTick = (now) => {
+    // The field battle's sounds (gunfire, blasts, footfalls), whoever is fighting: tablet orders or the K demo.
+    playSounds(v.take_sounds());
+    if (audio.ctx && now - envAt > 100) { envAt = now; audio.setEnv(v.audio_env()); }
     if (!assaultOn) return;
     if (now - assaultPoll < 250) return;
     assaultPoll = now;

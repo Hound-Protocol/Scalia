@@ -615,3 +615,26 @@ mod tests {
         assert!(inst.iter().all(|v| v.is_finite()));
     }
 }
+
+/// A soldier's readiness for the squad tags: 0 stable, 1 wounded (hit but on his feet), 2 incapacitated (down),
+/// 3 deceased.
+pub fn readiness(alive: bool, down: bool, health: i32) -> u8 {
+    match (alive, down) {
+        (false, _) => 3,
+        (true, true) => 2,
+        _ if health < 100 => 1,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::readiness;
+    #[test]
+    fn readiness_names_each_state() {
+        assert_eq!(readiness(true, false, 100), 0);
+        assert_eq!(readiness(true, false, 70), 1);
+        assert_eq!(readiness(true, true, 30), 2);
+        assert_eq!(readiness(false, false, 0), 3);
+    }
+}
