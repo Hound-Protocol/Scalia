@@ -626,7 +626,14 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             // pitched forward, rifle nearly level across the chest.
             (p.hip, p.knee, p.side) = gait_dir(phase, 0.6, 0.2, 1.15, 0.4, 0.45, dir);
             p.lean = 0.32;
-            carry(&mut p, Carry::Rush);
+            // The combat ready carried into the jog: the same hold (stock in the shoulder, muzzle ahead and down,
+            // bladed), so starting off from the ready the rifle never changes hands.
+            carry(&mut p, Carry::LowReadyFwd);
+            p.twist = -p.rifle_yaw;
+            p.look = p.rifle_yaw;
+            // He leans further into the jog than at the ready: the muzzle comes up by the difference, so it still
+            // points ahead and well down (0.15: any more pulls the handguard from the left hand).
+            p.rifle += 0.15;
             p.head = 0.28;
             stride(&mut p, phase, 0.03, 0.2, 0.08, 0.06, 0.16);
         }

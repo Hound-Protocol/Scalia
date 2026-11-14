@@ -230,7 +230,9 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   } else if (pose == 2u) {
     gait(&p, phase, 0.6, 0.2, 1.15, 0.4, 0.45, dir);
     p.lean = 0.32;
-    carry(&p, 5u);
+    // The combat ready carried into the jog (pose.rs `Pose::Run`): same hold, bladed.
+    carry(&p, 6u);
+    p.rifle = p.rifle + 0.15;
     p.head = 0.28;
     stride(&p, phase, 0.03, 0.2, 0.08, 0.06, 0.16);
   } else if (pose == 7u) {
