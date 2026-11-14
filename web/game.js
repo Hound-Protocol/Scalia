@@ -1,9 +1,13 @@
 // Full-screen game page. The Rust viewer draws everything; this file forwards input and the animation frame.
 import init, * as wasm from './pkg/scalia_wasm.js';
 import { AudioEngine } from './audio.js';
+import { installConsole } from './console.js';
+import { createErrors } from './errors.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
+// Error handling: every part of a frame runs guarded; a dead engine gets a crash screen (errors.js).
+const errors = createErrors('__UPDATE__');
 
 function showError(msg) {
   const e = $('error');
@@ -774,8 +778,8 @@ try {
   };
   // ---- AI lab (?lab in the address) ----
   // Fixed scenarios on the testing ground to watch the battle AI together: slow motion and pause, what every
-  // man is doing written over his head, and the leaders' steps and shouts in a feed. Keys: - pause, , . speed,
-  // Backspace restart.
+  // man is doing written over his head, and the leaders' steps and shouts in a feed. Keys: - slower (down to
+  // pause), + faster, Backspace restart.
   const lab = new URLSearchParams(location.search).has('lab') ? (() => {
     const SCEN = [['clear', 'Clear house'], ['contact', 'Contact'], ['wounded', 'Casualty'], ['standoff', 'Standoff']];
     const SPEEDS = [0, 0.25, 0.5, 1, 2];
@@ -783,7 +787,7 @@ try {
     const panel = document.createElement('div'); panel.id = 'labPanel';
     panel.innerHTML = `<h5>AI LAB</h5><div class="scen">${SCEN.map(([k, n]) => `<button data-s="${k}">${n}</button>`).join('')}</div>
       <div class="spd">${SPEEDS.map((x) => `<button data-v="${x}">${x === 0 ? 'Pause' : x + '×'}</button>`).join('')}<button data-l>Labels</button><button data-r>Restart</button></div>
-      <div class="note"></div><div class="feed"></div><div style="color:#8a9680;margin-top:4px">− pause · , . slower/faster · Backspace restart</div>`;
+      <div class="note"></div><div class="feed"></div><div style="color:#8a9680;margin-top:4px">- slower (to pause) · + faster · Backspace restart</div>`;
     document.body.appendChild(panel);
     const marks = $('labMarks'), feed = panel.querySelector('.feed'), els = new Map();
     const paint = () => {
@@ -808,13 +812,16 @@ try {
     addEventListener('keydown', (e) => {
       if (e.target.closest && e.target.closest('input,textarea')) return;
       const k = e.key.toLowerCase();
-      if (k === '-') setSpeed(speed === 0 ? 1 : 0);
-      else if (k === ',') setSpeed(SPEEDS[Math.max(1, SPEEDS.indexOf(speed) - 1)]);
-      else if (k === '.') setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)]);
+      // (Comma and full stop turn the camera.)
+      if (k === '-') setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(speed) - 1)]);
+      else if (k === '+' || k === '=') setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)]);
       else if (k === 'backspace') { e.preventDefault(); start(cur); }
     });
     let started = false;
     return {
+      start: (k) => { started = true; start(k); },
+      setSpeed: (x) => setSpeed(x),
+      toggleLabels: () => { labels = !labels; paint(); return labels; },
       draw() {
         if (!started) { started = true; start(cur); setSpeed(1); }
         const f = v.lab_feed();
@@ -1477,6 +1484,24 @@ try {
       flash(st.defenders === 0 ? `Killhouse taken: ${st.attackers} of 12 still up. K to run it again.` : `Assault failed: ${st.defenders} enemy left. K to run it again.`);
     }
   };
+  // Developer console (the key under Esc).
+  const LAB_SCENARIOS = ['clear', 'contact', 'wounded', 'standoff'];
+  installConsole({
+    lab: { help: `lab <${LAB_SCENARIOS.join('|')}>: run an AI lab scenario`, run: (a) => {
+      const k = LAB_SCENARIOS.includes(a[0]) ? a[0] : 'clear';
+      if (lab) { lab.start(k); return `lab: ${k}`; }
+      const u = new URL(location.href); u.searchParams.set('lab', k); location.href = u.toString();
+    } },
+    speed: { help: 'speed <0..4>: battle time scale (0 pauses)', run: (a) => { const x = Number(a[0]); if (!Number.isFinite(x)) return 'speed <0..4>'; v.lab_set_speed(x); if (lab) lab.setSpeed(x); return `speed ${x}`; } },
+    pause: { help: 'pause or resume battle time', run: () => { const p = !pause.on; pause.on = p; v.lab_set_speed(p ? 0 : 1); if (lab) lab.setSpeed(p ? 0 : 1); return p ? 'paused' : 'running'; } },
+    labels: { help: 'toggle the AI lab labels', run: () => (lab ? `labels ${lab.toggleLabels() ? 'on' : 'off'}` : 'labels need the AI lab (lab <scenario>)') },
+    field: { help: 'squads on the testing ground', run: () => v.field_debug() },
+    steps: { help: 'leader steps and shouts since last asked', run: () => v.lab_feed() || '(none)' },
+    report: { help: 'copy a bug report (version, browser, last errors) to the clipboard', run: () => { const r = errors.report(); navigator.clipboard.writeText(r).catch(() => {}); return `${errors.recent.length} error(s); report copied`; } },
+    errors: { help: 'list the last errors', run: () => errors.recent.map((r) => `${r.at} ${r.fatal ? 'CRASH ' : ''}${r.where}: ${r.error.split('\n')[0]}`).join('\n') || '(none)' },
+    audio: { help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
+  });
+  const pause = { on: false };
   const toggleAssault = () => {
     if (assaultOn) { v.stop_assault(); assaultOn = false; flash('Training assault called off'); return; }
     fireGraph();
@@ -1656,22 +1681,24 @@ Click to copy and close.`;
       if (held.has('.') || held.has('>')) v.rotate(1.5 * dt);
       if (bench) v.rotate((Math.PI * 2 / 20) * dt);
       const t0 = performance.now();
-      const line = v.frame(now);
-      syncTablet();
-      drawFieldLabels();
-      if (lab) lab.draw();
-      drawMapMarks(); drawScan();
-      footsteps();
-      assaultTick(now);
+      // Each part on its own guard: one failing never stops the others (or the next frame).
+      errors.guard('render', () => v.frame(now));
+      if (errors.crashed) return;
+      errors.guard('tablet', syncTablet);
+      errors.guard('labels', drawFieldLabels);
+      if (lab) errors.guard('lab', () => lab.draw());
+      errors.guard('map', () => { drawMapMarks(); drawScan(); });
+      errors.guard('footsteps', footsteps);
+      errors.guard('battle sound', () => assaultTick(now));
       const cpuFrame = performance.now() - t0;
       cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
       if (bench) benchTick(now, cpuFrame);
       const showNote = now < noteUntil;
       hud.hidden = !showNote || tabletUp;
       if (showNote) hud.textContent = note;
-      perfPanel(v.perf(), cpuMs, now, cap);
-      const now_scene = v.scene_name();
-      if (now_scene !== scene) scene = now_scene;
+      errors.guard('perf', () => perfPanel(v.perf(), cpuMs, now, cap));
+      const now_scene = errors.guard('scene', () => v.scene_name());
+      if (now_scene && now_scene !== scene) scene = now_scene;
     }
     requestAnimationFrame(loop);
   }
