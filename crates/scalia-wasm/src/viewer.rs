@@ -2913,7 +2913,8 @@ impl Viewer {
                 2 => (Pose::Prone, None),
                 1 if self.cmd_moving => (Pose::CrouchWalk, ready.then_some(Pose::CrouchAim)),
                 1 => (if ready { Pose::CrouchAim } else { Pose::Crouch }, None),
-                _ if legs == Pose::Stand => (if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Stand }, None),
+                // Rifle in hand he stands combat ready (low ready, athletic); slung, he stands easy.
+                _ if legs == Pose::Stand => (if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Ready }, None),
                 _ => (legs, if ready { Some(Pose::StandAim) } else if self.gun.slung { Some(Pose::Slung) } else { None }),
             }
         };

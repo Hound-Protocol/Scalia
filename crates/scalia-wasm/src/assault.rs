@@ -554,7 +554,8 @@ pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, 
             let upper = if pose == Pose::Sprint || pose == Pose::Run && s.target.is_none() && !reload { None } else { upper };
             (pose, speed / stride_m_dir(pose, dir), upper, dir)
         }
-        (Stance::Stand, false) => (if reload { Pose::Reload } else if aiming { Pose::StandAim } else { Pose::Stand }, if reload { 0.4 } else { 0.0 }, None, 0.0),
+        // In the fight a man standing is never at ease: combat ready (low ready on an athletic base).
+        (Stance::Stand, false) => (if reload { Pose::Reload } else if aiming { Pose::StandAim } else { Pose::Ready }, if reload { 0.4 } else { 0.0 }, None, 0.0),
     }
 }
 
@@ -565,7 +566,7 @@ mod tests {
     #[test]
     fn soldiers_look_like_what_they_are_doing() {
         let mut s = Soldier::new(0, 0, (0, 0), Stance::Stand);
-        assert_eq!(pose_of(&s, false, 0.0, 0.0).0, Pose::Stand);
+        assert_eq!(pose_of(&s, false, 0.0, 0.0).0, Pose::Ready);
         s.target = Some(3);
         assert_eq!(pose_of(&s, false, 0.0, 0.0).0, Pose::StandAim);
         // Walking left of his facing at 1.5 m/s, rifle up: walking legs, aiming upper body.

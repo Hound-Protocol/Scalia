@@ -44,7 +44,12 @@ fn main() {
         Target { name: "Rush", grip: Vec3::new(0.14, 0.24, 1.22), pitch: -0.2, along: 0.16, elbow_r: Vec3::new(0.29, 0.04, 1.12), elbow_l: Vec3::new(-0.10, 0.28, 1.08), butt: Some(Vec3::new(0.17, 0.12, 1.36)) },
         // Aim: the stock in the shoulder pocket (between chest and deltoid) is what matters; the grip follows.
         Target { name: "ReadyUp", grip: Vec3::new(0.06, 0.30, 1.26), pitch: 0.0, along: 0.21, elbow_r: Vec3::new(0.30, 0.10, 1.12), elbow_l: Vec3::new(-0.02, 0.34, 1.14), butt: Some(Vec3::new(0.17, 0.12, 1.36)) },
+        // Combat low ready (the user's SWAT reference): the aim's hold with the rifle pivoted down about the
+        // shoulder pocket by 0.6 rad: stock still in the shoulder, muzzle forward and down, elbows in and low.
+        Target { name: "LowReadyFwd", grip: Vec3::new(0.06, 0.21, 1.18), pitch: -0.6, along: 0.18, elbow_r: Vec3::new(0.30, 0.04, 1.06), elbow_l: Vec3::new(-0.04, 0.25, 1.02), butt: Some(Vec3::new(0.17, 0.12, 1.36)) },
     ];
+    let only = std::env::args().nth(1);
+    let targets: Vec<_> = targets.into_iter().filter(|t| only.as_deref().is_none_or(|o| o == t.name)).collect();
     for t in &targets {
         let score = |p: &PoseParams| {
             let (rh, lh) = (hand(p, Side::Right), hand(p, Side::Left));

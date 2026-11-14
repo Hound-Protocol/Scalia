@@ -27,7 +27,7 @@ fn carry_table_matches() {
     for line in body.lines().filter(|l| l.contains("(*p).sh = vec2f(")) {
         rows.extend_from_slice(&nums(line)[..10]);
     }
-    assert_eq!(rows.len(), 60, "six carries in the shader");
+    assert_eq!(rows.len(), 70, "seven carries in the shader");
     // pose.rs lists Rush after HighReady and before ReadyUp; the shader orders by index (ReadyUp 4, Rush 5).
     let mut rs_rows: Vec<&[f32]> = rs.chunks(10).collect();
     rs_rows.swap(4, 5);
@@ -45,7 +45,7 @@ fn gait_calls_match() {
 #[test]
 fn crouch_gait_calls_match() {
     let rs: Vec<Vec<f32>> = Regex::new(r"= crouch_gait\((?:phase|0\.0), ([^)]*), (?:dir|0\.0)\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
-    let wg: Vec<Vec<f32>> = Regex::new(r"crouch_gait\(&p, (?:phase|0\.0), ([^)]*), (?:dir|0\.0)\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
+    let wg: Vec<Vec<f32>> = Regex::new(r"crouch_gait\((?:&p|p), (?:phase|0\.0), ([^)]*), (?:dir|0\.0)\)").unwrap().captures_iter(WGSL).map(|c| nums(&c[1])).collect();
     assert!(!rs.is_empty());
     // The two files list the poses in different orders: compare as sets.
     let key = |v: &Vec<Vec<f32>>| { let mut s: Vec<String> = v.iter().map(|x| format!("{x:?}")).collect(); s.sort(); s };

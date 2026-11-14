@@ -78,6 +78,9 @@ pub enum Pose {
     DeadBack = 27,
     /// Rifle slung on the back, arms loose at the sides (weapon holstered).
     Slung = 28,
+    /// Combat ready (low ready): athletic stance, feet staggered and knees flexed, hips back and chest over the
+    /// toes, stock in the shoulder, muzzle 30-40 degrees down, eyes up.
+    Ready = 30,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -109,6 +112,7 @@ impl Pose {
             19 => Pose::Signal,
             20 => Pose::Drone,
             28 => Pose::Slung,
+            30 => Pose::Ready,
             _ => Pose::Stand,
         }
     }
@@ -383,7 +387,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready => 1.0,
         _ => 0.0,
     }
 }
@@ -842,8 +846,23 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 1.0;
         }
         Pose::StandAim => {
+            // On the same athletic base as the ready (feet staggered, knees flexed, leaning in), rifle shouldered:
+            // the rifle and head take back the lean so the sights stay level at the eye.
+            athletic(&mut p);
             aim_arms(&mut p);
-            p.head = AIM_HEAD;
+            p.lean = AIM_LEAN;
+            p.rifle += AIM_LEAN;
+            p.head = AIM_HEAD - AIM_LEAN;
+        }
+        Pose::Ready => {
+            // Bladed like the aim (upper body turned by the rifle's turn across the chest), so the muzzle points
+            // ahead and down; eyes up over it.
+            athletic(&mut p);
+            carry(&mut p, Carry::LowReadyFwd);
+            p.twist = -p.rifle_yaw;
+            p.look = p.rifle_yaw;
+            p.lean = READY_LEAN;
+            p.head = -READY_LEAN;
         }
     }
     p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat);
@@ -913,6 +932,18 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
 
 /// Kneeling: left thigh level with the foot planted ahead, right thigh down with the knee on the ground and the
 /// shin lying back; torso upright.
+/// The athletic base of the ready and the aim: feet shoulder-width and staggered (left forward), knees flexed,
+/// boots flat (common.wgsl `athletic`).
+fn athletic(p: &mut PoseParams) {
+    // Stagger 0.13 m either side of the hip, ankle 0.75 m below it (knees flexed from a straight 0.80).
+    (p.hip, p.knee, p.side) = crouch_gait(0.0, 0.13, 0.75, 0.0, 0.62, 0.0);
+    p.flat = 1.0;
+}
+/// Forward lean of the ready (radians): chest over the toes.
+pub const READY_LEAN: f32 = 0.16;
+/// Forward lean while aiming (radians): into the rifle.
+pub const AIM_LEAN: f32 = 0.1;
+
 fn kneel(p: &mut PoseParams) {
     p.hip = [1.55, -0.1];
     p.knee = [1.8, 1.75];
@@ -935,6 +966,8 @@ pub enum Carry {
     Rush,
     /// Shooting: shouldered and level.
     ReadyUp,
+    /// Combat low ready: the shooting hold pivoted down about the shoulder pocket, muzzle forward and down.
+    LowReadyFwd,
 }
 
 pub fn carry(p: &mut PoseParams, c: Carry) {
@@ -948,6 +981,7 @@ pub fn carry(p: &mut PoseParams, c: Carry) {
         Carry::HighReady => ([1.21, 0.12], [0.95, 1.76], [0.43, 0.57], [0.18, 0.51], 0.85, 0.41),
         Carry::Rush => ([0.97, 0.13], [0.52, 1.86], [0.24, 0.80], [0.22, 0.69], -0.20, 0.58),
         Carry::ReadyUp => ([1.13, 0.31], [0.51, 1.84], [0.14, 0.58], [-0.03, 0.50], 0.00, 0.55),
+        Carry::LowReadyFwd => ([0.65, -0.13], [0.45, 1.95], [0.36, 0.70], [0.14, 0.34], -0.60, 0.70),
     };
     p.shoulder = shoulder;
     p.elbow = elbow;

@@ -141,6 +141,12 @@ fn sideways(q: vec3f, a: f32, px: f32) -> vec3f {
 
 // Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
 // 4 ready up, 5 rush (combat run). Sets both arms and the rifle angle.
+// The athletic base of the ready and the aim (pose.rs `athletic`): feet staggered, knees flexed, boots flat.
+fn athletic(p: ptr<function, PP>) {
+  crouch_gait(p, 0.0, 0.13, 0.75, 0.0, 0.62, 0.0);
+  (*p).flat = 1.0;
+}
+
 fn carry(p: ptr<function, PP>, c: u32) {
   // Each carry turns the rifle across the body (ryaw): stock out to the right shoulder, muzzle to the left.
   // Generated from pose.rs `carry` (scripts: carry_ik, then copy the table).
@@ -158,6 +164,10 @@ fn carry(p: ptr<function, PP>, c: u32) {
     (*p).twist = -0.55; (*p).look = 0.55;
   } else if (c == 5u) {
     (*p).sh = vec2f(0.97, 0.13); (*p).el = vec2f(0.52, 1.86); (*p).reach = vec2f(0.24, 0.80); (*p).abd = vec2f(0.22, 0.69); (*p).rifle = -0.20; (*p).ryaw = 0.58;
+  } else if (c == 6u) {
+    // Combat low ready (pose.rs `Carry::LowReadyFwd`), bladed so the muzzle points ahead and down.
+    (*p).sh = vec2f(0.65, -0.13); (*p).el = vec2f(0.45, 1.95); (*p).reach = vec2f(0.36, 0.70); (*p).abd = vec2f(0.14, 0.34); (*p).rifle = -0.60; (*p).ryaw = 0.70;
+    (*p).twist = -0.70; (*p).look = 0.70;
   }
 }
 
@@ -248,8 +258,18 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 6u) {
+    // On the athletic base (pose.rs `athletic`), leaning in by AIM_LEAN 0.1 with the rifle and head taking it back.
+    athletic(&p);
     carry(&p, 4u);
-    p.head = -0.35;
+    p.lean = 0.1;
+    p.rifle = p.rifle + 0.1;
+    p.head = -0.45;
+  } else if (pose == 30u) {
+    // Combat ready (pose.rs `Pose::Ready`): athletic base, low ready forward, READY_LEAN 0.16.
+    athletic(&p);
+    carry(&p, 6u);
+    p.lean = 0.16;
+    p.head = -0.16;
   } else if (pose == 8u) {
     carry(&p, 3u);
   } else if (pose == 15u) {
@@ -478,7 +498,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u)); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
