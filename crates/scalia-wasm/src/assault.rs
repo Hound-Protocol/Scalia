@@ -58,6 +58,8 @@ pub struct Assault {
     /// The leader's steps as they start, for the radio.
     pub steps: Vec<(usize, &'static str)>,
     pub over: bool,
+    /// The AI lab's event feed: every leader step and shout, stamped with battle time and squad.
+    pub lab_log: Vec<String>,
     /// A training assault on its own (the K demo): it ends when one side is gone. The testing ground's
     /// field battle never ends.
     demo: bool,
@@ -84,7 +86,14 @@ impl Assault {
     /// The testing ground: its map, the enemy squad on its posts in the training house (holding), no one else
     /// until squads are spawned.
     pub fn field(map: scalia_ai::save::MapSpec, house: (i64, i64), seed: u64, now_ms: f64) -> Assault {
-        let soldiers = scalia_ai::scenario::KILLHOUSE_DEFENDERS.iter().map(|&(x, y)| Soldier::new(1, ENEMY_SQUAD, (house.0 + x, house.1 + y), Stance::Stand)).collect();
+        Assault::field_with(map, house, seed, now_ms, true)
+    }
+
+    /// The testing ground, with or without the enemy squad in the training house (the AI lab clears it for
+    /// scenarios in the open).
+    pub fn field_with(map: scalia_ai::save::MapSpec, house: (i64, i64), seed: u64, now_ms: f64, defenders: bool) -> Assault {
+        let posts: &[(i64, i64)] = if defenders { &scalia_ai::scenario::KILLHOUSE_DEFENDERS } else { &[] };
+        let soldiers = posts.iter().map(|&(x, y)| Soldier::new(1, ENEMY_SQUAD, (house.0 + x, house.1 + y), Stance::Stand)).collect();
         let mut b = Battle::on_map(map, soldiers, seed);
         b.submit(0, scalia_ai::save::Command::Squad { squad: ENEMY_SQUAD as usize, order: scalia_ai::leader::Order::Hold });
         let mut a = Assault::from_battle(b, now_ms);
@@ -93,7 +102,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), gait: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -204,7 +213,10 @@ impl Assault {
                         self.sounds.push(Sound { x: pos.0 as f64 / 1000.0, y: pos.1 as f64 / 1000.0, blast: true, step: None, at });
                         self.fx.push(Fx { at, from: (pos.0, pos.1, 0), to: (pos.0, pos.1, 0), hit: false, blast: true, tracer: false });
                     }
-                    Event::Order { squad, step } => self.steps.push((squad, step)),
+                    Event::Order { squad, step } => {
+                        self.steps.push((squad, step));
+                        self.lab_log.push(format!("{:>5.1}s  {}  {step}", self.battle.time_ms as f64 / 1000.0, lab_squad(squad)));
+                    }
                     // What his men shout, as steps of their squad ("bark:" marks them for the note line).
                     Event::Bark { soldier, bark } => {
                         let word = match bark {
@@ -214,7 +226,9 @@ impl Assault {
                             Bark::ManDown => "bark:man down",
                             Bark::Frag => "bark:frag out",
                         };
-                        self.steps.push((self.battle.soldiers[soldier].squad as usize, word));
+                        let sq = self.battle.soldiers[soldier].squad as usize;
+                        self.steps.push((sq, word));
+                        self.lab_log.push(format!("{:>5.1}s  {} #{soldier}  \"{}\"", self.battle.time_ms as f64 / 1000.0, lab_squad(sq), &word[5..]));
                     }
                     _ => {}
                 }
@@ -317,6 +331,56 @@ fn wrap(mut d: f32) -> f32 {
 }
 
 /// The renderer's heading for a facing vector (north is (0, 1000)): the angle the figure is turned by.
+/// How the AI lab names a squad in its feed.
+pub fn lab_squad(squad: usize) -> String {
+    match squad as u16 {
+        ENEMY_SQUAD => "RED".into(),
+        DEMO_SQUAD => "BLUE".into(),
+        LAB_RED => "RED-2".into(),
+        s => format!("SQ{s}"),
+    }
+}
+/// A second enemy squad the AI lab puts in the open.
+pub const LAB_RED: u16 = 201;
+
+/// What a soldier is doing, in a few words, for the AI lab's labels over heads.
+pub fn lab_state(b: &Battle, i: usize) -> String {
+    use scalia_ai::battle::Task;
+    let s = &b.soldiers[i];
+    if !s.alive() {
+        return "KIA".into();
+    }
+    let mut w: Vec<String> = Vec::new();
+    if s.down() {
+        w.push(if s.stable() { "DOWN stable".into() } else { "DOWN bleeding".into() });
+    } else {
+        w.push(match s.task {
+            Task::Idle => "idle".into(),
+            Task::Move { gait, .. } => format!("move {}", format!("{gait:?}").to_lowercase()),
+            Task::Hold { .. } => "hold".into(),
+        });
+        if s.cover.is_some() {
+            w.push("COVER".into());
+        }
+        if s.target.is_some() {
+            w.push("firing".into());
+        }
+        if let Some((act, _)) = s.act {
+            w.push(format!("{act:?}").to_lowercase());
+        }
+        if s.dragging().is_some() {
+            w.push("dragging".into());
+        }
+        if s.suppression > 0 {
+            w.push(format!("sup {}", s.suppression / 10));
+        }
+    }
+    if s.health < 100 {
+        w.push(format!("hp {}", s.health));
+    }
+    w.join(" · ")
+}
+
 pub fn heading_of(f: (i64, i64)) -> f32 {
     (-(f.0 as f32)).atan2(f.1 as f32)
 }

@@ -183,6 +183,12 @@ pub struct Viewer {
     assault: Option<crate::assault::Assault>,
     /// The K training assault is running on the field.
     demo: bool,
+    /// The AI lab's clock: battle time runs at `lab_speed` (0 paused, 0.25 slow motion, 1 real time).
+    lab_speed: f64,
+    lab_t: f64,
+    lab_prev: f64,
+    /// A lab scenario's casualty, applied once his squad has joined: (squad, which man, health).
+    lab_wound: Option<(u16, usize, i32)>,
     /// How the next squad move is to be made (chosen on the radio).
     order_mode: Option<scalia_ai::leader::Mode>,
     /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
@@ -330,6 +336,10 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         assault: None,
         demo: false,
+        lab_speed: 1.0,
+        lab_t: 0.0,
+        lab_prev: 0.0,
+        lab_wound: None,
         order_mode: None,
         fx: crate::effects::Effects::default(),
         fx_lights: Vec::new(),
@@ -654,9 +664,90 @@ impl Viewer {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
         map.killhouse = Some(KILLHOUSE_MM);
-        crate::assault::Assault::field(map, KILLHOUSE_MM, 7, self.frame_ms)
+        crate::assault::Assault::field(map, KILLHOUSE_MM, 7, self.lab_t)
     }
-    /// The assault as JSON: running, who is alive, and the leader's steps since the last call.
+    /// Battle (lab clock) time to viewer time: what happens later in the battle happens later on screen, slower
+    /// in slow motion.
+    fn lab_real(&self, at: f64) -> f64 {
+        if self.lab_speed <= 0.0 { self.frame_ms } else { self.frame_ms + (at - self.lab_t) / self.lab_speed }
+    }
+    /// AI lab: how fast battle time runs (0 pauses).
+    pub fn lab_set_speed(&mut self, speed: f64) {
+        self.lab_speed = speed.clamp(0.0, 4.0);
+    }
+    /// AI lab: clears the testing ground and sets up a scenario; the commander is placed to watch it. Returns
+    /// a line saying what to watch for.
+    pub fn lab_start(&mut self, name: &str) -> String {
+        use crate::assault::{DEMO_SQUAD, LAB_RED};
+        use scalia_ai::leader::{Mode, Order};
+        let (kx, ky) = KILLHOUSE_MM;
+        let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
+        let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
+        map.killhouse = Some(KILLHOUSE_MM);
+        let house = matches!(name, "clear" | "contact");
+        let mut a = crate::assault::Assault::field_with(map, KILLHOUSE_MM, 7, self.lab_t, house);
+        self.demo = false;
+        self.lab_wound = None;
+        let block = |x0: i64, y0: i64, n: i64| -> Vec<(i64, i64)> { (0..n).map(|i| (x0 + (i % 4) * 1_500, y0 + (i / 4) * 1_500)).collect() };
+        let (watch, note) = match name {
+            "contact" => {
+                a.spawn_squad(DEMO_SQUAD, 0, &block(kx - 30_000, ky - 16_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (kx + 50_000, ky - 16_000), mode: Mode::Plain });
+                ((kx + 10_000, ky - 22_000), "Blue walks past the house 15 m out; the defenders open up through the windows. Watch who takes cover, where, and when they move on.")
+            }
+            "wounded" => {
+                a.spawn_squad(DEMO_SQUAD, 0, &block(kx, ky - 30_000, 8));
+                a.order(DEMO_SQUAD, Order::Hold);
+                a.spawn_squad(LAB_RED, 1, &block(kx + 45_000, ky - 30_000, 3));
+                a.order(LAB_RED, Order::Hold);
+                self.lab_wound = Some((DEMO_SQUAD, 2, 25));
+                ((kx + 12_000, ky - 30_000), "One Blue man starts down and bleeding with Red 45 m east. Watch who goes to him, the drag to cover, and the aid.")
+            }
+            "standoff" => {
+                a.spawn_squad(DEMO_SQUAD, 0, &block(kx - 30_000, ky - 40_000, 8));
+                a.order(DEMO_SQUAD, Order::Move { to: (kx + 40_000, ky - 40_000), mode: Mode::Confirmed });
+                a.spawn_squad(LAB_RED, 1, &block(kx + 40_000, ky - 40_000, 8));
+                a.order(LAB_RED, Order::Move { to: (kx - 30_000, ky - 40_000), mode: Mode::Confirmed });
+                ((kx + 5_000, ky - 40_000), "Blue and Red, eight each with the same brain, advance on each other across open ground. Watch bounding, cover and fire.")
+            }
+            _ => {
+                a.spawn_squad(DEMO_SQUAD, 0, &block(kx + 6_000, ky - 27_000, 12));
+                a.order(DEMO_SQUAD, Order::Capture);
+                ((kx + 10_000, ky - 18_000), "Blue (12) takes the training house from Red (8): approach, stack, entry, clearing.")
+            }
+        };
+        self.assault = Some(a);
+        self.cmd = (watch.0 as f64 / 1000.0, watch.1 as f64 / 1000.0);
+        note.into()
+    }
+    /// AI lab: the feed of leader steps and shouts since the last call, one per line.
+    pub fn lab_feed(&mut self) -> String {
+        self.assault.as_mut().map_or(String::new(), |a| a.lab_log.drain(..).collect::<Vec<_>>().join("\n"))
+    }
+    /// AI lab: every soldier on the testing ground on screen with what he is doing, as JSON
+    /// [{x, y (screen fractions, over his head), t (team), txt}].
+    pub fn lab_marks(&mut self) -> String {
+        let Some(a) = self.assault.take() else { return "[]".into() };
+        let (target, yaw, view_h) = self.last_cam;
+        let (r, u, _) = scalia_render::camera::basis(yaw);
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        let mut out = Vec::new();
+        for i in 0..a.battle.soldiers.len() {
+            let (x, y) = a.position(i);
+            let (x, y) = (x / 1000.0, y / 1000.0);
+            let up = if a.battle.soldiers[i].alive() && !a.battle.soldiers[i].down() { 2.1 } else { 0.6 };
+            let rel = Vec3::new((x - self.origin.0) as f32, (y - self.origin.1) as f32, self.height_at(x as f32, y as f32) + up);
+            let d = rel - target;
+            let (sx, sy) = (0.5 + d.dot(r) / (view_h * aspect), 0.5 - d.dot(u) / view_h);
+            if !(-0.05..=1.05).contains(&sx) || !(-0.05..=1.05).contains(&sy) {
+                continue;
+            }
+            let txt = crate::assault::lab_state(&a.battle, i).replace('"', "'");
+            out.push(format!("{{\"i\":{i},\"x\":{sx:.4},\"y\":{sy:.4},\"t\":{},\"txt\":\"#{i} {txt}\"}}", a.battle.soldiers[i].team));
+        }
+        self.assault = Some(a);
+        format!("[{}]", out.join(","))
+    }
     pub fn assault_state(&mut self) -> String {
         use crate::assault::{DEMO_SQUAD, ENEMY_SQUAD};
         let demo = self.demo;
@@ -680,13 +771,14 @@ impl Viewer {
     /// Sounds since the last call, four floats each: distance from the commander (m), pan (-1 left .. 1 right
     /// on screen), 1 for a blast or 0 for a shot, and how long from now it happens (s; rounds of a burst).
     pub fn take_sounds(&mut self) -> Vec<f32> {
+        let (lab_t, lab_speed) = (self.lab_t, self.lab_speed);
         let Some(a) = self.assault.as_mut() else { return Vec::new() };
         let (r, _, _) = scalia_render::camera::basis(self.last_cam.1);
         let mut out = Vec::new();
         for snd in a.sounds.drain(..) {
             let d = Vec3::new((snd.x - self.cmd.0) as f32, (snd.y - self.cmd.1) as f32, 0.0);
             let len = d.length();
-            let delay = ((snd.at - self.frame_ms) / 1000.0).max(0.0) as f32;
+            let delay = (if lab_speed <= 0.0 { 0.0 } else { (snd.at - lab_t) / lab_speed }).max(0.0) as f32 / 1000.0;
             // Kind: 0 a shot, 1 a blast, 2 + loudness a footfall (2.0 to 3.0); footfalls only within 30 m.
             let kind = match (snd.blast, snd.step) {
                 (true, _) => 1.0,
@@ -2065,7 +2157,16 @@ impl Viewer {
         let mut foes = Vec::with_capacity(ENEMY_POSTS.len() * 12);
         let mut assaulters = Vec::new();
         if let Some(mut a) = self.assault.take() {
-            a.advance(self.frame_ms);
+            // Battle time runs on the lab's clock (real time unless the AI lab slows or pauses it).
+            self.lab_t += (self.frame_ms - self.lab_prev).clamp(0.0, 500.0) * self.lab_speed;
+            self.lab_prev = self.frame_ms;
+            a.advance(self.lab_t);
+            if let Some((sq, k, hp)) = self.lab_wound {
+                if let Some(i) = a.battle.soldiers.iter().enumerate().filter(|(_, s)| s.squad == sq).map(|(i, _)| i).nth(k) {
+                    a.battle.soldiers[i].health = hp;
+                    self.lab_wound = None;
+                }
+            }
             // Sandbags laid on the field: part of the base from now on (drawn, and in the agents' grid).
             if let Some(props) = a.battle.map_spec().map(|m| m.props()).filter(|p| p.len() > self.base_props.len()) {
                 self.base_props = props;
@@ -2091,9 +2192,9 @@ impl Viewer {
                 };
                 let (from, to) = (ground(self, f.from), ground(self, f.to));
                 if f.blast {
-                    self.fx.blast(f.at, from);
+                    self.fx.blast(self.lab_real(f.at), from);
                 } else {
-                    self.fx.shot(f.at, from, to, f.hit, f.tracer);
+                    self.fx.shot(self.lab_real(f.at), from, to, f.hit, f.tracer);
                 }
             }
             self.assault = Some(a);

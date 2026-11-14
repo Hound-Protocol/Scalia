@@ -771,6 +771,68 @@ try {
     }
     for (const [id, el] of fieldEls) if (!seen.has(id)) { el.remove(); fieldEls.delete(id); }
   };
+  // ---- AI lab (?lab in the address) ----
+  // Fixed scenarios on the testing ground to watch the battle AI together: slow motion and pause, what every
+  // man is doing written over his head, and the leaders' steps and shouts in a feed. Keys: - pause, , . speed,
+  // Backspace restart.
+  const lab = new URLSearchParams(location.search).has('lab') ? (() => {
+    const SCEN = [['clear', 'Clear house'], ['contact', 'Contact'], ['wounded', 'Casualty'], ['standoff', 'Standoff']];
+    const SPEEDS = [0, 0.25, 0.5, 1, 2];
+    let cur = new URLSearchParams(location.search).get('lab') || 'clear', speed = 1, labels = true;
+    const panel = document.createElement('div'); panel.id = 'labPanel';
+    panel.innerHTML = `<h5>AI LAB</h5><div class="scen">${SCEN.map(([k, n]) => `<button data-s="${k}">${n}</button>`).join('')}</div>
+      <div class="spd">${SPEEDS.map((x) => `<button data-v="${x}">${x === 0 ? 'Pause' : x + '×'}</button>`).join('')}<button data-l>Labels</button><button data-r>Restart</button></div>
+      <div class="note"></div><div class="feed"></div><div style="color:#8a9680;margin-top:4px">− pause · , . slower/faster · Backspace restart</div>`;
+    document.body.appendChild(panel);
+    const marks = $('labMarks'), feed = panel.querySelector('.feed'), els = new Map();
+    const paint = () => {
+      panel.querySelectorAll('[data-s]').forEach((b) => b.classList.toggle('on', b.dataset.s === cur));
+      panel.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) === speed));
+      panel.querySelector('[data-l]').classList.toggle('on', labels);
+    };
+    const setSpeed = (x) => { speed = x; v.lab_set_speed(x); paint(); };
+    const start = (k) => {
+      cur = k; feed.textContent = '';
+      panel.querySelector('.note').textContent = v.lab_start(k);
+      const u = new URL(location.href); u.searchParams.set('lab', k); history.replaceState(null, '', u);
+      paint();
+    };
+    panel.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.s) start(b.dataset.s);
+      else if (b.dataset.v !== undefined) setSpeed(Number(b.dataset.v));
+      else if (b.hasAttribute('data-l')) { labels = !labels; paint(); }
+      else if (b.hasAttribute('data-r')) start(cur);
+    });
+    addEventListener('keydown', (e) => {
+      if (e.target.closest && e.target.closest('input,textarea')) return;
+      const k = e.key.toLowerCase();
+      if (k === '-') setSpeed(speed === 0 ? 1 : 0);
+      else if (k === ',') setSpeed(SPEEDS[Math.max(1, SPEEDS.indexOf(speed) - 1)]);
+      else if (k === '.') setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)]);
+      else if (k === 'backspace') { e.preventDefault(); start(cur); }
+    });
+    let started = false;
+    return {
+      draw() {
+        if (!started) { started = true; start(cur); setSpeed(1); }
+        const f = v.lab_feed();
+        if (f) { feed.textContent += (feed.textContent ? '\n' : '') + f; feed.scrollTop = feed.scrollHeight; }
+        marks.hidden = !labels || tabletUp;
+        if (marks.hidden) return;
+        const w = canvas.clientWidth, h = canvas.clientHeight, seen = new Set();
+        for (const m of JSON.parse(v.lab_marks())) {
+          let el = els.get(m.i);
+          if (!el) { el = document.createElement('i'); marks.appendChild(el); els.set(m.i, el); }
+          el.className = m.t ? 'red' : '';
+          if (el.textContent !== m.txt) el.textContent = m.txt;
+          el.style.transform = `translate(${(m.x * w).toFixed(1)}px, ${(m.y * h).toFixed(1)}px) translate(-50%, -100%)`;
+          seen.add(m.i);
+        }
+        for (const [i, el] of els) if (!seen.has(i)) { el.remove(); els.delete(i); }
+      },
+    };
+  })() : null;
   const markEls = new Map();
   let lastMarks = [], commanderPicked = false, panelKey = '';
   const SPEC = { weapon: 'Assault rifle', armor: 'Standard fatigues', gear: 'Radio, first-aid kit' };
@@ -1619,6 +1681,7 @@ Click to copy and close.`;
       const line = v.frame(now);
       syncTablet();
       drawFieldLabels();
+      if (lab) lab.draw();
       drawMapMarks(); drawScan();
       footsteps();
       assaultTick(now);
