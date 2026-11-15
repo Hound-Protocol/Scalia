@@ -4,6 +4,29 @@
 use std::collections::HashMap;
 
 use glam::Vec3;
+
+/// Acoustic obstruction uses the propagation field for an on-foot listener, where diffraction around
+/// corners and open doors matters. The tablet listener is physically at camera height, so trace the actual
+/// 3D line instead of incorrectly applying a ground-level field to an elevated listener.
+fn sound_occlusion(
+    sight: &scalia_ai::sight::SightGrid,
+    field: Option<&scalia_audio::Field>,
+    ear: (f32, f32),
+    source: (f32, f32),
+    listener_height: f32,
+    camera_listener: bool,
+) -> scalia_audio::Occlusion {
+    let height = if camera_listener { listener_height } else { 1.6 };
+    if camera_listener {
+        let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
+        return scalia_audio::Occlusion { wall_db: walls as f32 * 40.0, bend_db: 0.0, detour_m: 0.0 };
+    }
+    if let Some(occlusion) = field.and_then(|field| field.at(source)) {
+        return occlusion;
+    }
+    let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
+    scalia_audio::Occlusion { wall_db: walls as f32 * 40.0, bend_db: 0.0, detour_m: 0.0 }
+}
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
 use scalia_core::nav::{Furnish, NavGrid, Prop, PropKind};
@@ -1082,18 +1105,16 @@ impl Viewer {
         // stands). Beyond the flooded field: the walls on the straight line, at ear height.
         let ear = self.ear();
         self.ensure_field(ear);
-        let occ = match self.assault.as_ref() {
-            None => scalia_audio::Occlusion::NONE,
-            Some(a) => {
-                match self.audio_field.as_ref().and_then(|f| f.0.at((sx, sy))) {
-                    Some(o) => o,
-                    None => {
-                        let w = scalia_audio::walls_between(&a.battle.sight, (ear.0, ear.1, 1.6), (sx, sy, 1.4));
-                        scalia_audio::Occlusion { wall_db: w as f32 * 40.0, bend_db: 0.0, detour_m: 0.0 }
-                    }
-                }
-            }
-        };
+        let occ = self.assault.as_ref().map_or(scalia_audio::Occlusion::NONE, |a| {
+            sound_occlusion(
+                &a.battle.sight,
+                self.audio_field.as_ref().map(|field| &field.0),
+                ear,
+                (sx, sy),
+                l.2,
+                self.tablet,
+            )
+        });
         let gain = spread * occ.gain();
         let lowpass = air_hz.min(occ.lowpass_hz());
         // The space it is made in rings; through walls you hear more of that ring than of the sound itself.
@@ -4374,5 +4395,47 @@ fn commander_soldier(a: &mut crate::assault::Assault, at_mm: (i64, i64)) -> usiz
             a.battle.soldiers[i].mags = COMMANDER_MAGS;
             i
         }
+    }
+}
+
+
+#[cfg(test)]
+mod audio_spatial_tests {
+    use super::*;
+    use scalia_core::nav::{Prop, PropKind};
+
+    #[test]
+    fn tablet_listener_height_is_used_for_occlusion() {
+        let wall = Prop {
+            kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
+            x_mm: 50_000,
+            y_mm: 50_000,
+            quarter_turns: 1,
+        };
+        let sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[wall]);
+        let ear = (40.0, 50.0);
+        let source = (60.0, 50.0);
+        let field = scalia_audio::Field::build(&sight, ear, 32.0);
+
+        let on_foot = sound_occlusion(&sight, Some(&field), ear, source, 19.2, false);
+        let tablet = sound_occlusion(&sight, Some(&field), ear, source, 30.0, true);
+
+        assert!(on_foot.wall_db >= 40.0, "{on_foot:?}");
+        assert_eq!(tablet, scalia_audio::Occlusion::NONE, "{tablet:?}");
+    }
+
+    #[test]
+    fn tablet_listener_still_hears_a_wall_that_intersects_the_elevated_ray() {
+        let wall = Prop {
+            kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
+            x_mm: 50_000,
+            y_mm: 50_000,
+            quarter_turns: 1,
+        };
+        let sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[wall]);
+        let ear = (40.0, 50.0);
+        let source = (60.0, 50.0);
+        let tablet = sound_occlusion(&sight, None, ear, source, 4.0, true);
+        assert!(tablet.wall_db >= 40.0, "{tablet:?}");
     }
 }
