@@ -922,6 +922,10 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             aim_arms(&mut p);
             p.prone = 1.0;
             p.rifle = std::f32::consts::FRAC_PI_2;
+            // The body faces the target directly when prone; no standing bladed-stance twist.
+            p.rifle_yaw = 0.0;
+            p.twist = 0.0;
+            p.look = 0.0;
             p.head = 0.82;
         }
         Pose::StandAim => {
