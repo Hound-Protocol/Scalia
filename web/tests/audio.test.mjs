@@ -12,6 +12,7 @@ class FakeNode {
     this.gain = param();
     this.frequency = param();
     this.playbackRate = param();
+    this.delayTime = param();
     this.pan = param();
     this.Q = { value: 0 };
     this.positionX = { value: 0, setTargetAtTime() {} };
