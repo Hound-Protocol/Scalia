@@ -1641,6 +1641,69 @@ impl Viewer {
         }
         format!("[{}]", out.join(","))
     }
+    /// Active interactables projected through the same orthographic camera as unit labels.
+    /// The UI receives metadata, not object-specific presentation rules.
+    fn active_hint_data(&self) -> Vec<crate::hints::HintData> {
+        use crate::hints::{Interactable, JukeboxTarget};
+        if self.scene != Scene::Ground || self.tablet {
+            return Vec::new();
+        }
+
+        let player = (self.cmd.0, self.cmd.1);
+        let mut hints = Vec::new();
+
+        // Entities publish their own interaction metadata through the Interactable contract.
+        if let Some((x, y)) = jukebox_mm() {
+            let jukebox = JukeboxTarget { at_mm: (x, y) };
+            if let Some(hint) = jukebox.interaction_hint("jukebox".into(), player) {
+                hints.push(hint);
+            }
+        }
+        if let Some(assault) = self.assault.as_ref() {
+            for (index, door) in assault.battle.doors.iter().enumerate() {
+                if let Some(hint) = door.interaction_hint(format!("door:{index}"), player) {
+                    hints.push(hint);
+                }
+            }
+        }
+
+        crate::hints::prioritize(hints)
+    }
+
+    /// JSON interaction hints: id, caption, input token, projected anchor, range and display policy.
+    /// Coordinates are normalized to the active canvas (0..1, y down).
+    pub fn hint_marks(&mut self) -> String {
+        let (target, yaw, view_h) = self.last_cam;
+        let (right, up, _) = scalia_render::camera::basis(yaw);
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        let origin = self.origin;
+        let mut out = Vec::new();
+
+        for hint in self.active_hint_data() {
+            let x = hint.target_transform[0];
+            let y = hint.target_transform[1];
+            let z = self.height_at(x as f32, y as f32) + hint.target_transform[2] as f32 + hint.local_vertical_offset;
+            let relative = Vec3::new((x - origin.0) as f32, (y - origin.1) as f32, z) - target;
+            let sx = 0.5 + relative.dot(right) / (view_h * aspect);
+            let sy = 0.5 - relative.dot(up) / view_h;
+            out.push(format!(
+                "{{\"id\":{},\"caption\":{},\"input\":{},\"action\":{},\"icon\":{},\"offscreenIcon\":{},\"x\":{sx:.5},\"y\":{sy:.5},\"radius\":{:.2},\"priority\":{},\"allowMultiple\":{},\"clampToScreen\":{},\"showOffscreenArrow\":{}}}",
+                crate::json_str(&hint.id),
+                crate::json_str(&hint.caption_text),
+                crate::json_str(&hint.input_token),
+                crate::json_str(&hint.action),
+                crate::json_str(&hint.on_screen_icon),
+                crate::json_str(&hint.off_screen_icon),
+                hint.trigger_radius,
+                hint.priority,
+                hint.allow_multiple,
+                hint.clamp_to_screen,
+                hint.show_offscreen_arrow,
+            ));
+        }
+        format!("[{}]", out.join(","))
+    }
+
     /// Every unit as seen by the camera that is active right now (the field camera, or the tablet map's inside
     /// `use_map(true)`): JSON [{id, cs, n, x, y, r, sel, you, men: [[x, y, readiness, health]], ready: [stable, wounded,
     /// incapacitated, deceased], u}] with x, y as fractions of the canvas (0..1, y down), u a metre as a fraction of
@@ -1913,29 +1976,34 @@ impl Viewer {
     /// E, on foot: the commander uses what is in reach. Returns "jukebox" when he is at the jukebox (the page
     /// opens its player), "door" when he opened or shut the nearest door, or "" with nothing in reach.
     pub fn interact(&mut self) -> String {
-        if self.scene != Scene::Ground {
+        let Some(target) = self.active_hint_data().into_iter().next() else {
             return String::new();
-        }
-        let me = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
-        let d2 = |p: (i64, i64)| ((p.0 - me.0) as f64).hypot((p.1 - me.1) as f64);
-        if jukebox_mm().is_some_and(|j| d2(j) < 2_000.0) {
-            return "jukebox".into();
-        }
-        let Some(a) = self.assault.as_mut() else { return String::new() };
-        let near = a.battle.doors.iter().enumerate().map(|(i, d)| (i, d2(d.at))).filter(|&(_, d)| d < 1_800.0).min_by(|x, y| x.1.total_cmp(&y.1));
-        let Some((i, _)) = near else { return String::new() };
-        use scalia_ai::doors::DoorState;
-        let me_soldier = a.battle.soldiers.iter().position(|s| s.player);
-        let to = match a.battle.doors[i].state {
-            DoorState::Open | DoorState::Breached => DoorState::Closed,
-            _ => DoorState::Open,
         };
-        // A breached door has nothing left to shut; a locked one does not give to a hand on the handle.
-        if matches!(a.battle.doors[i].state, DoorState::Breached | DoorState::Locked) {
-            return String::new();
+
+        match target.action.as_str() {
+            "jukebox" => "jukebox".into(),
+            "door" => {
+                let Some(index) = target.id.strip_prefix("door:").and_then(|id| id.parse::<usize>().ok()) else {
+                    return String::new();
+                };
+                let Some(assault) = self.assault.as_mut() else {
+                    return String::new();
+                };
+                let Some(door) = assault.battle.doors.get(index) else {
+                    return String::new();
+                };
+                use scalia_ai::doors::DoorState;
+                let to = match door.state {
+                    DoorState::Closed => DoorState::Open,
+                    DoorState::Open => DoorState::Closed,
+                    DoorState::Locked | DoorState::Breached => return String::new(),
+                };
+                let me_soldier = assault.battle.soldiers.iter().position(|soldier| soldier.player);
+                assault.battle.set_door(index, to, me_soldier);
+                "door".into()
+            }
+            _ => String::new(),
         }
-        a.battle.set_door(i, to, me_soldier);
-        "door".into()
     }
 
     pub fn scene_name(&self) -> String {

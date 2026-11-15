@@ -17,6 +17,7 @@ pub mod motion;
 #[cfg(target_arch = "wasm32")]
 pub mod viewer;
 pub mod ground;
+pub mod hints;
 
 fn json_str(s: &str) -> String {
     let mut o = String::from("\"");

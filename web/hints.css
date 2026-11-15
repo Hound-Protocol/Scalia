@@ -1,0 +1,66 @@
+/* Minimal world-space interaction marker: transparent, white, thin keyline. */
+#interactionHints {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  pointer-events: none;
+}
+#interactionHints[hidden] { display: none; }
+.interaction-hint {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .95));
+  user-select: none;
+}
+.interaction-hint__caption {
+  color: #fff;
+  font: 600 11px/1.2 ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+  letter-spacing: .075em;
+  text-align: center;
+  text-shadow: 0 1px 3px #000, 0 0 6px #000;
+}
+.interaction-hint__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.interaction-hint__key {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, .96);
+  border-radius: 2px;
+  background: transparent;
+  color: #fff;
+  font: 600 13px/1 ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+  text-shadow: 0 1px 3px #000;
+}
+.interaction-hint__action {
+  color: rgba(255, 255, 255, .96);
+  font: 500 10px/1 ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+  letter-spacing: .13em;
+  text-shadow: 0 1px 3px #000;
+}
+.interaction-hint.is-live {
+  animation: interaction-hint-pop 170ms cubic-bezier(.16, 1.45, .35, 1) both;
+}
+@keyframes interaction-hint-pop {
+  0% { transform: translate(-50%, -100%) scale(.72); }
+  72% { transform: translate(-50%, -100%) scale(1.08); }
+  100% { transform: translate(-50%, -100%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .interaction-hint.is-live { animation: none; }
+}
+
+body.in-menu #interactionHints { visibility: hidden; }

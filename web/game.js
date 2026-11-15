@@ -6,6 +6,7 @@ import { createErrors } from './errors.js';
 import { preload, fileBytes } from './preload.js';
 import { createMenu } from './menu.js';
 import { createJukebox } from './jukebox.js';
+import { HintManager } from './hints.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
@@ -887,6 +888,11 @@ try {
     }
     for (const [id, el] of fieldEls) if (!seen.has(id)) { el.remove(); fieldEls.delete(id); }
   };
+  const interactionHints = new HintManager({
+    viewer: v,
+    canvas,
+    visible: () => !tabletUp && !tabletShown && scene === 'ground' && $('answerCall').hidden && !jukebox.open,
+  });
   // ---- AI lab (?lab in the address) ----
   // Fixed scenarios on the testing ground to watch the battle AI together: slow motion and pause, what every
   // man is doing written over his head, and the leaders' steps and shouts in a feed. Keys: - slower (down to
@@ -1917,6 +1923,7 @@ Click to copy and close.`;
       if (errors.crashed) return;
       errors.guard('tablet', syncTablet);
       errors.guard('labels', drawFieldLabels);
+      errors.guard('interaction hints', () => interactionHints.update());
       if (lab) errors.guard('lab', () => lab.draw());
       errors.guard('map', () => { drawMapMarks(); drawScan(); });
       errors.guard('footsteps', footsteps);
