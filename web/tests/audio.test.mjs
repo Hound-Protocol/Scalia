@@ -8,8 +8,11 @@ let sourceCreations = 0;
 
 class FakeNode {
   constructor() {
-    this.gain = { value: 1, setTargetAtTime() {} };
-    this.frequency = { value: 1, setTargetAtTime() {} };
+    const param = () => ({ value: 1, setTargetAtTime() {}, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} });
+    this.gain = param();
+    this.frequency = param();
+    this.playbackRate = param();
+    this.pan = param();
     this.Q = { value: 0 };
     this.positionX = { value: 0, setTargetAtTime() {} };
     this.positionY = { value: 0, setTargetAtTime() {} };
@@ -34,8 +37,37 @@ class FakeAudioContext {
   createGain() { return new FakeNode(); }
   createBiquadFilter() { return new FakeNode(); }
   createPanner() { return new FakeNode(); }
+  createStereoPanner() { return new FakeNode(); }
+  createWaveShaper() { return new FakeNode(); }
+  createDelay() { return new FakeNode(); }
+  createBufferSource() {
+    const source = new FakeNode();
+    source.start = () => {};
+    source.stop = () => source.onended?.();
+    return source;
+  }
 }
 
+
+
+function playbackEngine() {
+  const audio = new AudioEngine();
+  const context = new FakeAudioContext();
+  audio.ctx = context;
+  audio.ensure = () => context;
+  audio.buffer = () => ({ duration: 0.2 });
+  audio.world = new FakeNode();
+  audio.mix = new FakeNode();
+  audio.ui = new FakeNode();
+  audio.air = new FakeNode();
+  audio.rev = { small: new FakeNode(), large: new FakeNode(), corridor: new FakeNode() };
+  audio.crunch = new Float32Array(8);
+  audio.heat = 0;
+  audio.heatAt = 0;
+  audio.muffle = null;
+  audio.ringGain = null;
+  return audio;
+}
 
 function lifecycleEngine() {
   const audio = Object.create(AudioEngine.prototype);
@@ -224,5 +256,33 @@ test('completed voice tails are bounded and retired nodes are disconnected', () 
   assert.equal(audio.voiceStats().nodes, 64 * 2);
   audio.stopAll();
   assert.equal(audio.voiceStats().tracked, 0);
+  assert.equal(audio.voiceStats().nodes, 0);
+});
+
+
+test('play() returns a cancellable handle and disconnects every voice-owned node', () => {
+  const audio = playbackEngine();
+  const handle = audio.play('test-shot', {
+    kind: 'shot', db: 100, gain: 1, room: 0, rx: 0, ry: 1,
+    below: 0, dist: 1, lowpass: 20000, space: [0, 30, 0], echoes: [],
+  });
+  assert.ok(handle);
+  assert.equal(handle.state, 'playing');
+  assert.equal(audio.voiceStats().active, 1);
+  assert.ok(audio.voiceStats().nodes >= 10);
+  assert.equal(handle.cancel(), true);
+  assert.equal(handle.state, 'ended');
+  assert.equal(audio.voiceStats().tracked, 0);
+  assert.equal(audio.voiceStats().nodes, 0);
+});
+
+test('playUi() participates in the same voice cap and cancellation lifecycle', () => {
+  const audio = playbackEngine();
+  const handle = audio.playUi('ui-click', 0.8);
+  assert.ok(handle);
+  assert.equal(handle.category, 'ui');
+  assert.equal(audio.voiceStats().active, 1);
+  assert.equal(handle.stop(), true);
+  assert.equal(audio.voiceStats().active, 0);
   assert.equal(audio.voiceStats().nodes, 0);
 });
