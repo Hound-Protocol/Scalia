@@ -60,6 +60,17 @@ impl Cue {
     }
 }
 
+/// Seconds since `team`'s figures were last stepped (0 the first time, at most 0.1), and mark them stepped now.
+fn figure_dt(clocks: &mut Vec<f64>, team: u8, now: f64) -> f32 {
+    let t = team as usize;
+    if clocks.len() <= t {
+        clocks.resize(t + 1, f64::NAN);
+    }
+    let last = clocks[t];
+    clocks[t] = now;
+    if last.is_nan() { 0.0 } else { ((now - last) / 1000.0).clamp(0.0, 0.1) as f32 }
+}
+
 /// How long one round's push lingers (ms, time constant).
 const RECOIL_MS: f64 = 160.0;
 
@@ -97,7 +108,9 @@ pub struct Assault {
     /// Per soldier: his animator (anim.rs, the same library the commander uses), and the viewer time it was
     /// last stepped.
     figs: Vec<crate::anim::Animator>,
-    figs_at: f64,
+    /// Per team: when its figures were last stepped (viewer ms). Each team is drawn by its own call, so each
+    /// keeps its own clock: one shared clock gave whichever team was drawn second no time at all.
+    figs_at: Vec<f64>,
     /// Per soldier: where his muzzle was last drawn (mm, z over the ground), for flashes and tracers.
     muzzle: Vec<Option<(i64, i64, i64)>>,
     /// Per soldier: which way his barrel pointed when last drawn (unit, world; zero = unknown).
@@ -158,7 +171,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: now_ms, muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), heat: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), heat: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -339,8 +352,7 @@ impl Assault {
         // Anyone who joined since the last step (the commander does, between steps) gets his tables first.
         self.sync_tables();
         let mut out = Vec::new();
-        let dt = ((self.now - self.figs_at) / 1000.0).clamp(0.0, 0.1) as f32;
-        self.figs_at = self.now;
+        let dt = figure_dt(&mut self.figs_at, team, self.now);
         for i in 0..self.battle.soldiers.len() {
             // The commander's man is drawn as the commander.
             if self.battle.soldiers[i].team != team || self.battle.soldiers[i].player {
@@ -520,6 +532,19 @@ pub fn drive_of(s: &Soldier, dt: f32, ts: f32) -> crate::anim::Drive {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn both_teams_get_frame_time_when_drawn_one_after_the_other() {
+        // The viewer draws the enemy, then our squads, every frame: both must advance by the frame's time.
+        let mut clocks = Vec::new();
+        for f in 0..5 {
+            let now = 1_000.0 + 16.0 * f as f64;
+            let (foes, ours) = (super::figure_dt(&mut clocks, 1, now), super::figure_dt(&mut clocks, 0, now));
+            if f > 0 {
+                assert!((foes - 0.016).abs() < 1e-4 && (ours - 0.016).abs() < 1e-4, "frame {f}: enemy {foes}, ours {ours}");
+            }
+        }
+    }
+
     #[test]
     fn recoil_is_one_push_that_builds_through_a_burst() {
         // 10 rounds at 800 rpm (75 ms apart), sampled every 5 ms.
