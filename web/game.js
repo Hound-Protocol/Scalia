@@ -51,7 +51,7 @@ const reboot = () => {
   if (rebooting) return;
   rebooting = true;
   const box = document.getElementById('reboot');
-  box.hidden = false;
+  if (box) box.hidden = false;
   setTimeout(() => { document.body.classList.add('unloading'); worldAudio.fadeOut(0.6); }, 1000);
   setTimeout(() => location.reload(), 1700);
 };
@@ -371,7 +371,6 @@ try {
   };
   // The changelog is written at deploy time from the commit history (changelog.json).
   let chgLoaded = false;
-  if (store.get('scalia.controls') === '0') $('controls').hidden = true;
   const drawChangelog = async () => {
     if (chgLoaded) return;
     try {
