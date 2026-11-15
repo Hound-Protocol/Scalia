@@ -3866,6 +3866,13 @@ fn zone_colour(mean_m: f32) -> f32 {
     }
 }
 
+/// Height source shared by every far-terrain LOD. Sampling the same coarse field at every
+/// level guarantees coincident vertices on neighbouring tiles have identical heights.
+/// Fine detail remains in the near-ground chunk renderer, where the grid can represent it.
+fn far_terrain_height(planet: &Planet, x_mm: i64, y_mm: i64) -> f32 {
+    (planet.coarse_height_mm(x_mm, y_mm) as f32 / 1000.0).max(0.0)
+}
+
 /// One far terrain tile: 64 x 64 cells of 2^level metres, seas flat at sea level.
 fn far_tile_mesh(planet: &Planet, level: u32, ix: i64, iy: i64) -> MeshBuilder {
     const N: usize = 64;
@@ -3878,8 +3885,7 @@ fn far_tile_mesh(planet: &Planet, level: u32, ix: i64, iy: i64) -> MeshBuilder {
         for i in 0..=N {
             let (x, y) = (x0 + i as f64 * cell as f64, y0 + j as f64 * cell as f64);
             let (xm, ym) = ((x * 1000.0) as i64, ymm(y));
-            let mm = if cell < 256.0 { planet.height_mm(xm, ym) } else { planet.coarse_height_mm(xm, ym) };
-            h[j * (N + 1) + i] = mm as f32 / 1000.0;
+            h[j * (N + 1) + i] = far_terrain_height(planet, xm, ym);
         }
     }
     let mut m = MeshBuilder::default();
@@ -4501,4 +4507,20 @@ mod audio_spatial_tests {
         let tablet = sound_occlusion(&sight, None, ear, source, 4.0, true);
         assert!(tablet.wall_db >= 40.0, "{tablet:?}");
     }
+    #[test]
+    fn far_terrain_uses_one_height_field_across_lod_boundaries() {
+        let planet = Planet::demo(42);
+        // Shared world-space vertices must not change height with tile resolution.
+        for &(x, y) in &[
+            (0_i64, 0_i64),
+            (64_000, 128_000),
+            (1_024_000, 2_048_000),
+            (planet.width_mm() - 1_000, planet.depth_mm() / 2),
+        ] {
+            let far = far_terrain_height(&planet, x, y);
+            let expected = (planet.coarse_height_mm(x, y) as f32 / 1000.0).max(0.0);
+            assert_eq!(far, expected);
+        }
+    }
+
 }
