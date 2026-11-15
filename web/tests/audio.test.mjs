@@ -341,3 +341,34 @@ test('voice allocator steals the quietest voice within the lowest priority tier'
   assert.equal(voices[0].source.stopped, false);
   audio.stopAll();
 });
+
+
+test('spatial one-shots keep a full-strength dry signal when room processing is enabled', () => {
+  const audio = playbackEngine();
+  const handle = audio.play('room-shot', {
+    kind: 'shot', db: 130, gain: 1, room: 1, rx: 0, ry: 1,
+    below: 0, dist: 2, lowpass: 20000, space: [1, 4, 0],
+    echoes: [[0.2, 1, 0]],
+  });
+  assert.ok(handle);
+  const voice = [...audio.voices][0];
+  assert.equal(voice.nodes[7].gain.value, 1, 'dry path must not be attenuated by room wetness');
+  assert.ok(voice.nodes[11].gain.value <= 0.18, 'reverb send must remain subordinate to dry signal');
+  assert.ok(voice.nodes[13].gain.value <= 0.25, 'geometric echo must remain subordinate to dry signal');
+  audio.stopAll();
+});
+
+test('persistent streams keep a full-strength dry signal and restrained reverb sends', () => {
+  const audio = engine();
+  const context = new FakeAudioContext();
+  audio.ensure = () => context;
+  audio.world = new FakeNode();
+  audio.rev = { small: new FakeNode(), large: new FakeNode(), corridor: new FakeNode() };
+  const voice = audio.stream({});
+  assert.ok(voice);
+  voice.place([0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 4, 0]);
+  assert.equal(context.createdNodes[9].gain.value, 1);
+  for (const send of context.createdNodes.slice(10)) {
+    if (send.gain) assert.ok(send.gain.value <= 0.1);
+  }
+});
