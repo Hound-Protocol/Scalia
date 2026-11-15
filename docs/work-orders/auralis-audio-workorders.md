@@ -118,3 +118,17 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 - Added regression tests for left/right/front/rear/below direction mapping, vector normalisation, invalid values, and elevated/blocked tablet listener paths.
 
 **Verification:** automated tests are pending CI. Browser headphone/stereo listening checks remain required before considering the spatial result fully verified.
+
+
+## AU-03 execution record — 2026-11-15
+
+**Implementation:** isolated on `audio/au-03-voice-lifecycle-2026-11-15`, stacked on AU-02.
+
+- Added explicit voice handles with category, state, cancel/stop and deterministic IDs.
+- Centralised voice admission: 64 active decoded voices; lowest-priority, quietest and then oldest voice is selected for stealing. Less important arrivals are dropped.
+- Tracked every per-voice Web Audio node and disconnect it after playback/tail completion.
+- Bounded retained tail graphs to 64; reverb, air and echo tails retain only the nodes needed to finish audibly.
+- Included UI one-shots in the same voice cap and lifecycle; exposed active/tail/node/drop/steal counters through `voiceStats()`.
+- Added tests for handle cancellation, cleanup, priority stealing, drop behaviour, and bounded tail retention.
+
+**Verification:** automated tests and browser stress/listening checks are pending CI and manual validation. No merge until checks pass.
