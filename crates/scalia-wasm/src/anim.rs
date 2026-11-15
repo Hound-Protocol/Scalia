@@ -510,6 +510,7 @@ mod tests {
         d.face = Face::Aim { heading: 0.0 };
         let still = run(&mut a, 90, d);
         assert_eq!(still.pose, Pose::ProneAim);
+        d.ts = a.clock;
         assert!(a.barrel(&still, (0.0, 0.0)).0.is_some(), "aimed prone soldier remains armed");
 
         for (vel, expected) in [
@@ -524,7 +525,7 @@ mod tests {
             assert_eq!(f.pose, Pose::Crawl);
             assert_eq!(f.upper, Some(Pose::ProneAim), "aim remains layered over the crawl");
             assert!((wrap(f.dir - expected)).abs() < 0.02, "direction {:?}: expected {expected}, got {}", vel, f.dir);
-            assert!((f.cadence - f.speed / pose::stride_m_dir(Pose::Crawl, expected)).abs() < 0.02);
+            assert_eq!(f.cadence, -1.0, "the shader consumes the animator-integrated crawl phase");
             assert!(a.barrel(&f, (0.0, 0.0)).0.is_some(), "crawling while aiming keeps a valid muzzle");
         }
     }
@@ -536,6 +537,7 @@ mod tests {
         d.rifle = Rifle::Aim;
         d.face = Face::Aim { heading: 0.0 };
         assert_eq!(run(&mut a, 8, d).pose, Pose::StandAim);
+        d.ts = a.clock;
 
         d.stance = Stance::Prone;
         let mut reached_drop = false;
