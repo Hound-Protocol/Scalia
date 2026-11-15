@@ -39,6 +39,9 @@ pub enum Mode {
     Garrison,
 }
 
+/// How far apart men stand across the enemy's bearing when a squad shakes out into a line on contact (mm).
+const LINE_GAP_MM: i64 = 2_500;
+
 /// Garrison: sandbag loads a squad carries, one 2 m wall each (0.7 m thick: low cover, 1 m high), and the time
 /// to fill and lay one.
 pub const SANDBAG_KIT: u8 = 4;
@@ -196,6 +199,10 @@ pub fn choose(s: &Situation) -> Vec<Method> {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Brain {
     pub order: Order,
+    /// The squad's line across the enemy's bearing for the current move, once laid out (kept, so the men do not
+    /// shuffle as the squad's centre and the contacts shift).
+    #[serde(default)]
+    line: Option<Vec<(i64, i64)>>,
     plan: Vec<Method>,
     /// Facts achieved so far (AT, STACKED, INSIDE, CLEARED, HOLDING).
     done: u64,
@@ -256,7 +263,7 @@ pub struct Choke {
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new() }
+        Brain { order: Order::None, line: None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new() }
     }
 }
 
@@ -435,6 +442,14 @@ impl Battle {
     /// Move: everyone heads for the spot (each gets his own place round it); once all are there, security:
     /// each man takes the nearest free cover within SECURE_MM of the spot, and the rest form a ring round it,
     /// low, each facing out over his own sector.
+    /// Which way the enemy the squad knows of lies from the squad (the nearest contact), if it knows of one.
+    fn contact_bearing(&self, squad: usize, ms: &[usize]) -> Option<(i64, i64)> {
+        let n = ms.len().max(1) as i64;
+        let c = ms.iter().fold((0, 0), |a, &i| (a.0 + self.soldiers[i].pos.0 / n, a.1 + self.soldiers[i].pos.1 / n));
+        let near = self.contacts.get(squad)?.iter().filter(|k| self.soldiers[k.enemy].alive()).min_by_key(|k| dist(k.pos, c))?;
+        Some((near.pos.0 - c.0, near.pos.1 - c.1))
+    }
+
     fn lead_move(&mut self, squad: usize, to: (i64, i64), mode: Mode) {
         let ms = self.members(squad);
         if ms.is_empty() || self.brains[squad].secured {
@@ -449,19 +464,41 @@ impl Battle {
             _ if far > 40_000 && mode == Mode::Plain => Gait::Run,
             _ => Gait::Walk,
         };
+        // Knowing of the enemy, the squad goes on in a line across his bearing (a shake-out), not in file: every
+        // man gets his own point beside the objective, in the order they already stand across, LINE_GAP_MM apart.
+        let laid = self.brains[squad].line.clone().filter(|l| l.len() == ms.len());
+        let line: Vec<(i64, i64)> = match (laid, self.contact_bearing(squad, &ms)) {
+            (Some(l), _) => l,
+            (None, Some(b)) if mode != Mode::Garrison && ms.len() > 1 => {
+                let len = isqrt(b.0 * b.0 + b.1 * b.1).max(1);
+                let across = (-b.1 * 1_000 / len, b.0 * 1_000 / len);
+                let mut order: Vec<usize> = (0..ms.len()).collect();
+                order.sort_by_key(|&k| { let p = self.soldiers[ms[k]].pos; (p.0 * across.0 + p.1 * across.1) / 1_000 });
+                let mut spots = vec![to; ms.len()];
+                let half = (ms.len() as i64 - 1) * LINE_GAP_MM / 2;
+                for (slot, &k) in order.iter().enumerate() {
+                    let off = slot as i64 * LINE_GAP_MM - half;
+                    spots[k] = (to.0 + across.0 * off / 1_000, to.1 + across.1 * off / 1_000);
+                }
+                self.brains[squad].line = Some(spots.clone());
+                spots
+            }
+            _ => vec![to; ms.len()],
+        };
         let mut all_there = true;
         for (rank, &i) in ms.iter().enumerate() {
             let t = self.time_ms;
+            let mine = line[rank];
             let s = &mut self.soldiers[i];
-            let going = matches!(s.task, Task::Move { to: t, .. } if t == to);
+            let going = matches!(s.task, Task::Move { to: t, .. } if t == mine);
             if !going {
-                s.task = Task::Move { to, gait };
+                s.task = Task::Move { to: mine, gait };
                 s.posture = None;
                 s.aim = mode != Mode::Plain;
             }
             // With caution each man watches his own sector (front, flanks, rear), sweeping it slowly.
             s.watch = if mode == Mode::Caution { Some(sector(s.pos, to, rank, t)) } else { None };
-            let there = s.settled || dist(s.pos, to) <= ARRIVE_NEAR_MM && !s.moving;
+            let there = s.settled || dist(s.pos, mine) <= ARRIVE_NEAR_MM && !s.moving;
             // Expecting trouble, the first men there get down while the rest come in.
             if there && mode != Mode::Plain {
                 s.posture = Some(Stance::Crouch);

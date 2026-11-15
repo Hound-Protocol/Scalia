@@ -102,6 +102,8 @@ const LANE_LOOK_MM: i64 = 25_000;
 /// How long a man with his lane blocked waits before trying again (ms; up to twice this).
 const LANE_WAIT_MS: i32 = 300;
 /// How long a man told to get down out of a friend's line of fire stays on a knee (ms).
+/// How far a man holding his ground shifts sideways to clear a lane a friend blocks (mm).
+const SIDE_STEP_MM: i64 = 1_200;
 const KNEEL_FOR_LANE_MS: i32 = 4_000;
 /// Two men are never sent to stand closer than this: a shared destination is spread into separate spots.
 pub const SPACING_MM: i64 = 900;
@@ -1498,6 +1500,23 @@ impl Battle {
                     // "Get down!": a friend standing still in the way drops to a knee so he can fire over him.
                     if !self.soldiers[k].moving && self.soldiers[i].stance == Stance::Stand {
                         self.soldiers[k].kneel_ms = KNEEL_FOR_LANE_MS;
+                    }
+                    // Holding his ground out of cover, he also shifts a pace sideways (away from the friend) to open
+                    // a lane of his own: a friend lying or already low cannot clear it by getting down.
+                    let me = &self.soldiers[i];
+                    // (Outdoors only: inside, his spot is part of how the room is held.)
+                    let indoors = self.building.as_ref().is_some_and(|(k, _)| k.room_at(me.pos.0, me.pos.1).is_some());
+                    // Nor in a house assault, where every man's place is set by the drill.
+                    let drill = self.brains.get(me.squad as usize).is_some_and(|b| matches!(b.order, crate::leader::Order::Capture));
+                    if !indoors && !drill && !me.moving && me.cover.is_none() && matches!(me.task, Task::Hold { .. } | Task::Idle) {
+                        let (a, t, f) = (me.pos, self.soldiers[j].pos, self.soldiers[k].pos);
+                        let d = (t.0 - a.0, t.1 - a.1);
+                        let len = isqrt(d.0 * d.0 + d.1 * d.1).max(1);
+                        let side = if d.0 * (f.1 - a.1) - d.1 * (f.0 - a.0) > 0 { 1 } else { -1 };
+                        let to = (a.0 + side * d.1 * SIDE_STEP_MM / len, a.1 - side * d.0 * SIDE_STEP_MM / len);
+                        let to = self.free_spot(i, to);
+                        let face = match self.soldiers[i].task { Task::Hold { face, .. } => face, _ => self.soldiers[i].facing };
+                        self.soldiers[i].task = Task::Hold { at: to, face };
                     }
                     self.soldiers[i].burst_left = 0;
                     self.rolls += 1;
