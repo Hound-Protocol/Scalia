@@ -131,7 +131,7 @@ fn crawl_directional_terms_match_in_rust_and_wgsl() {
     assert!(WGSL.contains("phase * 6.2831853 + dir"), "WGSL crawl phase uses travel direction");
     for term in ["0.16 * lateral", "0.12 * lateral", "0.08 * lateral", "0.04 * lateral"] {
         let rust = RS.contains(term);
-        let shader = WGSL.contains(term.replace("lateral", "lateral"));
+        let shader = WGSL.contains(term);
         assert_eq!(rust, shader, "crawl directional parameter parity for {term}");
     }
 }

@@ -97,7 +97,8 @@ fn main() {
         println!("  {deg:>6.0} deg  seam {seam:.4} rad");
         if seam > 0.01 { println!("  !! crawl cycle seam at {deg} degrees"); bad += 1; }
     }
-\n    println!("\nLeft palm to the rifle handguard (m, worst over the cycle, after grip()); the right palm holds the grip by construction");
+
+    println!("\nLeft palm to the rifle handguard (m, worst over the cycle, after grip()); the right palm holds the grip by construction");
     for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim, Pose::ProneAim] {
         // Worst over the cycle, as drawn (after grip()).
         let guard = (0..16).map(|k| { let p = grip(&params(pose, k as f32 / 16.0), two_handed(pose)); hand(&p, Side::Left).distance(held(RIFLE_GUARD, &p)) }).fold(0.0, f32::max);
