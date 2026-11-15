@@ -312,7 +312,7 @@ pub struct Viewer {
     far_fade: Option<(u32, f64)>,
     /// Zoom: the ladder step aimed at and the view height (metres) the camera is gliding through.
     zoom_step: usize,
-    inspect_zoom: Option<usize>,
+    inspect_zoom: Option<InspectCamera>,
     inspect_glide: bool,
     zoom_m: f32,
     last_frame_ms: f64,
