@@ -78,9 +78,9 @@ export class FieldFeedback {
     const health = Number.isFinite(weapon.health) ? weapon.health : 100;
     if (health < this.lastHealth) {
       this.hitUntil = now + 900;
-      this.el.classList.remove('field-hit');
-      void this.el.offsetWidth;
-      this.el.classList.add('field-hit');
+      this.canvas.classList.remove('field-hit');
+      void this.canvas.offsetWidth;
+      this.canvas.classList.add('field-hit');
       this.say('I’m hit!', now, 1100);
     }
     this.lastHealth = health;
@@ -93,6 +93,9 @@ export class FieldFeedback {
     if (this.checkStarted) {
       const p = Math.min(1, (now - this.checkStarted) / 1450);
       this.progressBar.style.width = (p * 100).toFixed(1) + '%';
+      const at = this.viewer.commander_screen();
+      this.progress.style.left = (at[0] * innerWidth) + 'px';
+      this.progress.style.top = (at[1] * innerHeight - 54) + 'px';
       if (p >= 1 && !this.checkDone) {
         this.checkDone = true;
         if (health >= 100) this.say('I’m all well.', now);
