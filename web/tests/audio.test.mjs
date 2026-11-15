@@ -129,6 +129,8 @@ test('stream() does not claim an element already routed by Auralis media routing
 test('spatialPosition maps camera-relative directions into HRTF coordinates', () => {
   const right = spatialPosition(1, 0);
   near(right[0], 1); near(right[1], 0); near(right[2], 0);
+  const left = spatialPosition(-1, 0);
+  near(left[0], -1); near(left[1], 0); near(left[2], 0);
   const ahead = spatialPosition(0, 1);
   near(ahead[0], 0); near(ahead[1], 0); near(ahead[2], -1);
   const behind = spatialPosition(0, -1);
