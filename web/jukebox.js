@@ -34,7 +34,7 @@ export function createJukebox({ audio, viewer }) {
     media.addEventListener('ended', onEnded);
     return media;
   };
-  let el = null;
+  let el = makeElement();
   let voice = null, on = false, track = 0, vol = 0.5, tone = [5, 5, 5], timer = 0;
   const $ = (s) => box.querySelector(s);
   const list = $('.jb-list');
