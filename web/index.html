@@ -188,6 +188,8 @@
   #boot .load { position: relative; height: 3px; background: rgba(255,255,255,0.1); --p: 0%; }
   #boot .load::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: #e0a526; transition: width 0.15s linear; }
   #boot .load::after { content: attr(data-text); position: absolute; left: 0; right: 0; text-align: center; top: 9px; font-size: 11px; letter-spacing: 0.08em; color: #9aa58a; white-space: pre; }
+  #boot .boot-error { margin: 24px 0 0; color: #ffb29e; font: 12px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; text-align: center; }
+  #boot .boot-retry { display: block; margin: 14px auto 0; padding: 7px 14px; color: #e3d6aa; background: #24291e; border: 1px solid #68734a; cursor: pointer; font: inherit; }
   #proto button:disabled { opacity: 0.45; cursor: progress; filter: grayscale(0.6); }
   #proto .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   #proto .ver { color: #7c8670; font-size: 11px; letter-spacing: .1em; }
@@ -772,6 +774,37 @@
 <div class="row"><span class="ver" id="protoVer"></span><button id="protoGo">UNDERSTOOD · ENTER</button></div>
 </div></div>
 <div id="update" hidden><span class="sig"></span><span class="txt"><span class="ttl">UPDATE RECEIVED</span><span class="sub" id="update-sub">A new build is ready for deployment.</span></span><button id="update-reload">REDEPLOY</button><button id="update-close" title="Later">✕</button></div>
-<script type="module" src="./game.js"></script>
+<script>
+(() => {
+  const boot = document.getElementById('boot');
+  let reported = false;
+  function reportBootFailure(reason) {
+    if (reported || !boot || boot.classList.contains('done')) return;
+    reported = true;
+    const load = document.getElementById('protoLoad');
+    if (load) load.style.display = 'none';
+    const message = reason instanceof Error ? reason.message : String(reason || 'Unknown initialization error');
+    const detail = document.createElement('p');
+    detail.className = 'boot-error';
+    detail.textContent = 'INITIALIZATION FAILED\n' + message;
+    const retry = document.createElement('button');
+    retry.className = 'boot-retry';
+    retry.type = 'button';
+    retry.textContent = 'RELOAD SCALIA';
+    retry.addEventListener('click', () => location.reload());
+    const panel = boot.querySelector('.bx');
+    if (panel) panel.append(detail, retry);
+    console.error('[Scalia startup]', reason);
+  }
+  window.__scaliaBootFailure = reportBootFailure;
+  window.addEventListener('error', (event) => {
+    if (event.target === window || event.target?.tagName === 'SCRIPT') {
+      reportBootFailure(event.error || event.message || 'A startup script failed to load or parse.');
+    }
+  }, true);
+  window.addEventListener('unhandledrejection', (event) => reportBootFailure(event.reason));
+})();
+</script>
+<script type="module" src="./game.js" onerror="window.__scaliaBootFailure('A startup module failed to load or parse. Check the browser console for details.')"></script>
 </body>
 </html>
