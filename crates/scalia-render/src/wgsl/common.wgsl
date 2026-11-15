@@ -318,10 +318,9 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 36u) {
-    // Prone aim: the same supported rifle position, with a cheek weld.
+    // Prone aim: the solved two-handed aim rig, rolled onto the elbows.
     p.prone = 1.0;
-    p.sh = vec2f(2.8);
-    p.el = vec2f(1.3, 1.35);
+    carry(&p, 4u);
     p.rifle = 1.5707963;
     p.head = 0.82;
   } else if (pose == 6u) {
