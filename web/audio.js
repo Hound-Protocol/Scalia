@@ -201,7 +201,7 @@ export class AudioEngine {
     this.mediaGain = c.createGain(); this.mediaGain.gain.value = 1;
     this.mediaFilter.connect(this.mediaGain).connect(this.world);
     // UI and cinematic sounds bypass world effects, but still pass through Auralis' master limiter.
-    this.ui = c.createGain(); this.ui.connect(head);
+    this.ui = c.createGain(); this.ui.connect(lim);
     // Room heat: sustained fire indoors keeps the room ringing on top of itself (rises per shot, fades in ~1.5 s).
     this.heat = 0; this.heatAt = 0;
     // Saturation curve for gunfire close by indoors: the overloaded crack of a shot in a hallway (bodycam).
