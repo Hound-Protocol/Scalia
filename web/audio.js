@@ -544,7 +544,7 @@ export class AudioEngine {
     const loudness = Math.max(0, Math.min(1, (num(o.db, 100, 0, 200) - 110) / 40));
     const airAmount = (1 - enc) * loudness * (0.45 + 0.5 * (gun ? o.far : 0));
     if (airAmount > 0.01) {
-      const send = c.createGain(); send.gain.value = airAmount;
+      const send = own(c.createGain()); send.gain.value = airAmount;
       p.connect(send).connect(this.air);
     }
     // Echoes off what stands around it: each a little later, weaker and darker, from the wall's side.
@@ -620,7 +620,7 @@ export class AudioEngine {
     // is tracked and disconnected on retirement; tail retention is bounded independently from live voices.
     const maxEcho = (o.echoes || []).reduce((m, e) => Math.max(m, num(e[0], 0, 0, 2)), 0);
     const farTail = gun && o.far > 0.05 ? Math.min(3.9, 0.9 * (1 + o.dist / 150)) + 0.12 : 0;
-    const hasRoomTail = sends.some(([bus, weight]) => weight * o.room > 0.01);
+    const hasRoomTail = sends.some(([bus, weight]) => weight * o.room * (1 + 2.6 * inside) * (1 + (inside > 0 ? this.heat : 0)) > 0.01);
     const hasAirTail = airAmount > 0.01;
     const tailSeconds = Math.min(4.2, Math.max(
       maxEcho > 0 ? maxEcho + 0.12 : 0,
