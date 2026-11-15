@@ -122,11 +122,11 @@ export class AudioEngine {
     return true;
   }
 
-  _registerVoice(src, nodes, { category = 'world', priority = 1, gain = 1, tailSeconds = 0 } = {}) {
+  _registerVoice(src, nodes, { category = 'world', priority = 1, gain = 1, tailSeconds = 0, out = null } = {}) {
     const voice = {
       id: ++this.voiceSequence, src, nodes, category, pri: priority, gain,
       tailSeconds: Math.max(0, Math.min(4.2, tailSeconds)), state: 'scheduled', done: false,
-      timer: null, reason: null, out: nodes.find((node) => node?._auralisOutput) || null,
+      timer: null, reason: null, out,
     };
     const engine = this;
     voice.handle = {
@@ -276,9 +276,8 @@ export class AudioEngine {
     const level = c.createGain(); level.gain.value = safeGain;
     source.connect(level).connect(this.ui);
     const voice = this._registerVoice(source, [source, level], {
-      category: 'ui', priority, gain: safeGain, tailSeconds: 0,
+      category: 'ui', priority, gain: safeGain, tailSeconds: 0, out: level,
     });
-    voice.out = level;
     try { source.start(); } catch (error) { this._cleanupVoice(voice); throw error; }
     voice.state = 'playing';
     return voice.handle;
@@ -520,7 +519,7 @@ export class AudioEngine {
     p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
     // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
     const dry = own(c.createGain()); dry.gain.value = 1 - o.room * 0.5;
-    const out = own(c.createGain()); out._auralisOutput = true;
+    const out = own(c.createGain());
     // Driven into the curve by how close and how enclosed; brought back down after it.
     const pre = own(c.createGain()); pre.gain.value = 1 + 2.5 * drive;
     const post = own(c.createGain()); post.gain.value = 1 / (1 + 1.2 * drive);
@@ -631,9 +630,8 @@ export class AudioEngine {
       inside > 0.3 ? 0.12 : 0,
     ));
     const voice = this._registerVoice(src, nodes, {
-      category: o.kind || 'world', priority: pri, gain: o.gain, tailSeconds,
+      category: o.kind || 'world', priority: pri, gain: o.gain, tailSeconds, out,
     });
-    voice.out = out;
     try {
       src.start(c.currentTime + Math.max(0, o.delay || 0));
       voice.state = 'playing';
