@@ -737,40 +737,48 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     let gust = sin(time * 1.7 + a.x * 0.35 + a.y * 0.21 + b.y * 6.28) * 0.5 + 0.5;
     q = q + vec3f(0.09, 0.04, 0.0) * gust * q.z * 2.5;
   } else if (part != 0u && part != 15u) {
-    // Instance b.z: cadence (strides/s, phase from the clock) or, when negative, the phase is b.y itself: the CPU
-    // integrates it for figures whose pace changes (winding up, braking), so the legs never jump.
+    // Negative b.z keeps the CPU-integrated leg phase in b.y. Values below -1 also carry reload progress.
     let phase = select(select(0.0, fract(time * b.z + b.y), b.z > 0.0), fract(b.y), b.z < 0.0);
+    let reload_phase = clamp(-b.z - 1.0, 0.0, 1.0);
     let w = clamp((time - d.y) / 0.35, 0.0, 1.0);
-    // Instance c.z (pose.rs `pack_layer`): whole part the upper-body pose id + 1 (0 none), fractional part the way
-    // the soldier moves from his facing towards the left, as a share of a turn (strafe, backpedal).
+    // Instance c.z: upper-body pose id + 1, with movement direction in its fractional part.
     let layer = floor(d.z);
     let turn = fract(d.z) * 6.2831853;
     let dir = select(turn, turn - 6.2831853, turn > 3.1415927);
-    var pp = pose_params(u32(b.w), phase, dir);
-    if (w < 1.0) { pp = blend(pose_params(u32(d.x), phase, dir), pp, w); }
-    // Instance c.z: an upper-body stance (pose id + 1) over these legs, e.g. walking while aiming.
+    let base_phase = select(phase, reload_phase, u32(b.w) == 18u);
+    var pp = pose_params(u32(b.w), base_phase, dir);
+    if (w < 1.0) {
+      let previous_phase = select(phase, reload_phase, u32(d.x) == 18u);
+      pp = blend(pose_params(u32(d.x), previous_phase, dir), pp, w);
+    }
     let base = pp;
-    if (layer >= 1.0) { pp = upper_over(base, pose_params(u32(layer - 1.0), phase, 0.0)); }
-    // Instance c.w (pose.rs `pack_fade_layer`): the upper body it is still leaving (raising or lowering the
-    // rifle, starting to walk with it up) blended out over 0.3 s, so the arms and rifle never pop.
+    var upper_id = 0u;
+    if (layer >= 1.0) {
+      upper_id = u32(layer - 1.0);
+      let upper_phase = select(phase, reload_phase, upper_id == 18u);
+      pp = upper_over(base, pose_params(upper_id, upper_phase, 0.0));
+    }
+    // Blend the upper body it is leaving so raising/lowering the rifle never pops.
     let lb = layer_back(d.w);
     if (lb.y > 0.0) {
       var was = base;
-      if (lb.x >= 1.0) { was = upper_over(base, pose_params(u32(lb.x - 1.0), phase, 0.0)); }
+      if (lb.x >= 1.0) {
+        let previous_upper_id = u32(lb.x - 1.0);
+        let previous_upper_phase = select(phase, reload_phase, previous_upper_id == 18u);
+        was = upper_over(base, pose_params(previous_upper_id, previous_upper_phase, 0.0));
+      }
       pp = blend(was, pp, 1.0 - lb.y);
     }
-    // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
+    // Standing still: idle life, each soldier out of step with the next.
     if (b.z == 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
-    // Recoil pressure, carried in the pose id's fraction (pose.rs `recoil`, `pack_kick`): rifle driven back into
-    // the shoulder, the muzzle only creeping up late in a burst.
+    // Recoil pressure, carried in the pose id's fraction.
     let kick = fract(b.w);
     if (kick > 0.0) {
       pp.rifle = pp.rifle + 0.024 * kick * kick;
       pp.sh = pp.sh - vec2f(0.09 * kick);
       pp.lean = pp.lean - 0.02 * kick;
     }
-    // Flinch, carried in the previous pose id's fraction (pose.rs `flinch`, `pack_flinch`): head down, hunched,
-    // a dip at the knees; lying down only the head ducks.
+    // Flinch, carried in the previous pose id's fraction.
     let fl = fract(d.x);
     if (fl > 0.0) {
       pp.head = pp.head - 0.35 * fl;
@@ -782,19 +790,32 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
         pp.drop = ground_drop(pp.hip, pp.knee, pp.side, pp.flat);
       }
     }
-    // Left palm onto the handguard (only the left arm and the rifle move, so only they pay for it).
-    // The shadow pass skips it: a few centimetres in an arm's shadow cannot be seen.
+    // Left palm onto the handguard or, while reloading, along the magazine path.
+    // The shadow pass skips this: a few centimetres in an arm's shadow cannot be seen.
     if (hands && (part == 3u || part == 11u || part == 9u)) {
-      let hold = select(two_handed(u32(b.w)), two_handed(u32(layer - 1.0)), layer >= 1.0);
+      let hold = select(two_handed(u32(b.w)), two_handed(upper_id), layer >= 1.0);
       let gw = select(hold, grip_weight(u32(d.x), u32(b.w), w), w < 1.0 && layer < 1.0);
       pp = grip(pp, gw);
-      // Reload: the left hand follows its path to the magazine well and pouch (fading in with the blend).
-      if (u32(b.w) == 18u && layer < 1.0) { pp = reach_left(pp, reload_target(pp, phase), min(w, 1.0), 2.0); }
+      var reload_weight = 0.0;
+      if (layer < 1.0) {
+        if (u32(b.w) == 18u) {
+          reload_weight = w;
+        } else if (u32(d.x) == 18u && w < 1.0) {
+          reload_weight = 1.0 - w;
+        }
+      } else if (upper_id == 18u) {
+        reload_weight = select(1.0, 1.0 - lb.y, lb.y > 0.0);
+      }
+      let current_upper_reload = layer >= 1.0 && upper_id == 18u;
+      if (lb.x == 19.0 && lb.y > 0.0 && !current_upper_reload) {
+        reload_weight = lb.y;
+      }
+      if (reload_weight > 0.0) {
+        pp = reach_left(pp, reload_target(pp, reload_phase), reload_weight, 2.0);
+      }
     }
     q = pose_vertex(v, part, pp);
-    // Banking into a turn (pose.rs `bank`): the whole figure tips over its feet towards the inside of the bend
-    // (+ to his left, about the forward axis).
-    // and leans with his acceleration (pitch, + forward: into a push off, back against a stop).
+    // Banking into a turn and leaning with acceleration.
     let k = tilt_of(a);
     if (k.x != 0.0 || k.y != 0.0) {
       let cb = cos(k.x);

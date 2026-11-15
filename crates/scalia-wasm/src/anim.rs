@@ -26,6 +26,8 @@ const FALL_FORWARD_S: f32 = 0.95;
 /// Getting down to prone or back up: how fast he moves along the drop (`Pose::Drop` phase per second), so the
 /// whole way from standing to flat takes about 0.9 s and from a knee about 0.6 s.
 const DROP_RATE: f32 = 1.1;
+/// One magazine manipulation is paced over the nominal reload duration, independently of gait.
+const RELOAD_ANIMATION_S: f32 = 2.5;
 /// Where on the drop each stance sits.
 fn drop_at(s: Stance) -> f32 {
     match s {
@@ -129,6 +131,9 @@ pub struct Animator {
     dir: f32,
     accel: f32,
     phase: f32,
+    /// Magazine manipulation progress (0..1), deliberately independent of the leg stride phase.
+    reload_phase: f32,
+    reloading: bool,
     legs: Pose,
     /// The pose drawn, the one before it and when the switch started (shader blend, `pose::switch_start`).
     shown: (Pose, Pose, f32),
@@ -173,6 +178,8 @@ impl Animator {
             dir: 0.0,
             accel: 0.0,
             phase: 0.0,
+            reload_phase: 0.0,
+            reloading: false,
             legs: Pose::Stand,
             shown: (Pose::Ready, Pose::Ready, -1000.0),
             upper: (Pose::Ready, Pose::Ready, -1000.0),
@@ -267,6 +274,15 @@ impl Animator {
         }
         let aim = d.rifle == Rifle::Aim;
         let reload = d.rifle == Rifle::Reload;
+        if reload {
+            if !self.reloading {
+                self.reload_phase = 0.0;
+            } else {
+                // Off-screen LOD may supply a bounded 200 ms tick; retain that elapsed time here.
+                self.reload_phase = (self.reload_phase + d.dt.clamp(0.0, 0.2) / RELOAD_ANIMATION_S).min(1.0);
+            }
+        }
+        self.reloading = reload;
         // Falls: shot down or killed, he goes down once (back or forward) before he lies there.
         if self.was_up && !alive_up {
             self.fall = Some((d.ts, if d.dead { Pose::FallForward } else { Pose::FallBack }));
@@ -396,6 +412,12 @@ impl Animator {
             (p, Pose::Drop) => (p, Pose::Crouch, self.shown.2),
             (p, before) => (p, before, self.shown.2),
         };
+        // Below -1, the cadence slot also carries the independent reload phase for the shader.
+        let base_reload_blending_out = self.shown.1 == Pose::Reload && self.clock - self.shown.2 < pose::BLEND_S;
+        let upper_reload_blending_out = self.upper.1 == Pose::Reload && self.clock - self.upper.2 < LAYER_BLEND_S;
+        let reload_phase_active = f.pose == Pose::Reload || f.upper == Some(Pose::Reload)
+            || base_reload_blending_out || upper_reload_blending_out;
+        let cadence = if reload_phase_active { -1.0 - self.reload_phase.clamp(0.0, 0.9999) } else { f.cadence };
         [
             at.0,
             at.1,
@@ -403,7 +425,7 @@ impl Animator {
             colour + f.lean,
             f.heading,
             f.phase,
-            f.cadence,
+            cadence,
             pose::pack_kick(pose, kick),
             pose::pack_flinch(prev, flinch),
             since,
@@ -414,7 +436,7 @@ impl Animator {
 
     /// His muzzle and bore in the world (mm and unit vector), posed exactly as drawn; None when he cannot fire.
     pub fn barrel(&self, f: &Frame, at_mm: (f32, f32)) -> (Option<[f32; 3]>, [f32; 3]) {
-        let (q, b) = pose::barrel(pose::RIFLE, f.pose, f.upper, f.phase, f.dir);
+        let (q, b) = pose::barrel_with_phases(pose::RIFLE, f.pose, f.upper, f.phase, self.reload_phase, f.dir);
         let (roll, pitch) = pose::unpack_tilt(9.0 + f.lean);
         let bore = pose::figure_to_world(b, glam::Vec3::ZERO, f.heading, roll, pitch).to_array();
         let armed = pose::two_handed(f.upper.unwrap_or(f.pose)) > 0.0;
@@ -504,6 +526,48 @@ mod tests {
         assert_eq!(run(&mut a, 5, d).pose, Pose::Slung);
     }
 
+    #[test]
+    fn moving_reload_has_its_own_phase_and_restarts_cleanly() {
+        let (mut slow, mut fast) = (Animator::new(0.0), Animator::new(0.0));
+        let (mut a, mut b) = (drive(0.0), drive(0.0));
+        a.rifle = Rifle::Reload;
+        b.rifle = Rifle::Reload;
+        a.vel = (0.0, 1.0);
+        b.vel = (0.0, 3.0);
+        let (mut fa, mut fb) = (slow.step(&a), fast.step(&b));
+        for k in 1..90 {
+            a.ts = k as f32 / 60.0;
+            b.ts = a.ts;
+            fa = slow.step(&a);
+            fb = fast.step(&b);
+        }
+        assert_eq!(fa.upper, Some(Pose::Reload));
+        assert_eq!(fb.upper, Some(Pose::Reload));
+        assert!((slow.reload_phase - fast.reload_phase).abs() < 1e-6, "reload phase follows elapsed time, not stride");
+        assert!((fa.phase - fb.phase).abs() > 0.1, "the two leg cycles remain independent");
+        let record = slow.record(&fa, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
+        assert!((record[6] - (-1.0 - slow.reload_phase)).abs() < 1e-5, "shader receives the reload clock");
+
+        a.rifle = Rifle::Ready;
+        for k in 90..112 {
+            a.ts = k as f32 / 60.0;
+            fa = slow.step(&a);
+        }
+        let fading = slow.record(&fa, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
+        assert!(fading[6] < -1.0, "the reload phase survives the upper-body blend-out");
+
+        for k in 112..140 {
+            a.ts = k as f32 / 60.0;
+            fa = slow.step(&a);
+        }
+        let settled = slow.record(&fa, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
+        assert_eq!(settled[6], fa.cadence, "normal gait/idle cadence returns after the blend");
+
+        a.rifle = Rifle::Reload;
+        a.ts = 140.0 / 60.0;
+        slow.step(&a);
+        assert_eq!(slow.reload_phase, 0.0, "a new magazine change starts at its first key");
+    }
     #[test]
     fn legs_follow_real_pace_with_give_either_way() {
         let mut a = Animator::new(0.0);
