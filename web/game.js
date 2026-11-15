@@ -619,9 +619,7 @@ try {
   // The commander's footsteps: one step each time a heel strikes (gait phase 0 and 0.5), a little different
   // every time; grass or concrete by where he is.
   let lastPhase = -1;
-  // The rifle on screen: rounds left, the aim line while aiming, and a small kick of the view on every shot.
-  // `climb` is the crosshair's recoil (0 settled): each round throws it out along the barrel and opens the ring,
-  // and it settles back on its own; `side` is that round's sideways twitch.
+  // Weapon HUD and reticle: the Rust weapon state supplies the muzzle ray and physical recoil displacement.
   let lastWeapon = '';
   // For crash reports: what the player last did (keys and mouse buttons), kept on the page side so a report can be
   // written even when the engine has died.
