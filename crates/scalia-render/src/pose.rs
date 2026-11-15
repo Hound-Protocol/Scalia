@@ -269,7 +269,7 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
     // Prone support reaches farther across the body than the standing carry; allow the arm to extend fully.
-    let max = if p.prone > 0.5 { REACH_MAX } else { GRIP_MAX };
+    let max = if p.prone > 0.5 { PRONE_GRIP_MAX } else { GRIP_MAX };
     reach_left_capped(p, held(RIFLE_GUARD, p), w, max)
 }
 
@@ -330,7 +330,7 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
     out.reach[0] += cap(q.reach[0] - p.reach[0]);
     out
 }
-const GRIP_STEPS: usize = 6;
+const GRIP_STEPS: usize = 12;
 /// Correction cap for reaching to points other than the handguard (actions move the arm a long way).
 const REACH_MAX: f32 = 2.0;
 pub const GRIP_DAMP: f32 = 0.05;
@@ -370,6 +370,8 @@ pub const GRIP_REACH: f32 = 0.595;
 const GRIP_TILT: f32 = 0.6;
 /// Largest correction `grip` makes to any one joint (radians, soft).
 const GRIP_MAX: f32 = 0.7;
+/// Larger correction budget for the support arm in the prone firing position.
+const PRONE_GRIP_MAX: f32 = 4.0;
 
 /// `grip`'s weight while blending pose `a` into `b` (`w0` as given to `blend`, eased the same way).
 pub fn grip_weight(a: Pose, b: Pose, w0: f32) -> f32 {
