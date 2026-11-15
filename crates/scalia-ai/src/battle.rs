@@ -93,11 +93,6 @@ pub(crate) const BODY_MM: i64 = 250;
 /// Within this of where he is going he has arrived.
 const ARRIVE_MM: i64 = 150;
 const PERSONAL_MM: i64 = 700;
-/// Walking men keep at least this far apart (mm): brushing past, not through each other.
-const WALK_GAP_MM: i64 = 650;
-/// A man's reaction to a new destination from a standstill: at least this (ms), plus up to `REACT_SPREAD_MS`.
-const REACT_MIN_MS: i32 = 120;
-const REACT_SPREAD_MS: i32 = 450;
 /// A friendly closer than this to the line of fire blocks it (mm).
 const LANE_MM: i64 = 500;
 /// Inside this range (mm) the lane is not checked: room to room a man fires past his partner's shoulder.
@@ -307,8 +302,6 @@ pub struct Soldier {
     calm_ms: i32,
     /// A friend behind him needs to fire past: he stays down on a knee for this long (ms), unless he moves.
     kneel_ms: i32,
-    /// Told to go somewhere new from a standstill: he reacts after this long (ms), each man in his own time.
-    react_ms: i32,
     /// How he is to be drawn for what the leader has him doing.
     pub cue: Cue,
     /// What he wants now and his plan for it (soldier mind, GOAP).
@@ -328,7 +321,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, kneel_ms: 0, react_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, kneel_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -818,13 +811,6 @@ impl Battle {
                     self.soldiers[i].path_to = Some(to);
                 }
                 if self.soldiers[i].path_to != Some(to) {
-                    // From a standstill a man takes a moment to react, and no two alike: a squad does not set
-                    // off as one.
-                    // (Walking moves only: a dash for cover or a room entry on the bang goes at once.)
-                    if !self.soldiers[i].moving && gait == Gait::Walk && self.soldiers[i].cue == Cue::None {
-                        self.rolls += 1;
-                        self.soldiers[i].react_ms = REACT_MIN_MS + (self.roll(i, self.rolls) as i64 * REACT_SPREAD_MS as i64 / 1_000) as i32;
-                    }
                     let goal = self.free_spot(i, to);
                     let straight = self.nav.as_ref().is_none_or(|n| walk_line(n, pos, goal));
                     let s = &mut self.soldiers[i];
@@ -834,12 +820,6 @@ impl Battle {
                     s.goal = Some(goal);
                     s.settled = false;
                     self.goals.insert(i, goal);
-                }
-                if self.soldiers[i].react_ms > 0 {
-                    self.soldiers[i].react_ms -= dt_ms;
-                    self.soldiers[i].vel = (0, 0);
-                    self.soldiers[i].moving = false;
-                    continue;
                 }
                 if self.soldiers[i].path.is_empty() {
                     if self.paths_this_step >= PATHS_PER_STEP {
@@ -899,7 +879,6 @@ impl Battle {
             // Personal space: ease away from anyone too close (positions as they were at the start of the step).
             let p = self.soldiers[i].pos;
             let mut push = (0i64, 0i64);
-            let mut respot = false;
             let mut near = std::mem::take(&mut self.scratch);
             self.grid.near(p, PERSONAL_MM, &mut near);
             for &j in &near {
@@ -912,12 +891,7 @@ impl Battle {
                 let d = isqrt(dx * dx + dy * dy);
                 // Walking men brush past each other; standing men only make room when someone is really close.
                 // A settled man gives way only to someone actually brushing him, and gently: no sliding about.
-                let near = if step != (0, 0) { WALK_GAP_MM } else if self.soldiers[i].settled { BODY_MM * 2 - 50 } else { PERSONAL_MM - 150 };
-                // Two settled men on top of each other (their spots given out before the other got there): the
-                // later one finds himself a free spot, at the usual spacing, instead of standing in his mate's boots.
-                if d < BODY_MM * 2 - 50 && i > j && self.soldiers[i].settled && self.soldiers[j].settled && self.soldiers[i].cue == Cue::None && self.soldiers[j].cue == Cue::None {
-                    respot = true;
-                }
+                let near = if step != (0, 0) { BODY_MM * 2 } else if self.soldiers[i].settled { BODY_MM * 2 - 50 } else { PERSONAL_MM - 150 };
                 if d < near {
                     let (ux, uy) = if d == 0 { if i < j { (-1_000, 0) } else { (1_000, 0) } } else { (dx * 1_000 / d, dy * 1_000 / d) };
                     let k = (near - d) * dt_ms as i64 / 250;
@@ -925,9 +899,6 @@ impl Battle {
                 }
             }
             self.scratch = near;
-            if respot {
-                self.soldiers[i].path_to = None;
-            }
             let mut next = (p.0 + step.0 + push.0, p.1 + step.1 + push.1);
             if let Some(n) = &self.nav {
                 // Blocked: drop the push, then slide along the obstacle (x part, then y part of the step).
