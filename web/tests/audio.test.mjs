@@ -44,8 +44,8 @@ class FakeAudioContext {
   createDelay() { return this.track(new FakeNode()); }
   createBufferSource() {
     const source = this.track(new FakeNode());
-    source.start = () => {};
-    source.stop = () => source.onended?.();
+    source.start = (...args) => { source.startArgs = args; };
+    source.stop = (when) => { source.stopAt = when; source.onended?.(); };
     return source;
   }
 }
@@ -308,4 +308,23 @@ test('reverb, air and echo branches retain then disconnect every auxiliary node'
   assert.equal(handle.state, 'ended');
   assert.equal(audio.voiceStats().nodes, 0);
   assert.equal(audio.ctx.createdNodes.every((node) => node.disconnected), true);
+});
+
+
+test('playBuffer() manages looping menu voices and supports graceful fade cancellation', () => {
+  const audio = playbackEngine();
+  const handle = audio.playBuffer({ duration: 4 }, {
+    gain: 0.6, category: 'ui', priority: 2, loop: true,
+    loopStart: 0.2, loopEnd: 3.5, fadeIn: 0.4,
+  });
+  assert.ok(handle);
+  assert.equal(handle.state, 'playing');
+  assert.equal(handle.category, 'ui');
+  assert.equal(handle.src.loop, true);
+  assert.deepEqual(handle.src.startArgs, [0, 0.2]);
+  assert.equal(handle.gain.gain.value, 1);
+  assert.equal(handle.stop(0.05), true);
+  assert.equal(handle.src.stopAt, 0.07);
+  assert.equal(handle.state, 'ended');
+  assert.equal(audio.voiceStats().nodes, 0);
 });
