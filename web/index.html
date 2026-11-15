@@ -807,6 +807,7 @@
   window.addEventListener('unhandledrejection', (event) => reportBootFailure(event.reason));
 })();
 </script>
+<script type="module" src="./boot-console.js"></script>
 <script type="module" src="./game.js" onerror="window.__scaliaBootFailure('A startup module failed to load or parse. Check the browser console for details.')"></script>
 </body>
 </html>
