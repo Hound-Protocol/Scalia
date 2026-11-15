@@ -16,6 +16,7 @@ class FakeNode {
     this.positionZ = { value: 0, setTargetAtTime() {} };
   }
   connect() { return this; }
+  disconnect() { this.disconnected = true; }
 }
 
 class FakeAudioContext {
@@ -33,6 +34,32 @@ class FakeAudioContext {
   createGain() { return new FakeNode(); }
   createBiquadFilter() { return new FakeNode(); }
   createPanner() { return new FakeNode(); }
+}
+
+
+function lifecycleEngine() {
+  const audio = Object.create(AudioEngine.prototype);
+  audio.active = [];
+  audio.voices = new Set();
+  audio.tails = [];
+  audio.voiceSequence = 0;
+  audio.voiceMetrics = { dropped: 0, stolen: 0, completed: 0, cleaned: 0 };
+  return audio;
+}
+
+function addVoice(audio, priority = 1, gain = 0.1, tailSeconds = 0) {
+  const source = {
+    onended: null,
+    stopped: false,
+    stop() { this.stopped = true; this.onended?.(); },
+  };
+  const node = new FakeNode();
+  const voice = audio._registerVoice(source, [source, node], {
+    category: 'test', priority, gain, tailSeconds,
+  });
+  voice.out = new FakeNode();
+  voice.state = 'playing';
+  return { voice, source, node };
 }
 
 function engine() {
@@ -145,4 +172,57 @@ test('spatialPosition normalises diagonal vectors and contains invalid inputs', 
   near(Math.hypot(...diagonal), 1);
   const invalid = spatialPosition(Number.NaN, Infinity, Number.NaN);
   assert.deepEqual(invalid, [0, 0, -1]);
+});
+
+
+test('voice handles stop and clean up their owned graph exactly once', () => {
+  const audio = lifecycleEngine();
+  const { voice, source, node } = addVoice(audio, 2, 0.4);
+  assert.equal(audio.active.length, 1);
+  assert.equal(audio.voices.size, 1);
+  assert.equal(voice.handle.stop(), true);
+  assert.equal(source.stopped, true);
+  assert.equal(voice.handle.state, 'ended');
+  assert.equal(node.disconnected, true);
+  assert.deepEqual(audio.voiceStats(), {
+    active: 0, tails: 0, tracked: 0, nodes: 0,
+    dropped: 0, stolen: 0, completed: 1, cleaned: 1,
+  });
+  assert.equal(voice.handle.stop(), false);
+});
+
+test('voice allocator deterministically steals a lower-priority voice at the 64 voice cap', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 64 }, () => addVoice(audio, 1, 0.1));
+  assert.equal(audio.active.length, 64);
+  assert.equal(audio._admitVoice(2, 0.05), true);
+  assert.equal(voices[0].source.stopped, true);
+  assert.equal(voices[0].voice.handle.state, 'ended');
+  assert.equal(audio.active.length, 63);
+  assert.equal(audio.voiceStats().stolen, 1);
+  audio.stopAll();
+  assert.equal(audio.voiceStats().tracked, 0);
+});
+
+test('voice allocator drops a lower-priority sound when all 64 voices are more important', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 64 }, () => addVoice(audio, 3, 0.5));
+  assert.equal(audio._admitVoice(1, 1), false);
+  assert.equal(audio.active.length, 64);
+  assert.equal(voices.every(({ source }) => !source.stopped), true);
+  assert.equal(audio.voiceStats().dropped, 1);
+  audio.stopAll();
+});
+
+test('completed voice tails are bounded and retired nodes are disconnected', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 65 }, () => addVoice(audio, 1, 0.1, 0.5));
+  for (const { source } of voices) source.onended();
+  assert.equal(audio.tails.length, 64);
+  assert.equal(voices[0].voice.handle.state, 'ended');
+  assert.equal(voices[0].node.disconnected, true);
+  assert.equal(audio.voiceStats().nodes, 64 * 2);
+  audio.stopAll();
+  assert.equal(audio.voiceStats().tracked, 0);
+  assert.equal(audio.voiceStats().nodes, 0);
 });
