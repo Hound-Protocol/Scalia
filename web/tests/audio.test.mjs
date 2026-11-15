@@ -18,7 +18,7 @@ class FakeNode {
     this.positionY = { value: 0, setTargetAtTime() {} };
     this.positionZ = { value: 0, setTargetAtTime() {} };
   }
-  connect() { return this; }
+  connect(destination) { this.connections ??= []; this.connections.push(destination); return destination; }
   disconnect() { this.disconnected = true; }
 }
 
