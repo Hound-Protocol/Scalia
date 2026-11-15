@@ -6,25 +6,31 @@
 //
 // Start / Deploy (the project lead's sequence, 14 Nov; camera moves follow his curve, position ~ t³: slow, then
 // faster and faster):
-//   1. Flash 1 ("cinematic hit door"), the music stops: for a second the camera pulls back to see the galaxy at a
-//      20 degree tilt while cinema bars slide in (they stay for the sequence).
-//   2. Flash 2 ("massive thump"): home from an isometric galactic angle, orbiting it very slowly to the right;
+//   1. Flash 1 ("cinematic hit door"), the music stops: over 2 s the camera pulls back to see the galaxy at a
+//      20 degree tilt while cinema bars slide in (they stay for the sequence); it holds there 2 s.
+//   2. Flash 2 ("massive thump"): 3 s on home from an isometric galactic angle, barely turning to the right;
 //      deep space ambience 01.
 //   3. Flash 3: the commander's planet, held for 2 seconds with deep space ambience 03; then the zoom down into
-//      him (travel sound, the whoosh into his head) while the ambience fades and narrows to 5 kHz.
+//      him (the travel sound a second ahead of it, cut as the camera reaches him; the whoosh into his head) while the ambience fades and narrows to 5 kHz.
 //   Then black, and his eyes open on the field. Escape, Space or a click skips; with reduced motion it is a fade.
 
-const PULL_MS = 1000;         // Flash 1 to flash 2: the pull-back.
-const GALAXY_MS = 4800;       // Flash 2 to flash 3: home from the galactic angle.
+const PULL_MS = 2000;         // Flash 1: the pull-back to the 20 degree view.
+const LOOK_MS = 2000;         // Then the galaxy held, before flash 2.
+const GALAXY_MS = 3000;       // Flash 2 to flash 3: home from the galactic angle.
 const HOLD_MS = 2000;         // The planet held before the zoom.
 const ZOOM_MS = 3600;         // The zoom from the planet into his head.
 const BLACK_MS = 450;         // Inside him, in the dark.
 const OPEN_MS = 3600;         // Eyes opening and the view easing out to the field.
-const T_GALAXY = PULL_MS, T_PLANET = T_GALAXY + GALAXY_MS, T_ZOOM = T_PLANET + HOLD_MS, T_HIT = T_ZOOM + ZOOM_MS;
+const T_GALAXY = PULL_MS + LOOK_MS, T_PLANET = T_GALAXY + GALAXY_MS, T_ZOOM = T_PLANET + HOLD_MS, T_HIT = T_ZOOM + ZOOM_MS;
 const ELEV = 0.6154797;       // The game camera's elevation (scalia-render camera.rs ELEV).
 const PLANET_M = 3.2e6;       // The planet framed whole (viewer.rs shows the globe above 4 planet radii, 2.6e6 m).
 const FIELD_M = 50;           // The widest field zoom (viewer.rs LADDER[STEP_FIELD_MAX]).
 const AMB_TO_HZ = 5000;       // The zoom's ambience narrows to this.
+const TRAVEL_LEAD_MS = 1000;  // The zoom's travel sound starts this far ahead of the zoom, to match its rush.
+// The menu's camera is cinematic: 50 degrees vertical field of view (the game's own camera takes over at the
+// planet). Distances are scaled so the framing matches the earlier 35.5 degree lens.
+const FOV = 50 * Math.PI / 180;
+const LENS = Math.tan(0.31) / Math.tan(FOV / 2);
 // The project lead's speed curve: position over time as t³ (his chart: 0, .003, .04, .13, .31, .60, 1 at sixths).
 export const curve = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * t; };
 
@@ -283,17 +289,16 @@ export function createMenu({ viewer, onEnter }) {
 
   // The resting camera: low over the disc (about 6 degrees up), close enough that it fills the width; aimed a
   // little above the core so the galaxy lies across the lower middle and the title rides above its bulge.
-  const REST_EYE = [0.22, -2.05, 0.21];
   const REST_AT = [0.0, 0.0, 0.075];
-  const FOV = 0.62;
+  const REST_EYE = lerp3(REST_AT, [0.22, -2.05, 0.21], LENS);
   const spinAt = (now) => now / 1000 * 0.018;
   let flightSpin = 0;
   // Pulled back: the same bearing, farther out and 20 degrees above the disc.
   const restAz = Math.atan2(REST_EYE[1] - REST_AT[1], REST_EYE[0] - REST_AT[0]);
   const at3 = (o, d, az, el) => [o[0] + d * Math.cos(el) * Math.cos(az), o[1] + d * Math.cos(el) * Math.sin(az), o[2] + d * Math.sin(el)];
-  const PULL_EYE = at3(REST_AT, 2.9, restAz, 20 * Math.PI / 180);
+  const PULL_EYE = at3(REST_AT, 2.9 * LENS, restAz, 20 * Math.PI / 180);
   // The galactic angle on home: isometric (35.3 degrees down), close in, turning to the right.
-  const ISO_EL = Math.atan(1 / Math.SQRT2), ISO_D = 1.35, ORBIT = 0.05; // rad/s; far enough to see the arms round home
+  const ISO_EL = Math.atan(1 / Math.SQRT2), ISO_D = 1.35 * LENS, ORBIT = 0.012; // rad/s, barely turning; far enough to see the arms round home
   const homeAt = (spin) => { const c = Math.cos(spin), s = Math.sin(spin); return [galaxy.home[0] * c - galaxy.home[1] * s, galaxy.home[0] * s + galaxy.home[1] * c, galaxy.home[2]]; };
 
   function drawMarks(project, now, alpha) {
@@ -364,7 +369,7 @@ export function createMenu({ viewer, onEnter }) {
         amb3 = play('amb3', 0.6, { loop: true, via: hp, fadeIn: 0.3 });
       }
     }
-    if (step === 2 && e >= T_ZOOM) {
+    if (step === 2 && e >= T_ZOOM - TRAVEL_LEAD_MS) {
       step = 3;
       travel = play('travel', 0.8);
     }
@@ -372,8 +377,10 @@ export function createMenu({ viewer, onEnter }) {
       step = 4;
       enter = play('enter', 0.85);
     }
+    // The travel sound ends the moment the camera reaches him.
+    if (step === 4 && e >= T_HIT) { step = 5; travel?.stop(0.04); travel = null; }
     if (e < T_GALAXY) {
-      // 1. Pulling back to the 20 degree view.
+      // 1. Pulling back to the 20 degree view, then holding on the galaxy.
       const k = curve(e / PULL_MS);
       drawSky(now, lerp3(REST_EYE, PULL_EYE, k), REST_AT, flightSpin, 1 - smooth(e / 400));
       return;
