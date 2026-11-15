@@ -665,7 +665,9 @@ fn grip(p_in: PP, w_in: f32) -> PP {
   if (w <= 0.0) { return p_in; }
   var p = p_in;
   p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
-  return reach_left(p, guard(p), w, 0.7);
+  // Prone support reaches farther across the body than the standing carry.
+  let cap = select(0.7, 2.0, p.prone > 0.5);
+  return reach_left(p, guard(p), w, cap);
 }
 
 // Port of pose.rs `reach_left_capped`: the left palm onto `goal`, each joint's correction softly capped at
