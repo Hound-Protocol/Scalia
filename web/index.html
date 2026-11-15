@@ -135,9 +135,6 @@
   #menuStart .d { opacity: 0; transform: translateY(6px); }
   #menuStart:hover .s, #menuStart:focus-visible .s { opacity: 0; transform: translateY(-6px); }
   #menuStart:hover .d, #menuStart:focus-visible .d { opacity: 1; transform: none; color: #ffd27a; letter-spacing: 0.56em; }
-  /* The title comes in from wide and soft as the menu fades up. */
-  #menu.shown h1 { animation: menu-title 2.6s cubic-bezier(.2, .7, .2, 1) both; }
-  @keyframes menu-title { 0% { opacity: 0; letter-spacing: 0.75em; filter: blur(10px); } 100% { opacity: 1; letter-spacing: 0.3em; filter: blur(0); } }
   #menuStart::before, #menuStart::after { content: ''; width: 34px; height: 1px; background: #e0a526; transition: width .25s ease-out; }
   #menuStart:hover, #menuStart:focus-visible { animation-play-state: paused; opacity: 1; color: #fff4d4; }
   #menuStart:hover::before, #menuStart:hover::after, #menuStart:focus-visible::before, #menuStart:focus-visible::after { width: 56px; }
@@ -154,7 +151,7 @@
   body.in-menu :is(#controls, #fieldHint, #wipMark, #perf, #radio, #weapon, #hud, #fieldLabels, #actions, #inventory, #answerCall, #reticle, #aimDot, #aimLine) { visibility: hidden; }
   body.in-menu #view { filter: blur(var(--blur, 0px)); }
   @media (prefers-reduced-motion: reduce) { #menu .mn-ui { transition: none; } #menuStart { animation: none; opacity: 1; } #menuFlash.go, #menuFlash.cut { animation: none; }
-    #menu.shown h1, #menu .mn-grain { animation: none; } }
+    #menu .mn-grain { animation: none; } }
   /* The prototype notice: shown before play, over a blurred view of the game. */
   #proto { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
     background: #000; }

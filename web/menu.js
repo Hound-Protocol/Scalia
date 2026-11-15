@@ -33,6 +33,15 @@ const FOV = 50 * Math.PI / 180;
 const LENS = Math.tan(0.31) / Math.tan(FOV / 2);
 // The project lead's speed curve: position over time as t³ (his chart: 0, .003, .04, .13, .31, .60, 1 at sixths).
 export const curve = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * t; };
+// The same build-up (speed rising as t²) for a move that must come to rest: over its last quarter the speed
+// eases back to nothing (as (1 - s)²), quickly but without a jolt. Speed is continuous throughout; ends at 1.
+export const settle = (t) => {
+  t = Math.min(1, Math.max(0, t));
+  const tb = 0.75, L = 1 - tb, A = tb * tb * tb / 3, total = A + tb * tb * L / 3;
+  if (t <= tb) return t * t * t / 3 / total;
+  const s = (t - tb) / L;
+  return (A + tb * tb * L * (1 - Math.pow(1 - s, 3)) / 3) / total;
+};
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const smooth = (x) => { x = clamp01(x); return x * x * x * (x * (x * 6 - 15) + 10); };
@@ -381,7 +390,7 @@ export function createMenu({ viewer, onEnter }) {
     if (step === 4 && e >= T_HIT) { step = 5; travel?.stop(0.04); travel = null; }
     if (e < T_GALAXY) {
       // 1. Pulling back to the 20 degree view, then holding on the galaxy.
-      const k = curve(e / PULL_MS);
+      const k = settle(e / PULL_MS);
       drawSky(now, lerp3(REST_EYE, PULL_EYE, k), REST_AT, flightSpin, 1 - smooth(e / 400));
       return;
     }
