@@ -27,8 +27,25 @@ fn sound_occlusion(
 ) -> scalia_audio::Occlusion {
     let height = if camera_listener { listener_height } else { 1.6 };
     if camera_listener {
+        let from = scalia_ai::sight::Point {
+            x: (ear.0 * 1000.0) as i64,
+            y: (ear.1 * 1000.0) as i64,
+            z: (height * 1000.0) as i64,
+        };
+        let to = scalia_ai::sight::Point {
+            x: (source.0 * 1000.0) as i64,
+            y: (source.1 * 1000.0) as i64,
+            z: 1_400,
+        };
         let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
-        return scalia_audio::Occlusion { wall_db: walls as f32 * 40.0, bend_db: 0.0, detour_m: 0.0 };
+        // Doors are stored separately from the static sight grid. A shut/locked leaf
+        // attenuates sound, but less than masonry; open/breached doors add no loss.
+        let doors = sight.doors.iter().filter(|door| door.blocks(from, to)).count();
+        return scalia_audio::Occlusion {
+            wall_db: walls as f32 * 40.0 + doors as f32 * 18.0,
+            bend_db: 0.0,
+            detour_m: 0.0,
+        };
     }
     if let Some(occlusion) = field.and_then(|field| field.at(source)) {
         return occlusion;
@@ -4472,6 +4489,41 @@ mod audio_spatial_tests {
 
         assert!(ground_listener.gain() < 0.8 && ground_listener.lowpass_hz() < 18_000.0, "{ground_listener:?}");
         assert_eq!(elevated_camera, scalia_audio::Occlusion::NONE, "{elevated_camera:?}");
+    }
+
+    #[test]
+    fn camera_listener_hears_through_open_doors_but_a_shut_door_muffles_it() {
+        use scalia_ai::doors::{Door, DoorState};
+        let mut sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[]);
+        let ear = (40.0, 50.0);
+        let source = (60.0, 50.0);
+        let door = Door::new((50_000, 50_000), false, 2_000, 2_100, DoorState::Closed);
+        sight.doors = vec![door];
+
+        let shut = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        assert_eq!(shut.wall_db, 18.0, "{shut:?}");
+        assert!(shut.gain() < 0.2, "{shut:?}");
+
+        sight.doors[0].state = DoorState::Open;
+        let open = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        assert_eq!(open, scalia_audio::Occlusion::NONE, "{open:?}");
+
+        sight.doors[0].state = DoorState::Locked;
+        let locked = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        assert_eq!(locked.wall_db, 18.0, "{locked:?}");
+
+        sight.doors[0].state = DoorState::Breached;
+        let breached = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        assert_eq!(breached, scalia_audio::Occlusion::NONE, "{breached:?}");
+    }
+
+    #[test]
+    fn camera_listener_hears_over_a_shut_door_when_the_sound_path_clears_its_top() {
+        use scalia_ai::doors::{Door, DoorState};
+        let mut sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[]);
+        sight.doors = vec![Door::new((50_000, 50_000), false, 2_000, 2_100, DoorState::Closed)];
+        let above = sound_occlusion(&sight, None, (40.0, 50.0), (60.0, 50.0), 4.0, true);
+        assert_eq!(above, scalia_audio::Occlusion::NONE, "{above:?}");
     }
 
     #[test]
