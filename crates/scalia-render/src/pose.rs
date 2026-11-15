@@ -1268,17 +1268,18 @@ pub fn barrel(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) 
     (tip, (tip - pose_vertex(w.breech, Part::Rifle, &p)).normalize_or_zero())
 }
 
-/// A shot's kick (`k` 1 the instant it fires, easing to 0): the muzzle flips up, the rifle drives back into the
-/// shoulder with the arms, and the upper body rocks back a touch. Visual only: where rounds go is the battle's.
+/// Recoil under fire (`k` the firing pressure, 0 to 1: it builds through a burst and eases off after). The rifle
+/// is driven straight back into the shoulder with the arms and the upper body takes it, so the muzzle stays on the
+/// mark; it only creeps up a little (squared, so the climb comes late in a long burst). Visual only: where rounds
+/// go is the battle's. common.wgsl mirrors this.
 pub fn recoil(p: &mut PoseParams, k: f32) {
     if k <= 0.0 {
         return;
     }
-    p.rifle += 0.16 * k;
-    p.shoulder[0] -= 0.08 * k;
-    p.shoulder[1] -= 0.08 * k;
-    p.lean -= 0.04 * k;
-    p.head += 0.03 * k;
+    p.rifle += 0.024 * k * k;
+    p.shoulder[0] -= 0.09 * k;
+    p.shoulder[1] -= 0.09 * k;
+    p.lean -= 0.02 * k;
 }
 
 /// An instance's pose id (b.w) carrying the shot kick in its fraction (common.wgsl reads the id with `u32()`).
@@ -1376,15 +1377,19 @@ mod fade_layer_tests {
     }
 
     #[test]
-    fn a_shot_kicks_the_rifle_up_and_back_and_lets_it_settle() {
+    fn recoil_pushes_the_rifle_in_and_only_creeps_it_up() {
         let base = params(Pose::StandAim, 0.0);
-        let mut hit = base;
-        recoil(&mut hit, 1.0);
         let at = |p: &PoseParams| { let p = grip(p, 1.0); pose_vertex(RIFLE.muzzle, Part::Rifle, &p) };
-        let (a, b) = (at(&base), at(&hit));
-        assert!(b.z > a.z + 0.02, "muzzle flips up: {a:?} -> {b:?}");
-        assert!(b.y < a.y - 0.01, "rifle comes back into the shoulder: {a:?} -> {b:?}");
-        assert!((b - a).length() < 0.15, "a kick, not a throw: {:?}", b - a);
+        let a = at(&base);
+        let mut first = base;
+        recoil(&mut first, 0.5);
+        let mut held = base;
+        recoil(&mut held, 1.0);
+        let (b, c) = (at(&first), at(&held));
+        assert!(c.y < a.y - 0.01, "rifle driven back into the shoulder: {a:?} -> {c:?}");
+        assert!(a.y - c.y > (c.z - a.z) * 1.5, "mostly in, not up: {a:?} -> {c:?}");
+        assert!(c.z > a.z && c.z - a.z < 0.05, "a slight climb, no flip: {a:?} -> {c:?}");
+        assert!(b.z - a.z < (c.z - a.z) * 0.5, "the climb builds through a burst: {:?} vs {:?}", b - a, c - a);
         let mut none = base;
         recoil(&mut none, 0.0);
         assert_eq!(at(&none), a, "no kick, no change");

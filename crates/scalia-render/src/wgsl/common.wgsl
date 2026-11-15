@@ -699,13 +699,13 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     }
     // Standing still: idle life, each soldier out of step with the next (instance b.y is his own offset).
     if (b.z == 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
-    // A shot's kick, carried in the pose id's fraction (pose.rs `recoil`, `pack_kick`): muzzle up, rifle back.
+    // Recoil pressure, carried in the pose id's fraction (pose.rs `recoil`, `pack_kick`): rifle driven back into
+    // the shoulder, the muzzle only creeping up late in a burst.
     let kick = fract(b.w);
     if (kick > 0.0) {
-      pp.rifle = pp.rifle + 0.16 * kick;
-      pp.sh = pp.sh - vec2f(0.08 * kick);
-      pp.lean = pp.lean - 0.04 * kick;
-      pp.head = pp.head + 0.03 * kick;
+      pp.rifle = pp.rifle + 0.024 * kick * kick;
+      pp.sh = pp.sh - vec2f(0.09 * kick);
+      pp.lean = pp.lean - 0.02 * kick;
     }
     // Left palm onto the handguard (only the left arm and the rifle move, so only they pay for it).
     // The shadow pass skips it: a few centimetres in an arm's shadow cannot be seen.

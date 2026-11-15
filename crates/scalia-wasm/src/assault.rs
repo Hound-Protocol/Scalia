@@ -60,6 +60,19 @@ impl Cue {
     }
 }
 
+/// How long one round's push lingers (ms, time constant).
+const RECOIL_MS: f64 = 160.0;
+
+/// Recoil pressure (0 to 1) at `now` from the rounds' worth `heat` built up as of the last round at `fired`.
+fn recoil_pressure(fired: f64, heat: f32, now: f64) -> f32 {
+    let age = now - fired;
+    if !(0.0..1_500.0).contains(&age) {
+        return 0.0;
+    }
+    let h = heat * (-age / RECOIL_MS).exp() as f32;
+    (1.0 - (-0.6 * h).exp()).min(0.99)
+}
+
 /// A round or a blast to draw: viewer time, muzzle (or blast centre) and impact, in absolute millimetres above
 /// the ground (z is height over the terrain).
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -91,6 +104,8 @@ pub struct Assault {
     bore: Vec<[f32; 3]>,
     /// Per soldier: when he last fired (viewer ms, as `now`), for the rifle's kick.
     fired: Vec<f64>,
+    /// Per soldier: recoil pressure as of his last round (rounds' worth, each fading over `RECOIL_MS`).
+    heat: Vec<f32>,
     pub sounds: Vec<Sound>,
     pub fx: Vec<Fx>,
     /// The leader's steps as they start, for the radio.
@@ -143,7 +158,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: now_ms, muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: now_ms, muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), heat: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -161,6 +176,7 @@ impl Assault {
             self.muzzle.push(None);
             self.bore.push([0.0; 3]);
             self.fired.push(f64::NEG_INFINITY);
+            self.heat.push(0.0);
         }
     }
 
@@ -254,7 +270,10 @@ impl Assault {
                         let impact = if hit || target == shooter { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
                         // One round in four is a tracer.
                         let tracer = (r >> 40) % 4 == 0;
-                        if let Some(f) = self.fired.get_mut(shooter) { *f = at; }
+                        if let (Some(f), Some(h)) = (self.fired.get_mut(shooter), self.heat.get_mut(shooter)) {
+                            *h = *h * (-(at - *f).max(0.0) / RECOIL_MS).exp() as f32 + 1.0;
+                            *f = at;
+                        }
                         let bore = self.bore.get(shooter).copied().filter(|b| b.iter().any(|c| *c != 0.0));
                         self.fx.push(Fx { at, from: muzzle, to: impact, hit, blast: false, tracer, bore });
                     }
@@ -358,10 +377,10 @@ impl Assault {
         }
     }
 
-    /// How hard soldier `i`'s rifle is kicking now (1 as a round leaves, gone in about a fifth of a second).
+    /// Soldier `i`'s recoil pressure now (0 to 1): each round adds to it and it fades over `RECOIL_MS`, so a burst
+    /// is one continuous push that builds, not a flip per round.
     pub fn kick(&self, i: usize) -> f32 {
-        let age = self.now - self.fired.get(i).copied().unwrap_or(f64::NEG_INFINITY);
-        if (0.0..400.0).contains(&age) { (-age / 70.0).exp() as f32 } else { 0.0 }
+        recoil_pressure(self.fired.get(i).copied().unwrap_or(f64::NEG_INFINITY), self.heat.get(i).copied().unwrap_or(0.0), self.now)
     }
     /// Where soldier `i`'s muzzle was last drawn (mm, z over the ground).
     pub fn muzzle_of(&self, i: usize) -> Option<(i64, i64, i64)> {
@@ -501,6 +520,29 @@ pub fn drive_of(s: &Soldier, dt: f32, ts: f32) -> crate::anim::Drive {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recoil_is_one_push_that_builds_through_a_burst() {
+        // 10 rounds at 800 rpm (75 ms apart), sampled every 5 ms.
+        let (mut fired, mut heat) = (f64::NEG_INFINITY, 0.0f32);
+        let mut samples = Vec::new();
+        for t in (0..1_400).step_by(5) {
+            let t = t as f64;
+            if t % 75.0 == 0.0 && t < 750.0 {
+                heat = heat * (-(t - fired).max(0.0) / super::RECOIL_MS).exp() as f32 + 1.0;
+                fired = t;
+            }
+            samples.push(super::recoil_pressure(fired, heat, t));
+        }
+        let at = |ms: usize| samples[ms / 5];
+        assert!(at(0) > 0.3, "the first round pushes in at once: {}", at(0));
+        assert!(at(700) > at(100), "pressure builds through the burst: {} -> {}", at(100), at(700));
+        // Late in the burst the sawtooth between rounds is shallow: a continuous push, not a flip per round.
+        let late = &samples[600 / 5..740 / 5];
+        let (lo, hi) = late.iter().fold((1.0f32, 0.0f32), |(l, h), v| (l.min(*v), h.max(*v)));
+        assert!(hi - lo < 0.2, "ripple {lo}..{hi}");
+        assert!(at(1_395) < 0.05, "it eases off after: {}", at(1_395));
+    }
+
     use super::*;
 
     #[test]
