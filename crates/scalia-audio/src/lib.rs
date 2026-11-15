@@ -236,20 +236,30 @@ pub struct Field {
 /// (diffraction, dB), and how much the best way bends round things (m longer than straight).
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Occlusion {
+    /// Nominal mid-band material loss, retained for room/diagnostic calculations.
     pub wall_db: f32,
     pub bend_db: f32,
     pub detour_m: f32,
+    /// Transmission loss by band. The overall gain follows the low band; higher bands are filtered separately.
+    pub low_db: f32,
+    pub mid_db: f32,
+    pub high_db: f32,
 }
 
 impl Occlusion {
-    pub const NONE: Occlusion = Occlusion { wall_db: 0.0, bend_db: 0.0, detour_m: 0.0 };
+    pub const NONE: Occlusion = Occlusion {
+        wall_db: 0.0, bend_db: 0.0, detour_m: 0.0,
+        low_db: 0.0, mid_db: 0.0, high_db: 0.0,
+    };
     pub fn gain(&self) -> f32 {
-        10f32.powf(-(self.wall_db + self.bend_db) / 20.0)
+        10f32.powf(-self.low_db / 20.0)
     }
-    /// Walls let the lows through and stop the highs (a thump through masonry, a dull voice through a door);
-    /// sound bent round a corner loses some top too.
+    /// Residual attenuation relative to the bass band, applied as separate mid/high EQ cuts.
+    pub fn mid_cut_db(&self) -> f32 { (self.mid_db - self.low_db).max(0.0) }
+    pub fn high_cut_db(&self) -> f32 { (self.high_db - self.low_db).max(0.0) }
+    /// A convenient summary cutoff for diagnostics and legacy callers.
     pub fn lowpass_hz(&self) -> f32 {
-        (18_000.0 * 10f32.powf(-self.wall_db / 35.0) / (1.0 + self.detour_m / 4.0)).clamp(180.0, 20_000.0)
+        (18_000.0 * 10f32.powf(-self.high_cut_db() / 35.0) / (1.0 + self.detour_m / 4.0)).clamp(180.0, 20_000.0)
     }
 }
 
@@ -341,7 +351,15 @@ impl Field {
         let detour_m = (self.len_m[k] - straight * 1.08 - FIELD_CELL_M).max(0.0);
         // Bent round an edge: a few dB at once, more the further round (diffraction, roughly).
         let bend_db = if detour_m > 0.3 { (4.0 + 4.0 * (1.0 + detour_m).log2()).min(22.0) } else { 0.0 };
-        Some(Occlusion { wall_db: self.wall_db[k], bend_db, detour_m })
+        let wall_db = self.wall_db[k];
+        // The propagation field currently distinguishes solid masonry from open air. Use a conservative
+        // masonry spectrum until individual wall materials are represented in map data.
+        Some(Occlusion {
+            wall_db, bend_db, detour_m,
+            low_db: wall_db * 0.70 + bend_db * 0.40,
+            mid_db: wall_db + bend_db,
+            high_db: wall_db * 1.30 + bend_db * 1.40,
+        })
     }
 }
 
@@ -462,6 +480,24 @@ mod tests {
         let shut = Field::build(&room_with_door(DoorState::Closed), ear, 30.0);
         let e2 = shut.at((65.0, 50.5)).unwrap();
         assert!(e2.wall_db >= DOOR_DB && e2.wall_db < WALL_ENTER_DB && e2.gain() < east.gain() * 0.3, "{e2:?}");
+    }
+
+    #[test]
+    fn material_transmission_keeps_more_bass_than_high_frequencies() {
+        let wood_door = Occlusion {
+            wall_db: 18.0, bend_db: 0.0, detour_m: 0.0,
+            low_db: 8.0, mid_db: 18.0, high_db: 30.0,
+        };
+        let concrete = Occlusion {
+            wall_db: 40.0, bend_db: 0.0, detour_m: 0.0,
+            low_db: 28.0, mid_db: 40.0, high_db: 52.0,
+        };
+        assert!(wood_door.gain() > 0.3, "{wood_door:?}");
+        assert!(wood_door.high_cut_db() > wood_door.mid_cut_db());
+        assert!(concrete.gain() < wood_door.gain() * 0.2, "{concrete:?} vs {wood_door:?}");
+        assert!(concrete.high_cut_db() > wood_door.high_cut_db());
+        assert_eq!(Occlusion::NONE.gain(), 1.0);
+        assert_eq!(Occlusion::NONE.high_cut_db(), 0.0);
     }
 
     #[test]
