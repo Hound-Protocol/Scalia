@@ -246,3 +246,26 @@ mod tests {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn muzzle_flash_is_a_single_static_pulse() {
+        let mut effects = Effects::default();
+        effects.shot(0.0, [0.0, 0.0, 0.0], [100.0, 0.0, 0.0], Some([1.0, 0.0, 0.0]), false, false);
+
+        let first = effects.mesh(0.0, (0.0, 0.0));
+        let middle = effects.mesh(8.0, (0.0, 0.0));
+        assert_eq!(first.vertices.len(), middle.vertices.len(), "flash geometry must not fade or shrink");
+        assert!(!first.vertices.is_empty());
+        assert!(effects.mesh(FLASH_MS, (0.0, 0.0)).vertices.is_empty(), "flash must be gone after its short pulse");
+
+        let light = effects.lights(8.0, (0.0, 0.0));
+        assert_eq!(light.len(), 1);
+        assert_eq!(light[0].intensity, 1.8, "flash light must not fade");
+        assert!(effects.lights(FLASH_LIGHT_MS, (0.0, 0.0)).is_empty());
+    }
+}
