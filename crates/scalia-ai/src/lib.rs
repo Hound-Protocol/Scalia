@@ -11,3 +11,4 @@ pub mod sight;
 pub mod squad;
 pub mod tactics;
 pub mod titan;
+pub mod titan_tasks;
