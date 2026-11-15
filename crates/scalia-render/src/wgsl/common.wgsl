@@ -318,13 +318,11 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 36u) {
-    // Prone aim: the solved two-handed aim rig, rolled onto the elbows.
+    // Match the prone support geometry; grip() places the left palm on the handguard.
     p.prone = 1.0;
-    carry(&p, 4u);
+    p.sh = vec2f(2.8, 2.8);
+    p.el = vec2f(1.3, 1.35);
     p.rifle = 1.5707963;
-    p.ryaw = 0.0;
-    p.twist = 0.0;
-    p.look = 0.0;
     p.head = 0.82;
   } else if (pose == 6u) {
     // On the athletic base (pose.rs `athletic`), leaning in by AIM_LEAN 0.1 with the rifle and head taking it back.
