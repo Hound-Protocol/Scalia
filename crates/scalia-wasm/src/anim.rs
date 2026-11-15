@@ -612,12 +612,12 @@ mod tests {
     }
 
     #[test]
-    fn gait_changes_keep_stride_phase_continuous_and_cadence_positive() {
+    fn gait_changes_keep_stride_phase_continuous_and_shader_phase_enabled() {
         let mut a = Animator::new(0.0);
         let mut d = drive(0.0);
         let mut previous: Option<f32> = None;
         // Cross walk -> run -> sprint -> run -> walk at real pace. Pose changes must not
-        // reset the alternating-foot cycle or produce a zero/negative stride cadence.
+        // reset the alternating-foot cycle. Moving poses must keep shader phase animation enabled.
         for (frame, speed, sprint, expected) in [
             (0, 1.5, true, Pose::Walk),
             (30, 2.6, true, Pose::Run),
@@ -630,7 +630,7 @@ mod tests {
             d.ts = frame as f32 / 60.0;
             let f = a.step(&d);
             assert_eq!(f.pose, expected, "frame {frame}");
-            assert!(f.cadence > 0.0, "moving gait has positive cadence at frame {frame}: {}", f.cadence);
+            assert_eq!(f.cadence, -1.0, "moving gait must use the shader's integrated phase at frame {frame}");
             if let Some(before) = previous {
                 let delta = (f.phase - before + 1.0).fract();
                 assert!(delta < 0.2, "stride phase jumped at gait transition {frame}: {before} -> {}", f.phase);
