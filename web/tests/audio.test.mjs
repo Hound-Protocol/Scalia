@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AudioEngine } from '../audio.js';
+import { AudioEngine, spatialPosition } from '../audio.js';
 
 const connectedElements = new WeakSet();
 let sourceCreations = 0;
@@ -122,4 +122,25 @@ test('stream() does not claim an element already routed by Auralis media routing
   assert.ok(audio.routeMedia(element, 'world'));
   assert.equal(audio.stream(element), null);
   assert.equal(sourceCreations, before + 1);
+});
+
+
+test('spatialPosition maps camera-relative directions into HRTF coordinates', () => {
+  const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
+  const right = spatialPosition(1, 0);
+  near(right[0], 1); near(right[1], 0); near(right[2], 0);
+  const ahead = spatialPosition(0, 1);
+  near(ahead[0], 0); near(ahead[1], 0); near(ahead[2], -1);
+  const behind = spatialPosition(0, -1);
+  near(behind[0], 0); near(behind[1], 0); near(behind[2], 1);
+  const below = spatialPosition(0, 0, 2);
+  near(below[0], 0); near(below[1], -1); near(below[2], 0);
+  assert.deepEqual(spatialPosition(0, 0), [0, 0, -1]);
+});
+
+test('spatialPosition normalises diagonal vectors and contains invalid inputs', () => {
+  const diagonal = spatialPosition(1, 1, 0);
+  near(Math.hypot(...diagonal), 1);
+  const invalid = spatialPosition(Number.NaN, Infinity, Number.NaN);
+  assert.deepEqual(invalid, [0, 0, -1]);
 });
