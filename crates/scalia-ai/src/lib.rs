@@ -2,6 +2,7 @@ pub mod battle;
 pub mod doors;
 pub mod goap;
 pub mod grid;
+pub mod intelligence;
 pub mod leader;
 pub mod mind;
 pub mod save;
