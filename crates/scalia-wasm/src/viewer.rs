@@ -1561,15 +1561,18 @@ impl Viewer {
     /// The commander's weapon for the page, as JSON: rounds in the rifle and spare, reloading, slung, stance,
     /// rounds fired so far, health (0..100), and the aim line [x0, y0, x1, y1] (screen fractions) while aiming.
     pub fn commander_weapon_state(&mut self) -> String {
-        let (ammo, spare, reloading, health, down, stable) = match self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)) {
-            Some(s) => (s.ammo, s.mags * scalia_ai::battle::MAG, s.reloading_ms > 0, s.health.max(0), s.down(), s.stable()),
-            None => (scalia_ai::battle::MAG, COMMANDER_MAGS * scalia_ai::battle::MAG, false, 100, false, false),
+        let (ammo, spare, reloading, health, down, stable, injuries) = match self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)) {
+            Some(s) => (
+                s.ammo, s.mags * scalia_ai::battle::MAG, s.reloading_ms > 0, s.health.max(0), s.down(), s.stable(),
+                s.injuries.iter().map(|w| format!("\"{}\"", w.as_str())).collect::<Vec<_>>().join(","),
+            ),
+            None => (scalia_ai::battle::MAG, COMMANDER_MAGS * scalia_ai::battle::MAG, false, 100, false, false, String::new()),
         };
         let line = self.gun.line.map_or("null".to_string(), |l| format!("[{:.4},{:.4},{:.4},{:.4}]", l[0], l[1], l[2], l[3]));
         // How wide the rounds go now (0 steady .. 1 wild): moving, standing up and the hip open it; crouched or
         // prone and still close it. The page sizes the reticle by it.
         let spread = self.gun_spread();
-        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"down\":{down},\"stable\":{stable},\"bleed_per_sec\":{},\"spread\":{spread:.3},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots, if down && !stable { 1 } else { 0 })
+        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"down\":{down},\"stable\":{stable},\"bleed_per_sec\":{},\"injuries\":[{injuries}],\"spread\":{spread:.3},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots, if down && !stable { 1 } else { 0 })
     }
     /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
     /// starts over the commander.
@@ -2069,12 +2072,22 @@ impl Viewer {
     pub fn commander_inspect(&mut self, on: bool) {
         if on {
             if self.inspect_zoom.is_none() && self.scene == Scene::Ground && !self.tablet {
-                self.inspect_zoom = Some(self.zoom_step);
-                self.zoom_step = 1;
+                self.inspect_zoom = Some(InspectCamera {
+                    zoom_step: self.zoom_step, zoom_m: self.zoom_m, ground_view: self.ground_view,
+                    ground_cam: self.ground_cam, cam_smooth: self.cam_smooth, yaw: self.yaw, yaw_smooth: self.yaw_smooth,
+                });
+                // Step 0 is the closest on-foot view. Step 1 could zoom OUT if the player was already closer.
+                self.zoom_step = 0;
                 self.inspect_glide = true;
             }
-        } else if let Some(step) = self.inspect_zoom.take() {
-            self.zoom_step = step;
+        } else if let Some(saved) = self.inspect_zoom.take() {
+            self.zoom_step = saved.zoom_step;
+            self.zoom_m = saved.zoom_m;
+            self.ground_view = saved.ground_view;
+            self.ground_cam = saved.ground_cam;
+            self.cam_smooth = saved.cam_smooth;
+            self.yaw = saved.yaw;
+            self.yaw_smooth = saved.yaw_smooth;
             self.inspect_glide = true;
         }
     }
@@ -4361,6 +4374,13 @@ fn commander_figure() -> MeshBuilder {
         }
     }
     f
+}
+
+/// The exact field camera state temporarily displaced by the vitality check.
+#[derive(Clone, Copy)]
+struct InspectCamera {
+    zoom_step: usize, zoom_m: f32, ground_view: f32, ground_cam: Option<Vec3>, cam_smooth: Option<Vec3>,
+    yaw: f32, yaw_smooth: f32,
 }
 
 /// The tablet map's camera: everything that differs between the field view and the map view.
