@@ -2900,7 +2900,6 @@ impl Viewer {
                 self.base_props = props;
                 self.base_grid.rebuild(&self.base_props);
                 self.audio_spaces.clear();
-                self.audio_field = None;
                 self.audio_reflectors.clear();
                 let m = base_mesh(&self.base_props, self.base_h);
                 self.gpu.upload("base", m.bytes());
