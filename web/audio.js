@@ -24,6 +24,7 @@ const PRIORITY = { blast: 3, shot: 2, step: 1 };
 // A media element may have exactly one MediaElementAudioSourceNode for its lifetime.
 // Keep this module-wide so separate AudioEngine instances cannot reconnect the same element.
 const MEDIA_ELEMENT_STREAMS = new WeakMap();
+const MEDIA_ELEMENT_ROUTES = new WeakMap();
 
 /// A stereo impulse response: decaying noise (darker as it decays), plus early reflections.
 function impulse(ctx, seconds, rt60, early, damp) {
@@ -78,6 +79,7 @@ export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.buffers = new Map();
+    this.bufferLoads = new Map();
     this.active = [];
     this.env = { enclosure: 0, size: 30, rt60: 0.25, corridor: 0, pda: 0 };
     this.peak = PEAK_FLOOR_DB; this.peakAt = 0;
@@ -101,7 +103,65 @@ export class AudioEngine {
   setWake(hz) {
     this.wakeHz = Math.min(22000, Math.max(200, hz));
     if (this.wakeLp) this.wakeLp.frequency.value = this.wakeHz;
+    if (this.mediaWakeLp) this.mediaWakeLp.frequency.value = this.wakeHz;
   }
+  /// Applies tablet attention muffling to music and ambience only.
+  setMediaMuffle(on) {
+    const c = this.ctx; if (!c || !this.mediaFilter || !this.mediaGain) return;
+    const t = c.currentTime;
+    this.mediaFilter.frequency.cancelScheduledValues(t);
+    this.mediaGain.gain.cancelScheduledValues(t);
+    this.mediaFilter.frequency.setTargetAtTime(on ? 600 : 20000, t, 0.12);
+    this.mediaGain.gain.setTargetAtTime(on ? 0.55 : 1, t, 0.12);
+  }
+
+  /// Fade only the persistent media bus (used by the controlled session reboot).
+  fadeMediaOut(seconds = 0.6) {
+    const c = this.ctx; if (!c || !this.mediaGain) return;
+    const t = c.currentTime;
+    this.mediaGain.gain.cancelScheduledValues(t);
+    this.mediaGain.gain.setTargetAtTime(0, t, Math.max(0.01, seconds / 3));
+  }
+
+  /// Route a persistent HTML media element through Auralis. A media element gets one source node for life.
+  routeMedia(el, bus = 'ui') {
+    if (!el || (typeof el !== 'object' && typeof el !== 'function')) return null;
+    const existing = MEDIA_ELEMENT_ROUTES.get(el);
+    if (existing) return existing.bus === bus ? existing : null;
+    if (MEDIA_ELEMENT_STREAMS.has(el)) return null;
+    const c = this.ensure(); if (!c) return null;
+    const destination = bus === 'world' ? this.mediaFilter : bus === 'ui' ? this.ui : (bus && typeof bus.connect === 'function' ? bus : null);
+    if (!destination) return null;
+    let source;
+    try { source = c.createMediaElementSource(el); }
+    catch (error) {
+      if (error?.name === 'InvalidStateError') {
+        console.warn('[Auralis] Media element already has a source node; duplicate routing skipped.', error);
+        return null;
+      }
+      throw error;
+    }
+    source.connect(destination);
+    const route = { context: c, source, bus };
+    MEDIA_ELEMENT_ROUTES.set(el, route);
+    return route;
+  }
+
+  /// Play a decoded, non-spatial interface sound through the Auralis master limiter.
+  playUi(url, gain = 1) {
+    const c = this.ensure(); if (!c) return;
+    const buffer = this.buffer(url);
+    if (!buffer) {
+      const pending = this.bufferLoads.get(url);
+      if (pending) pending.then(() => this.playUi(url, gain)).catch(() => {});
+      return;
+    }
+    const source = c.createBufferSource(); source.buffer = buffer;
+    const level = c.createGain(); level.gain.value = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
+    source.connect(level).connect(this.ui);
+    source.start();
+  }
+
   /// Creates the graph on first use (browsers allow audio only after a user gesture).
   ensure() {
     if (this.ctx) {
@@ -137,6 +197,14 @@ export class AudioEngine {
     this.muffle.connect(this.wakeLp);
     this.mix = c.createGain(); this.mix.connect(this.muffle);
     this.world = c.createGain(); this.world.connect(this.mix);
+    // Persistent music and ambience keep their own tablet-muffle and wake stages, separate from combat ducking
+    // and the tablet speaker band-pass. They still share Auralis' master limiter.
+    this.mediaFilter = c.createBiquadFilter(); this.mediaFilter.type = 'lowpass'; this.mediaFilter.frequency.value = 20000; this.mediaFilter.Q.value = 0.6;
+    this.mediaGain = c.createGain(); this.mediaGain.gain.value = 1;
+    this.mediaWakeLp = c.createBiquadFilter(); this.mediaWakeLp.type = 'lowpass'; this.mediaWakeLp.frequency.value = this.wakeHz || 22000; this.mediaWakeLp.Q.value = 0.5;
+    this.mediaFilter.connect(this.mediaGain).connect(this.mediaWakeLp).connect(lim);
+    // UI and cinematic sounds bypass world effects, but still pass through Auralis' master limiter.
+    this.ui = c.createGain(); this.ui.connect(lim);
     // Room heat: sustained fire indoors keeps the room ringing on top of itself (rises per shot, fades in ~1.5 s).
     this.heat = 0; this.heatAt = 0;
     // Saturation curve for gunfire close by indoors: the overloaded crack of a shot in a hallway (bodycam).
@@ -182,7 +250,16 @@ export class AudioEngine {
       this.buffers.set(url, 'loading');
       // From the preloaded bytes when the page has them (a copy: decoding takes the buffer over).
       const get = this.fetchBytes || ((u) => fetch(u).then((r) => r.arrayBuffer()));
-      get(url).then((a) => this.ctx.decodeAudioData(a.slice(0))).then((d) => this.buffers.set(url, d)).catch(() => this.buffers.delete(url));
+      const context = this.ctx;
+      const pending = get(url).then((a) => context.decodeAudioData(a.slice(0))).then((d) => {
+        if (this.ctx === context) this.buffers.set(url, d);
+        return d;
+      }).catch((error) => {
+        if (this.ctx === context) this.buffers.delete(url);
+        throw error;
+      });
+      this.bufferLoads.set(url, pending);
+      pending.catch(() => {});
     }
     return null;
   }
@@ -216,6 +293,7 @@ export class AudioEngine {
     // API forbids creating a second MediaElementSourceNode for the same HTMLMediaElement.
     const existing = MEDIA_ELEMENT_STREAMS.get(el);
     if (existing) return existing.stream;
+    if (MEDIA_ELEMENT_ROUTES.has(el)) return null;
 
     const c = this.ensure(); if (!c) return null;
     let src;
