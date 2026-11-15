@@ -1090,8 +1090,8 @@ impl Viewer {
         let space = self.space_at(sx, sy);
         let refl = self.reflectors_at(sx, sy);
         let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
-        // Spreading (about -6 dB a doubling past 10 m, from the ears at the camera: zooming out quietens) and
-        // the air's own toll on the highs over the real distance.
+        // Spreading (about -6 dB a doubling past 10 m, from the rendered camera: zooming out quietens)
+        // and the air's own toll on the highs over the real distance.
         let spread = 1.0 / (1.0 + dist / 10.0);
         let air_hz = scalia_audio::air_lowpass_hz(dist);
         // What stands between: walls, shut doors, the way round through open ones, all as heard at the
@@ -4443,6 +4443,14 @@ mod audio_spatial_tests {
         assert_eq!((close.0, close.1), (1_040.0, 2_050.0));
         assert_eq!((zoomed_out.0, zoomed_out.1), (1_040.0, 2_050.0));
         assert!(zoomed_out.2 > close.2, "zooming out must move the acoustic listener farther from ground sources");
+        let source = (1_040.0f32, 2_050.0f32, 1.4f32);
+        let distance = |listener: (f32, f32, f32)| {
+            ((source.0 - listener.0).powi(2) + (source.1 - listener.1).powi(2) + (source.2 - listener.2).powi(2)).sqrt()
+        };
+        let close_distance = distance(close);
+        let far_distance = distance(zoomed_out);
+        assert!(far_distance > close_distance);
+        assert!(1.0 / (1.0 + far_distance / 10.0) < 1.0 / (1.0 + close_distance / 10.0));
         assert_eq!(close.2, scalia_audio::camera_height_m(12.0));
     }
 
