@@ -128,7 +128,7 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 - Centralised voice admission: 64 active decoded voices; lowest-priority, quietest and then oldest voice is selected for stealing. Less important arrivals are dropped.
 - Tracked every per-voice Web Audio node and disconnect it after playback/tail completion.
 - Bounded retained tail graphs to 64; reverb, air and echo tails retain only the nodes needed to finish audibly.
-- Included UI one-shots in the same voice cap and lifecycle; exposed active/tail/node/drop/steal counters through `voiceStats()`.
-- Added tests for handle cancellation, cleanup, priority stealing, drop behaviour, and bounded tail retention.
+- Included UI one-shots and menu/cinematic looping buffers in the same voice cap and lifecycle, including fade-stop handles; exposed active/tail/node/drop/steal counters through `voiceStats()`.
+- Added tests for handle cancellation, cleanup, priority stealing, drop behaviour, bounded tail retention, UI playback, managed menu loops and auxiliary-node cleanup.
 
 **Verification:** automated tests and browser stress/listening checks are pending CI and manual validation. No merge until checks pass.
