@@ -101,3 +101,9 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
 - Every completed feature has a test; animation work gets visual proof (stance sheet or in-game capture); AI work gets a reproducible lab scenario.
 - Don't rewrite working systems; keep the simulation deterministic (check `hash_battle` before and after).
 - `scripts/verify.sh` must pass before each push; commits carry an `Update: <Area>` trailer, and the commit description goes into the in-game changelog, so write it for players.
+
+
+### AN-2 reconciliation (15 Nov)
+- Directional prone crawl now reverses diagonal timing when backing up and changes support width when moving sideways; cadence uses direction-adjusted stride length.
+- Rust pose reference and WGSL mirror updated together; parity, directional-cycle and audit checks added.
+- Prone aiming/firing remains unfinished and requires a separate rig-tuned pose pass. Visual browser review remains outstanding.
