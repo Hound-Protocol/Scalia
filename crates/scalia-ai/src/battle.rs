@@ -1666,6 +1666,7 @@ impl Battle {
     pub fn revive(&mut self, i: usize) {
         let Some(s) = self.soldiers.get_mut(i) else { return };
         s.health = 100;
+        s.injuries.clear();
         s.stable = false;
         s.bleed_ms = 0;
         s.suppression = 0;
