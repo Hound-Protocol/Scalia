@@ -98,7 +98,7 @@ const STREAM_ASSETS = ['./sfx/ambience-wind.mp3', './sfx/jukebox/hard-rock-metal
   './sfx/weapons/deagle-mag-in.mp3', './sfx/weapons/deagle-mag-out.mp3', './sfx/weapons/deagle-shot.mp3', './sfx/weapons/deagle-slide.mp3',
   './sfx/weapons/m1911-mag.mp3', './sfx/weapons/m1911-shot.mp3', './sfx/weapons/m1911-slide.mp3',
   './sfx/weapons/mp5-bolt.mp3', './sfx/weapons/mp5-mag-in.mp3', './sfx/weapons/mp5-mag-out.mp3', './sfx/weapons/mp5-shot.mp3'];
-const UI_ASSETS = ['./voice/manifest.json',
+const UI_ASSETS = ['./voice/manifest.json', './changelog.json', './version.json',
   './img/fp_body.webp', './img/fp_left.webp', './img/fp_lwalkie_back.webp', './img/fp_lwalkie_front.webp',
   './img/fp_right.webp', './img/fp_thumb.webp', './img/pda_front.webp', './img/walkie.webp',
   './fonts/saira-condensed-latin-400-normal.woff2', './fonts/saira-condensed-latin-500-normal.woff2',
@@ -144,6 +144,14 @@ const loaded = (async () => {
     } catch (error) { failures.push({ url, error: error?.message || String(error) }); }
   }
 
+  for (const url of ['./changelog.json', './version.json']) {
+    const asset = get(url);
+    if (!asset?.ok) failures.push({ url, error: 'Required JSON asset was not downloaded' });
+    else {
+      try { JSON.parse(new TextDecoder().decode(asset.buffer)); }
+      catch (error) { failures.push({ url, error: error?.message || String(error) }); }
+    }
+  }
   const manifest = get('./voice/manifest.json');
   let voiceFiles = [];
   if (manifest?.ok) {
