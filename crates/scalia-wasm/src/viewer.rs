@@ -5,14 +5,18 @@ use std::collections::HashMap;
 
 use glam::Vec3;
 
-/// Commander's ear height above the local ground. Auralis source heights use the same local frame.
-fn commander_ear_height(stance: u8) -> f32 {
-    match stance { 1 => 1.05, 2 => 0.35, _ => 1.55 }
+/// The acoustic listener follows the rendered camera, not the commander's movement input or head pose.
+/// The view height maps to the camera's acoustic height so zoom changes physical propagation distance.
+fn camera_listener_position(target: Vec3, view_height: f32, origin: (f64, f64)) -> (f32, f32, f32) {
+    (
+        (target.x as f64 + origin.0) as f32,
+        (target.y as f64 + origin.1) as f32,
+        scalia_audio::camera_height_m(view_height),
+    )
 }
 
-/// Acoustic obstruction uses the propagation field for an on-foot listener, where diffraction around
-/// corners and open doors matters. The tablet listener is physically at camera height, so trace the actual
-/// 3D line instead of incorrectly applying a ground-level field to an elevated listener.
+/// Acoustic obstruction is evaluated along the rendered camera's 3D line of sight. A ground-level
+/// propagation field would incorrectly place the listener at the commander's feet when zoomed out.
 fn sound_occlusion(
     sight: &scalia_ai::sight::SightGrid,
     field: Option<&scalia_audio::Field>,
@@ -109,8 +113,6 @@ const PLANET_R: f32 = 651_898.6;
 const GROUND_TOP: f32 = 4.0 * PLANET_R;
 /// The zoom ladder: view heights in metres, one wheel notch per step. Up to GROUND_TOP the ground scene draws
 /// them (squad, platoon, company, battlefield, region, globe); above it the star system does (orbit to system).
-/// How far round the ears sound is followed through and round things (m); beyond, straight lines.
-const AUDIO_FIELD_M: f32 = 32.0;
 /// From the commander, where gunfire starts to sound distant (m): the edge of the closest view.
 const FAR_FROM_M: f32 = 12.0;
 const LADDER: [f32; 21] = [
@@ -261,9 +263,6 @@ pub struct Viewer {
     /// The acoustic space per 2 m square of the testing ground (cleared when the map changes).
     audio_spaces: std::collections::HashMap<(i32, i32), scalia_audio::Env>,
     audio_reflectors: std::collections::HashMap<(i32, i32), Vec<(f32, f32)>>,
-    /// How sound reaches the commander's ears through and round everything near him, and what it was built for
-    /// (his metre square, the doors' states).
-    audio_field: Option<(scalia_audio::Field, (i32, i32, u64))>,
     /// How the next squad move is to be made (chosen on the radio).
     order_mode: Option<scalia_ai::leader::Mode>,
     /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
@@ -445,7 +444,6 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         lab_wound: None,
         audio_spaces: std::collections::HashMap::new(),
         audio_reflectors: std::collections::HashMap::new(),
-        audio_field: None,
         order_mode: None,
         fx: crate::effects::Effects::default(),
         fx_lights: Vec::new(),
@@ -863,7 +861,6 @@ impl Viewer {
         self.base_grid.rebuild(&self.base_props);
         self.audio_spaces.clear();
         self.audio_reflectors.clear();
-        self.audio_field = None;
         let m = base_mesh(&self.base_props, self.base_h);
         self.gpu.upload("base", m.bytes());
         self.demo = false;
@@ -975,24 +972,16 @@ impl Viewer {
     }
     /// Where the ears are: the camera (x, y, height; m). Above the middle of the view, as high as the view is
     /// big; while the tablet is up, above the middle of its map.
-    fn audio_listener(&mut self) -> (f32, f32, f32) {
+    fn audio_listener(&self) -> (f32, f32, f32) {
         if self.tablet {
             if let Some(c) = self.map_cam.ground_cam {
-                return (c.x, c.y, scalia_audio::camera_height_m(self.map_cam.ground_view));
+                return camera_listener_position(c, self.map_cam.ground_view, (0.0, 0.0));
             }
         }
-        // During the playable assault, the camera can lag behind or remain centred on the
-        // battlefield while the commander moves independently. The ears must follow the
-        // controlled soldier, otherwise his own muzzle appears to move left/right with WASD.
-        if self.scene == Scene::Ground && self.assault.is_some() && self.intro.is_none() && self.cine.is_none() {
-            // Auralis models source and listener heights relative to local ground. Adding the
-            // terrain's absolute elevation here turns altitude into fake sound distance/delay.
-            let eye = commander_ear_height(self.gun.stance);
-            return (self.cmd.0 as f32, self.cmd.1 as f32, eye);
-        }
+        // Use the final rendered camera pose in every mode, including the live assault. The
+        // commander's WASD movement and stance must never substitute for the camera listener.
         let (target, _, view_h) = self.last_cam;
-        let (x, y) = (target.x as f64 + self.origin.0, target.y as f64 + self.origin.1);
-        (x as f32, y as f32, scalia_audio::camera_height_m(view_h))
+        camera_listener_position(target, view_h, self.origin)
     }
     /// The space at the listener's spot on the ground (ambience and the console):
     /// [enclosure 0..1, size (m), reverb time (s), corridor 0..1, through the tablet 0/1].
@@ -1014,23 +1003,10 @@ impl Viewer {
         self.audio_reflectors.insert(key, r.clone());
         r
     }
-    /// Where the ears are for what stands between: the commander's head on foot, the camera on the tablet.
-    fn ear(&mut self) -> (f32, f32) {
-        if self.tablet {
-            let l = self.audio_listener();
-            return (l.0, l.1);
-        }
-        (self.cmd.0 as f32, self.cmd.1 as f32)
-    }
-    /// The propagation field round the ears, rebuilt when they move a metre or a door opens or shuts.
-    fn ensure_field(&mut self, ear: (f32, f32)) {
-        let Some(a) = self.assault.as_ref() else { return };
-        let doors = a.battle.sight.doors.iter().enumerate().fold(0u64, |h, (i, d)| h.wrapping_mul(31).wrapping_add(i as u64 * 7 + d.shut() as u64));
-        let key = (ear.0.floor() as i32, ear.1.floor() as i32, doors);
-        if self.audio_field.as_ref().is_some_and(|f| f.1 == key) {
-            return;
-        }
-        self.audio_field = Some((scalia_audio::Field::build(&a.battle.sight, (key.0 as f32 + 0.5, key.1 as f32 + 0.5), AUDIO_FIELD_M), key));
+    /// Where the camera listener is for what stands between.
+    fn ear(&self) -> (f32, f32) {
+        let listener = self.audio_listener();
+        (listener.0, listener.1)
     }
     /// The space at a spot (open field, room, corridor), remembered per 2 m square until the map changes.
     fn space_at(&mut self, x: f32, y: f32) -> scalia_audio::Env {
@@ -1114,25 +1090,24 @@ impl Viewer {
         let space = self.space_at(sx, sy);
         let refl = self.reflectors_at(sx, sy);
         let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
-        // Spreading (about -6 dB a doubling past 10 m, from the ears at the camera: zooming out quietens) and
-        // the air's own toll on the highs over the real distance.
+        // Spreading (about -6 dB a doubling past 10 m, from the rendered camera: zooming out quietens)
+        // and the air's own toll on the highs over the real distance.
         let spread = 1.0 / (1.0 + dist / 10.0);
         let air_hz = scalia_audio::air_lowpass_hz(dist);
         // What stands between: walls, shut doors, the way round through open ones, all as heard at the
         // commander's ears (inside a building the outside is muffled; zoomed out you still hear from where he
         // stands). Beyond the flooded field: the walls on the straight line, at ear height.
         let ear = self.ear();
-        if !self.tablet {
-            self.ensure_field(ear);
-        }
+        // The listener is always the rendered camera, so occlusion must use its actual
+        // acoustic height rather than a ground-level field centred on the moving commander.
         let occ = self.assault.as_ref().map_or(scalia_audio::Occlusion::NONE, |a| {
             sound_occlusion(
                 &a.battle.sight,
-                self.audio_field.as_ref().map(|field| &field.0),
+                None,
                 ear,
                 (sx, sy),
                 l.2,
-                self.tablet,
+                true,
             )
         });
         let gain = spread * occ.gain();
@@ -2925,7 +2900,6 @@ impl Viewer {
                 self.base_props = props;
                 self.base_grid.rebuild(&self.base_props);
                 self.audio_spaces.clear();
-                self.audio_field = None;
                 self.audio_reflectors.clear();
                 let m = base_mesh(&self.base_props, self.base_h);
                 self.gpu.upload("base", m.bytes());
@@ -4461,14 +4435,27 @@ mod audio_spatial_tests {
     use scalia_core::nav::{Prop, PropKind};
 
     #[test]
-    fn commander_listener_height_stays_relative_to_ground_elevation() {
-        assert_eq!(commander_ear_height(0), 1.55);
-        assert_eq!(commander_ear_height(1), 1.05);
-        assert_eq!(commander_ear_height(2), 0.35);
+    fn acoustic_listener_uses_rendered_camera_pose_and_zoom_not_commander_input() {
+        let camera = Vec3::new(40.0, 50.0, 0.0);
+        let close = camera_listener_position(camera, 12.0, (1_000.0, 2_000.0));
+        let zoomed_out = camera_listener_position(camera, 50.0, (1_000.0, 2_000.0));
+
+        assert_eq!((close.0, close.1), (1_040.0, 2_050.0));
+        assert_eq!((zoomed_out.0, zoomed_out.1), (1_040.0, 2_050.0));
+        assert!(zoomed_out.2 > close.2, "zooming out must move the acoustic listener farther from ground sources");
+        let source = (1_040.0f32, 2_050.0f32, 1.4f32);
+        let distance = |listener: (f32, f32, f32)| {
+            ((source.0 - listener.0).powi(2) + (source.1 - listener.1).powi(2) + (source.2 - listener.2).powi(2)).sqrt()
+        };
+        let close_distance = distance(close);
+        let far_distance = distance(zoomed_out);
+        assert!(far_distance > close_distance);
+        assert!(1.0 / (1.0 + far_distance / 10.0) < 1.0 / (1.0 + close_distance / 10.0));
+        assert_eq!(close.2, scalia_audio::camera_height_m(12.0));
     }
 
     #[test]
-    fn tablet_listener_height_is_used_for_occlusion() {
+    fn rendered_camera_listener_height_is_used_for_occlusion() {
         let wall = Prop {
             kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
             x_mm: 50_000,
@@ -4480,15 +4467,15 @@ mod audio_spatial_tests {
         let source = (60.0, 50.0);
         let field = scalia_audio::Field::build(&sight, ear, 32.0);
 
-        let on_foot = sound_occlusion(&sight, Some(&field), ear, source, 19.2, false);
-        let tablet = sound_occlusion(&sight, Some(&field), ear, source, 30.0, true);
+        let ground_listener = sound_occlusion(&sight, Some(&field), ear, source, 1.6, false);
+        let elevated_camera = sound_occlusion(&sight, None, ear, source, 19.2, true);
 
-        assert!(on_foot.gain() < 0.8 && on_foot.lowpass_hz() < 18_000.0, "{on_foot:?}");
-        assert_eq!(tablet, scalia_audio::Occlusion::NONE, "{tablet:?}");
+        assert!(ground_listener.gain() < 0.8 && ground_listener.lowpass_hz() < 18_000.0, "{ground_listener:?}");
+        assert_eq!(elevated_camera, scalia_audio::Occlusion::NONE, "{elevated_camera:?}");
     }
 
     #[test]
-    fn tablet_listener_still_hears_a_wall_that_intersects_the_elevated_ray() {
+    fn camera_listener_still_hears_a_wall_that_intersects_the_elevated_ray() {
         let wall = Prop {
             kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
             x_mm: 50_000,
@@ -4498,7 +4485,7 @@ mod audio_spatial_tests {
         let sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[wall]);
         let ear = (40.0, 50.0);
         let source = (60.0, 50.0);
-        let tablet = sound_occlusion(&sight, None, ear, source, 4.0, true);
-        assert!(tablet.wall_db >= 40.0, "{tablet:?}");
+        let camera = sound_occlusion(&sight, None, ear, source, 4.0, true);
+        assert!(camera.wall_db >= 40.0, "{camera:?}");
     }
 }
