@@ -58,6 +58,10 @@ const GRAB_MM: i64 = 2_150;
 const DRAG_REACH: i64 = 700;
 /// Hostiles confirmed: the length of one bound.
 const BOUND_MM: i64 = 12_000;
+/// Suppression on any man that makes a moving squad react to fire (one near miss does it).
+const REACT_SUPPRESSION: i32 = 100;
+/// Back this far from where it set out, a squad that has called off its attack rallies (mm).
+const RALLY_BACK_MM: i64 = 10_000;
 /// With caution: corners this close ahead are watched.
 const CORNER_MM: i64 = 8_000;
 
@@ -247,6 +251,19 @@ pub struct Brain {
     pair: Vec<usize>,
     /// Where the men not clearing wait, out of sight of the rooms not yet cleared (for room `wait.0`).
     wait: Option<(usize, Vec<(i64, i64)>)>,
+    /// The attack: men able to fight when the order was given, how many are left (to see a man fall), where the
+    /// squad set out from, whether it has come under fire (then it goes on by fire and movement), and the rally
+    /// point it falls back to once it has called the attack off.
+    #[serde(default)]
+    strength: usize,
+    #[serde(default)]
+    left: usize,
+    #[serde(default)]
+    origin: (i64, i64),
+    #[serde(default)]
+    under_fire: bool,
+    #[serde(default)]
+    broken: Option<(i64, i64)>,
 }
 
 /// A narrow gap on the squad's way (a passage between walls, a gateway): where it is, which way the squad
@@ -263,7 +280,7 @@ pub struct Choke {
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, line: None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new() }
+        Brain { order: Order::None, line: None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new(), strength: 0, left: 0, origin: (0, 0), under_fire: false, broken: None }
     }
 }
 
@@ -456,7 +473,15 @@ impl Battle {
             return;
         }
         let far = ms.iter().map(|&i| dist(self.soldiers[i].pos, to)).max().unwrap_or(0);
-        if mode == Mode::Confirmed && !self.bound(squad, &ms, to) {
+        // React to fire: shot at on the way, the squad gets down and goes on by fire and movement (two teams
+        // bounding, one always down and firing), however it was told to move.
+        if mode != Mode::Garrison && !self.brains[squad].under_fire && ms.iter().any(|&i| self.soldiers[i].suppression >= REACT_SUPPRESSION) {
+            self.brains[squad].under_fire = true;
+            self.brains[squad].legs.clear();
+            self.log.push(Event::Order { squad, step: "react" });
+        }
+        let bounding = mode == Mode::Confirmed || self.brains[squad].under_fire && mode != Mode::Garrison;
+        if bounding && !self.bound(squad, &ms, to) {
             return;
         }
         let gait = match mode {
@@ -691,6 +716,65 @@ impl Battle {
     /// The squad's leader: kept while he can lead, otherwise the next man takes command (and says so).
     pub fn leader_of(&self, squad: usize) -> Option<usize> {
         self.brains.get(squad).and_then(|b| b.leader).filter(|&l| self.soldiers[l].alive() && !self.soldiers[l].down())
+    }
+
+    /// An attacking squad watches its strength: a man lost makes the leader regroup it (the line laid again round
+    /// those left); half of it out of action, he calls the attack off and takes the rest back to a rally point.
+    fn count_losses(&mut self, squad: usize) {
+        if !matches!(self.brains[squad].order, Order::Move { .. }) || self.brains[squad].broken.is_some() {
+            return;
+        }
+        let ms = self.members(squad);
+        let b = &mut self.brains[squad];
+        if b.strength == 0 {
+            if ms.is_empty() {
+                return;
+            }
+            let n = ms.len() as i64;
+            b.origin = ms.iter().fold((0, 0), |a, &i| (a.0 + self.soldiers[i].pos.0 / n, a.1 + self.soldiers[i].pos.1 / n));
+            (b.strength, b.left) = (ms.len(), ms.len());
+            return;
+        }
+        // Those busy with a casualty still count: only the dead and the wounded are lost.
+        let able = self.soldiers.iter().filter(|s| s.squad as usize == squad && s.alive() && !s.down() && !s.player).count();
+        if able >= b.left || b.holding || b.secured {
+            return;
+        }
+        b.left = able;
+        if able * 2 <= b.strength {
+            // Back from where it set out, away from the enemy.
+            let away = self.contact_bearing(squad, &ms).map(|v| { let l = isqrt(v.0 * v.0 + v.1 * v.1).max(1); (-v.0 * RALLY_BACK_MM / l, -v.1 * RALLY_BACK_MM / l) }).unwrap_or((0, 0));
+            let b = &mut self.brains[squad];
+            b.broken = Some((b.origin.0 + away.0, b.origin.1 + away.1));
+            self.log.push(Event::Order { squad, step: "abandon" });
+        } else {
+            // On the move the line is laid again round those left (a room-clearing plan keeps its legs).
+            if matches!(b.order, Order::Move { .. }) {
+                b.line = None;
+                b.legs.clear();
+            }
+            self.log.push(Event::Order { squad, step: "regroup" });
+        }
+    }
+
+    /// The attack called off: everyone runs back to the rally point (each to his own place round it, the
+    /// wounded left to those caring for them) and gets down there, facing the way they came from.
+    fn withdraw(&mut self, squad: usize, rally: (i64, i64)) {
+        let ms = self.members(squad);
+        let n = ms.len() as i64;
+        for (k, &i) in ms.iter().enumerate() {
+            let spot = (rally.0 + (k as i64 * 2 - n + 1) * LINE_GAP_MM / 2, rally.1);
+            let s = &mut self.soldiers[i];
+            let there = s.settled || dist(s.pos, spot) <= ARRIVE_NEAR_MM && !s.moving;
+            if there {
+                s.posture = Some(Stance::Prone);
+            } else if !matches!(s.task, Task::Move { to, .. } if to == spot) {
+                s.task = Task::Move { to: spot, gait: Gait::Run };
+                s.posture = None;
+                s.aim = false;
+                s.watch = None;
+            }
+        }
     }
 
     fn keep_leader(&mut self, squad: usize) {
@@ -1091,6 +1175,11 @@ impl Battle {
         }
         self.care();
         for squad in 0..self.brains.len() {
+            self.count_losses(squad);
+            if let Some(rally) = self.brains[squad].broken {
+                self.withdraw(squad, rally);
+                continue;
+            }
             match self.brains[squad].order {
                 Order::None => {}
                 Order::Hold => self.lead_hold(squad),
