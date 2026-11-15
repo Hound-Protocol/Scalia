@@ -44,3 +44,7 @@
 
 ## Music
 - "Operation Vance" — temporary placeholder track supplied by the project lead (`web/sfx/music-vance.mp3`).
+- **Jukebox tracks** (`web/sfx/jukebox/`): "strawberry_candy sport heavy music hard rock 627307" (heavy-music),
+  "bearstockmusic hard rock metal 627781" (hard-rock-metal), "audioera hard rock sport 628925" (hard-rock-sport),
+  "soundreality virus 124940" (virus), "soundreality polet 125525" (polet), "soundreality ransom 125510" (ransom);
+  supplied by the project lead (Pixabay sound library naming). Re-encoded at 160 kbit/s.
