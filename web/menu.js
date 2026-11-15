@@ -260,17 +260,18 @@ export function createMenu({ viewer, onEnter, wake = () => {}, audio }) {
   sky.addEventListener('webglcontextrestored', makeRenderer);
 
   // Sound through Web Audio: everything decoded while the notice is up, so it plays the moment it is asked for.
-  // Reuse Auralis' AudioContext; the menu has no independent output graph.
-  const ctx = audio?.ensure() || null;
+  // Reuse Auralis' context, but create it only after the first user gesture.
+  let ctx = null;
+  const ensureContext = () => { if (!ctx) ctx = audio?.ensure() || null; return ctx; };
   const bufs = {};
   // One at a time, so decoding never piles up while the engine is starting: only the menu theme during loading,
   // the sequence's sounds once the menu is up (they are short; the ambiences are 15 s cuts).
   let queue = Promise.resolve();
   const load = (name, url) => {
-    if (!ctx || bufs[name]) return;
-    bufs[name] = queue = queue.then(() => fetch(url)).then((r) => r.arrayBuffer()).then((a) => ctx.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => { console.warn('menu sound', url, e); });
+    const context = ensureContext();
+    if (!context || bufs[name]) return;
+    bufs[name] = queue = queue.then(() => fetch(url)).then((r) => r.arrayBuffer()).then((a) => context.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => { console.warn('menu sound', url, e); });
   };
-  load('tune', './sfx/menu-music.mp3');
   const loadSequence = () => {
     load('flash2', './sfx/menu-flash2-thump.mp3');
     load('amb1', './sfx/space-ambience-01-short.mp3');
@@ -560,6 +561,8 @@ export function createMenu({ viewer, onEnter, wake = () => {}, audio }) {
     // black and the theme starts at once.
     show() {
       state = 'menu';
+      ensureContext();
+      load('tune', './sfx/menu-music.mp3');
       root.hidden = false;
       document.body.classList.add('in-menu');
       requestAnimationFrame(() => root.classList.add('shown'));
