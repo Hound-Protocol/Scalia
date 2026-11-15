@@ -347,8 +347,8 @@ impl Animator {
             }
         } else {
             match (d.stance, moving) {
-                (Stance::Prone, true) => (Pose::Crawl, None, speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
-                (Stance::Prone, false) => (Pose::Prone, None, 0.0),
+                (Stance::Prone, true) => (Pose::Crawl, aim.then_some(Pose::ProneAim), speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
+                (Stance::Prone, false) => (if aim { Pose::ProneAim } else { Pose::Prone }, None, 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
                 (Stance::Stand, _) if skid == Skid::Stop => (Pose::Brake, None, 0.0),
@@ -511,6 +511,29 @@ mod tests {
 
     fn drive(ts: f32) -> Drive {
         Drive::new(1.0 / 60.0, ts)
+    }
+
+    #[test]
+    fn prone_aim_and_fire_work_at_rest_and_over_the_crawl_gait() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Prone, 1.5);
+
+        let mut d = drive(ts);
+        d.stance = Stance::Prone;
+        d.rifle = Rifle::Aim;
+        d.face = Face::Aim { heading: 0.4 };
+        let f = run(&mut a, 5, d);
+        assert_eq!(f.pose, Pose::ProneAim);
+        assert!(a.barrel(&f, (0.0, 0.0)).0.is_some(), "the prone rifle has a firing muzzle");
+
+        d.ts = ts + 0.2;
+        d.vel = (0.0, 1.0);
+        d.want = Some(d.vel);
+        let moving = run(&mut a, 5, d);
+        assert_eq!(moving.pose, Pose::Crawl);
+        assert_eq!(moving.upper, Some(Pose::ProneAim), "aim stays on the upper body while the legs crawl");
+        assert!(a.barrel(&moving, (0.0, 0.0)).0.is_some(), "the layered prone aim keeps its muzzle");
     }
 
     #[test]

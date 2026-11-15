@@ -94,6 +94,8 @@ pub enum Pose {
     /// both knees with the left palm planted. Drawn only as keys of the drop.
     DropReach = 34,
     DropPlant = 35,
+    /// Prone, rifle shouldered and held on a target; can also be layered over the crawl legs.
+    ProneAim = 36,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -131,6 +133,7 @@ impl Pose {
             33 => Pose::Drop,
             34 => Pose::DropReach,
             35 => Pose::DropPlant,
+            36 => Pose::ProneAim,
             _ => Pose::Stand,
         }
     }
@@ -265,7 +268,9 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     let mut p0 = *p;
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
-    reach_left_capped(p, held(RIFLE_GUARD, p), w, GRIP_MAX)
+    // Prone support reaches farther across the body than the standing carry; allow the arm to extend fully.
+    let max = if p.prone > 0.5 { PRONE_GRIP_MAX } else { GRIP_MAX };
+    reach_left_capped(p, held(RIFLE_GUARD, p), w, max)
 }
 
 /// Puts the left palm on `target` (figure frame): damped least-squares steps on the left shoulder, elbow and
@@ -325,7 +330,7 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
     out.reach[0] += cap(q.reach[0] - p.reach[0]);
     out
 }
-const GRIP_STEPS: usize = 6;
+const GRIP_STEPS: usize = 12;
 /// Correction cap for reaching to points other than the handguard (actions move the arm a long way).
 const REACH_MAX: f32 = 2.0;
 pub const GRIP_DAMP: f32 = 0.05;
@@ -365,6 +370,8 @@ pub const GRIP_REACH: f32 = 0.595;
 const GRIP_TILT: f32 = 0.6;
 /// Largest correction `grip` makes to any one joint (radians, soft).
 const GRIP_MAX: f32 = 0.7;
+/// Larger correction budget for the support arm in the prone firing position.
+const PRONE_GRIP_MAX: f32 = 4.0;
 
 /// `grip`'s weight while blending pose `a` into `b` (`w0` as given to `blend`, eased the same way).
 pub fn grip_weight(a: Pose, b: Pose, w0: f32) -> f32 {
@@ -411,7 +418,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::ProneAim => 1.0,
         _ => 0.0,
     }
 }
@@ -912,6 +919,21 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }
+        Pose::ProneAim => {
+            // Solved blend of prone support and the two-handed aim rig: both elbows stay supported,
+            // the right hand anchors the rifle, and the left hand reaches the handguard.
+            p.prone = 1.0;
+            p.shoulder = [1.965, 0.559];
+            p.elbow = [0.905, 1.791];
+            p.reach = [0.07, 0.522];
+            p.abduct = [-0.015, 0.45];
+            p.rifle = std::f32::consts::FRAC_PI_2;
+            p.rifle_yaw = 0.55;
+            p.twist = -0.55;
+            p.look = 0.55;
+            p.lean = -0.1;
+            p.head = 0.82;
+        }
         Pose::StandAim => {
             // On the same athletic base as the ready (feet staggered, knees flexed, leaning in), rifle shouldered:
             // the rifle and head take back the lean so the sights stay level at the eye.
@@ -990,7 +1012,7 @@ const IDLE_PEEK_PERIOD_S: f32 = 5.2;
 pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
     let mut q = *p;
     // Moving gaits and the close-up tablet view supply their own motion (or must stay perfectly still).
-    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk | Pose::Tablet) {
+    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk | Pose::Tablet | Pose::ProneAim) {
         return q;
     }
     let tau = std::f32::consts::TAU;

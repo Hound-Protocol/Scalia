@@ -317,6 +317,19 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.el = vec2f(1.3, 1.35);
     p.rifle = 1.5707963;
     p.head = 1.0;
+  } else if (pose == 36u) {
+    // Solved blend of prone support and the two-handed aim rig.
+    p.prone = 1.0;
+    p.sh = vec2f(1.965, 0.559);
+    p.el = vec2f(0.905, 1.791);
+    p.reach = vec2f(0.07, 0.522);
+    p.abd = vec2f(-0.015, 0.45);
+    p.rifle = 1.5707963;
+    p.ryaw = 0.55;
+    p.twist = -0.55;
+    p.look = 0.55;
+    p.lean = -0.1;
+    p.head = 0.82;
   } else if (pose == 6u) {
     // On the athletic base (pose.rs `athletic`), leaning in by AIM_LEAN 0.1 with the rifle and head taking it back.
     athletic(&p);
@@ -585,7 +598,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -658,7 +671,9 @@ fn grip(p_in: PP, w_in: f32) -> PP {
   if (w <= 0.0) { return p_in; }
   var p = p_in;
   p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
-  return reach_left(p, guard(p), w, 0.7);
+  // Prone support reaches farther across the body than the standing carry.
+  let cap = select(0.7, 4.0, p.prone > 0.5);
+  return reach_left(p, guard(p), w, cap);
 }
 
 // Port of pose.rs `reach_left_capped`: the left palm onto `goal`, each joint's correction softly capped at
@@ -668,7 +683,7 @@ fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
   let excess = max(distance(goal, vec3f(-0.238, 0.0, 1.40)) - 0.595, 0.0);
   let damp = 0.05 + 2.0 * excess;
   var q = p;
-  for (var it = 0; it < 6; it = it + 1) {
+  for (var it = 0; it < 12; it = it + 1) {
     let r = goal - hand_l(q);
     if (dot(r, r) < 1e-6) { break; }
     let d = 0.01;
