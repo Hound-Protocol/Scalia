@@ -1,9 +1,8 @@
 // Full-screen game page. The Rust viewer draws everything; this file forwards input and the animation frame.
 import init, * as wasm from './pkg/scalia_wasm.js';
 import { AudioEngine } from './audio.js';
-import { installConsole } from './console.js';
 import { createErrors } from './errors.js';
-import { preload, fileBytes } from './preload.js';
+import { preload, fileBytes, verifyFiles } from './preload.js';
 import { createMenu } from './menu.js';
 import { createJukebox } from './jukebox.js';
 import { HintManager } from './hints.js';
@@ -113,6 +112,7 @@ audio.fetchBytes = fileBytes;
 window.scaliaAudio = audio;
 const bootLog = $('protoLoadList'), bootBar = $('protoLoad');
 function bootProgress(done, total, label, phase, ok = true, error = null) {
+  window.scaliaBoot?.update({ phase, done, total, label, ok, error });
   const pct = total ? Math.floor(done * 100 / total) : 0;
   if (bootBar) { bootBar.style.setProperty('--p', pct + '%'); bootBar.dataset.text = `${phase} ${done}/${total} · ${label}`; }
   if (bootLog) {
@@ -1755,7 +1755,7 @@ try {
   };
   // Developer console (the key under Esc).
   const LAB_SCENARIOS = ['clear', 'contact', 'wounded', 'standoff'];
-  installConsole({
+  window.scaliaConsole?.addCommands({
     lab: { group: 'Battle', help: `lab <${LAB_SCENARIOS.join('|')}>: run an AI lab scenario`, run: (a) => {
       const k = LAB_SCENARIOS.includes(a[0]) ? a[0] : 'clear';
       if (lab) { lab.start(k); return `lab: ${k}`; }
@@ -2042,6 +2042,8 @@ Click to copy and close.`;
   requestAnimationFrame(loop);
   window.scaliaViewer = v;
 } catch (e) {
+  window.scaliaBoot?.fail(e);
+  console.error('[Scalia startup]', e);
   showError(`Scalia could not start: ${e.message || e}. It needs a browser with WebGPU (Chrome or Edge; on Linux, Chrome with Vulkan enabled).`);
   hud.textContent = '';
 }
