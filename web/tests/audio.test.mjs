@@ -296,7 +296,7 @@ test('reverb, air and echo branches retain then disconnect every auxiliary node'
   const handle = audio.play('dense-blast', {
     kind: 'blast', db: 150, gain: 1, room: 1, rx: 0, ry: 1,
     below: 0, dist: 1, far: 0.5, lowpass: 20000,
-    space: [1, 30, 0], echoes: [[0.1, 0.5, 0]],
+    space: [0.5, 30, 0], echoes: [[0.1, 0.5, 0]],
   });
   assert.ok(handle);
   const source = [...audio.voices][0].src;
