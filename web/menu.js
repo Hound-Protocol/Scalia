@@ -13,7 +13,7 @@
 //      deep space ambience 01.
 //   3. Flash 3: the commander's planet, held for 2 seconds with deep space ambience 03; then the zoom down into
 //      him (the travel sound a second ahead of it, cut as the camera reaches him; the whoosh into his head) while the ambience fades and narrows to 5 kHz.
-//   Then black, and his eyes open on the field. Escape, Space or a click skips; with reduced motion it is a fade.
+//   Then black, and his eyes open on the field with a dark braam whoosh. Escape, Space or a click skips; with reduced motion it is a fade.
 
 const PULL_MS = 2000;         // Flash 1: the pull-back to the 20 degree view.
 const LOOK_MS = 2000;         // Then the galaxy held, before flash 2.
@@ -246,6 +246,7 @@ export function createMenu({ viewer, onEnter }) {
   load('amb3', './sfx/space-ambience-03.mp3');
   load('travel', './sfx/menu-travel.mp3');
   load('enter', './sfx/menu-enter.mp3');
+  load('eyes', './sfx/menu-eyes-braam.mp3');
   const ready = (name) => bufs[name] instanceof AudioBuffer ? bufs[name] : null;
   // Where the sound in a buffer really starts and ends (MP3 encoders pad both ends with silence): the loop runs
   // between them, so it comes round without a gap.
@@ -277,8 +278,8 @@ export function createMenu({ viewer, onEnter }) {
     };
     return { src, gain, stop };
   }
-  let tune = null, amb1 = null, amb3 = null, travel = null, enter = null, ambFilter = null;
-  const stopAll = (fade) => { for (const s of [tune, amb1, amb3, travel, enter]) s?.stop(fade); tune = amb1 = amb3 = travel = enter = null; };
+  let tune = null, amb1 = null, amb3 = null, travel = null, enter = null, eyesSnd = null, ambFilter = null;
+  const stopAll = (fade) => { for (const s of [tune, amb1, amb3, travel, enter, eyesSnd]) s?.stop(fade); tune = amb1 = amb3 = travel = enter = eyesSnd = null; };
   function startTune() {
     if (state !== 'menu' || tune || !ctx) return;
     ctx.resume().catch(() => {});
@@ -430,6 +431,8 @@ export function createMenu({ viewer, onEnter }) {
     // Inside: dark. Then the eyes open on him from close behind, the bars go, and the view eases out to the field.
     const o = e - T_HIT - BLACK_MS;
     if (o < 0) { lids.style.background = '#000'; intro(2.5, ELEV, 0); return; }
+    // The eyes open on a dark braam.
+    if (step === 5) { step = 6; eyesSnd = play('eyes', 0.85); }
     root.classList.remove('letterbox');
     const k = o / OPEN_MS;
     setLids(eyes(k * 1.15));
@@ -461,7 +464,8 @@ export function createMenu({ viewer, onEnter }) {
     state = 'done';
     cancelAnimationFrame(raf);
     try { v()?.end_intro(); } catch (_) { /* engine down */ }
-    stopAll(0.3);
+    // Everything but the eyes' braam, which rings out into the game.
+    const keep = eyesSnd; eyesSnd = null; stopAll(0.3); eyesSnd = keep;
     document.body.style.removeProperty('--blur');
     root.remove();
     document.body.classList.remove('in-menu');

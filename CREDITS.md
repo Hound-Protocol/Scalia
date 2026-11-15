@@ -32,8 +32,10 @@
   commander); supplied by the project lead (Pixabay sound library naming). Re-encoded at 128 kbit/s.
 - **Intro sequence sounds** (`web/sfx/menu-flash1-door.mp3`, `menu-flash2-thump.mp3`, `space-ambience-01.mp3`,
   `space-ambience-03.mp3`): "soundreality cinematic hit door 619512" (first flash), "blendertimer massive thump 116359"
-  (second flash), "fronbondi_skegs sfx deep space travel ambience 01 358466" and "... ambience 03 358469"; supplied by
-  the project lead (Pixabay sound library naming). Not yet wired in.
+  (every flash), "fronbondi_skegs sfx deep space travel ambience 01 358466" and "... ambience 03 358469"; supplied by
+  the project lead (Pixabay sound library naming). The door hit is no longer played.
+- **Eyes opening** (`web/sfx/menu-eyes-braam.mp3`): "sdanezis ultimate cinematic dark braam whoosh 3 607330";
+  supplied by the project lead (Pixabay sound library naming).
 - **"walkie talkie"** by [FayBall](https://sketchfab.com/FayBall), licensed under
   [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
   Source: https://sketchfab.com/3d-models/walkie-talkie-88d0177b7801448397b69fcd81220c3a
