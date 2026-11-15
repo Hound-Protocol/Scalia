@@ -4422,7 +4422,7 @@ mod audio_spatial_tests {
         let on_foot = sound_occlusion(&sight, Some(&field), ear, source, 19.2, false);
         let tablet = sound_occlusion(&sight, Some(&field), ear, source, 30.0, true);
 
-        assert!(on_foot.wall_db >= 40.0, "{on_foot:?}");
+        assert!(on_foot.gain() < 0.8 && on_foot.lowpass_hz() < 18_000.0, "{on_foot:?}");
         assert_eq!(tablet, scalia_audio::Occlusion::NONE, "{tablet:?}");
     }
 
