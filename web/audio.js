@@ -488,9 +488,9 @@ export class AudioEngine {
         glide(hpf.frequency, Math.min(90, 30 + dist * 0.3));
         const [x, y, z] = spatialPosition(rx, ry, below);
         glide(p.positionX, x); glide(p.positionY, y); glide(p.positionZ, z);
-        glide(dry.gain, 1 - room * 0.5);
+        glide(dry.gain, 1);
         const roomy = Math.max(0, Math.min(1, (9 - size) / 5)), c2 = cor * enc;
-        [enc * roomy * (1 - c2), enc * (1 - roomy) * (1 - c2), c2].forEach((w, k) => glide(sends[k].gain, w * room));
+        [enc * roomy * (1 - c2), enc * (1 - roomy) * (1 - c2), c2].forEach((w, k) => glide(sends[k].gain, Math.min(0.1, w * room)));
       },
     };
     MEDIA_ELEMENT_STREAMS.set(el, { context: c, source: src, stream });
@@ -553,7 +553,7 @@ export class AudioEngine {
     const [x, y, z] = spatialPosition(o.rx, o.ry, o.below);
     p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
     // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
-    const dry = own(c.createGain()); dry.gain.value = 1 - o.room * 0.5;
+    const dry = own(c.createGain()); dry.gain.value = 1;
     const out = own(c.createGain());
     // Driven into the curve by how close and how enclosed; brought back down after it.
     const pre = own(c.createGain()); pre.gain.value = 1 + 2.5 * drive;
@@ -569,7 +569,7 @@ export class AudioEngine {
       this.heatAt = now;
     }
     for (const [busIn, w] of sends) {
-      const amount = w * o.room * (1 + 2.6 * inside) * (1 + (inside > 0 ? this.heat : 0));
+      const amount = Math.min(0.18, w * o.room * (1 + 2.6 * inside) * (1 + (inside > 0 ? this.heat : 0)));
       if (amount < 0.01) continue;
       const send = own(c.createGain()); send.gain.value = amount;
       p.connect(send).connect(busIn);
@@ -577,7 +577,7 @@ export class AudioEngine {
     // Outdoors a loud sound trails off in a soft echo rather than stopping dead: more the louder it is and the
     // more open the ground (rooms have their own ring).
     const loudness = Math.max(0, Math.min(1, (num(o.db, 100, 0, 200) - 110) / 40));
-    const airAmount = (1 - enc) * loudness * (0.45 + 0.5 * (gun ? o.far : 0));
+    const airAmount = Math.min(0.12, (1 - enc) * loudness * (0.45 + 0.5 * (gun ? o.far : 0)));
     if (airAmount > 0.01) {
       const send = own(c.createGain()); send.gain.value = airAmount;
       p.connect(send).connect(this.air);
@@ -587,7 +587,7 @@ export class AudioEngine {
       const [edelay, egain, epan] = [num(e[0], 0, 0, 2), num(e[1], 0, 0, 1), num(e[2], 0, -1, 1)];
       if (egain < 0.02) continue;
       const d = own(c.createDelay(2)); d.delayTime.value = edelay;
-      const eg = own(c.createGain()); eg.gain.value = egain;
+      const eg = own(c.createGain()); eg.gain.value = Math.min(0.25, egain);
       const elp = own(c.createBiquadFilter()); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 5000) * 0.6; elp.Q.value = 0.5;
       const ep = own(c.createStereoPanner()); ep.pan.value = epan * 0.85;
       lp.connect(d).connect(eg).connect(elp).connect(ep).connect(this.mix);
