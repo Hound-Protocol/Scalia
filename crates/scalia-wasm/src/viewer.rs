@@ -771,14 +771,37 @@ impl Viewer {
         use crate::assault::{DEMO_SQUAD, LAB_RED};
         use scalia_ai::leader::{Mode, Order};
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
-        let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &self.base_props);
+        // House clearing happens in the training compound east of the base, laid out afresh every run (the
+        // house, its ways in, the furniture, the cover outside and where the enemy stands); the other scenarios
+        // use the fixed testing ground.
+        let comp = !matches!(name, "contact" | "wounded" | "standoff");
+        let seed = scalia_core::hash::mix64(self.frame_ms.to_bits() ^ 0x1ab5);
+        let c = comp.then(|| crate::ground::compound(seed));
+        let mut props = base_props();
+        if let Some(c) = &c {
+            props.extend(c.props.iter().copied());
+        }
+        let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
         map.doors = battle_doors();
         map.killhouse = Some(killhouse_mm());
-        // The house scenarios are on the live-fire range (live only inside its walls); the open-ground ones
-        // are live everywhere.
-        let house = matches!(name, "clear" | "contact");
+        // The fixed house's scenarios are on the live-fire range (live only inside its walls); the open-ground
+        // ones are live everywhere.
+        let house = matches!(name, "contact");
         map.live = if house { Some(range_live_mm()) } else { None };
+        if let Some(c) = &c {
+            map.doors.extend(c.doors.iter().copied());
+            map.killhouse = Some(c.house.origin);
+            map.killhouse_seed = Some(c.seed);
+            map.live = Some(c.live);
+        }
         let mut a = crate::assault::Assault::field_with(map, killhouse_mm(), 7, self.lab_t, house);
+        // The ground drawn and walked on is the battle's map (the compound comes and goes with the scenario).
+        self.base_props = a.battle.map_spec().map(|m| m.props()).unwrap_or_else(base_props);
+        self.base_grid.rebuild(&self.base_props);
+        self.audio_spaces.clear();
+        self.audio_reflectors.clear();
+        let m = base_mesh(&self.base_props, self.base_h);
+        self.gpu.upload("base", m.bytes());
         self.demo = false;
         self.lab_wound = None;
         let block = |x0: i64, y0: i64, n: i64| -> Vec<(i64, i64)> { (0..n).map(|i| (x0 + (i % 4) * 1_500, y0 + (i / 4) * 1_500)).collect() };
@@ -810,10 +833,21 @@ impl Viewer {
                 ((110_000, 95_000), "Blue and Red, eight each with the same brain, advance on each other across the open north of the base. Watch bounding, cover and fire.")
             }
             _ => {
-                // Outside the range by its door (safe: not live): the briefing, then in through the door.
-                a.spawn_squad(DEMO_SQUAD, 0, &block(door.0 + 8_000, door.1 - 3_000, 12));
+                let c = c.as_ref().expect("the compound is laid out for house clearing");
+                a.spawn_squad(crate::assault::ENEMY_SQUAD, 1, &c.posts);
+                a.order(crate::assault::ENEMY_SQUAD, Order::Hold);
+                a.spawn_squad(DEMO_SQUAD, 0, &c.start);
                 a.order(DEMO_SQUAD, Order::Capture);
-                ((door.0 + 5_000, door.1 - 4_000), "Blue (12) takes the training house on the range from Red (8): briefing outside, in through the range door (pied), approach, stack, pie, entry, clearing.")
+                let (o, n) = (c.house.origin, c.house.rooms.len());
+                let note = format!(
+                    "Training compound (layout {:x}): a new house every run, {n} rooms, {} ways in, {} defenders posted at random inside, cover all around. Blue (12) takes it from the south.",
+                    c.seed & 0xffff,
+                    c.house.doors.iter().filter(|d| d.rooms.0.is_none() || d.rooms.1.is_none()).count(),
+                    c.posts.len()
+                );
+                self.assault = Some(a);
+                self.cmd = ((o.0 - 6_000) as f64 / 1000.0, (o.1 - 14_000) as f64 / 1000.0);
+                return note;
             }
         };
         self.assault = Some(a);

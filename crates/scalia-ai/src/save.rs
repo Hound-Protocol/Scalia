@@ -32,6 +32,9 @@ pub struct MapSpec {
     pub h_mm: i64,
     props: Vec<PropSpec>,
     pub killhouse: Option<(i64, i64)>,
+    /// The house's layout seed when it was generated (`Killhouse::generate`); None for the fixed house.
+    #[serde(default)]
+    pub killhouse_seed: Option<u64>,
     /// How many of the props (the last ones) were placed during the battle, in order.
     placed: usize,
     /// The live-fire zone (x0, y0, x1, y1; mm): only soldiers inside it see and fight each other. None: the
@@ -48,7 +51,7 @@ const SIGHT_CELL: i64 = 250;
 
 impl MapSpec {
     pub fn new(x0: i64, y0: i64, w_mm: i64, h_mm: i64, props: &[Prop]) -> MapSpec {
-        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None, placed: 0, live: None, doors: Vec::new() }
+        MapSpec { x0, y0, w_mm, h_mm, props: props.iter().map(|&p| PropSpec::from(p)).collect(), killhouse: None, killhouse_seed: None, placed: 0, live: None, doors: Vec::new() }
     }
 
     /// The training house with its south-west corner at `origin`, on 100 × 80 m of open ground around it.

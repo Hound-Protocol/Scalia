@@ -529,3 +529,174 @@ mod barracks_tests {
         }
     }
 }
+
+/// The AI lab's training compound east of the base: a training house laid out afresh for every run (rooms,
+/// doors, ways in), furnished inside, cover scattered around it outside (sandbag walls, crates, containers,
+/// rocks) and the enemy posted at random inside. Seeded, so a run can be repeated.
+pub(crate) struct Compound {
+    pub house: scalia_core::killhouse::Killhouse,
+    pub seed: u64,
+    /// The house's panels and furniture and the cover outside.
+    pub props: Vec<scalia_core::nav::Prop>,
+    pub doors: Vec<scalia_ai::doors::Door>,
+    /// Where the defenders stand (inside rooms) and where the assault squad forms up (south of the house).
+    pub posts: Vec<(i64, i64)>,
+    pub start: Vec<(i64, i64)>,
+    /// Live area (fighting happens only inside it).
+    pub live: (i64, i64, i64, i64),
+}
+
+pub(crate) const COMPOUND_MM: (i64, i64, i64, i64) = (164_000, 8_000, 218_000, 132_000);
+
+pub(crate) fn compound(seed: u64) -> Compound {
+    use scalia_core::killhouse::Killhouse;
+    use scalia_core::nav::{Prop, PropKind};
+    let mut s = seed;
+    let mut below = |n: u64| -> i64 {
+        s = scalia_core::hash::mix64(s.wrapping_add(0x9e37_79b9));
+        (s % n.max(1)) as i64
+    };
+    let origin = (172_000 + below(6) * 1_000, 52_000 + below(14) * 1_000);
+    let house = Killhouse::generate(origin.0, origin.1, seed);
+    let (w, h) = ((house.size_m.0 * 1000.0) as i64, (house.size_m.1 * 1000.0) as i64);
+    let mut props = house.props();
+    props.extend(house.furnish(seed));
+    // Where the assault squad forms up: 22 m south of the house, three ranks of four.
+    let sx = origin.0 + w / 2 - 2_250;
+    let start: Vec<(i64, i64)> = (0..12).map(|i| (sx + (i % 4) * 1_500, origin.1 - 22_000 + (i / 4) * 1_500)).collect();
+    // The line of departure: a sandbag wall and a container screening the start block from the house (the
+    // squad forms up in cover, not in the defenders' sights), with gaps to move out through.
+    props.push(Prop { kind: PropKind::Wall { length_mm: 5_000, thickness_mm: 700 }, x_mm: sx + 500, y_mm: origin.1 - 17_500, quarter_turns: 0 });
+    props.push(Prop { kind: PropKind::Wall { length_mm: 6_000, thickness_mm: 2_500 }, x_mm: sx + 6_500, y_mm: origin.1 - 16_500, quarter_turns: 0 });
+    // Cover outside: kept 3 m off the house, off the start block and 2.5 m from each other.
+    let live = COMPOUND_MM;
+    let n = 16 + below(8);
+    let mut placed: Vec<(i64, i64)> = Vec::new();
+    for _ in 0..n {
+        for _ in 0..20 {
+            let x = live.0 + 3_000 + below((live.2 - live.0 - 6_000) as u64);
+            let y = live.1 + 3_000 + below((live.3 - live.1 - 6_000) as u64);
+            let by_house = x > origin.0 - 3_500 && x < origin.0 + w + 3_500 && y > origin.1 - 3_500 && y < origin.1 + h + 3_500;
+            let by_start = (x - (sx + 3_500)).abs() < 8_000 && (y - (origin.1 - 19_500)).abs() < 5_000;
+            if by_house || by_start || placed.iter().any(|p| (p.0 - x).abs() < 2_500 && (p.1 - y).abs() < 2_500) {
+                continue;
+            }
+            let kind = match below(10) {
+                0..=3 => PropKind::Wall { length_mm: 3_000 + below(3) * 1_000, thickness_mm: 700 },
+                4..=6 => PropKind::Crate { size_mm: [1_000, 1_200][below(2) as usize] },
+                7 => PropKind::Wall { length_mm: 6_000, thickness_mm: 2_500 },
+                _ => PropKind::Rock { radius_mm: 500 + below(5) * 100 },
+            };
+            props.push(Prop { kind, x_mm: x, y_mm: y, quarter_turns: below(2) as u8 });
+            placed.push((x, y));
+            break;
+        }
+    }
+    let doors = house
+        .doors
+        .iter()
+        .map(|d| scalia_ai::doors::Door::new((d.x_mm, d.y_mm), d.along_x, d.width_mm, 2_100, scalia_ai::doors::DoorState::Closed))
+        .collect();
+    // The defenders: 6 to 10, spread over the rooms, a metre off the walls, clear of doorways, furniture and
+    // each other.
+    let mut posts: Vec<(i64, i64)> = Vec::new();
+    let want = 6 + below(5) as usize;
+    let mut tries = 0;
+    while posts.len() < want && tries < 400 {
+        tries += 1;
+        let r = house.rooms[below(house.rooms.len() as u64) as usize];
+        let (x0, y0, x1, y1) = (r.min.0 + 1_000, r.min.1 + 1_000, r.max.0 - 1_000, r.max.1 - 1_000);
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        let p = (x0 + below((x1 - x0) as u64), y0 + below((y1 - y0) as u64));
+        let clear = house.doors.iter().all(|d| (d.x_mm - p.0).abs() + (d.y_mm - p.1).abs() > 1_500)
+            && props.iter().filter(|q| !matches!(q.kind, PropKind::Panel { .. })).all(|q| (q.x_mm - p.0).abs() + (q.y_mm - p.1).abs() > 1_300)
+            && posts.iter().all(|q| (q.0 - p.0).abs() + (q.1 - p.1).abs() > 1_500);
+        if clear {
+            posts.push(p);
+        }
+    }
+    Compound { house, seed, props, doors, posts, start, live }
+}
+
+#[cfg(test)]
+mod compound_tests {
+    use super::*;
+
+    #[test]
+    fn every_run_gets_a_different_sound_compound() {
+        let (a, b) = (compound(1), compound(2));
+        assert!(a.house.rooms != b.house.rooms || a.posts != b.posts);
+        for seed in 0..40 {
+            let c = compound(seed);
+            assert!((6..=10).contains(&c.posts.len()), "seed {seed}: {} defenders", c.posts.len());
+            assert!(c.posts.iter().all(|&(x, y)| c.house.room_at(x, y).is_some()), "seed {seed}: a defender outside");
+            let l = c.live;
+            assert!(c.props.iter().all(|p| p.x_mm > l.0 && p.x_mm < l.2 && p.y_mm > l.1 && p.y_mm < l.3), "seed {seed}: cover outside the compound");
+            assert!(c.start.iter().all(|&(x, y)| x > l.0 && x < l.2 && y > l.1 && y < l.3));
+            assert!(c.props.len() > c.house.props().len() + 16, "seed {seed}: furnished and covered");
+            assert_eq!(compound(seed).posts, c.posts, "the same seed, the same compound");
+        }
+    }
+}
+
+#[cfg(test)]
+mod compound_runs {
+    use super::*;
+
+    /// The lab's house clearing in a fresh compound, natively: (blue standing, red standing, red in the house
+    /// at the start, seconds to finish or the cap).
+    pub(crate) fn run_compound(seed: u64, secs: i64) -> (usize, usize, usize, f64) {
+        use crate::assault::{Assault, DEMO_SQUAD, ENEMY_SQUAD};
+        let c = compound(seed);
+        let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
+        let mut props = base_props();
+        props.extend(c.props.iter().copied());
+        let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
+        map.doors = battle_doors();
+        map.doors.extend(c.doors.iter().copied());
+        map.killhouse = Some(c.house.origin);
+        map.killhouse_seed = Some(c.seed);
+        map.live = Some(c.live);
+        let mut a = Assault::field_with(map, killhouse_mm(), seed, 0.0, false);
+        a.spawn_squad(ENEMY_SQUAD, 1, &c.posts);
+        a.order(ENEMY_SQUAD, scalia_ai::leader::Order::Hold);
+        a.spawn_squad(DEMO_SQUAD, 0, &c.start);
+        a.order(DEMO_SQUAD, scalia_ai::leader::Order::Capture);
+        let b = &mut a.battle;
+        let standing = |b: &scalia_ai::battle::Battle, t: u8| b.soldiers.iter().filter(|s| s.team == t && s.alive() && !s.down()).count();
+        let mut t = 0;
+        while t < secs * 1000 {
+            b.step(50);
+            t += 50;
+            if t > 2_000 && (standing(b, 0) == 0 || standing(b, 1) == 0) {
+                break;
+            }
+        }
+        (standing(b, 0), standing(b, 1), c.posts.len(), t as f64 / 1000.0)
+    }
+
+    #[test]
+    fn a_compound_battle_runs_and_ends() {
+        let (blue, red, posted, secs) = run_compound(3, 300);
+        assert!(blue + red > 0 && posted >= 6, "{blue} {red} {posted} {secs}");
+    }
+
+    /// `cargo test -p scalia-wasm --release compound_report -- --ignored --nocapture`: house clearing over many
+    /// random compounds (how often Blue takes the house, what it costs, how long it takes).
+    #[test]
+    #[ignore]
+    fn compound_report() {
+        let n = std::env::var("RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(20u64);
+        let (mut won, mut blue_left, mut secs) = (0, 0, 0.0);
+        for seed in 0..n {
+            let (blue, red, posted, s) = run_compound(seed, 300);
+            println!("seed {seed:3}: blue {blue:2}/12 red {red}/{posted} in {s:5.0} s");
+            won += (red == 0) as usize;
+            blue_left += blue;
+            secs += s;
+        }
+        println!("taken {won}/{n}, blue standing {:.1} of 12, {:.0} s on average", blue_left as f64 / n as f64, secs / n as f64);
+    }
+}

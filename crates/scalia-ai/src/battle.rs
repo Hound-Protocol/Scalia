@@ -543,7 +543,7 @@ impl Battle {
         let (nav, sight, cover) = map.grids();
         let mut b = Battle::with_map(nav, sight, cover, soldiers, seed);
         if let Some(o) = map.killhouse {
-            b.set_building(Killhouse::new(o.0, o.1));
+            b.set_building(match map.killhouse_seed { Some(seed) => Killhouse::generate(o.0, o.1, seed), None => Killhouse::new(o.0, o.1) });
         }
         b.doors = map.doors.clone();
         b.map = Some(map);
