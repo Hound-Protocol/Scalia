@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { AudioEngine, spatialPosition } from '../audio.js';
 
 const connectedElements = new WeakSet();
+const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
 let sourceCreations = 0;
 
 class FakeNode {
@@ -126,7 +127,6 @@ test('stream() does not claim an element already routed by Auralis media routing
 
 
 test('spatialPosition maps camera-relative directions into HRTF coordinates', () => {
-  const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
   const right = spatialPosition(1, 0);
   near(right[0], 1); near(right[1], 0); near(right[2], 0);
   const ahead = spatialPosition(0, 1);
