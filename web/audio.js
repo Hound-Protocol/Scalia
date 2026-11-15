@@ -122,7 +122,7 @@ export class AudioEngine {
     return true;
   }
 
-  _registerVoice(src, nodes, { category = 'world', priority = 1, gain = 1, tailSeconds = 0, out = null } = {}) {
+  _registerVoice(src, nodes, { category = 'world', priority = 1, gain = 1, tailSeconds = 0, out = null, onended = null } = {}) {
     const voice = {
       id: ++this.voiceSequence, src, nodes, category, pri: priority, gain,
       tailSeconds: Math.max(0, Math.min(4.2, tailSeconds)), state: 'scheduled', done: false,
@@ -140,7 +140,7 @@ export class AudioEngine {
     };
     this.voices.add(voice);
     this.active.push(voice);
-    src.onended = () => this._finishVoice(voice);
+    src.onended = () => { this._finishVoice(voice); onended?.(voice.handle); };
     return voice;
   }
 
@@ -275,7 +275,7 @@ export class AudioEngine {
 
   /// Play a decoded buffer through an Auralis bus with the same bounded lifecycle as world one-shots.
   playBuffer(buffer, { gain = 1, category = 'ui', priority = PRIORITY[category] || 1, via = null,
-    loop = false, loopStart = 0, loopEnd = 0, fadeIn = 0 } = {}) {
+    loop = false, loopStart = 0, loopEnd = 0, fadeIn = 0, onended = null } = {}) {
     const c = this.ensure(); if (!c || !buffer) return null;
     const safeGain = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
     if (!this._admitVoice(priority, safeGain)) return null;
@@ -294,7 +294,7 @@ export class AudioEngine {
     const destination = via && typeof via.connect === 'function' ? via : this.ui;
     source.connect(level).connect(destination);
     const voice = this._registerVoice(source, [source, level], {
-      category, priority, gain: safeGain, tailSeconds: 0, out: level,
+      category, priority, gain: safeGain, tailSeconds: 0, out: level, onended,
     });
     try {
       source.start(now, source.loop ? source.loopStart : 0);
