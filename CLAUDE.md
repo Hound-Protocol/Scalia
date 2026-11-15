@@ -28,3 +28,12 @@ hound-protocol.github.io/Scalia (GitHub Pages builds on push to main). The curre
 - Don't re-read a file right after editing it; don't repeat results back to the user.
 - Batch independent commands into one call; batch edits into one script.
 - Short replies to the user: what changed, what's next.
+
+## Mandatory branch safety
+- Never write, commit, push, or merge directly to `main`. The default development branch for this side effort is `work/scalia-readiness-2026-11-15`.
+- Before any edit, verify `git branch --show-current`, `git status --short --branch`, and the current `origin/main`, work-branch, and safety-branch SHAs. Stop if the branch is wrong, dirty in an unexplained way, or has moved unexpectedly.
+- Never force-push, reset shared history, or delete the safety branch. Roll back published changes with a revert commit on the work branch.
+- Use the current blob SHA for GitHub file updates and the expected branch SHA for ref updates. Do not overwrite a newer change.
+- Do not open or merge a PR, deploy a side branch to production Pages, or change branch protection without the project lead's approval.
+- `scripts/check.sh` is the quiet wrapper around the full `scripts/verify.sh` suite. A Pages build alone is not a substitute for that suite; report exactly which checks actually ran.
+- Read `docs/handoff/scalia-readiness-2026-11-15.md` before side-development work; it records the current baseline, audit findings, work-order sequence, and known documentation drift.
