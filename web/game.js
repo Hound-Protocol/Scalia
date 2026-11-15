@@ -1929,7 +1929,7 @@ Click to copy and close.`;
         // On foot: WASD walks the commander (Shift sprints); the camera follows him.
         const mx = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
         const my = (held.has('w') || held.has('arrowup') ? 1 : 0) - (held.has('s') || held.has('arrowdown') ? 1 : 0);
-        v.move_commander(mx, my, held.has('shift'));
+        v.move_commander(mx, my, held.has('shift') && fieldFeedback.stamina > 0.01);
         v.commander_walk(held.has('alt'));
       }
       if (held.has(',') || held.has('<')) v.rotate(-1.5 * dt);
@@ -1946,7 +1946,7 @@ Click to copy and close.`;
       errors.guard('map', () => { drawMapMarks(); drawScan(); });
       errors.guard('footsteps', footsteps);
       errors.guard('weapon', weaponTick);
-      errors.guard('field feedback', () => fieldFeedback.update(now, dt, JSON.parse(lastWeapon || v.commander_weapon_state()), held.has('shift')));
+      errors.guard('field feedback', () => fieldFeedback.update(now, dt, JSON.parse(lastWeapon || v.commander_weapon_state()), held.has('shift') && fieldFeedback.stamina > 0.01));
       errors.guard('battle sound', () => assaultTick(now));
       const cpuFrame = performance.now() - t0;
       cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
