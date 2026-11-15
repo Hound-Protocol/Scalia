@@ -610,4 +610,51 @@ mod tests {
         }
         assert!(seen > 20);
     }
+
+    #[test]
+    fn gait_changes_keep_stride_phase_continuous_and_cadence_positive() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        let mut previous = None;
+        // Cross walk -> run -> sprint -> run -> walk at real pace. Pose changes must not
+        // reset the alternating-foot cycle or produce a zero/negative stride cadence.
+        for (frame, speed, sprint, expected) in [
+            (0, 1.5, true, Pose::Walk),
+            (30, 2.6, true, Pose::Run),
+            (60, 4.5, true, Pose::Sprint),
+            (90, 4.5, false, Pose::Run),
+            (120, 1.5, false, Pose::Walk),
+        ] {
+            d.vel = (0.0, speed);
+            d.sprint = sprint;
+            d.ts = frame as f32 / 60.0;
+            let f = a.step(&d);
+            assert_eq!(f.pose, expected, "frame {frame}");
+            assert!(f.cadence > 0.0, "moving gait has positive cadence at frame {frame}: {}", f.cadence);
+            if let Some(before) = previous {
+                let delta = (f.phase - before + 1.0).fract();
+                assert!(delta < 0.2, "stride phase jumped at gait transition {frame}: {before} -> {}", f.phase);
+            }
+            previous = Some(f.phase);
+        }
+    }
+
+    #[test]
+    fn gait_thresholds_do_not_flicker_when_pace_hovers_at_each_boundary() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.vel = (0.0, 1.0);
+        assert_eq!(a.step(&d).pose, Pose::Walk);
+        for speed in [0.19, 0.21, 0.18, 0.22, 0.19] {
+            d.vel = (0.0, speed);
+            d.ts += d.dt;
+            assert_eq!(a.step(&d).pose, Pose::Walk, "walk hysteresis at {speed}");
+        }
+        for speed in [2.41, 2.35, 2.25, 2.39, 2.2] {
+            d.vel = (0.0, speed);
+            d.ts += d.dt;
+            let pose = a.step(&d).pose;
+            assert!(matches!(pose, Pose::Walk | Pose::Run), "no unrelated pose at {speed}: {pose:?}");
+        }
+    }
 }
