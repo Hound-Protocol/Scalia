@@ -5,7 +5,8 @@ use scalia_core::state_hash::{derive_hash, state_hash};
 use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 
-const GOLDEN_STATE_HASH: u64 = 0xcc763f567496bd24;
+// Changed 15 Nov: needs drain on the absolute clock (no fraction lost per tick), so meters end a little fuller.
+const GOLDEN_STATE_HASH: u64 = 0xc32ab541db2708cb;
 
 fn run(seed: u64) -> World {
     let mut w = build_scenario(seed, 200, 150);

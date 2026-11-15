@@ -34,22 +34,31 @@ fn battle(n: usize, gap_mm: i64) -> Battle {
     Battle::on_map(field(7), soldiers, 1)
 }
 
-fn time(b: &mut Battle, steps: usize) -> (f64, f64) {
-    let (mut total, mut worst) = (0.0f64, 0.0f64);
-    for _ in 0..steps {
-        let t = Instant::now();
-        b.step(50);
-        let ms = t.elapsed().as_secs_f64() * 1000.0;
-        total += ms;
-        worst = worst.max(ms);
-    }
-    (total / steps as f64, worst)
+/// Step times for `steps` steps of 50 ms: (median, 99th percentile, worst), in ms.
+fn time(b: &mut Battle, steps: usize) -> (f64, f64, f64) {
+    let mut ms: Vec<f64> = (0..steps)
+        .map(|_| {
+            let t = Instant::now();
+            b.step(50);
+            t.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    ms.sort_by(|a, b| a.total_cmp(b));
+    let at = |q: f64| ms[((ms.len() - 1) as f64 * q).round() as usize];
+    (at(0.5), at(0.99), ms[ms.len() - 1])
 }
 
+/// The step budget: a 50 ms battle step must finish well inside its own 50 ms (the rest of the frame needs time).
+const CHECK_P99_MS: f64 = 35.0;
+
 fn main() {
-    let sizes: Vec<usize> = std::env::args().skip(1).filter_map(|s| s.parse().ok()).collect();
+    // `battle_bench [--check] [sizes...]`: with --check, fail if the contact step's 99th percentile is over budget.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let check = args.iter().any(|a| a == "--check");
+    let sizes: Vec<usize> = args.iter().filter_map(|s| s.parse().ok()).collect();
     let sizes = if sizes.is_empty() { vec![200, 500, 1_000, 2_000] } else { sizes };
-    println!("soldiers | idle avg/worst ms | marching avg/worst ms | contact avg/worst ms   (per 50 ms step; budget 50)");
+    println!("soldiers | idle p50/p99/worst ms | marching p50/p99/worst ms | contact p50/p99/worst ms   (per 50 ms step)");
+    let mut over = Vec::new();
     for n in sizes {
         // Idle: far apart, nothing to do.
         let mut b = battle(n, 280_000);
@@ -68,7 +77,15 @@ fn main() {
             let p = b.soldiers[i].pos;
             b.order(i, Task::Move { to: (p.0, 150_000), gait: Gait::Walk });
         }
-        let contact = time(&mut b, 60);
-        println!("{n:8} | {:7.2} / {:7.2} | {:9.2} / {:7.2} | {:8.2} / {:7.2}", idle.0, idle.1, march.0, march.1, contact.0, contact.1);
+        let contact = time(&mut b, 100);
+        let f = |t: (f64, f64, f64)| format!("{:6.2} /{:6.2} /{:6.2}", t.0, t.1, t.2);
+        println!("{n:8} | {} | {} | {}", f(idle), f(march), f(contact));
+        if contact.1 > CHECK_P99_MS {
+            over.push(format!("{n} soldiers in contact: p99 {:.1} ms over {CHECK_P99_MS} ms", contact.1));
+        }
+    }
+    if check && !over.is_empty() {
+        eprintln!("battle step over budget: {}", over.join("; "));
+        std::process::exit(1);
     }
 }

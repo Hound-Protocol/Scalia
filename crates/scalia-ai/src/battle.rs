@@ -912,7 +912,11 @@ impl Battle {
     fn think(&mut self) {
         use crate::mind::{fact, think, Act, Situation, Want};
         let now = self.time_ms;
+        // Every cover spot held, gathered once for the pass and kept up to date as men take or leave cover (it
+        // was rebuilt from all soldiers for each man looking for cover: quadratic in a big fight).
+        let mut taken: Vec<usize> = self.soldiers.iter().filter_map(|o| o.cover).collect();
         for i in 0..self.soldiers.len() {
+            let held = self.soldiers[i].cover;
             let s = &self.soldiers[i];
             if !s.alive() || s.down() || s.player {
                 self.soldiers[i].mind = crate::mind::Mind::default();
@@ -950,7 +954,6 @@ impl Battle {
                     threats.sort_unstable();
                     let threats: Vec<(i64, i64)> = threats.iter().take(4).map(|t| (t.1, t.2)).collect();
                     if !threats.is_empty() {
-                        let taken: Vec<usize> = self.soldiers.iter().filter_map(|o| o.cover).collect();
                         candidate = map.best(s.pos, &threats, COVER_REACH_MM, &self.sight, &taken);
                     }
                 }
@@ -1008,6 +1011,13 @@ impl Battle {
                 }
             }
             self.soldiers[i].mind = mind;
+            let now_held = self.soldiers[i].cover;
+            if now_held != held {
+                if let Some(k) = held.and_then(|h| taken.iter().position(|&t| t == h)) {
+                    taken.swap_remove(k);
+                }
+                taken.extend(now_held);
+            }
         }
     }
 

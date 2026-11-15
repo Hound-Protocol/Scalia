@@ -152,3 +152,23 @@ fn boarding_a_ship_in_another_region_errors_and_leaves_group_unchanged() {
     );
     assert_eq!(*w.groups.process(id), Process::idle());
 }
+
+#[test]
+fn needs_drain_the_same_whatever_the_frame_rate() {
+    // Ten real minutes ticked at 30 fps, at 144 fps and once: the meters must agree exactly (no fraction lost to
+    // rounding on every small tick).
+    let run = |step_us: u64| {
+        let mut w = World::new(3);
+        let id = spawn(&mut w, [150, 5, 0, 0]);
+        let end_us = 600_000_000u64;
+        let mut t = 0u64;
+        while t < end_us {
+            t = (t + step_us).min(end_us);
+            w.tick(WorldMs(t / 1000)).unwrap();
+        }
+        *w.groups.needs(id)
+    };
+    let once = run(600_000_000);
+    assert_eq!(run(33_333), once, "30 fps");
+    assert_eq!(run(6_944), once, "144 fps");
+}

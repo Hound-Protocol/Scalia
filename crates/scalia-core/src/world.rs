@@ -25,10 +25,13 @@ pub struct World {
     pub roster: Roster,
 }
 
-fn drain(meter: Fix, rate_pct: i64, game_dt_ms: u64) -> Fix {
-    // rate_pct percent of a full meter per game hour, floored, clamped at zero.
+/// Drains `meter` by `rate_pct` percent of a full meter per game hour over the game time from `from_ms` to
+/// `to_ms` (both since the world began). The drain is counted on the absolute clock, so the floors telescope:
+/// the total is the same however the time is cut into ticks (30 fps, 144 fps or one big step).
+fn drain(meter: Fix, rate_pct: i64, from_ms: u64, to_ms: u64) -> Fix {
     let per_hour = Fix::from_ratio(rate_pct, 100).map(|f| f.0).unwrap_or(0) as i128;
-    let amount = per_hour * game_dt_ms as i128 / GAME_HOUR_MS;
+    let drained = |ms: u64| per_hour * ms as i128 / GAME_HOUR_MS;
+    let amount = drained(to_ms) - drained(from_ms);
     Fix((meter.0 as i128 - amount).max(0) as i64)
 }
 
@@ -46,11 +49,11 @@ impl World {
         if now < self.now {
             return Err(TickError::TimeWentBackwards);
         }
-        let game_dt = WorldMs(now.since(self.now)).game_ms();
+        let (from, to) = (self.now.game_ms(), now.game_ms());
         for n in self.groups.needs_all_mut() {
-            n.food = drain(n.food, FOOD_DRAIN_PCT, game_dt);
-            n.sleep = drain(n.sleep, SLEEP_DRAIN_PCT, game_dt);
-            n.upkeep = drain(n.upkeep, UPKEEP_DRAIN_PCT, game_dt);
+            n.food = drain(n.food, FOOD_DRAIN_PCT, from, to);
+            n.sleep = drain(n.sleep, SLEEP_DRAIN_PCT, from, to);
+            n.upkeep = drain(n.upkeep, UPKEEP_DRAIN_PCT, from, to);
         }
         for i in 0..self.groups.len() {
             let id = GroupId(i as u32);
