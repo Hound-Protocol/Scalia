@@ -126,8 +126,8 @@ impl Effects {
             let path = sub(s.impact, s.muzzle);
             let dist = len(path).max(0.01);
             if age < FLASH_MS {
-                // Fire out of the end of the barrel, along the barrel (not towards wherever the round lands): a small
-                // bright core just past the muzzle and a short tongue thrown forward, both shrinking as it dies.
+                // Fire out of the end of the barrel, along the barrel (not towards wherever the round lands): a fixed
+                // bright core and short tongue, both present for one brief pulse and then gone.
                 let bore = s.bore.and_then(|b| { let l = len(b); (l > 1e-6).then(|| [b[0] / l, b[1] / l, b[2] / l]) })
                     .unwrap_or([path[0] / dist, path[1] / dist, path[2] / dist]);
                 let out = |d: f64| [s.muzzle[0] + bore[0] * d, s.muzzle[1] + bore[1] * d, s.muzzle[2] + bore[2] * d];
@@ -246,7 +246,6 @@ mod tests {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
