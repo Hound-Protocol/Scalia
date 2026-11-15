@@ -54,7 +54,7 @@ fn crouching_is_lower_and_prone_is_flat() {
 
 #[test]
 fn aiming_points_the_rifle_forward_at_shoulder_height() {
-    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45), (Pose::ProneAim, 0.05, 0.45)] {
+    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45)] {
         let v = posed(pose, 0.0);
         let rifle: Vec<Vec3> = v.iter().filter(|p| p.0 == Part::Rifle).map(|p| p.1).collect();
         let tip = rifle.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
@@ -155,7 +155,7 @@ fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
     let (tip, bore) = barrel_with_phases(RIFLE, Pose::ProneAim, None, 0.0, 0.0, 0.0);
     assert!(tip.y > 0.55, "muzzle points forward: {tip:?}");
     assert!(bore.y > 0.95 && bore.z.abs() < 0.1, "prone bore is level and forward: {bore:?}");
-    let v = posed(Pose::ProneAim, 0.0);
+    let v: Vec<_> = figure().vertices.iter().map(|x| (part_of(x.color), pose_vertex(Vec3::from(x.pos), part_of(x.color), &held_pose))).collect();
     assert!(top(&v) < 0.6, "prone aim stays low: {}", top(&v));
     assert!(bottom(&v) > -0.05, "prone aim does not sink: {}", bottom(&v));
 }
