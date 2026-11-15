@@ -25,6 +25,7 @@ export class FieldFeedback {
         <div><kbd>H</kbd><span>HOLD · SELF CHECK</span></div>
         <div><kbd>R</kbd><span>TAP · RELOAD / HOLD · CHECK</span></div>
         <div><kbd>C / X</kbd><span>STANCE</span></div>
+        <div><kbd>G</kbd><span>SLING / READY RIFLE</span></div>
         <div><kbd>TAB</kbd><span>FIELD PDA</span></div>
         <small>U · HIDE CONTROLS</small>
       </aside>
