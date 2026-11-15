@@ -1792,8 +1792,7 @@ try {
     if (k === 'r') fieldFeedback.endAmmoCheck(performance.now());
     if (e.key === 'Alt') e.preventDefault();
   });
-  addEventListener('blur', () => { held.clear(); fieldFeedback.endHealthCheck(performance.now()); fieldFeedback.endAmmoCheck(performance.now()); });
-  addEventListener('blur', () => held.clear());
+  addEventListener('blur', () => { held.clear(); fieldFeedback.endHealthCheck(performance.now()); fieldFeedback.rStarted = 0; });
 
   // Performance panel: CPU and GPU bars against the frame budget, and a frame-time graph.
   const P = (id) => document.getElementById(id);
