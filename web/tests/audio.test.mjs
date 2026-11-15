@@ -4,6 +4,13 @@ import { AudioEngine, spatialPosition } from '../audio.js';
 
 const connectedElements = new WeakSet();
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
+const connectedTo = (nodes, destination) => nodes.find((node) => node.connections?.includes(destination));
+const reachesWithin = (start, destination, maxDepth, seen = new Set()) => {
+  if (start === destination) return true;
+  if (maxDepth === 0 || seen.has(start)) return false;
+  seen.add(start);
+  return (start.connections || []).some((next) => reachesWithin(next, destination, maxDepth - 1, seen));
+};
 let sourceCreations = 0;
 
 class FakeNode {
@@ -352,9 +359,18 @@ test('spatial one-shots keep a full-strength dry signal when room processing is 
   });
   assert.ok(handle);
   const voice = [...audio.voices][0];
-  assert.equal(voice.nodes[7].gain.value, 1, 'dry path must not be attenuated by room wetness');
-  assert.ok(voice.nodes[11].gain.value > 0.18 && voice.nodes[11].gain.value <= 0.45, 'room reverb must remain audible without overwhelming dry signal');
-  assert.ok(voice.nodes[13].gain.value > 0.25 && voice.nodes[13].gain.value <= 0.5, 'geometric echo must remain audible but bounded');
+  const dry = connectedTo(voice.nodes, audio.world);
+  assert.ok(dry, 'one-shot dry node must connect to the world bus');
+  near(dry.gain.value, 1);
+  const reverbSends = voice.nodes.filter((node) =>
+    [audio.rev.small, audio.rev.large, audio.rev.corridor].some((bus) => node.connections?.includes(bus)));
+  assert.ok(reverbSends.some((send) => send.gain.value > 0.18), 'room reverb must remain audible');
+  for (const send of reverbSends) assert.ok(send.gain.value <= 0.45, 'room reverb must remain bounded');
+  const echoGain = voice.nodes.find((node) =>
+    node !== dry && node.gain && reachesWithin(node, audio.mix, 3) &&
+    (node.connections || []).some((next) => next !== audio.mix));
+  assert.ok(echoGain, 'geometric echo gain node must route to the mix through its filter/panner chain');
+  assert.ok(echoGain.gain.value > 0.25 && echoGain.gain.value <= 0.5, 'geometric echo must remain audible but bounded');
   audio.stopAll();
 });
 
@@ -367,8 +383,11 @@ test('persistent streams keep a full-strength dry signal and restrained reverb s
   const voice = audio.stream({});
   assert.ok(voice);
   voice.place([0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 4, 0]);
-  assert.equal(context.createdNodes[9].gain.value, 1);
-  const sends = context.createdNodes.slice(10).filter((send) => send.gain);
+  const dry = connectedTo(context.createdNodes, audio.world);
+  assert.ok(dry, 'persistent stream dry node must connect to the world bus');
+  near(dry.gain.value, 1);
+  const sends = context.createdNodes.filter((node) =>
+    [audio.rev.small, audio.rev.large, audio.rev.corridor].some((bus) => node.connections?.includes(bus)));
   assert.ok(sends.some((send) => send.gain.value > 0.1), 'persistent media must carry audible room reverb');
   for (const send of sends) assert.ok(send.gain.value <= 0.35, 'persistent media reverb stays bounded');
 });
