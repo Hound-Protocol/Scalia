@@ -129,7 +129,7 @@ export class AudioEngine {
     const existing = MEDIA_ELEMENT_ROUTES.get(el);
     if (existing) return existing.context === c && existing.bus === bus ? existing : null;
     if (MEDIA_ELEMENT_STREAMS.has(el)) return null;
-    const destination = bus === 'world' ? this.mediaFilter : bus === 'ui' ? this.ui : null;
+    const destination = bus === 'world' ? this.mediaFilter : bus === 'ui' ? this.ui : (bus && typeof bus.connect === 'function' ? bus : null);
     if (!destination) return null;
     let source;
     try { source = c.createMediaElementSource(el); }
