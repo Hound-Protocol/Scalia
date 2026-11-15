@@ -34,6 +34,13 @@ jobs:
         with:
           node-version: 22
 
+      - name: Check browser JavaScript syntax
+        run: |
+          for file in web/*.js; do
+            echo "Checking $file"
+            node --check --input-type=module < "$file"
+          done
+
       - name: Cache Cargo build artifacts
         uses: Swatinem/rust-cache@v2
 
