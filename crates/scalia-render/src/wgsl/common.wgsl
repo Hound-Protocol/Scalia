@@ -742,6 +742,19 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
       pp.sh = pp.sh - vec2f(0.09 * kick);
       pp.lean = pp.lean - 0.02 * kick;
     }
+    // Flinch, carried in the previous pose id's fraction (pose.rs `flinch`, `pack_flinch`): head down, hunched,
+    // a dip at the knees; lying down only the head ducks.
+    let fl = fract(d.x);
+    if (fl > 0.0) {
+      pp.head = pp.head - 0.35 * fl;
+      pp.sh = pp.sh - vec2f(0.06 * fl);
+      if (pp.prone == 0.0) {
+        pp.lean = pp.lean + 0.18 * fl;
+        pp.hip = pp.hip + vec2f(0.2 * fl);
+        pp.knee = pp.knee + vec2f(0.35 * fl);
+        pp.drop = ground_drop(pp.hip, pp.knee, pp.side, pp.flat);
+      }
+    }
     // Left palm onto the handguard (only the left arm and the rifle move, so only they pay for it).
     // The shadow pass skips it: a few centimetres in an arm's shadow cannot be seen.
     if (hands && (part == 3u || part == 11u || part == 9u)) {

@@ -2995,8 +2995,8 @@ impl Viewer {
         self.commander_fight(ready, pose);
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
-        let kick = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().position(|s| s.player).map(|i| a.kick(i))).unwrap_or(0.0);
-        let rec = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, 0.0);
+        let (kick, flinch) = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().position(|s| s.player).map(|i| (a.kick(i), a.flinch(i)))).unwrap_or((0.0, 0.0));
+        let rec = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, flinch, 0.0);
         // His muzzle as drawn, so his rounds leave from the end of his barrel.
         let (tip, bore) = self.cmd_fig.barrel(&f, ((self.cmd.0 * 1000.0) as f32, (self.cmd.1 * 1000.0) as f32));
         let gun = tip.filter(|_| !self.gun.slung).map(|w| (w[0] as i64, w[1] as i64, w[2] as i64));
@@ -3007,7 +3007,7 @@ impl Viewer {
         }
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
-        let me = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, self.cine_fade(self.frame_ms));
+        let me = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, flinch, self.cine_fade(self.frame_ms));
         self.gpu.upload_instances("commander_at", bytes(&me));
         instanced.push(("commander".into(), "commander_at".into()));
         // The tablet appears in his hands once they have come up to hold it.

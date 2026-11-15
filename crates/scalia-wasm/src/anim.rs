@@ -381,9 +381,10 @@ impl Animator {
     }
 
     /// The shader's instance record for this frame (scene.wgsl): `colour` is the palette index with the leader
-    /// (+32) and selection (+64 per level) flags; `kick` is the shot's kick (1 as a round leaves); `fade` dissolves
+    /// (+32) and selection (+64 per level) flags; `kick` is the recoil pressure, `flinch` how hard he is flinching
+    /// from fire (both 0 to 1); `fade` dissolves
     /// him.
-    pub fn record(&self, f: &Frame, at: (f32, f32, f32), colour: f32, kick: f32, fade: f32) -> [f32; 12] {
+    pub fn record(&self, f: &Frame, at: (f32, f32, f32), colour: f32, kick: f32, flinch: f32, fade: f32) -> [f32; 12] {
         let remaining = 1.0 - ((self.clock - self.upper.2) / LAYER_BLEND_S).clamp(0.0, 1.0);
         [
             at.0,
@@ -394,7 +395,7 @@ impl Animator {
             f.phase,
             f.cadence,
             pose::pack_kick(f.pose, kick),
-            self.shown.1 as u32 as f32,
+            pose::pack_flinch(self.shown.1, flinch),
             self.shown.2,
             pose::pack_layer(f.upper, f.dir),
             pose::pack_fade_layer(fade, Some(self.upper.1), remaining),

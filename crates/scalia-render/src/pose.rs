@@ -1334,6 +1334,33 @@ pub fn recoil(p: &mut PoseParams, k: f32) {
     p.lean -= 0.02 * k;
 }
 
+/// A flinch from a round close by or a hit that does not put him down (`k` 0 to 1, easing off): he ducks his
+/// head, hunches over, dips at the knees and tucks the rifle in. Lying down, only the head ducks. Visual only.
+/// common.wgsl mirrors this.
+pub fn flinch(p: &mut PoseParams, k: f32) {
+    if k <= 0.0 {
+        return;
+    }
+    p.head -= 0.35 * k;
+    p.shoulder[0] -= 0.06 * k;
+    p.shoulder[1] -= 0.06 * k;
+    if p.prone != 0.0 {
+        return;
+    }
+    p.lean += 0.18 * k;
+    p.hip[0] += 0.2 * k;
+    p.hip[1] += 0.2 * k;
+    p.knee[0] += 0.35 * k;
+    p.knee[1] += 0.35 * k;
+    p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat);
+}
+
+/// The previous pose's id (instance d.x) carrying the flinch in its fraction (common.wgsl reads the id with
+/// `u32()`).
+pub fn pack_flinch(prev: Pose, k: f32) -> f32 {
+    prev as u32 as f32 + k.clamp(0.0, 0.99)
+}
+
 /// An instance's pose id (b.w) carrying the shot kick in its fraction (common.wgsl reads the id with `u32()`).
 pub fn pack_kick(pose: Pose, k: f32) -> f32 {
     pose as u32 as f32 + k.clamp(0.0, 0.99)
@@ -1488,5 +1515,30 @@ mod drop_tests {
             let step = (head(b) - head(a)).length();
             assert!(step < 0.08, "head jumps {step} m between {a} and {b}");
         }
+    }
+}
+
+#[cfg(test)]
+mod flinch_tests {
+    use super::*;
+    use crate::mesh::Part;
+
+    #[test]
+    fn a_flinch_ducks_the_head_and_keeps_the_boots_on_the_ground() {
+        for pose in [Pose::Ready, Pose::StandAim, Pose::Crouch] {
+            let base = params(pose, 0.0);
+            let mut f = base;
+            flinch(&mut f, 1.0);
+            let head = |p: &PoseParams| pose_vertex(Vec3::new(0.0, 0.0, 1.6), Part::Head, p);
+            assert!(head(&f).z < head(&base).z - 0.05, "{pose:?} ducks: {:?} -> {:?}", head(&base), head(&f));
+            let boot = |p: &PoseParams| pose_vertex(Vec3::new(-0.1, 0.05, 0.03), Part::LeftFoot, p).z;
+            assert!((boot(&f) - boot(&base)).abs() < 0.05, "{pose:?} boots stay down: {} -> {}", boot(&base), boot(&f));
+        }
+        let mut lying = params(Pose::Prone, 0.0);
+        let before = lying;
+        flinch(&mut lying, 1.0);
+        assert_eq!((lying.hip, lying.knee, lying.prone), (before.hip, before.knee, before.prone), "lying down only the head ducks");
+        assert_eq!(pack_flinch(Pose::Ready, 0.0), Pose::Ready as u32 as f32);
+        assert_eq!(pack_flinch(Pose::Ready, 0.5) as u32, Pose::Ready as u32);
     }
 }

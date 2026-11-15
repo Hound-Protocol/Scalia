@@ -71,6 +71,21 @@ fn figure_dt(clocks: &mut Vec<f64>, team: u8, now: f64) -> f32 {
     if last.is_nan() { 0.0 } else { ((now - last) / 1000.0).clamp(0.0, 0.1) as f32 }
 }
 
+/// How hard a round past him makes a man flinch (a hit is 1).
+const NEAR_MISS_FLINCH: f32 = 0.55;
+
+/// A flinch of `power` that started at `at`, at `now`: in fast (60 ms), then easing off (about 0.3 s for a near
+/// miss, longer for a hit).
+fn flinch_amount(at: f64, power: f32, now: f64) -> f32 {
+    let age = now - at;
+    if !(0.0..2_000.0).contains(&age) || power <= 0.0 {
+        return 0.0;
+    }
+    let tau = 200.0 + 250.0 * power as f64;
+    let k = if age < 60.0 { age / 60.0 } else { (-(age - 60.0) / tau).exp() };
+    (power as f64 * k) as f32
+}
+
 /// How long one round's push lingers (ms, time constant).
 const RECOIL_MS: f64 = 160.0;
 
@@ -117,6 +132,8 @@ pub struct Assault {
     bore: Vec<[f32; 3]>,
     /// Per soldier: when he last fired (viewer ms, as `now`), for the rifle's kick.
     fired: Vec<f64>,
+    /// Per soldier: when fire last made him flinch (viewer ms) and how hard (1 hit, less for a near miss).
+    shaken: Vec<(f64, f32)>,
     /// Per soldier: recoil pressure as of his last round (rounds' worth, each fading over `RECOIL_MS`).
     heat: Vec<f32>,
     pub sounds: Vec<Sound>,
@@ -171,7 +188,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), heat: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), heat: Vec::new(), shaken: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -190,6 +207,7 @@ impl Assault {
             self.bore.push([0.0; 3]);
             self.fired.push(f64::NEG_INFINITY);
             self.heat.push(0.0);
+            self.shaken.push((f64::NEG_INFINITY, 0.0));
         }
     }
 
@@ -283,6 +301,16 @@ impl Assault {
                         let impact = if hit || target == shooter { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
                         // One round in four is a tracer.
                         let tracer = (r >> 40) % 4 == 0;
+                        // The man shot at flinches: hard when hit, less for a round past him. Not at himself (the
+                        // commander firing into the open).
+                        if target != shooter {
+                            let power = if hit { 1.0 } else { NEAR_MISS_FLINCH };
+                            if let Some(f) = self.shaken.get_mut(target) {
+                                if flinch_amount(f.0, f.1, at) < power {
+                                    *f = (at, power);
+                                }
+                            }
+                        }
                         if let (Some(f), Some(h)) = (self.fired.get_mut(shooter), self.heat.get_mut(shooter)) {
                             *h = *h * (-(at - *f).max(0.0) / RECOIL_MS).exp() as f32 + 1.0;
                             *f = at;
@@ -363,6 +391,7 @@ impl Assault {
             let s = &self.battle.soldiers[i];
             let d = drive_of(s, dt, ts);
             let kick = self.kick(i);
+            let flinch = if s.alive() && !s.down() { self.flinch(i) } else { 0.0 };
             let fig = &mut self.figs[i];
             let f = fig.step(&d);
             if let Some(loud) = f.footfall {
@@ -372,7 +401,7 @@ impl Assault {
             let leader = if self.battle.leader_of(s.squad as usize) == Some(i) { 32.0 } else { 0.0 };
             // A selected squad's men carry the selection tag (+64 per level) for the outline: stable, hurt, killed.
             let tag = if self.selected.contains(&s.squad) { 64.0 * select_level(readiness(s.alive(), s.down(), s.health)) } else { 0.0 };
-            out.extend_from_slice(&fig.record(&f, (rx, ry, z), body(s.squad) + leader + tag, kick, 0.0));
+            out.extend_from_slice(&fig.record(&f, (rx, ry, z), body(s.squad) + leader + tag, kick, flinch, 0.0));
             // Where his muzzle is now, posed exactly as drawn: rounds fired from here.
             let on_feet = s.alive() && !s.down();
             let (tip, bore) = fig.barrel(&f, (x as f32, y as f32));
@@ -389,6 +418,10 @@ impl Assault {
         }
     }
 
+    /// How hard soldier `i` is flinching from fire now (0 to 1).
+    pub fn flinch(&self, i: usize) -> f32 {
+        self.shaken.get(i).map_or(0.0, |&(at, power)| flinch_amount(at, power, self.now))
+    }
     /// Soldier `i`'s recoil pressure now (0 to 1): each round adds to it and it fades over `RECOIL_MS`, so a burst
     /// is one continuous push that builds, not a flip per round.
     pub fn kick(&self, i: usize) -> f32 {
@@ -532,6 +565,16 @@ pub fn drive_of(s: &Soldier, dt: f32, ts: f32) -> crate::anim::Drive {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fire_makes_a_man_flinch_quickly_and_settle() {
+        let f = |ms: f64, p: f32| super::flinch_amount(0.0, p, ms);
+        assert_eq!(f(-10.0, 1.0), 0.0);
+        assert!(f(60.0, 1.0) > 0.95, "in fast");
+        assert!(f(60.0, super::NEAR_MISS_FLINCH) < f(60.0, 1.0), "a near miss less than a hit");
+        assert!(f(500.0, 1.0) > f(500.0, super::NEAR_MISS_FLINCH), "a hit shakes him longer");
+        assert!(f(1_500.0, 1.0) < 0.05, "settled after a second and a half");
+    }
+
     #[test]
     fn both_teams_get_frame_time_when_drawn_one_after_the_other() {
         // The viewer draws the enemy, then our squads, every frame: both must advance by the frame's time.
