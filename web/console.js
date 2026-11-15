@@ -2,7 +2,7 @@
 // can be dragged by its title bar and resized from its corner (both remembered). It shows the game's log (console
 // output included) and takes commands; up/down walk the history, Tab completes a command.
 
-export function installConsole(commands) {
+export function installConsole(initialCommands = {}) {
   const css = document.createElement('style');
   css.textContent = `
   #devcon { position: fixed; right: 16px; top: 64px; width: min(600px, 46vw); height: 60vh; min-width: 320px; min-height: 180px; z-index: 1000;
@@ -84,9 +84,11 @@ export function installConsole(commands) {
     const orig = console[k].bind(console);
     console[k] = (...a) => { orig(...a); try { const msg = a.map(String).join(' '); if (cls && window.scaliaNote && !/^\[(error|crash)\]/.test(msg)) window.scaliaNote(k, msg); print(a.map((x) => (typeof x === 'string' ? x : x instanceof Error ? x.message : JSON.stringify(x))).join(' '), cls); } catch (_) {} };
   }
-  addEventListener('error', (e) => print(`error: ${e.message}`, 'err'));
+  addEventListener('error', (e) => print(`error: ${e.message || e.error || 'Unknown window error'}`, 'err'));
+  addEventListener('unhandledrejection', (e) => print(`unhandled rejection: ${e.reason?.stack || e.reason?.message || String(e.reason)}`, 'err'));
 
   // Commands by group (each command's `group`; the console's own under Console).
+  const registry = { ...initialCommands };
   const all = () => ({
     help: { group: 'Console', help: 'help [group]: list commands, all or one group', run: (a) => {
       const by = {};
@@ -100,7 +102,7 @@ export function installConsole(commands) {
     } },
     clear: { group: 'Console', help: 'clear the console (also cls)', run: () => { out.textContent = ''; } },
     cls: { group: 'Console', help: 'clear the console', run: () => { out.textContent = ''; } },
-    ...commands });
+    ...registry });
   const run = (line) => {
     print(`] ${line}`, 'cmd');
     const [name, ...args] = line.trim().split(/\s+/);
@@ -155,5 +157,5 @@ export function installConsole(commands) {
   input.addEventListener('blur', () => setTimeout(() => sug.classList.remove('on'), 150));
   print('Scalia console. Start typing to see matching commands, or type help for the full list.');
   print('Groups: ' + [...new Set(Object.values(all()).map((c) => c.group || 'Other'))].join(', ') + '  (help <group> for one)');
-  return { print, run, toggle };
+  return { print, run, toggle, addCommands(next = {}) { Object.assign(registry, next); print(`Registered ${Object.keys(next).length} game command(s).`, 'ok'); } };
 }
