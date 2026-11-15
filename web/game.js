@@ -92,9 +92,12 @@ const SOUNDS = ['./sfx/context-menu.mp3', './sfx/dive-whoosh.mp3', './sfx/m4-sho
   './sfx/weapons/m1911-dry.mp3', './sfx/menu-boom.mp3', './sfx/menu-travel.mp3', './sfx/menu-enter.mp3'];
 const MENU_AUDIO = ['./sfx/menu-music.mp3', './sfx/menu-flash2-thump.mp3', './sfx/space-ambience-01-short.mp3',
   './sfx/space-ambience-03-short.mp3', './sfx/menu-eyes-braam.mp3'];
-const STREAM_ASSETS = ['./sfx/ambience-wind.mp3', './sfx/jukebox/hard-rock-metal.mp3', './sfx/jukebox/hard-rock-sport.mp3',
+// The world music and wind are streamed by HTMLAudioElement, but fetch them now so playback is not waiting on
+// a multi-megabyte first download after the player enters.
+const STREAM_PRELOAD = ['./sfx/music-vance.mp3', './sfx/ambience-wind.mp3'];
+const STREAM_ASSETS = ['./sfx/jukebox/hard-rock-metal.mp3', './sfx/jukebox/hard-rock-sport.mp3',
   './sfx/jukebox/heavy-music.mp3', './sfx/jukebox/polet.mp3', './sfx/jukebox/ransom.mp3', './sfx/jukebox/virus.mp3',
-  './sfx/music-vance.mp3', './sfx/space-ambience-01.mp3', './sfx/space-ambience-03.mp3', './sfx/menu-flash1-door.mp3',
+  './sfx/space-ambience-01.mp3', './sfx/space-ambience-03.mp3', './sfx/menu-flash1-door.mp3',
   './sfx/weapons/deagle-mag-in.mp3', './sfx/weapons/deagle-mag-out.mp3', './sfx/weapons/deagle-shot.mp3', './sfx/weapons/deagle-slide.mp3',
   './sfx/weapons/m1911-mag.mp3', './sfx/weapons/m1911-shot.mp3', './sfx/weapons/m1911-slide.mp3',
   './sfx/weapons/mp5-bolt.mp3', './sfx/weapons/mp5-mag-in.mp3', './sfx/weapons/mp5-mag-out.mp3', './sfx/weapons/mp5-shot.mp3'];
@@ -125,7 +128,7 @@ async function verifyImage(url) {
   if (!image.naturalWidth || !image.naturalHeight) throw new Error('Image has no decoded dimensions');
 }
 const loaded = (async () => {
-  const urls = [WASM_URL, ...SOUNDS, ...MENU_AUDIO, ...UI_ASSETS];
+  const urls = [WASM_URL, ...SOUNDS, ...MENU_AUDIO, ...STREAM_PRELOAD, ...UI_ASSETS];
   const download = await preload(urls, ({ completed, total, url, ok, error }) => bootProgress(completed, total, url.replace('./', ''), 'Downloading', ok, error));
   const failures = download.failures.map(({ url, error }) => ({ url, error }));
   const get = (url) => download.results.find((r) => r.url === url);
