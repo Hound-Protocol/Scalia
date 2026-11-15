@@ -1104,7 +1104,9 @@ impl Viewer {
         // commander's ears (inside a building the outside is muffled; zoomed out you still hear from where he
         // stands). Beyond the flooded field: the walls on the straight line, at ear height.
         let ear = self.ear();
-        self.ensure_field(ear);
+        if !self.tablet {
+            self.ensure_field(ear);
+        }
         let occ = self.assault.as_ref().map_or(scalia_audio::Occlusion::NONE, |a| {
             sound_occlusion(
                 &a.battle.sight,
