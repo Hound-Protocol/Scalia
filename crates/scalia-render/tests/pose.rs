@@ -161,39 +161,6 @@ fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
 }
 
 #[test]
-fn probe_prone_aim_arm_blend_for_a_supported_grip() {
-    use scalia_render::pose::ground_drop_side;
-    let base = params(Pose::Prone, 0.0);
-    let aim = params(Pose::StandAim, 0.0);
-    let mut found = 0;
-    for k in 0..=100 {
-        let u = k as f32 / 100.0;
-        let mut p = base;
-        for i in 0..2 {
-            p.shoulder[i] = base.shoulder[i] + (aim.shoulder[i] - base.shoulder[i]) * u;
-            p.elbow[i] = base.elbow[i] + (aim.elbow[i] - base.elbow[i]) * u;
-            p.reach[i] = base.reach[i] + (aim.reach[i] - base.reach[i]) * u;
-            p.abduct[i] = base.abduct[i] + (aim.abduct[i] - base.abduct[i]) * u;
-        }
-        p.rifle = std::f32::consts::FRAC_PI_2;
-        p.rifle_yaw = aim.rifle_yaw * u;
-        p.twist = -p.rifle_yaw;
-        p.look = p.rifle_yaw;
-        p.head = 0.82;
-        p.prone = 1.0;
-        p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat);
-        let q = grip(&p, 1.0);
-        let gap = hand(&q, Side::Left).distance(held(RIFLE_GUARD, &q));
-        let low = figure().vertices.iter().map(|v| pose_vertex(Vec3::from(v.pos), part_of(v.color), &q).z).fold(f32::MAX, f32::min);
-        if gap < 0.05 && low > -0.05 {
-            println!("FEASIBLE u={u:.2} gap={gap:.4} bottom={low:.4} shoulder={:?} elbow={:?}", q.shoulder, q.elbow);
-            found += 1;
-        }
-    }
-    assert!(found > 0, "no prone arm blend keeps the hand on the handguard and the body above ground");
-}
-
-#[test]
 fn aiming_tucks_the_firing_elbow_and_reaches_across_with_the_other() {
     let pp = params(Pose::StandAim, 0.0);
     // The right (firing) elbow is tucked and bent; the left arm reaches nearly straight to the rifle and swings in.
