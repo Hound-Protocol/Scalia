@@ -170,3 +170,8 @@ I checked the claims against the code on 14 Nov:
   5. nav scratch;
   6. GPU error handling;
   7. splitting the big files alongside A and C.
+
+### H. Small fixes (15 Nov)
+- Intro: when the eyes open, the zoom-out should end at the closest zoom level (the ground view nearest the
+  commander), not the widest field zoom (`menu.js` `FIELD_M` and `end_intro` in `viewer.rs`, which sets
+  `STEP_FIELD_MAX`).
