@@ -1691,7 +1691,7 @@ impl Viewer {
                 crate::json_str(&hint.id),
                 crate::json_str(&hint.caption_text),
                 crate::json_str(&hint.input_token),
-                crate::json_str(&hint.id),
+                crate::json_str(&hint.action),
                 crate::json_str(&hint.on_screen_icon),
                 crate::json_str(&hint.offscreen_icon),
                 hint.trigger_radius,
