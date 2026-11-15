@@ -75,7 +75,7 @@ fn prone_aim_is_two_handed_and_keeps_the_rifle_level_in_front() {
     let held_pose = grip(&base, two_handed(Pose::ProneAim));
     let gap = hand(&held_pose, Side::Left).distance(held(RIFLE_GUARD, &held_pose));
     assert!(gap < 0.04, "support hand is off the handguard by {gap:.3} m");
-    let v = posed(Pose::ProneAim, 0.0);
+    let v: Vec<_> = figure().vertices.iter().map(|vertex| (part_of(vertex.color), pose_vertex(Vec3::from(vertex.pos), part_of(vertex.color), &held_pose))).collect();
     let top = v.iter().map(|p| p.1.z).fold(f32::MIN, f32::max);
     let low = v.iter().map(|p| p.1.z).fold(f32::MAX, f32::min);
     assert!(top < 0.7 && low > -0.06, "prone aim clips or rises off the ground: {low}..{top}");

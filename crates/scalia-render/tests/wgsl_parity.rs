@@ -115,10 +115,9 @@ fn prone_aim_pose_is_mirrored_in_the_shader() {
     let body = &body[..body.find("\n  } else if").unwrap_or(body.len())];
     let expected = [
         "p.prone = 1.0;",
-        "carry(&p, 5u);",
-        "p.rifle = p.rifle + 1.5707963;",
-        "p.twist = -p.ryaw;",
-        "p.look = p.ryaw;",
+        "p.sh = vec2f(2.8);",
+        "p.el = vec2f(1.3, 1.35);",
+        "p.rifle = 1.5707963;",
         "p.head = 1.0;",
     ];
     for line in expected { assert!(body.contains(line), "shader prone aim missing: {line}"); }
