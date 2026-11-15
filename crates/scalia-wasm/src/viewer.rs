@@ -3581,6 +3581,7 @@ impl Viewer {
             if fallback_tiles.iter().all(|key| self.far_tiles.contains(key)) {
                 self.far_level = Some(fallback);
             }
+            budget = budget.saturating_sub(fallback_tiles.len());
         }
 
         let mut missing = false;
