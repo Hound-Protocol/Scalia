@@ -268,7 +268,9 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     let mut p0 = *p;
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
-    reach_left_capped(p, held(RIFLE_GUARD, p), w, GRIP_MAX)
+    // Prone support reaches farther across the body than the standing carry; allow the arm to extend fully.
+    let max = if p.prone > 0.5 { REACH_MAX } else { GRIP_MAX };
+    reach_left_capped(p, held(RIFLE_GUARD, p), w, max)
 }
 
 /// Puts the left palm on `target` (figure frame): damped least-squares steps on the left shoulder, elbow and
