@@ -1989,7 +1989,6 @@ if (BUILD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./s
   if (!mine) return; // local build
   const bar = document.getElementById('update');
   const alert = new Audio('./sfx/update-alert.mp3'); alert.preload = 'auto'; alert.volume = 0.6;
-  window.scaliaAudio?.routeMedia(alert, 'ui');
   document.getElementById('update-reload').addEventListener('click', reboot);
   let dismissed = null;
   document.getElementById('update-close').addEventListener('click', () => { bar.hidden = true; dismissed = bar.dataset.v; });
@@ -2002,7 +2001,9 @@ if (BUILD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./s
         bar.dataset.v = live;
         document.querySelector('#update .ttl').textContent = `${info.n || 'Update'} received`;
         document.getElementById('update-sub').textContent = `You run ${UPDATE.startsWith('__') ? mine.slice(0, 7) : UPDATE}`;
-        if (bar.hidden) { alert.currentTime = 0; alert.play().catch(() => {}); bar.hidden = false; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
+        if (bar.hidden) {
+          if (window.scaliaAudio?.ctx) window.scaliaAudio.routeMedia(alert, 'ui');
+          alert.currentTime = 0; alert.play().catch(() => {}); bar.hidden = false; bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
       }
     } catch (_) { /* offline: try again later */ }
   };
