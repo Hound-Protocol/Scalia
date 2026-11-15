@@ -956,17 +956,63 @@ fn stride(p: &mut PoseParams, phase: f32, bob: f32, twist: f32, arms: f32, rifle
 /// How much livelier the weapon is than the stride numbers alone (both moving and aiming).
 pub const SWAY_GAIN: f32 = 1.6;
 
+const IDLE_PRONE_BREATH: f32 = 0.006;
+const IDLE_PRONE_HEAD_BREATH: f32 = 0.010;
+const IDLE_PRONE_SCAN: f32 = 0.045;
+const IDLE_PRONE_SCAN_PERIOD_S: f32 = 8.5;
+const IDLE_PRONE_RIFLE_SWAY: f32 = 0.004;
+const IDLE_PRONE_RIFLE_PERIOD_S: f32 = 3.2;
+const IDLE_PRONE_RIFLE_YAW: f32 = 0.006;
+const IDLE_PRONE_RIFLE_YAW_PERIOD_S: f32 = 4.1;
+const IDLE_TACTICAL_BREATH: f32 = 0.012;
+const IDLE_TACTICAL_LEAN: f32 = 0.003;
+const IDLE_TACTICAL_TWIST: f32 = 0.028;
+const IDLE_TACTICAL_TWIST_PERIOD_S: f32 = 10.0;
+const IDLE_TACTICAL_SCAN: f32 = 0.16;
+const IDLE_TACTICAL_SCAN_PERIOD_S: f32 = 12.0;
+const IDLE_TACTICAL_RIFLE_SWAY: f32 = 0.006;
+const IDLE_TACTICAL_RIFLE_PERIOD_S: f32 = 4.6;
+const IDLE_TACTICAL_RIFLE_YAW: f32 = 0.009;
+const IDLE_TACTICAL_RIFLE_YAW_PERIOD_S: f32 = 6.0;
+const IDLE_PEEK_MIN: f32 = 0.12;
+const IDLE_PEEK_PERIOD_S: f32 = 5.2;
+
 /// Idle life for a soldier standing still (`t` seconds, `seed` 0..1 per soldier, so a squad is never in step):
 /// breathing, a slow shift of weight, glances around, and now and then a hitch of the rifle. Moving soldiers get
 /// their life from the stride instead; aiming soldiers keep their eyes and rifle on the target.
 pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
     let mut q = *p;
-    // Holding the tablet he keeps still: the close-up camera is on it, and any sway smears the screen.
-    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::Prone | Pose::CrouchWalk | Pose::Tablet) {
+    // Moving gaits and the close-up tablet view supply their own motion (or must stay perfectly still).
+    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk | Pose::Tablet) {
         return q;
     }
     let tau = std::f32::consts::TAU;
     let breathe = (tau * (t / 3.8 + seed)).sin();
+
+    // Prone: the chest works against the elbows, with only a small head scan and rifle settle.
+    // Keep the legs and body-to-ground transform fixed so the soldier never floats or sinks.
+    if pose == Pose::Prone {
+        q.shoulder[0] += IDLE_PRONE_BREATH * breathe;
+        q.shoulder[1] += IDLE_PRONE_BREATH * breathe;
+        q.head += IDLE_PRONE_HEAD_BREATH * breathe;
+        q.look += IDLE_PRONE_SCAN * (tau * (t / IDLE_PRONE_SCAN_PERIOD_S + seed * 1.4)).sin();
+        q.rifle += IDLE_PRONE_RIFLE_SWAY * (tau * (t / IDLE_PRONE_RIFLE_PERIOD_S + seed)).sin();
+        q.rifle_yaw += IDLE_PRONE_RIFLE_YAW * (tau * (t / IDLE_PRONE_RIFLE_YAW_PERIOD_S + seed * 1.3)).sin();
+        return q;
+    }
+
+    // Behind cover and stacked: quiet breathing, a restrained weight shift and short sector scans.
+    if matches!(pose, Pose::Cover | Pose::Stack) {
+        q.shoulder[0] += IDLE_TACTICAL_BREATH * breathe;
+        q.shoulder[1] += IDLE_TACTICAL_BREATH * breathe;
+        q.lean += IDLE_TACTICAL_LEAN * breathe;
+        q.twist += IDLE_TACTICAL_TWIST * (tau * (t / IDLE_TACTICAL_TWIST_PERIOD_S + seed * 1.7)).sin();
+        q.look += IDLE_TACTICAL_SCAN * (tau * (t / IDLE_TACTICAL_SCAN_PERIOD_S + seed * 2.3)).sin();
+        q.rifle += IDLE_TACTICAL_RIFLE_SWAY * (tau * (t / IDLE_TACTICAL_RIFLE_PERIOD_S + seed)).sin();
+        q.rifle_yaw += IDLE_TACTICAL_RIFLE_YAW * (tau * (t / IDLE_TACTICAL_RIFLE_YAW_PERIOD_S + seed * 1.3)).sin();
+        return q;
+    }
+
     if matches!(pose, Pose::StandAim | Pose::CoverAim | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim) {
         q.shoulder[0] += 0.008 * breathe;
         q.shoulder[1] += 0.008 * breathe;
@@ -974,14 +1020,22 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
         // Aiming: the muzzle wanders in a slow loop around the aim point (breath and pulse).
         q.rifle += 0.018 * (tau * (t / 2.3 + seed)).sin();
         q.rifle_yaw += 0.022 * (tau * (t / 3.1 + seed * 1.3)).sin();
+
+        // A peek eases back towards cover, then leans out again. The cosine envelope has zero velocity
+        // at both ends, avoiding a mechanical snap while preserving the chosen left/right side.
+        if matches!(pose, Pose::LeanLeft | Pose::LeanRight) {
+            let cycle = tau * (t / IDLE_PEEK_PERIOD_S + seed);
+            let exposure = 0.5 - 0.5 * cycle.cos();
+            q.tilt *= IDLE_PEEK_MIN + (1.0 - IDLE_PEEK_MIN) * exposure;
+        }
         return q;
     }
+
     q.shoulder[0] += 0.03 * breathe;
     q.shoulder[1] += 0.03 * breathe;
     q.lean += 0.008 * breathe;
     q.twist += 0.06 * (tau * (t / 9.5 + seed * 1.7)).sin();
     if pose != Pose::Tablet {
-        // Mostly looking ahead, now and then a glance to one side (the cube holds it near the middle).
         q.look += 0.6 * (tau * (t / 14.0 + seed * 2.3)).sin().powi(3);
     }
     if pose == Pose::Stand {

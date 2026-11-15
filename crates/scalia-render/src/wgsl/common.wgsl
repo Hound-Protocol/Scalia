@@ -184,20 +184,71 @@ fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rif
   (*p).ryaw = (*p).ryaw + swing * sin(t);
 }
 
+const IDLE_PRONE_BREATH: f32 = 0.006;
+const IDLE_PRONE_HEAD_BREATH: f32 = 0.010;
+const IDLE_PRONE_SCAN: f32 = 0.045;
+const IDLE_PRONE_SCAN_PERIOD_S: f32 = 8.5;
+const IDLE_PRONE_RIFLE_SWAY: f32 = 0.004;
+const IDLE_PRONE_RIFLE_PERIOD_S: f32 = 3.2;
+const IDLE_PRONE_RIFLE_YAW: f32 = 0.006;
+const IDLE_PRONE_RIFLE_YAW_PERIOD_S: f32 = 4.1;
+const IDLE_TACTICAL_BREATH: f32 = 0.012;
+const IDLE_TACTICAL_LEAN: f32 = 0.003;
+const IDLE_TACTICAL_TWIST: f32 = 0.028;
+const IDLE_TACTICAL_TWIST_PERIOD_S: f32 = 10.0;
+const IDLE_TACTICAL_SCAN: f32 = 0.16;
+const IDLE_TACTICAL_SCAN_PERIOD_S: f32 = 12.0;
+const IDLE_TACTICAL_RIFLE_SWAY: f32 = 0.006;
+const IDLE_TACTICAL_RIFLE_PERIOD_S: f32 = 4.6;
+const IDLE_TACTICAL_RIFLE_YAW: f32 = 0.009;
+const IDLE_TACTICAL_RIFLE_YAW_PERIOD_S: f32 = 6.0;
+const IDLE_PEEK_MIN: f32 = 0.12;
+const IDLE_PEEK_PERIOD_S: f32 = 5.2;
+
 // Idle life for soldiers standing still (port of pose.rs `idle`): breathing, weight shifts, glances, a rifle hitch.
 fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   var q = p0;
-  // Tablet (10): held still for the close-up (no sway).
-  if (pose == 1u || pose == 2u || pose == 7u || pose == 5u || pose == 10u || pose == 11u || pose >= 21u) { return q; }
+  // Moving gaits and the close-up tablet view supply their own motion (or must stay perfectly still).
+  if (pose == 1u || pose == 2u || pose == 7u || pose == 11u || pose == 10u || pose >= 21u) { return q; }
   let tau = 6.2831853;
   let breathe = sin(tau * (t / 3.8 + seed));
+
+  // Prone: the chest works against the elbows, with only a small head scan and rifle settle.
+  // Keep the legs and body-to-ground transform fixed so the soldier never floats or sinks.
+  if (pose == 5u) {
+    q.sh = q.sh + vec2f(IDLE_PRONE_BREATH * breathe);
+    q.head = q.head + IDLE_PRONE_HEAD_BREATH * breathe;
+    q.look = q.look + IDLE_PRONE_SCAN * sin(tau * (t / IDLE_PRONE_SCAN_PERIOD_S + seed * 1.4));
+    q.rifle = q.rifle + IDLE_PRONE_RIFLE_SWAY * sin(tau * (t / IDLE_PRONE_RIFLE_PERIOD_S + seed));
+    q.ryaw = q.ryaw + IDLE_PRONE_RIFLE_YAW * sin(tau * (t / IDLE_PRONE_RIFLE_YAW_PERIOD_S + seed * 1.3));
+    return q;
+  }
+
+  // Behind cover and stacked: quiet breathing, a restrained weight shift and short sector scans.
+  if (pose == 8u || pose == 15u) {
+    q.sh = q.sh + vec2f(IDLE_TACTICAL_BREATH * breathe);
+    q.lean = q.lean + IDLE_TACTICAL_LEAN * breathe;
+    q.twist = q.twist + IDLE_TACTICAL_TWIST * sin(tau * (t / IDLE_TACTICAL_TWIST_PERIOD_S + seed * 1.7));
+    q.look = q.look + IDLE_TACTICAL_SCAN * sin(tau * (t / IDLE_TACTICAL_SCAN_PERIOD_S + seed * 2.3));
+    q.rifle = q.rifle + IDLE_TACTICAL_RIFLE_SWAY * sin(tau * (t / IDLE_TACTICAL_RIFLE_PERIOD_S + seed));
+    q.ryaw = q.ryaw + IDLE_TACTICAL_RIFLE_YAW * sin(tau * (t / IDLE_TACTICAL_RIFLE_YAW_PERIOD_S + seed * 1.3));
+    return q;
+  }
+
   if (pose == 6u || pose == 4u || pose == 12u || pose == 13u || pose == 14u) {
     q.sh = q.sh + vec2f(0.008 * breathe);
     q.look = q.look + 0.03 * sin(tau * (t / 7.0 + seed));
     q.rifle = q.rifle + 0.018 * sin(tau * (t / 2.3 + seed));
     q.ryaw = q.ryaw + 0.022 * sin(tau * (t / 3.1 + seed * 1.3));
+    // Eased return towards cover and lean back out; zero velocity at both ends.
+    if (pose == 12u || pose == 13u) {
+      let cycle = tau * (t / IDLE_PEEK_PERIOD_S + seed);
+      let exposure = 0.5 - 0.5 * cos(cycle);
+      q.tilt = q.tilt * (IDLE_PEEK_MIN + (1.0 - IDLE_PEEK_MIN) * exposure);
+    }
     return q;
   }
+
   q.sh = q.sh + vec2f(0.03 * breathe);
   q.lean = q.lean + 0.008 * breathe;
   q.twist = q.twist + 0.06 * sin(tau * (t / 9.5 + seed * 1.7));

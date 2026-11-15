@@ -88,3 +88,20 @@ fn animate_evaluates_poses_at_most_four_times() {
     assert!(body.matches("pose_params(").count() <= 4, "pose_params called {} times in animate", body.matches("pose_params(").count());
     assert_eq!(WGSL.matches("pose_params(").count() - 1, body.matches("pose_params(").count(), "and nowhere else");
 }
+
+
+#[test]
+fn idle_animation_constants_match_between_rust_and_wgsl() {
+    let extract = |src: &str| {
+        let re = Regex::new(r"const (IDLE_[A-Z0-9_]+): f32 = ([0-9.]+);").unwrap();
+        let mut values: Vec<(String, f32)> = re.captures_iter(src)
+            .map(|c| (c[1].to_string(), c[2].parse().unwrap()))
+            .collect();
+        values.sort_by(|a, b| a.0.cmp(&b.0));
+        values
+    };
+    let rust = extract(RS);
+    let shader = extract(WGSL);
+    assert!(!rust.is_empty(), "idle constants are present in the Rust pose reference");
+    assert_eq!(rust, shader, "idle animation tuning stays in sync with the shader");
+}

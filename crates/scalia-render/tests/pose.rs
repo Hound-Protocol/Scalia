@@ -394,6 +394,64 @@ fn standing_soldiers_breathe_shift_and_look_around() {
 }
 
 
+#[test]
+fn prone_idle_breathes_and_scans_without_moving_ground_contacts() {
+    let base = params(Pose::Prone, 0.0);
+    let samples: Vec<_> = (0..600).map(|k| idle(&base, Pose::Prone, k as f32 * 0.05, 0.37)).collect();
+    let span = |f: &dyn Fn(&PoseParams) -> f32| {
+        samples.iter().map(f).fold(f32::MIN, f32::max) - samples.iter().map(f).fold(f32::MAX, f32::min)
+    };
+    assert!(span(&|p| p.shoulder[0]) > 0.01, "the chest breathes");
+    assert!(span(&|p| p.look) > 0.07, "the head scans gently");
+    for p in &samples {
+        assert_eq!(p.hip, base.hip, "prone legs stay planted");
+        assert_eq!(p.knee, base.knee, "prone knees stay planted");
+        assert_eq!(p.prone, base.prone, "the body-to-ground transform stays fixed");
+        assert!((p.look - base.look).abs() <= 0.046);
+        assert!((p.head - base.head).abs() <= 0.011);
+        assert!((p.rifle - base.rifle).abs() <= 0.005);
+        assert!((p.rifle_yaw - base.rifle_yaw).abs() <= 0.007);
+    }
+}
+
+#[test]
+fn cover_and_stack_have_restrained_life_and_preserve_the_rifle_grip() {
+    for pose in [Pose::Cover, Pose::Stack] {
+        let base = params(pose, 0.0);
+        let samples: Vec<_> = (0..600).map(|k| idle(&base, pose, k as f32 * 0.05, 0.37)).collect();
+        let span = |f: &dyn Fn(&PoseParams) -> f32| {
+            samples.iter().map(f).fold(f32::MIN, f32::max) - samples.iter().map(f).fold(f32::MAX, f32::min)
+        };
+        assert!(span(&|p| p.shoulder[0]) > 0.02, "{pose:?}: breathing");
+        assert!(span(&|p| p.twist) > 0.04, "{pose:?}: weight shift");
+        assert!(span(&|p| p.look) > 0.25, "{pose:?}: sector scan");
+        let worst_grip = samples.iter().map(|p| guard_gap(&grip(p, two_handed(pose)))).fold(0.0, f32::max);
+        assert!(worst_grip < 0.03, "{pose:?}: rifle handguard gap {worst_grip}");
+        for p in &samples {
+            assert!(p.look.abs() < 0.2, "{pose:?}: scan remains local");
+            assert!(p.twist.abs() < 0.04, "{pose:?}: weight shift remains restrained");
+        }
+    }
+}
+
+#[test]
+fn peeks_ease_back_towards_cover_and_out_again_without_snapping() {
+    for pose in [Pose::LeanLeft, Pose::LeanRight] {
+        let base = params(pose, 0.0);
+        let samples: Vec<_> = (0..=600).map(|k| idle(&base, pose, k as f32 * 0.02, 0.37)).collect();
+        let magnitude: Vec<_> = samples.iter().map(|p| p.tilt.abs()).collect();
+        let min = magnitude.iter().copied().fold(f32::MAX, f32::min);
+        let max = magnitude.iter().copied().fold(0.0f32, f32::max);
+        let step = samples.windows(2).map(|w| (w[1].tilt - w[0].tilt).abs()).fold(0.0f32, f32::max);
+        assert!(min < base.tilt.abs() * 0.16, "{pose:?}: returns close to cover ({min})");
+        assert!(max > base.tilt.abs() * 0.99, "{pose:?}: leans fully out ({max})");
+        assert!(step < 0.005, "{pose:?}: peek motion is eased, largest frame step {step}");
+        assert!(samples.iter().all(|p| p.tilt.signum() == base.tilt.signum()), "{pose:?}: keeps the same side");
+        let worst_grip = samples.iter().map(|p| guard_gap(&grip(p, two_handed(pose)))).fold(0.0, f32::max);
+        assert!(worst_grip < 0.03, "{pose:?}: rifle handguard gap {worst_grip}");
+    }
+}
+
 fn guard_gap(p: &PoseParams) -> f32 {
     hand(p, Side::Left).distance(held(RIFLE_GUARD, p))
 }
