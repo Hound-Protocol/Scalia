@@ -299,6 +299,18 @@ mod lab_more {
 
     /// The lab's other scenarios, natively: (blue standing, blue total, red standing, red total).
     fn run(name: &str, seed: u64) -> (usize, usize, usize, usize) {
+        let mut a = setup(name, seed);
+        for _ in 0..(150_000 / 50) {
+            a.battle.step(50);
+        }
+        let b = &a.battle;
+        let up = |team| b.soldiers.iter().filter(|s| s.team == team && s.alive() && !s.down()).count();
+        let all = |team| b.soldiers.iter().filter(|s| s.team == team).count();
+        (up(0), all(0), up(1), all(1))
+    }
+
+    /// A lab scenario set up and ordered, not yet run.
+    fn setup(name: &str, seed: u64) -> Assault {
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
         let props = base_props();
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
@@ -338,13 +350,7 @@ mod lab_more {
                 a.order(LAB_RED, Order::Move { to: (80_000, 95_000), mode: Mode::Confirmed });
             }
         }
-        for _ in 0..(150_000 / 50) {
-            a.battle.step(50);
-        }
-        let b = &a.battle;
-        let up = |team| b.soldiers.iter().filter(|s| s.team == team && s.alive() && !s.down()).count();
-        let all = |team| b.soldiers.iter().filter(|s| s.team == team).count();
-        (up(0), all(0), up(1), all(1))
+        a
     }
 
     /// `cargo test -p scalia-wasm --release lab_more_report -- --ignored --nocapture`.
@@ -360,6 +366,100 @@ mod lab_more {
                 n = r.1.max(n);
             }
             println!("{name}: blue standing {:.1}, red standing {:.1} (of {n} / 8) after 150 s", bu as f64 / 20.0, ru as f64 / 20.0);
+        }
+    }
+
+    /// Behaviour that reads as odd, measured over the lab scenarios (per run, 20 seeds):
+    /// `cargo test -p scalia-wasm --release lab_behaviour_report -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn lab_behaviour_report() {
+        use scalia_ai::battle::Event;
+        for name in ["contact", "standoff"] {
+            let mut m = [0f64; 8];
+            let seeds = 20;
+            for seed in 1..=seeds {
+                let mut a = setup(name, seed);
+                let mut was_moving = Vec::new();
+                let mut flips: Vec<u32> = Vec::new();
+                let mut idle_contact: Vec<i64> = Vec::new();
+                for _ in 0..(150_000 / 50) {
+                    let seen = a.battle.log.len();
+                    a.battle.step(50);
+                    let b = &a.battle;
+                    let n = b.soldiers.len();
+                    was_moving.resize(n, false);
+                    flips.resize(n, 0);
+                    idle_contact.resize(n, 0);
+                    let up = |s: &scalia_ai::battle::Soldier| s.alive() && !s.down();
+                    // Lockstep: many men of one squad setting off in the same step.
+                    let mut starts = std::collections::HashMap::new();
+                    for (i, s) in b.soldiers.iter().enumerate() {
+                        if !up(s) {
+                            continue;
+                        }
+                        if s.moving != was_moving[i] {
+                            flips[i] += 1;
+                            if s.moving {
+                                *starts.entry(s.squad).or_insert(0) += 1;
+                            }
+                        }
+                        was_moving[i] = s.moving;
+                        // Standing in the open under fire, not moving and not in cover (seconds).
+                        if s.suppression >= 100 && s.cover.is_none() && !s.moving && s.stance == scalia_ai::battle::Stance::Stand {
+                            m[0] += 0.05;
+                        }
+                        // Squad knows of enemies, he is up, has no target, not moving, not in cover (seconds).
+                        let knows = b.contacts.get(s.squad as usize).is_some_and(|c| !c.is_empty());
+                        if knows && s.target.is_none() && !s.moving && s.cover.is_none() {
+                            idle_contact[i] += 50;
+                        } else {
+                            idle_contact[i] = 0;
+                        }
+                        if idle_contact[i] == 5_000 {
+                            m[1] += 1.0;
+                        }
+                        // Crowding: another friendly within 0.5 m.
+                        if b.soldiers.iter().enumerate().any(|(j, o)| j > i && up(o) && o.team == s.team && (o.pos.0 - s.pos.0).abs() < 500 && (o.pos.1 - s.pos.1).abs() < 500) {
+                            m[2] += 0.05;
+                        }
+                    }
+                    m[3] += starts.values().filter(|&&c| c >= 4).count() as f64;
+                    // Rounds fired past a friendly within a metre of the line (before the target).
+                    for e in &b.log[seen..] {
+                        if let Event::Shot { shooter, from, to, .. } = *e {
+                            m[4] += 1.0;
+                            let team = b.soldiers[shooter].team;
+                            let (dx, dy) = ((to.x - from.x) as f64, (to.y - from.y) as f64);
+                            let len2 = dx * dx + dy * dy;
+                            if len2 <= 0.0 {
+                                continue;
+                            }
+                            let risky = b.soldiers.iter().enumerate().any(|(j, o)| {
+                                if j == shooter || o.team != team || !o.alive() {
+                                    return false;
+                                }
+                                let (px, py) = ((o.pos.0 - from.x) as f64, (o.pos.1 - from.y) as f64);
+                                let t = (px * dx + py * dy) / len2;
+                                if !(0.05..0.95).contains(&t) {
+                                    return false;
+                                }
+                                let (cx, cy) = (px - t * dx, py - t * dy);
+                                cx * cx + cy * cy < 1_000.0 * 1_000.0
+                            });
+                            if risky {
+                                m[5] += 1.0;
+                            }
+                        }
+                    }
+                }
+                // Dithering: men starting and stopping a lot (flips per man per minute over 2.5 min).
+                m[6] += flips.iter().map(|&f| f as f64 / 2.5).sum::<f64>() / flips.len().max(1) as f64;
+                m[7] += flips.iter().filter(|&&f| f as f64 / 2.5 > 12.0).count() as f64;
+            }
+            let k = seeds as f64;
+            println!("{name} (per run): exposed standing still under fire {:.1} man-s | idle with known enemy >5 s {:.1} times | crowded <0.5 m {:.1} man-s | 4+ men setting off in the same step {:.1} times | rounds {:.0}, past a friendly within 1 m {:.1} | start/stop per man-minute {:.1}, men dithering (>12/min) {:.1}",
+                m[0] / k, m[1] / k, m[2] / k, m[3] / k, m[4] / k, m[5] / k, m[6] / k, m[7] / k);
         }
     }
 }
