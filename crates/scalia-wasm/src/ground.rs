@@ -411,16 +411,13 @@ mod lab_more {
                         }
                         // Squad knows of enemies, he is up, has no target, not moving, not in cover (seconds).
                         let knows = b.contacts.get(s.squad as usize).is_some_and(|c| !c.is_empty());
-                        if knows && s.target.is_none() && !s.moving && s.cover.is_none() && s.stance == scalia_ai::battle::Stance::Stand && !s.mind.describe().contains("suppress") {
+                        if knows && s.target.is_none() && !s.moving && s.cover.is_none() {
                             idle_contact[i] += 50;
                         } else {
                             idle_contact[i] = 0;
                         }
                         if idle_contact[i] == 5_000 {
                             m[1] += 1.0;
-                            if std::env::var("WHY").is_ok() {
-                                eprintln!("IDLE {name} team {} task {:?} cue {:?} stance {:?} mind {}", s.team, s.task, s.cue, s.stance, s.mind.describe());
-                            }
                         }
                         // Crowding: another friendly within 0.5 m.
                         if b.soldiers.iter().enumerate().any(|(j, o)| j > i && up(o) && o.team == s.team && (o.pos.0 - s.pos.0).abs() < 500 && (o.pos.1 - s.pos.1).abs() < 500) {
@@ -439,11 +436,7 @@ mod lab_more {
                                 continue;
                             }
                             let risky = b.soldiers.iter().enumerate().any(|(j, o)| {
-                                use scalia_ai::battle::Stance as St;
-                                let mine = b.soldiers[shooter].stance;
-                                // Fired over a man lower than the shooter (lying, or kneeling under a man standing).
-                                let under = match o.stance { St::Prone => mine != St::Prone, St::Crouch => mine == St::Stand, St::Stand => false };
-                                if j == shooter || o.team != team || !o.alive() || under {
+                                if j == shooter || o.team != team || !o.alive() {
                                     return false;
                                 }
                                 let (px, py) = ((o.pos.0 - from.x) as f64, (o.pos.1 - from.y) as f64);
@@ -465,7 +458,7 @@ mod lab_more {
                 m[7] += flips.iter().filter(|&&f| f as f64 / 2.5 > 12.0).count() as f64;
             }
             let k = seeds as f64;
-            println!("{name} (per run): exposed standing still under fire {:.1} man-s | standing tall idle with known enemy >5 s {:.1} times | crowded <0.5 m {:.1} man-s | 4+ men setting off in the same step {:.1} times | rounds {:.0}, past a friendly (not fired over) within 1 m {:.1} | start/stop per man-minute {:.1}, men dithering (>12/min) {:.1}",
+            println!("{name} (per run): exposed standing still under fire {:.1} man-s | idle with known enemy >5 s {:.1} times | crowded <0.5 m {:.1} man-s | 4+ men setting off in the same step {:.1} times | rounds {:.0}, past a friendly within 1 m {:.1} | start/stop per man-minute {:.1}, men dithering (>12/min) {:.1}",
                 m[0] / k, m[1] / k, m[2] / k, m[3] / k, m[4] / k, m[5] / k, m[6] / k, m[7] / k);
         }
     }

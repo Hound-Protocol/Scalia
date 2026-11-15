@@ -93,16 +93,6 @@ pub(crate) const BODY_MM: i64 = 250;
 /// Within this of where he is going he has arrived.
 const ARRIVE_MM: i64 = 150;
 const PERSONAL_MM: i64 = 700;
-/// A friendly closer than this to the line of fire blocks it (mm).
-const LANE_MM: i64 = 500;
-/// Inside this range (mm) the lane is not checked: room to room a man fires past his partner's shoulder.
-const LANE_CQB_MM: i64 = 6_000;
-/// How far out from the muzzle friendlies in the line of fire are looked for (mm).
-const LANE_LOOK_MM: i64 = 25_000;
-/// How long a man with his lane blocked waits before trying again (ms; up to twice this).
-const LANE_WAIT_MS: i32 = 300;
-/// How long a man told to get down out of a friend's line of fire stays on a knee (ms).
-const KNEEL_FOR_LANE_MS: i32 = 4_000;
 /// Two men are never sent to stand closer than this: a shared destination is spread into separate spots.
 pub const SPACING_MM: i64 = 900;
 /// Once there, a man stays put until pushed this far off his spot.
@@ -300,8 +290,6 @@ pub struct Soldier {
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
     calm_ms: i32,
-    /// A friend behind him needs to fire past: he stays down on a knee for this long (ms), unless he moves.
-    kneel_ms: i32,
     /// How he is to be drawn for what the leader has him doing.
     pub cue: Cue,
     /// What he wants now and his plan for it (soldier mind, GOAP).
@@ -321,7 +309,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, kneel_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -923,11 +911,6 @@ impl Battle {
                     }
                 }
             }
-            // Told to get down out of a friend's line of fire: on a knee while he holds his ground.
-            s.kneel_ms = (s.kneel_ms - dt_ms).max(0);
-            if s.kneel_ms > 0 && !s.moving && s.stance == Stance::Stand {
-                s.stance = Stance::Crouch;
-            }
         }
     }
 
@@ -999,18 +982,10 @@ impl Battle {
                 (fact::CONTACT, contact),
             ];
             let facts = bits.iter().fold(0u64, |a, &(b, on)| if on { a | 1 << b } else { a });
-            // Holding his ground with the enemy known but out of sight: he gets down on a knee rather than stand
-            // tall in the open (refreshed while it lasts).
-            // (Outdoors only: posted at a window he must stand to see out.)
-            let known = contact || self.contacts[s.squad as usize].iter().any(|c| self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
-            let hold_low = known && !indoors && s.target.is_none() && matches!(s.task, Task::Hold { .. }) && !s.moving && s.cover.is_none() && !busy;
             let sit = Situation { facts, suppression: s.suppression, target_close, mag_empty: s.ammo <= 0, aim: s.aim, aiding: busy };
             let mind = think(&sit);
             let doing = mind.doing();
             let me = &mut self.soldiers[i];
-            if hold_low {
-                me.kneel_ms = me.kneel_ms.max(PERCEIVE_MS * 3);
-            }
             me.may_fire = !busy && match doing {
                 Some(Act::TakeCover) => target_close,
                 _ => true,
@@ -1487,18 +1462,6 @@ impl Battle {
                     self.soldiers[i].burst_left = n as u8;
                     self.soldiers[i].burst_fired = 0;
                 }
-                // Never through his own men: a friendly in the line of fire ends the burst and he waits a moment
-                // for the lane to clear (a little different every time).
-                if let Some(k) = self.lane_blocked(i, j) {
-                    // "Get down!": a friend standing still in the way drops to a knee so he can fire over him.
-                    if !self.soldiers[k].moving && self.soldiers[i].stance == Stance::Stand {
-                        self.soldiers[k].kneel_ms = KNEEL_FOR_LANE_MS;
-                    }
-                    self.soldiers[i].burst_left = 0;
-                    self.rolls += 1;
-                    self.soldiers[i].cooldown_ms += LANE_WAIT_MS + (self.roll(i, self.rolls) as i64 * LANE_WAIT_MS as i64 / 1_000) as i32;
-                    break;
-                }
                 let at_ms = (self.time_ms + self.soldiers[i].cooldown_ms as i64).max(step_start);
                 let recoil = RECOIL[(self.soldiers[i].burst_fired as usize).min(RECOIL.len() - 1)];
                 let p = self.hit_permille(i, j) * recoil / 1_000;
@@ -1525,41 +1488,6 @@ impl Battle {
                 self.soldiers[i].burst_left = 0;
             }
         }
-    }
-
-    /// Whether a friendly of `i` stands in his line of fire to `j`: within `LANE_MM` of the line, between them
-    /// and within `LANE_LOOK_MM` of the muzzle (beyond that a man would not see him through the sights either).
-    /// A man lower than the shooter (lying down, or kneeling under a man standing) is fired over. Returns the
-    /// friend in the way. Only the soldiers near the muzzle are
-    /// looked at (the spatial grid), so this costs the same in a battle of any size.
-    fn lane_blocked(&mut self, i: usize, j: usize) -> Option<usize> {
-        let (from, to) = (self.soldiers[i].pos, self.soldiers[j].pos);
-        let (team, mine) = (self.soldiers[i].team, self.soldiers[i].stance);
-        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
-        let len2 = dx * dx + dy * dy;
-        if len2 < LANE_CQB_MM * LANE_CQB_MM {
-            return None;
-        }
-        let mut near = std::mem::take(&mut self.scratch);
-        self.grid.near(from, LANE_LOOK_MM, &mut near);
-        let blocked = near.iter().map(|&k| k as usize).find(|&k| {
-            let o = &self.soldiers[k];
-            // He fires over a man lower than himself (prone under anyone up, kneeling under a man standing).
-            let under = match o.stance { Stance::Prone => mine != Stance::Prone, Stance::Crouch => mine == Stance::Stand, Stance::Stand => false };
-            if k == i || k == j || o.team != team || !o.alive() || under {
-                return false;
-            }
-            let (px, py) = (o.pos.0 - from.0, o.pos.1 - from.1);
-            let along = px * dx + py * dy;
-            if along <= 0 || along >= len2 || px * px + py * py > LANE_LOOK_MM * LANE_LOOK_MM {
-                return false;
-            }
-            // Distance from the line, squared, without dividing: cross² / len² < LANE².
-            let cross = (px * dy - py * dx) as i128;
-            cross * cross < (LANE_MM as i128 * LANE_MM as i128) * len2 as i128
-        });
-        self.scratch = near;
-        blocked
     }
 
     /// One round fired by `i`: logged, heard by every squad within earshot, and on `target` (if it went at a
