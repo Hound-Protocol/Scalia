@@ -238,10 +238,10 @@ test('voice allocator deterministically steals a lower-priority voice at the 64 
   assert.equal(audio.voiceStats().tracked, 0);
 });
 
-test('voice allocator drops a lower-priority sound when all 64 voices are more important', () => {
+test('UI priority cannot steal higher-priority gunfire when all 64 slots are occupied', () => {
   const audio = lifecycleEngine();
   const voices = Array.from({ length: 64 }, () => addVoice(audio, 3, 0.5));
-  assert.equal(audio._admitVoice(1, 1), false);
+  assert.equal(audio._admitVoice(2, 1), false);
   assert.equal(audio.active.length, 64);
   assert.equal(voices.every(({ source }) => !source.stopped), true);
   assert.equal(audio.voiceStats().dropped, 1);
@@ -327,4 +327,14 @@ test('playBuffer() manages looping menu voices and supports graceful fade cancel
   assert.equal(handle.src.stopAt, 0.07);
   assert.equal(handle.state, 'ended');
   assert.equal(audio.voiceStats().nodes, 0);
+});
+
+
+test('voice allocator steals the quietest voice within the lowest priority tier', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 64 }, (_, i) => addVoice(audio, 1, i === 17 ? 0.01 : 0.2));
+  assert.equal(audio._admitVoice(1, 0.1), true);
+  assert.equal(voices[17].source.stopped, true);
+  assert.equal(voices[0].source.stopped, false);
+  audio.stopAll();
 });
