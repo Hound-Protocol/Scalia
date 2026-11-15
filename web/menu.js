@@ -173,13 +173,33 @@ function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 function lerp3(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
 
 // The galaxy drawn with WebGL (points, added light, dust taking it away). Returns null if WebGL is unavailable.
+// Built in two halves so the page never waits on the GPU: `galaxyRenderer` only queues the shader build and
+// returns a `ready()` probe; asking whether a compile succeeded before it has finished stalls the page until the
+// GPU process gets to it, and while the engine is starting (compiling its own pipelines) that stall ran to many
+// seconds and froze the whole browser window. With KHR_parallel_shader_compile the probe answers without waiting.
 function galaxyRenderer(canvas, g) {
   const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
   if (!gl) return null;
-  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const par = gl.getExtension('KHR_parallel_shader_compile');
+  const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
   const prog = gl.createProgram();
-  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const vs = mk(gl.VERTEX_SHADER, VS), fs = mk(gl.FRAGMENT_SHADER, FS);
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  let draw = null;
+  // Without the extension, wait a while (the engine's startup) before the one blocking question.
+  const born = performance.now();
+  return () => {
+    if (draw) return draw;
+    if (par ? !gl.getProgramParameter(prog, par.COMPLETION_STATUS_KHR) : performance.now() - born < 1500) return null;
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      throw new Error(`${gl.getShaderInfoLog(vs) || ''} ${gl.getShaderInfoLog(fs) || ''} ${gl.getProgramInfoLog(prog) || ''}`);
+    }
+    draw = finish(gl, prog, canvas, g);
+    return draw;
+  };
+}
+
+function finish(gl, prog, canvas, g) {
   gl.useProgram(prog);
   const buf = (data) => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); return { b, n: data.length / 8 }; };
   const sets = { stars: buf(g.stars), dust: buf(g.dust) };
@@ -226,11 +246,17 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
   const mctx = marks.getContext('2d');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const galaxy = buildGalaxy();
-  let draw = null;
-  const makeRenderer = () => { try { draw = galaxyRenderer(sky, galaxy); } catch (e) { draw = null; console.warn('galaxy:', e); } };
-  makeRenderer();
+  // The galaxy's GPU side is started only when the menu is first drawn (not during loading, when the engine is
+  // busy with the GPU), and its shaders build in the background: until they are ready the sky is just black.
+  let probe = null, draw = null;
+  const makeRenderer = () => { draw = null; try { probe = galaxyRenderer(sky, galaxy); } catch (e) { probe = null; console.warn('galaxy:', e); } };
+  const renderer = () => {
+    if (draw || !probe) return draw;
+    try { draw = probe(); } catch (e) { probe = null; console.warn('galaxy:', e); }
+    return draw;
+  };
   // A lost GPU context (driver reset, the engine's GPU work crowding it out) comes back and is rebuilt.
-  sky.addEventListener('webglcontextlost', (e) => { e.preventDefault(); draw = null; });
+  sky.addEventListener('webglcontextlost', (e) => { e.preventDefault(); draw = null; probe = null; });
   sky.addEventListener('webglcontextrestored', makeRenderer);
 
   // Sound through Web Audio: everything decoded while the notice is up, so it plays the moment it is asked for.
@@ -339,7 +365,9 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
 
   function drawSky(now, eye, at, spin, markAlpha) {
     fit();
-    const project = draw ? draw(eye, at, spin, FOV) : null;
+    if (!probe && !draw && !sky.dataset.tried) { sky.dataset.tried = '1'; makeRenderer(); }
+    const d = renderer();
+    const project = d ? d(eye, at, spin, FOV) : null;
     drawMarks(project, now, markAlpha);
   }
 
