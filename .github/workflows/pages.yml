@@ -52,8 +52,14 @@ jobs:
             count=$(git log --format='%(trailers:key=Update,valueonly)' | xargs -L1 | grep -cxF "$area"); fi
           n=$(printf '%s update V %03d' "$area" "$count")
           title=""
-          sed -i "s#__UPDATE__#$n#" web/game.js
-          python3 -c 'import json,sys; print(json.dumps({"v": sys.argv[1], "n": sys.argv[2], "title": sys.argv[3]}))' "$v" "$n" "$title" > web/version.json
+          # The game's version: the stage and series in VERSION (e.g. "Alpha 0.1"), then how many updates have
+          # shipped since VERSION last changed (e.g. "Alpha 0.1.7"). Bump VERSION for a new series or stage.
+          series=$(head -1 VERSION | xargs)
+          since=$(git log -1 --format=%H -- VERSION)
+          patch=$(git log --format='%(trailers:key=Update,valueonly)' "$since"..HEAD | grep -c . || true)
+          ver="$series.$patch"
+          sed -i "s#__UPDATE__#$n#; s#__VERSION__#$ver#" web/game.js
+          python3 -c 'import json,sys; print(json.dumps({"v": sys.argv[1], "n": sys.argv[2], "title": sys.argv[3], "version": sys.argv[4]}))' "$v" "$n" "$title" "$ver" > web/version.json
           python3 - <<'PY' > web/changelog.json
           import json, re, subprocess
           out = subprocess.run(['git', 'log', '--reverse', '--format=%x1e%ad%x1f%s%x1f%b%x1f%(trailers:key=Update,valueonly)', '--date=format:%d %b %Y'], capture_output=True, text=True).stdout

@@ -1739,7 +1739,7 @@ try {
       fireGraph(); audio.play(url, { kind: 'shot', db: 120, gain: 1, room: 0, rx: 0, ry: 1, below: 0, dist: 2, lowpass: 20000, space: v.audio_env().slice(0, 3), echoes: [] });
       return `playing ${url} (it may take a moment the first time)`; } },
     // The game itself.
-    version: { group: 'Game', help: 'which build this is', run: () => `${document.title} ${new URL(import.meta.url).searchParams.get('v') || 'local build'}` },
+    version: { group: 'Game', help: 'which build this is', run: () => `${document.title} ${VERSION_LINE} (${new URL(import.meta.url).searchParams.get('v') || 'local build'})` },
     perf: { group: 'Game', help: 'show or hide the performance panel', run: () => { const p = $('perf'); p.hidden = !p.hidden; return `performance panel ${p.hidden ? 'hidden' : 'shown'}`; } },
     reload: { group: 'Game', help: 'reload the page', run: () => { setTimeout(() => location.reload(), 150); return 'reloading'; } },
     audio: { group: 'Audio', help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
@@ -1976,11 +1976,14 @@ Click to copy and close.`;
 // A new deploy carries a new version stamp: poll for it and offer a reload.
 // This build's update number (stamped by the deploy).
 const UPDATE = '__UPDATE__';
+// The game's version (VERSION in the repo, stamped at deploy): stage, series and updates since, e.g. Alpha 0.1.7.
+const VERSION = '__VERSION__';
+const VERSION_LINE = VERSION.startsWith('__') ? 'Local build' : `${VERSION} · ${UPDATE}`;
 // The prototype notice: shown before play; entering also unlocks sound (browsers need a first click).
 (function prototypeNotice() {
   const box = document.getElementById('proto');
   if (!box) return;
-  document.getElementById('protoVer').textContent = UPDATE.startsWith('__') ? 'Local build' : UPDATE;
+  document.getElementById('protoVer').textContent = VERSION_LINE;
   let ready = false;
   const goBtn = document.getElementById('protoGo');
   goBtn.disabled = true;
@@ -2001,7 +2004,7 @@ const UPDATE = '__UPDATE__';
   const menu = noMenu ? { show() { document.getElementById('menu')?.remove(); music.start(); ambience(); } } : createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); },
     // Waking up: every sound in the scene through one low-pass the eyes' opening sweeps open.
     wake: (hz) => { worldAudio.wake(hz); try { window.scaliaAudio?.setWake(hz); } catch (_) { /* engine not up */ } } });
-  const ver = document.getElementById('menuVer'); if (ver) ver.textContent = UPDATE.startsWith('__') ? '(local)' : UPDATE;
+  const ver = document.getElementById('menuVer'); if (ver) ver.textContent = VERSION_LINE;
   const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); menu.show(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
   const key = (e) => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') go(); };
