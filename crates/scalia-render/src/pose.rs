@@ -909,6 +909,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.prone = 1.0;
             p.shoulder = [2.8, 2.8];
             p.elbow = [1.3, 1.35];
+            p.abduct[0] = -0.45;
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }

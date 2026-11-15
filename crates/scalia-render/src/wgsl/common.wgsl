@@ -315,6 +315,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.prone = 1.0;
     p.sh = vec2f(2.8);
     p.el = vec2f(1.3, 1.35);
+    p.abd.x = -0.45;
     p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 6u) {
