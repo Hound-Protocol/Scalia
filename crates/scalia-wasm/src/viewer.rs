@@ -1567,7 +1567,7 @@ impl Viewer {
         // How wide the rounds go now (0 steady .. 1 wild): moving, standing up and the hip open it; crouched or
         // prone and still close it. The page sizes the reticle by it.
         let spread = self.gun_spread();
-        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"down\":{down},\"stable\":{stable},\"bleed_per_sec\":{},\"injuries\":[{injuries}],\"spread\":{spread:.3},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots, if down && !stable { 1 } else { 0 })
+        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"down\":{down},\"stable\":{stable},\"bleed_per_sec\":{},\"injuries\":[{injuries}],\"spread\":{spread:.3},\"recoil\":{:.4},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots, if down && !stable { 1 } else { 0 }, self.gun.recoil)
     }
     /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
     /// starts over the commander.
@@ -3207,6 +3207,8 @@ impl Viewer {
         }
         let dt = ((t - self.cmd_ms).clamp(0.0, 100.0) / 1000.0) as f32;
         self.cmd_ms = t;
+        self.gun.recoil *= (-dt * 4.5).exp();
+        if self.gun.recoil < 0.0005 { self.gun.recoil = 0.0; }
         let (ix, iy, sprint) = self.cmd_input;
         let (s, c) = self.yaw_smooth.sin_cos();
         let (right, fwd) = ((c, s), (-s, c));
@@ -3350,7 +3352,9 @@ impl Viewer {
         // The rifle points the way he faces, not straight at the mouse: while he swings round, his rounds (and the
         // reticle) lag behind the cursor, as in Helldivers. The mouse only says how far out to look.
         let mouse_m = self.gun.toward.map_or(30.0, |(x, y)| (x * x + y * y).sqrt());
-        let toward = self.gun.toward.map(|_| (-h.sin(), h.cos()));
+        // The rifle's recoil is part of the real firing axis, not a cosmetic camera shake.
+        let aim_heading = h + self.gun.recoil;
+        let toward = self.gun.toward.map(|_| (-aim_heading.sin(), aim_heading.cos()));
         let mut reach = 120.0f32;
         if let Some(mut a) = self.assault.take() {
             let i = commander_soldier(&mut a, at);
@@ -3360,6 +3364,7 @@ impl Viewer {
                     match a.battle.player_fire(i, ((tx * 1000.0) as i64, (ty * 1000.0) as i64), (self.gun_spread() * 1000.0) as i64) {
                         scalia_ai::battle::PlayerShot::Fired { .. } => {
                             self.gun.shots += 1;
+                            self.gun.recoil = (self.gun.recoil + 0.035).min(0.16);
                             self.gun.pull = false;
                         }
                         scalia_ai::battle::PlayerShot::Cycling => {}
@@ -4438,6 +4443,8 @@ struct Gun {
     line: Option<[f32; 4]>,
     /// The way the rifle points (absolute metres, from him), once the mouse has been seen.
     toward: Option<(f32, f32)>,
+    /// Recoil angle in radians; applied to the projectile/aim axis and recovered over time.
+    recoil: f32,
     /// When the empty rifle last clicked (ms): once per squeeze, not every frame.
     dry_at: f64,
 }
