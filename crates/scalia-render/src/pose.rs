@@ -879,19 +879,20 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 0.12;
         }
         Pose::Crawl => {
-            // A low crawl: chest down on planted elbows, rifle cradled across the forearms with the muzzle ahead.
-            // Opposite limbs work together (right arm reaches as the left knee draws up, then the other pair) and
-            // the hips roll a little with the weight shift.
-            let s = (phase * std::f32::consts::TAU).sin();
+            // Low crawl: diagonal limbs alternate, with the cycle rotated by travel direction. This reverses the
+            // pull/push timing when backing up and changes the support pattern for either side-crawl.
+            let s = (phase * std::f32::consts::TAU + dir).sin();
+            let lateral = dir.sin();
             let draw = [s.max(0.0), (-s).max(0.0)];
             p.prone = 1.0;
             p.shoulder = [2.75 - 0.3 * s, 2.75 + 0.3 * s];
             p.elbow = [1.4 + 0.3 * s, 1.4 - 0.3 * s];
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
-            p.side = [-0.12 - 0.55 * draw[0], 0.12 + 0.55 * draw[1]];
-            p.twist = 0.06 * s;
-            p.tilt = 0.05 * s;
+            p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
+            p.abduct = [0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral];
+            p.twist = 0.06 * s + 0.08 * lateral;
+            p.tilt = 0.05 * s + 0.04 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }

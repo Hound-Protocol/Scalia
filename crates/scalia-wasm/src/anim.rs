@@ -331,7 +331,7 @@ impl Animator {
             }
         } else {
             match (d.stance, moving) {
-                (Stance::Prone, true) => (Pose::Crawl, None, speed / pose::CRAWL_STRIDE),
+                (Stance::Prone, true) => (Pose::Crawl, None, speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
                 (Stance::Prone, false) => (Pose::Prone, None, 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),

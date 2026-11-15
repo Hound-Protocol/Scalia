@@ -518,17 +518,20 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.lean = -0.12;
     p.head = 0.12;
   } else if (pose == 32u) {
-    // Crawl (pose.rs `Pose::Crawl`).
-    let s = sin(phase * 6.2831853);
+    // Direction-aware low crawl (pose.rs `Pose::Crawl`): reverse the diagonal pull when backing up and
+    // change the support width for either side-crawl.
+    let s = sin(phase * 6.2831853 + dir);
+    let lateral = sin(dir);
     let draw = vec2f(max(s, 0.0), max(-s, 0.0));
     p.prone = 1.0;
     p.sh = vec2f(2.75 - 0.3 * s, 2.75 + 0.3 * s);
     p.el = vec2f(1.4 + 0.3 * s, 1.4 - 0.3 * s);
     p.hip = vec2f(0.1) + 0.3 * draw;
     p.knee = vec2f(0.35) + 1.2 * draw;
-    p.side = vec2f(-0.12 - 0.55 * draw.x, 0.12 + 0.55 * draw.y);
-    p.twist = 0.06 * s;
-    p.tilt = 0.05 * s;
+    p.side = vec2f(-0.12 - 0.55 * draw.x - 0.16 * lateral, 0.12 + 0.55 * draw.y + 0.16 * lateral);
+    p.abd = vec2f(0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral);
+    p.twist = 0.06 * s + 0.08 * lateral;
+    p.tilt = 0.05 * s + 0.04 * lateral;
     p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 28u) {

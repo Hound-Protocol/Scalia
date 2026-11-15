@@ -86,6 +86,17 @@ fn main() {
         if avg > 0.2 { println!("  !! walking at {deg} deg: the planted foot slides {avg:.2} m/s"); bad += 1; }
     }
 
+    // Prone crawl cycles in each cardinal direction: no limb/torso seam when the cycle wraps.
+    println!("\nProne crawl direction seams");
+    for deg in [0.0f32, 90.0, 180.0, -90.0] {
+        let dir = deg.to_radians();
+        let first = angles(&params_dir(Pose::Crawl, 0.0, dir));
+        let last = angles(&params_dir(Pose::Crawl, 1.0, dir));
+        let seam = first.iter().zip(last.iter()).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        println!("  {deg:>6.0} deg  seam {seam:.4} rad");
+        if seam > 0.01 { println!("  !! crawl cycle seam at {deg} degrees"); bad += 1; }
+    }
+
     println!("\nLeft palm to the rifle handguard (m, worst over the cycle, after grip()); the right palm holds the grip by construction");
     for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim] {
         // Worst over the cycle, as drawn (after grip()).

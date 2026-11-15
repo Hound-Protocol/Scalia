@@ -9,6 +9,7 @@ fn nums(s: &str) -> Vec<f32> {
     Regex::new(r"-?\d+\.\d+").unwrap().find_iter(s).map(|m| m.as_str().parse().unwrap()).collect()
 }
 
+
 #[test]
 fn stride_calls_match() {
     let rs: Vec<Vec<f32>> = Regex::new(r"stride\(&mut p, phase, ([^)]*)\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
@@ -104,4 +105,16 @@ fn idle_animation_constants_match_between_rust_and_wgsl() {
     let shader = extract(WGSL);
     assert!(!rust.is_empty(), "idle constants are present in the Rust pose reference");
     assert_eq!(rust, shader, "idle animation tuning stays in sync with the shader");
+}
+
+
+#[test]
+fn crawl_directional_terms_match_in_rust_and_wgsl() {
+    assert!(RS.contains("phase * std::f32::consts::TAU + dir"), "Rust crawl phase uses travel direction");
+    assert!(WGSL.contains("phase * 6.2831853 + dir"), "WGSL crawl phase uses travel direction");
+    for term in ["0.16 * lateral", "0.12 * lateral", "0.08 * lateral", "0.04 * lateral"] {
+        let rust = RS.contains(term);
+        let shader = WGSL.contains(term);
+        assert_eq!(rust, shader, "crawl directional parameter parity for {term}");
+    }
 }
