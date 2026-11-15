@@ -970,11 +970,19 @@ impl Viewer {
     }
     /// Where the ears are: the camera (x, y, height; m). Above the middle of the view, as high as the view is
     /// big; while the tablet is up, above the middle of its map.
-    fn audio_listener(&self) -> (f32, f32, f32) {
+    fn audio_listener(&mut self) -> (f32, f32, f32) {
         if self.tablet {
             if let Some(c) = self.map_cam.ground_cam {
                 return (c.x, c.y, scalia_audio::camera_height_m(self.map_cam.ground_view));
             }
+        }
+        // During the playable assault, the camera can lag behind or remain centred on the
+        // battlefield while the commander moves independently. The ears must follow the
+        // controlled soldier, otherwise his own muzzle appears to move left/right with WASD.
+        if self.scene == Scene::Ground && self.assault.is_some() && self.intro.is_none() && self.cine.is_none() {
+            let eye = match self.gun.stance { 1 => 1.05, 2 => 0.35, _ => 1.55 };
+            let ground = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
+            return (self.cmd.0 as f32, self.cmd.1 as f32, ground + eye);
         }
         let (target, _, view_h) = self.last_cam;
         let (x, y) = (target.x as f64 + self.origin.0, target.y as f64 + self.origin.1);
@@ -1001,7 +1009,7 @@ impl Viewer {
         r
     }
     /// Where the ears are for what stands between: the commander's head on foot, the camera on the tablet.
-    fn ear(&self) -> (f32, f32) {
+    fn ear(&mut self) -> (f32, f32) {
         if self.tablet {
             let l = self.audio_listener();
             return (l.0, l.1);
