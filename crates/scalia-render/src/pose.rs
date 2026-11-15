@@ -86,6 +86,10 @@ pub enum Pose {
     Brake = 31,
     /// Crawling on the belly: arms and legs working in turn (phase = the crawl cycle), rifle carried forward.
     Crawl = 32,
+    /// Getting down to prone over the phase (0 standing at the ready, `DROP_KNEEL` down on a knee, 1 flat), played
+    /// backwards to get up: a knee to the ground, the left hand planted ahead, then down onto the front. Built from
+    /// the ready, the kneel and prone (`drop_params`), so it always lands exactly on them.
+    Drop = 33,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -120,6 +124,7 @@ impl Pose {
             30 => Pose::Ready,
             31 => Pose::Brake,
             32 => Pose::Crawl,
+            33 => Pose::Drop,
             _ => Pose::Stand,
         }
     }
@@ -884,6 +889,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }
+        Pose::Drop => return drop_params(phase),
         Pose::Prone => {
             p.prone = 1.0;
             p.shoulder = [2.8, 2.8];
@@ -989,6 +995,52 @@ fn athletic(p: &mut PoseParams) {
 pub const READY_LEAN: f32 = 0.16;
 /// Forward lean while aiming (radians): into the rifle.
 pub const AIM_LEAN: f32 = 0.1;
+
+/// Where the kneel sits on the drop (`Pose::Drop` phase): crouching joins and leaves the drop here.
+pub const DROP_KNEEL: f32 = 0.35;
+/// Where, still on his knee, he has leaned over and put the left hand down ahead.
+pub const DROP_REACH: f32 = 0.55;
+/// Where his weight is on the planted hand, most of the way over onto the front.
+pub const DROP_PLANT: f32 = 0.78;
+
+/// The drop to prone at phase `t` (`Pose::Drop`): ready, then down on a knee, then over onto the planted left
+/// hand, then flat. common.wgsl `drop_params` mirrors it.
+pub fn drop_params(t: f32) -> PoseParams {
+    let t = t.clamp(0.0, 1.0);
+    let (ready, kneel, flat) = (params(Pose::Ready, 0.0), params(Pose::Crouch, 0.0), params(Pose::Prone, 0.0));
+    // Most of the way over, the chest kept well down (so the head never rises as the body pivots from the knee
+    // to the boots), the left palm on the ground ahead taking the weight (found by search: 4 cm up, 0.8 m ahead
+    // of the boots); the rifle stays in the right hand.
+    let mut plant = blend(&kneel, &flat, 0.65);
+    plant.lean += 0.9;
+    // On both knees under him (search: knees about 20 cm up as drawn, boots on the ground), not floating.
+    plant.hip = [0.9, 0.9];
+    plant.knee = [1.35, 1.35];
+    plant.drop = ground_drop_side(plant.hip, plant.knee, plant.side, plant.flat);
+    plant.shoulder[0] = 0.9;
+    plant.elbow[0] = 0.5;
+    plant.reach[0] = 0.1;
+    plant.abduct[0] = 0.15;
+    plant.head = 0.6;
+    // Between them, still on the knee: chest down over it and the left palm on the ground just ahead (search:
+    // about 15 cm up, 45 cm ahead), so he goes over onto the hand instead of rising off the knee.
+    let mut reach = kneel;
+    reach.lean = 1.1;
+    reach.shoulder[0] = 1.0;
+    reach.elbow[0] = 0.1;
+    reach.reach[0] = 0.1;
+    reach.abduct[0] = 0.15;
+    reach.head = 0.9;
+    if t < DROP_KNEEL {
+        blend(&ready, &kneel, t / DROP_KNEEL)
+    } else if t < DROP_REACH {
+        blend(&kneel, &reach, (t - DROP_KNEEL) / (DROP_REACH - DROP_KNEEL))
+    } else if t < DROP_PLANT {
+        blend(&reach, &plant, (t - DROP_REACH) / (DROP_PLANT - DROP_REACH))
+    } else {
+        blend(&plant, &flat, (t - DROP_PLANT) / (1.0 - DROP_PLANT))
+    }
+}
 
 fn kneel(p: &mut PoseParams) {
     p.hip = [1.55, -0.1];
@@ -1402,5 +1454,39 @@ mod fade_layer_tests {
         assert!((unpack_kick(packed) - 0.7).abs() < 0.01);
         assert_eq!(pack_kick(Pose::Ready, 0.0), Pose::Ready as u32 as f32);
         assert!(unpack_kick(pack_kick(Pose::Ready, 5.0)) < 1.0);
+    }
+}
+
+#[cfg(test)]
+mod drop_tests {
+    use super::*;
+    use crate::mesh::Part;
+
+    #[test]
+    fn the_drop_lands_exactly_on_ready_kneel_and_prone() {
+        assert_eq!(drop_params(0.0), params(Pose::Ready, 0.0));
+        assert_eq!(drop_params(DROP_KNEEL), params(Pose::Crouch, 0.0));
+        assert_eq!(drop_params(1.0), params(Pose::Prone, 0.0));
+        assert_eq!(params(Pose::Drop, 0.6), drop_params(0.6));
+    }
+
+    #[test]
+    fn the_left_hand_goes_to_the_ground_ahead_and_nothing_jumps() {
+        let palm = |t: f32| pose_vertex(Vec3::new(-PALM.x, PALM.y, PALM.z), Part::LeftForearm, &drop_params(t));
+        let h = palm(DROP_PLANT);
+        assert!((-0.02..0.15).contains(&h.z), "planted hand on the ground: {h:?}");
+        assert!(h.y > 0.15, "and ahead of him: {h:?}");
+        // Small steps along the drop move the head a little each, never a jump.
+        let head = |t: f32| pose_vertex(Vec3::new(0.0, 0.0, 1.6), Part::Head, &drop_params(t));
+        let kneel_head = head(DROP_KNEEL).z;
+        for i in 35..=100 {
+            let z = head(i as f32 / 100.0).z;
+            assert!(z < kneel_head + 0.06, "head rises off the knee at {}: {z} vs {kneel_head}", i as f32 / 100.0);
+        }
+        for i in 0..100 {
+            let (a, b) = (i as f32 / 100.0, (i + 1) as f32 / 100.0);
+            let step = (head(b) - head(a)).length();
+            assert!(step < 0.08, "head jumps {step} m between {a} and {b}");
+        }
     }
 }

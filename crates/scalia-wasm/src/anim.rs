@@ -23,6 +23,17 @@ const SHUFFLE_SPIN: f32 = 1.3;
 pub const TURN_ACCEL: f32 = 28.0;
 const FALL_BACK_S: f32 = 1.1;
 const FALL_FORWARD_S: f32 = 0.95;
+/// Getting down to prone or back up: how fast he moves along the drop (`Pose::Drop` phase per second), so the
+/// whole way from standing to flat takes about 0.9 s and from a knee about 0.6 s.
+const DROP_RATE: f32 = 1.1;
+/// Where on the drop each stance sits.
+fn drop_at(s: Stance) -> f32 {
+    match s {
+        Stance::Stand => 0.0,
+        Stance::Crouch => pose::DROP_KNEEL,
+        Stance::Prone => 1.0,
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Stance {
@@ -128,6 +139,10 @@ pub struct Animator {
     on_back: bool,
     was_up: bool,
     clock: f32,
+    /// The stance he was last drawn in, and where he is on the drop while going down to prone or getting up
+    /// (None when settled).
+    stance: Stance,
+    drop: Option<f32>,
 }
 
 impl Default for Animator {
@@ -165,6 +180,8 @@ impl Animator {
             on_back: false,
             was_up: true,
             clock: 0.0,
+            stance: Stance::Stand,
+            drop: None,
         }
     }
 
@@ -265,6 +282,31 @@ impl Animator {
             let t = (d.ts - t0) / if p == Pose::FallBack { FALL_BACK_S } else { FALL_FORWARD_S };
             (t < 1.0).then_some((p, t))
         });
+        // Going down to prone or getting up from it: he travels along the drop at his own pace (reversing from
+        // wherever he is if told the other way). Stand and crouch change by the plain blend.
+        let settled = alive_up && falling.is_none() && d.action.is_none();
+        if !settled {
+            self.drop = None;
+            self.stance = d.stance;
+        } else if d.stance != self.stance {
+            if self.drop.is_some() || d.stance == Stance::Prone || self.stance == Stance::Prone {
+                let from = self.drop.unwrap_or(drop_at(self.stance));
+                self.drop = Some(from);
+            }
+            self.stance = d.stance;
+        }
+        let mut landed = None;
+        if let Some(at) = self.drop {
+            let to = drop_at(d.stance);
+            let next = if at < to { (at + DROP_RATE * dt).min(to) } else { (at - DROP_RATE * dt).max(to) };
+            if next == to {
+                self.drop = None;
+                landed = Some(match d.stance { Stance::Stand => Pose::Ready, Stance::Crouch => Pose::Crouch, Stance::Prone => Pose::Prone });
+            } else {
+                self.drop = Some(next);
+            }
+        }
+        let dropping = self.drop;
         let carried = |legs: Pose| match d.rifle {
             Rifle::Aim => Some(Pose::StandAim),
             Rifle::Reload => Some(Pose::Reload),
@@ -274,6 +316,8 @@ impl Animator {
         };
         let (pose, upper, mut steps) = if let Some((p, _)) = falling {
             (p, None, 0.0)
+        } else if dropping.is_some() {
+            (Pose::Drop, None, 0.0)
         } else if d.dead {
             (if self.on_back { Pose::DeadBack } else { Pose::Dead }, None, 0.0)
         } else if d.down {
@@ -305,7 +349,13 @@ impl Animator {
             steps = 0.0;
         }
         if self.shown.0 != pose {
-            self.shown = (pose, self.shown.0, pose::switch_start(self.shown.1, self.shown.2, pose, d.ts));
+            self.shown = if let (Pose::Drop, Some(end)) = (self.shown.0, landed) {
+                // Off the drop: it ended exactly on this stance's settled pose, so blend on from that (whatever
+                // the phase) rather than from the drop.
+                (pose, end, d.ts)
+            } else {
+                (pose, self.shown.0, pose::switch_start(self.shown.1, self.shown.2, pose, d.ts))
+            };
         }
         let eff = upper.unwrap_or(pose);
         if eff != self.upper.0 {
@@ -318,11 +368,12 @@ impl Animator {
         let crossed = |at: f32| if after >= before { before < at && after >= at } else { before < at || after >= at };
         let footfall = (steps > 0.0 && matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk) && (crossed(0.0001) || crossed(0.5)))
             .then(|| match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, _ => 0.5 });
-        let (phase, cadence) = match falling {
-            Some((_, t)) => (t, -1.0),
+        let (phase, cadence) = match (falling, dropping) {
+            (Some((_, t)), _) => (t, -1.0),
+            (None, Some(at)) => (at, -1.0),
             // The phase is always handed over (frozen when he stops) so legs blending out of a stride stay put;
             // once settled the shader takes over the idle.
-            None => (self.phase, if steps == 0.0 && d.ts - self.shown.2 > 0.4 { 0.0 } else { -1.0 }),
+            (None, None) => (self.phase, if steps == 0.0 && d.ts - self.shown.2 > 0.4 { 0.0 } else { -1.0 }),
         };
         let up = alive_up && falling.is_none();
         let lean = if up { pose::pack_tilt(pose::bank(speed, self.spin), pose::accel_pitch(self.accel)) } else { 0.0 };
@@ -363,6 +414,57 @@ impl Animator {
 
 #[cfg(test)]
 mod tests {
+
+    /// Steps him at 60 fps for `secs` in `stance`, returning the poses and drop phases seen.
+    fn hold(a: &mut Animator, ts: &mut f32, stance: Stance, secs: f32) -> Vec<(Pose, f32)> {
+        let mut seen = Vec::new();
+        for _ in 0..(secs * 60.0) as usize {
+            let mut d = drive(*ts);
+            d.stance = stance;
+            let f = a.step(&d);
+            seen.push((f.pose, f.phase));
+            *ts += d.dt;
+        }
+        seen
+    }
+
+    #[test]
+    fn going_prone_kneels_plants_and_lies_down_then_gets_back_up() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Stand, 1.0);
+        let down = hold(&mut a, &mut ts, Stance::Prone, 1.5);
+        let drop: Vec<f32> = down.iter().filter(|(p, _)| *p == Pose::Drop).map(|(_, t)| *t).collect();
+        let secs = drop.len() as f32 / 60.0;
+        assert!((0.7..1.1).contains(&secs), "stand to flat in about 0.9 s: {secs}");
+        assert!(drop.windows(2).all(|w| w[1] > w[0]), "down the drop, never back");
+        assert_eq!(down.last().unwrap().0, Pose::Prone);
+        // Landing blends on from prone itself, not from the drop at some other phase.
+        assert_eq!(a.shown.1, Pose::Prone);
+        let up = hold(&mut a, &mut ts, Stance::Stand, 1.5);
+        let rise: Vec<f32> = up.iter().filter(|(p, _)| *p == Pose::Drop).map(|(_, t)| *t).collect();
+        assert!(rise.windows(2).all(|w| w[1] < w[0]), "up the drop backwards");
+        assert!(!rise.is_empty() && rise[0] > 0.9);
+        assert_eq!(up.last().unwrap().0, Pose::Ready);
+    }
+
+    #[test]
+    fn crouching_joins_the_drop_at_the_knee_and_a_change_of_mind_turns_back() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Crouch, 1.0);
+        let down = hold(&mut a, &mut ts, Stance::Prone, 0.3);
+        let first = down.iter().find(|(p, _)| *p == Pose::Drop).unwrap().1;
+        assert!((first - pose::DROP_KNEEL).abs() < 0.05, "from the knee: {first}");
+        let mid = down.last().unwrap().1;
+        // Told to get up half way down: he turns back from where he is.
+        let back = hold(&mut a, &mut ts, Stance::Crouch, 1.0);
+        assert!((back[0].1 - mid).abs() < 0.05, "no jump: {} -> {}", mid, back[0].1);
+        assert_eq!(back.last().unwrap().0, Pose::Crouch);
+        // Standing up from a crouch is the plain blend, no drop.
+        assert!(hold(&mut a, &mut ts, Stance::Stand, 0.5).iter().all(|(p, _)| *p != Pose::Drop));
+    }
+
     use super::*;
 
     fn run(a: &mut Animator, frames: usize, mut d: Drive) -> Frame {
