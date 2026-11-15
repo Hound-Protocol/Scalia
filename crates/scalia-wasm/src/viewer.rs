@@ -3536,12 +3536,8 @@ impl Viewer {
         (self.planet.height_mm(xm, ym.clamp(0, self.planet.depth_mm() - 1)) as f32 / 1000.0).max(0.0)
     }
 
-    /// Coarse terrain for zoomed-out views: square tiles of 64 x 64 cells, each cell 2^level metres, enough of
-    /// them to cover the screen (or the whole planet once it is a globe). A level is drawn only when all its
-    /// tiles are ready; until then the previous level stays, so zooming never shows holes.
-    fn far_terrain(&mut self, tg: Vec3, now: f64, _meshes: &mut Vec<String>, instanced: &mut Vec<(String, String)>) {
-        // Cells about five screen pixels wide: any finer and the globe shimmers as the camera moves. And at least
-        // six internal pixels (the small tablet map draws at few of them): smaller facets get speckled normals.
+    /// Coarse terrain for zoomed-out views. Keep a complete fallback visible while the requested LOD streams in.
+    fn far_terrain(&mut self, tg: Vec3, _now: f64, _meshes: &mut Vec<String>, instanced: &mut Vec<(String, String)>) {
         let pix = self.ground_view / self.size.1.max(1) as f32 * self.pixel_scale as f32;
         let by_view = (self.ground_view / 64.0).log2().ceil() as i32;
         let by_pixels = (pix * 6.0).log2().ceil() as i32;
@@ -3552,75 +3548,79 @@ impl Viewer {
             let half_lon = PLANET_R * std::f32::consts::PI;
             let cov = (1.6 * view).min(half_lon);
             let (y0, y1) = (((tg.y - cov).max(-HALF_DEPTH) / ts).floor() as i64, ((tg.y + cov).min(HALF_DEPTH - 1.0) / ts).floor() as i64);
-            // Towards a pole the same ground spans more longitude (1 / cos latitude), and at the pole all of it
-            // meets: each row of tiles covers what its poleward edge needs, up to the whole way round.
             (y0..=y1)
                 .flat_map(|y| {
                     let edge = ((y as f32 * ts).abs()).max(((y + 1) as f32 * ts).abs()).min(HALF_DEPTH);
-                    let lat = edge / PLANET_R;
-                    let span = (cov / lat.cos().max(1e-3)).min(half_lon);
+                    let span = (cov / (edge / PLANET_R).cos().max(1e-3)).min(half_lon);
                     let (x0, x1) = (((tg.x - span) / ts).floor() as i64, ((tg.x + span) / ts).floor() as i64);
                     (x0..=x1).map(move |x| (level, x, y))
                 })
                 .collect()
         };
+
         let tiles = needed(want);
         let mut budget = 6;
+
+        // On first entry there is no completed LOD to fall back to. Build a coarser complete
+        // coverage set (at most six tiles), rather than displaying the first six tiles as black-hole gaps.
+        if self.far_level.is_none() {
+            let mut fallback = want;
+            let mut fallback_tiles = tiles.clone();
+            while fallback_tiles.len() > budget && fallback < 24 {
+                fallback += 1;
+                fallback_tiles = needed(fallback);
+            }
+            for &key in &fallback_tiles {
+                if !self.far_tiles.contains(&key) {
+                    let mesh = far_tile_mesh(&self.planet, key.0, key.1, key.2);
+                    self.gpu.upload(&format!("far{},{},{}", key.0, key.1, key.2), mesh.bytes());
+                    self.far_tiles.insert(key);
+                    self.place_far(key, 0.0, "of");
+                }
+            }
+            if fallback_tiles.iter().all(|key| self.far_tiles.contains(key)) {
+                self.far_level = Some(fallback);
+            }
+        }
+
         let mut missing = false;
         for &key in &tiles {
-            if !self.far_tiles.contains(&key) {
-                if budget == 0 {
-                    missing = true;
-                    continue;
-                }
-                budget -= 1;
-                let m = far_tile_mesh(&self.planet, key.0, key.1, key.2);
-                self.gpu.upload(&format!("far{},{},{}", key.0, key.1, key.2), m.bytes());
-                self.far_tiles.insert(key);
-                self.place_far(key, 0.0, "of");
+            if self.far_tiles.contains(&key) {
+                continue;
             }
+            if budget == 0 {
+                missing = true;
+                continue;
+            }
+            budget -= 1;
+            let mesh = far_tile_mesh(&self.planet, key.0, key.1, key.2);
+            self.gpu.upload(&format!("far{},{},{}", key.0, key.1, key.2), mesh.bytes());
+            self.far_tiles.insert(key);
+            self.place_far(key, 0.0, "of");
         }
-        // A new level takes over only when complete, dissolving in over the old one.
-        if !missing && self.far_level != Some(want) {
-            if let Some(old) = self.far_level {
-                self.far_fade = Some((old, now));
-            }
+
+        // Swap only after every requested tile exists. No screen-space dissolve: its moving Bayer pattern
+        // shimmered during zoom and exposed dark gaps where adjacent LOD meshes disagreed in depth.
+        if !missing && tiles.iter().all(|key| self.far_tiles.contains(key)) {
             self.far_level = Some(want);
         }
+
         let shown = self.far_level.unwrap_or(want);
-        let fade = self.far_fade.and_then(|(old, start)| {
-            let p = ((now - start) / FADE_MS) as f32;
-            (p < 1.0 && old != shown).then_some((old, p))
-        });
-        if fade.is_none() {
-            self.far_fade = None;
-        }
-        let p = fade.map_or(1.0, |f| f.1);
-        // The new level is solid at once; the old one lies over it at half strength and thins out to nothing,
-        // a gentle blend rather than a flicker between the two.
-        let new_tiles = if shown == want { tiles.clone() } else { needed(shown) };
-        for key in &new_tiles {
+        let shown_tiles = needed(shown);
+        for key in &shown_tiles {
             if self.far_tiles.contains(key) {
                 instanced.push((format!("far{},{},{}", key.0, key.1, key.2), format!("of{},{},{}", key.0, key.1, key.2)));
             }
         }
-        let mut keep: std::collections::HashSet<_> = new_tiles.iter().copied().chain(tiles).collect();
-        if let Some((old, _)) = fade {
-            for key in needed(old) {
-                if self.far_tiles.contains(&key) {
-                    self.place_far(key, 0.5 + 0.5 * p, "off");
-                    instanced.push((format!("far{},{},{}", key.0, key.1, key.2), format!("off{},{},{}", key.0, key.1, key.2)));
-                }
-                keep.insert(key);
-            }
-        }
-        // Forget tiles of other levels, and ones far off screen.
-        let stale: Vec<_> = self.far_tiles.iter().copied().filter(|k| !keep.contains(k)).collect();
-        for k in stale {
-            self.far_tiles.remove(&k);
-            self.gpu.drop_buffer(&format!("far{},{},{}", k.0, k.1, k.2));
-            self.gpu.drop_buffer(&format!("of{},{},{}", k.0, k.1, k.2));
-            self.gpu.drop_buffer(&format!("off{},{},{}", k.0, k.1, k.2));
+
+        // Retain the visible LOD and in-progress requested tiles; discard everything else.
+        let keep: std::collections::HashSet<_> = shown_tiles.into_iter().chain(tiles).collect();
+        let stale: Vec<_> = self.far_tiles.iter().copied().filter(|key| !keep.contains(key)).collect();
+        for key in stale {
+            self.far_tiles.remove(&key);
+            self.gpu.drop_buffer(&format!("far{},{},{}", key.0, key.1, key.2));
+            self.gpu.drop_buffer(&format!("of{},{},{}", key.0, key.1, key.2));
+            self.gpu.drop_buffer(&format!("off{},{},{}", key.0, key.1, key.2));
         }
     }
 
