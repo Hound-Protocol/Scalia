@@ -423,8 +423,12 @@ mod lab_more {
                             }
                         }
                         // Crowding: another friendly within 0.5 m.
-                        if b.soldiers.iter().enumerate().any(|(j, o)| j > i && up(o) && o.team == s.team && (o.pos.0 - s.pos.0).abs() < 500 && (o.pos.1 - s.pos.1).abs() < 500) {
+                        if let Some((_, o)) = b.soldiers.iter().enumerate().find(|(j, o)| *j > i && up(o) && o.team == s.team && (o.pos.0 - s.pos.0).pow(2) + (o.pos.1 - s.pos.1).pow(2) < 500 * 500) {
                             m[2] += 0.05;
+                            if std::env::var("WHY").is_ok() {
+                                let k = |t: &scalia_ai::battle::Task| format!("{t:?}").split([' ', '{']).next().unwrap_or("").to_string();
+                                eprintln!("CROWD {name} {} {}/{} moving {}/{} stance {:?}/{:?} mind {} / {} gait {:?}", s.team, k(&s.task), k(&o.task), s.moving, o.moving, s.stance, o.stance, s.mind.describe(), o.mind.describe(), s.gait);
+                            }
                         }
                     }
                     m[3] += starts.values().filter(|&&c| c >= 4).count() as f64;
