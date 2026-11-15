@@ -57,3 +57,21 @@ test('stream() contains InvalidStateError when another audio path already owns t
   connectedElements.add(element);
   assert.doesNotThrow(() => assert.equal(engine().stream(element), null));
 });
+
+test('jukebox replaces an already-routed media element and obtains a controllable stream', async () => {
+  const { createRoutedMediaStream } = await import('../jukebox.js');
+  const original = {};
+  const replacement = {};
+  const calls = [];
+  const result = createRoutedMediaStream({
+    element: original,
+    createElement: () => replacement,
+    stream: (element) => {
+      calls.push(element);
+      return element === replacement ? { volume() {}, tone() {} } : null;
+    },
+  });
+  assert.equal(result.element, replacement);
+  assert.ok(result.voice);
+  assert.deepEqual(calls, [original, replacement]);
+});

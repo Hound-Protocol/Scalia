@@ -12,11 +12,29 @@ const TRACKS = [
   ['Ransom', 'ransom'],
 ];
 
+// A media element can only be connected to one MediaElementAudioSourceNode. If a stale or
+// independently-routed element is handed to the jukebox, switch to a fresh element rather than
+// leaving the controls attached to a null stream.
+export function createRoutedMediaStream({ element, createElement, stream }) {
+  let media = element;
+  let voice = stream(media);
+  if (!voice) {
+    media = createElement();
+    voice = stream(media);
+  }
+  return { element: media, voice };
+}
+
 export function createJukebox({ audio, viewer }) {
   const box = document.getElementById('jukebox');
-  const el = new Audio();
-  el.preload = 'none';
-  el.crossOrigin = 'anonymous';
+  const makeElement = () => {
+    const media = new Audio();
+    media.preload = 'none';
+    media.crossOrigin = 'anonymous';
+    media.addEventListener('ended', onEnded);
+    return media;
+  };
+  let el = makeElement();
   let voice = null, on = false, track = 0, vol = 0.5, tone = [5, 5, 5], timer = 0;
   const $ = (s) => box.querySelector(s);
   const list = $('.jb-list');
@@ -28,7 +46,9 @@ export function createJukebox({ audio, viewer }) {
   });
   const ensure = () => {
     if (voice) return voice;
-    voice = audio.stream(el);
+    const routed = createRoutedMediaStream({ element: el || makeElement(), createElement: makeElement, stream: (media) => audio.stream(media) });
+    el = routed.element;
+    voice = routed.voice;
     if (voice) { voice.volume(vol); voice.tone(...tone); }
     return voice;
   };
@@ -53,7 +73,7 @@ export function createJukebox({ audio, viewer }) {
     $('.jb-vol-v').textContent = `${Math.round(vol * 100)}%`;
     ['bass', 'treble', 'highs'].forEach((k, i) => { $(`.jb-${k}`).value = tone[i]; $(`.jb-${k}-v`).textContent = tone[i]; });
   };
-  el.addEventListener('ended', () => { track = (track + 1) % TRACKS.length; load(true); draw(); });
+  function onEnded() { track = (track + 1) % TRACKS.length; load(true); draw(); }
   $('.jb-power').addEventListener('click', () => {
     on = !on;
     if (on) { ensure(); aim(); load(true); timer = setInterval(aim, 120); }
