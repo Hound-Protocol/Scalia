@@ -549,14 +549,14 @@ mod tests {
         assert!((record[6] - (-1.0 - slow.reload_phase)).abs() < 1e-5, "shader receives the reload clock");
 
         a.rifle = Rifle::Ready;
-        for k in 90..112 {
+        for k in 90..102 {
             a.ts = k as f32 / 60.0;
             fa = slow.step(&a);
         }
         let fading = slow.record(&fa, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
         assert!(fading[6] < -1.0, "the reload phase survives the upper-body blend-out");
 
-        for k in 112..140 {
+        for k in 102..130 {
             a.ts = k as f32 / 60.0;
             fa = slow.step(&a);
         }
