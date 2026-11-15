@@ -92,6 +92,29 @@ fn animate_evaluates_poses_at_most_four_times() {
 
 
 #[test]
+fn reload_manipulation_phase_and_key_times_match_the_wgsl_mirror() {
+    assert!(RS.contains("pub fn reload_hand("), "Rust reference exposes the magazine reach");
+    assert!(WGSL.contains("let reload_phase = clamp(-b.z - 1.0, 0.0, 1.0);"));
+    assert!(WGSL.contains("let base_phase = select(phase, reload_phase, u32(b.w) == 18u);"));
+    assert!(WGSL.contains("let upper_phase = select(phase, reload_phase, upper_id == 18u);"));
+    assert!(WGSL.contains("reload_target(pp, reload_phase)"), "shader uses the independent reload phase");
+    assert!(WGSL.contains("lb.x == 19.0"), "the previous upper reload keeps its hand path during blend-out");
+
+    let rust = Regex::new(r"let kt = \[([^\]]*)\]").unwrap().captures(RS).unwrap();
+    let mut rust_times = nums(&rust[1]);
+    let body = &WGSL[WGSL.find("fn reload_target(").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    let mut shader_times: Vec<f32> = Regex::new(r"t >= ([0-9.]+)")
+        .unwrap()
+        .captures_iter(body)
+        .map(|c| c[1].parse().unwrap())
+        .collect();
+    shader_times.push(0.0);
+    rust_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    shader_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(rust_times, shader_times, "reload hand path key times match");
+}
+#[test]
 fn idle_animation_constants_match_between_rust_and_wgsl() {
     let extract = |src: &str| {
         let re = Regex::new(r"const (IDLE_[A-Z0-9_]+): f32 = ([0-9.]+);").unwrap();

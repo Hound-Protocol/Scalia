@@ -397,6 +397,12 @@ pub fn reload_target(p: &PoseParams, t: f32) -> Vec3 {
     }
     well
 }
+
+/// Moves the left palm along the reload path, blended by weight so reloads can enter and leave over a pose blend.
+pub fn reload_hand(p: &PoseParams, phase: f32, weight: f32) -> PoseParams {
+    reach_left(p, reload_target(p, phase), weight)
+}
+
 /// The magazine well, a rifle point (rest pose): under the receiver just ahead of the grip.
 pub const RIFLE_WELL: Vec3 = Vec3::new(0.238, 0.11, 0.70);
 /// The magazine pouch on the front of the vest, left of centre (figure frame).
@@ -1400,12 +1406,19 @@ pub fn muzzle(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) 
 
 /// `w`'s muzzle and the unit direction its bore points, in a figure's own frame (as `muzzle`).
 pub fn barrel(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, dir: f32) -> (Vec3, Vec3) {
-    let legs = params_dir(pose, phase, dir);
+    barrel_with_phases(w, pose, upper, phase, phase, dir)
+}
+
+/// A barrel reference with a separate magazine-manipulation phase; gait and weapon handling need not share a clock.
+pub fn barrel_with_phases(w: Weapon, pose: Pose, upper: Option<Pose>, phase: f32, reload_phase: f32, dir: f32) -> (Vec3, Vec3) {
+    let base_phase = if pose == Pose::Reload { reload_phase } else { phase };
+    let legs = params_dir(pose, base_phase, dir);
     let p = match upper {
-        Some(u) => layer(&legs, &params_dir(u, phase, 0.0)),
+        Some(u) => layer(&legs, &params_dir(u, if u == Pose::Reload { reload_phase } else { phase }, 0.0)),
         None => legs,
     };
     let p = grip(&p, two_handed(upper.unwrap_or(pose)));
+    let p = if pose == Pose::Reload || upper == Some(Pose::Reload) { reload_hand(&p, reload_phase, 1.0) } else { p };
     let tip = pose_vertex(w.muzzle, Part::Rifle, &p);
     (tip, (tip - pose_vertex(w.breech, Part::Rifle, &p)).normalize_or_zero())
 }
@@ -1500,6 +1513,24 @@ mod muzzle_tests {
             let yaw = b.x.atan2(b.y).to_degrees();
             assert!(yaw.abs() < 3.0, "{pose:?}/{upper:?}: barrel yaw {yaw:.1} degrees off his heading");
         }
+    }
+
+
+    #[test]
+    fn moving_reload_reaches_the_magazine_and_uses_its_own_phase() {
+        let legs = params(Pose::Walk, 0.2);
+        let upper = params(Pose::Reload, 0.2);
+        let layered = layer(&legs, &upper);
+        let target = reload_target(&layered, 0.2);
+        let reached = reload_hand(&layered, 0.2, 1.0);
+        assert!(
+            (hand(&reached, Side::Left) - target).length() < (hand(&layered, Side::Left) - target).length(),
+            "the support hand leaves the handguard for the magazine path"
+        );
+
+        let early = barrel_with_phases(RIFLE, Pose::Walk, Some(Pose::Reload), 0.1, 0.15, 0.0).0;
+        let late = barrel_with_phases(RIFLE, Pose::Walk, Some(Pose::Reload), 0.1, 0.5, 0.0).0;
+        assert!((early - late).length() > 0.005, "reload manipulation changes the posed barrel independently of gait");
     }
 }
 
