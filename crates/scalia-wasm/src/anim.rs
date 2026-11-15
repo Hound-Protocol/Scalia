@@ -615,7 +615,7 @@ mod tests {
     fn gait_changes_keep_stride_phase_continuous_and_cadence_positive() {
         let mut a = Animator::new(0.0);
         let mut d = drive(0.0);
-        let mut previous = None;
+        let mut previous: Option<f32> = None;
         // Cross walk -> run -> sprint -> run -> walk at real pace. Pose changes must not
         // reset the alternating-foot cycle or produce a zero/negative stride cadence.
         for (frame, speed, sprint, expected) in [
