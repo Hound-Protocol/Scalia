@@ -786,7 +786,7 @@
     const message = reason instanceof Error ? reason.message : String(reason || 'Unknown initialization error');
     const detail = document.createElement('p');
     detail.className = 'boot-error';
-    detail.textContent = 'INITIALIZATION FAILED\\n' + message;
+    detail.textContent = 'INITIALIZATION FAILED\n' + message;
     const retry = document.createElement('button');
     retry.className = 'boot-retry';
     retry.type = 'button';
