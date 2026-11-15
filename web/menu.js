@@ -27,6 +27,7 @@ const ELEV = 0.6154797;       // The game camera's elevation (scalia-render came
 const PLANET_M = 3.2e6;       // The planet framed whole (viewer.rs shows the globe above 4 planet radii, 2.6e6 m).
 const FIELD_M = 50;           // The widest field zoom (viewer.rs LADDER[STEP_FIELD_MAX]).
 const AMB_TO_HZ = 5000;       // The zoom's ambience narrows to this.
+const WAKE_FROM_HZ = 1000;    // Waking up: everything heard through a low-pass opening from here to the full range.
 // After the pull-back the camera keeps drifting the same way at about 5% of its top speed (pull-backs per PULL_MS).
 const DRIFT = 0.14;
 const TRAVEL_LEAD_MS = 1000;  // The zoom's travel sound starts this far ahead of the zoom, to match its rush.
@@ -214,7 +215,7 @@ function galaxyRenderer(canvas, g) {
   };
 }
 
-export function createMenu({ viewer, onEnter }) {
+export function createMenu({ viewer, onEnter, wake = () => {} }) {
   const root = document.getElementById('menu');
   const sky = document.getElementById('menuSky');
   const marks = document.getElementById('menuMarks');
@@ -278,6 +279,7 @@ export function createMenu({ viewer, onEnter }) {
     };
     return { src, gain, stop };
   }
+  let wakeLp = null;
   let tune = null, amb1 = null, amb3 = null, travel = null, enter = null, eyesSnd = null, ambFilter = null;
   const stopAll = (fade) => { for (const s of [tune, amb1, amb3, travel, enter, eyesSnd]) s?.stop(fade); tune = amb1 = amb3 = travel = enter = eyesSnd = null; };
   function startTune() {
@@ -336,11 +338,14 @@ export function createMenu({ viewer, onEnter }) {
     drawMarks(project, now, markAlpha);
   }
 
-  // The round black border of opening eyes: `open` 0 shut .. 1 gone off the corners.
+  // Eyelids: `open` 0 shut .. 1 gone. The gap between them is an eye's shape: a wide, flat slit that parts
+  // upwards and downwards (it widens a little too, never round), soft at the lashes.
   function setLids(open) {
-    const rad = Math.max(0, open) * 78; // % of the farthest corner
-    lids.style.background = open >= 1 ? 'none'
-      : `radial-gradient(ellipse ${rad * 1.25}% ${rad}% at 50% 50%, transparent 0%, transparent 62%, rgba(0,0,0,0.85) 86%, #000 100%)`;
+    open = Math.max(0, open);
+    if (open >= 1) { lids.style.background = 'none'; return; }
+    const h = 4 + open * 120;                 // % of the half height between the lids
+    const w = 75 + 85 * Math.min(1, open * 1.4); // % of the half width
+    lids.style.background = `radial-gradient(ellipse ${w}% ${h}% at 50% 52%, transparent 0%, transparent ${40 + 25 * open}%, rgba(0,0,0,0.9) ${78 + 10 * open}%, #000 100%)`;
   }
   // Two lids blink open: half open, a heavy half-close, then wide.
   const eyes = (x) => {
@@ -432,12 +437,21 @@ export function createMenu({ viewer, onEnter }) {
     const o = e - T_HIT - BLACK_MS;
     if (o < 0) { lids.style.background = '#000'; intro(2.5, ELEV, 0); return; }
     // The eyes open on a dark braam.
-    if (step === 5) { step = 6; eyesSnd = play('eyes', 0.85); }
+    if (step === 5) {
+      step = 6;
+      if (ctx) { wakeLp = ctx.createBiquadFilter(); wakeLp.type = 'lowpass'; wakeLp.frequency.value = WAKE_FROM_HZ; wakeLp.Q.value = 0.5; wakeLp.connect(ctx.destination); }
+      eyesSnd = play('eyes', 0.3, { via: wakeLp });
+    }
     root.classList.remove('letterbox');
     const k = o / OPEN_MS;
     setLids(eyes(k * 1.15));
     intro(logLerp(2.5, FIELD_M, smooth(k)), ELEV, 0);
-    document.body.style.setProperty('--blur', `${(1 - smooth(k * 1.6)) * 6}px`);
+    // Waking up: sight blurred until late in the opening, then clearing; hearing opening from 1 kHz to everything
+    // over the whole of it.
+    document.body.style.setProperty('--blur', `${(1 - smooth((k - 0.45) / 0.55)) * 9}px`);
+    const hz = logLerp(WAKE_FROM_HZ, 22000, smooth(k));
+    if (wakeLp) wakeLp.frequency.value = hz;
+    wake(hz);
     if (k >= 1) finish();
   }
 
@@ -464,6 +478,8 @@ export function createMenu({ viewer, onEnter }) {
     state = 'done';
     cancelAnimationFrame(raf);
     try { v()?.end_intro(); } catch (_) { /* engine down */ }
+    wake(22000);
+    if (wakeLp) wakeLp.frequency.value = 22000;
     // Everything but the eyes' braam, which rings out into the game.
     const keep = eyesSnd; eyesSnd = null; stopAll(0.3); eyesSnd = keep;
     document.body.style.removeProperty('--blur');

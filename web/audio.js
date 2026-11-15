@@ -93,6 +93,11 @@ export class AudioEngine {
     return Math.max(PEAK_FLOOR_DB, this.peak - RELEASE_DB_S * Math.max(0, t - this.peakAt));
   }
 
+  /// Waking up: everything in the world heard through a low-pass at `hz` (22000 or more: open).
+  setWake(hz) {
+    this.wakeHz = Math.min(22000, Math.max(200, hz));
+    if (this.wakeLp) this.wakeLp.frequency.value = this.wakeHz;
+  }
   /// Creates the graph on first use (browsers allow audio only after a user gesture).
   ensure() {
     if (this.ctx) {
@@ -122,7 +127,10 @@ export class AudioEngine {
     // The world: everything goes through a low-pass the shock of close indoor fire can close for a moment (the
     // ears stunned), and non-gunfire through a bus that gunfire ducks (the bang pushes everything else away).
     this.muffle = c.createBiquadFilter(); this.muffle.type = 'lowpass'; this.muffle.frequency.value = 22000; this.muffle.Q.value = 0.5;
-    this.muffle.connect(head);
+    // Waking up (the intro's eyes opening): a low-pass the menu sweeps from 1 kHz to the full range (setWake).
+    this.wakeLp = c.createBiquadFilter(); this.wakeLp.type = 'lowpass'; this.wakeLp.frequency.value = this.wakeHz || 22000; this.wakeLp.Q.value = 0.5;
+    this.wakeLp.connect(head);
+    this.muffle.connect(this.wakeLp);
     this.mix = c.createGain(); this.mix.connect(this.muffle);
     this.world = c.createGain(); this.world.connect(this.mix);
     // Room heat: sustained fire indoors keeps the room ringing on top of itself (rises per shot, fades in ~1.5 s).

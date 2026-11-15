@@ -26,14 +26,15 @@ const store = {
 // World sounds (music, footsteps) go through one bus; with the tablet up it is muffled (low-passed and a little
 // quieter), as if the commander's attention has gone to the device. The tablet's own sounds and the radio stay clear.
 const worldAudio = (() => {
-  let ctx = null, filt = null, gain = null;
+  let ctx = null, filt = null, gain = null, wakeF = null, wakeHz = 22000;
   const routed = new WeakSet();
   const graph = () => {
     if (ctx) return ctx;
     try {
       ctx = new AudioContext();
       filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 20000; filt.Q.value = 0.6;
-      gain = ctx.createGain(); filt.connect(gain).connect(ctx.destination);
+      wakeF = ctx.createBiquadFilter(); wakeF.type = 'lowpass'; wakeF.frequency.value = wakeHz; wakeF.Q.value = 0.5;
+      gain = ctx.createGain(); filt.connect(wakeF).connect(gain).connect(ctx.destination);
     } catch (_) { ctx = null; }
     return ctx;
   };
@@ -45,6 +46,8 @@ const worldAudio = (() => {
       if (routed.has(el)) return;
       try { c.createMediaElementSource(el).connect(filt); routed.add(el); } catch (_) { /* plays unfiltered */ }
     },
+    // Waking up (the intro's eyes opening): the bus heard through a low-pass at `hz`.
+    wake(hz) { wakeHz = Math.min(22000, Math.max(200, hz)); if (wakeF) wakeF.frequency.value = wakeHz; },
     fadeOut(sec) { const c = graph(); if (!c) return; gain.gain.cancelScheduledValues(c.currentTime); gain.gain.setTargetAtTime(0, c.currentTime, sec / 3); },
     muffle(on) {
       const c = graph(); if (!c) return;
@@ -1624,6 +1627,8 @@ try {
   // Battle sounds go through the Pack Engine audio graph (audio.js): the acoustics place every shot, blast and
   // footfall (walls, distance, zoom, the listener's space, headphones 3D), the graph plays it.
   const audio = new AudioEngine();
+  // For the intro (outside this block): waking up filters the world's sound.
+  window.scaliaAudio = audio;
   audio.fetchBytes = fileBytes;
   const SHOT = './sfx/m4-shot.mp3', STEPS = './sfx/steps-grass.mp3';
   // Each side's rifle (Rust assault.rs `Cue`): ours an AR-15, theirs an AK-47; the handling heard close by.
@@ -1981,7 +1986,9 @@ const UPDATE = '__UPDATE__';
   // Past the notice (shown alone on black): the main menu fades in (its music, then Start and the sequence); the
   // game's music and the wind
   // come in once the commander's eyes are open.
-  const menu = createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); } });
+  const menu = createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); },
+    // Waking up: every sound in the scene through one low-pass the eyes' opening sweeps open.
+    wake: (hz) => { worldAudio.wake(hz); try { window.scaliaAudio?.setWake(hz); } catch (_) { /* engine not up */ } } });
   const ver = document.getElementById('menuVer'); if (ver) ver.textContent = UPDATE.startsWith('__') ? '(local)' : UPDATE;
   const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); menu.show(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
