@@ -45,14 +45,11 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
   - raising and lowering the rifle (blend), falls, the commander's hard-stop brake;
   - reload (now the commander's too, through the battle's reload state).
 - **Partial:**
-  - crawl forward, backwards and sideways using one direction-aware low-crawl cycle; prone aim layers over the crawl;
-  - wounded idle; drag (crouch-walk legs plus drag arms).
+  - wounded idle; drag (crouch-walk legs plus drag arms); wounded crawl.
 - **Static poses (no motion of their own):**
-  - cover, cover aim, prone (now breathing/scanning), prone aim (now active and layerable);
-  - leans (peek), stack, signal, the radio and tablet holds, dead.
+  - cover, cover aim; leans (peek), stack, signal, the radio and tablet holds, dead.
 - **Exist but not driven by AI decisions yet:** grenade throw (there is an action path, but it needs checking in the lab), drone launch.
 - **Missing:**
-  - stand ↔ crouch ↔ prone transitions (BF3-style hand plant), including an aimed transition path;
   - dive to cover, vault and step over obstacles, kneel to observe;
   - pistol (fire, reload) and weapon switching; handling per weapon class;
   - hit reactions while standing, limp, wounded crawl, carry, help up, death variations;
@@ -61,6 +58,7 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
 - **Hook still missing:** incoming fire can already change a soldier's mind (cover first), but there is no visual "flinch / drop" reaction yet.
 
 ### AN-2 implementation notes (15 Nov)
+- Prone crawl forward/back/side, the ProneAim pose and aimed get-down/get-up transitions are implemented; automated checks are the merge gate, with visual in-game sign-off still outstanding.
 - `ProneAim` is pose 36; it is a real two-handed prone firing pose and can layer over directional `Crawl`.
 - `Crawl` uses the animator's travel direction to reverse diagonal timing when backing up and to change support width when crawling sideways.
 - Aimed drop/get-up transitions use aimed endpoints and latch their animation path so reversing halfway up/down does not switch to the non-aimed keys.
