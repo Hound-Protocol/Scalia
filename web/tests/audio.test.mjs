@@ -89,6 +89,11 @@ test('routeMedia() reuses one media source and preserves its selected bus', () =
   assert.equal(first.bus, 'world');
   assert.equal(audio.routeMedia(element, 'world'), first);
   assert.equal(audio.routeMedia(element, 'ui'), null);
+  const secondEngine = engine();
+  let secondEnsures = 0;
+  secondEngine.ensure = () => { secondEnsures++; return new FakeAudioContext(); };
+  assert.equal(secondEngine.routeMedia(element, 'world'), first);
+  assert.equal(secondEnsures, 0);
   assert.equal(sourceCreations, before + 1);
 });
 
