@@ -354,14 +354,19 @@ test('spatial one-shots keep a full-strength dry signal when room processing is 
   const audio = playbackEngine();
   const handle = audio.play('room-shot', {
     kind: 'shot', db: 130, gain: 1, room: 1, rx: 0, ry: 1,
-    below: 0, dist: 2, lowpass: 20000, space: [1, 4, 0],
+    below: 0, dist: 2, lowpass: 20000, lowDb: 8, midDb: 18, highDb: 30, space: [1, 4, 0],
     echoes: [[0.2, 1, 0]],
   });
   assert.ok(handle);
   const voice = [...audio.voices][0];
-  const dry = connectedTo(voice.nodes, audio.world);
-  assert.ok(dry, 'one-shot dry node must connect to the world bus');
+  const dry = connectedTo(voice.nodes, audio.mix);
+  assert.ok(dry, 'gunfire dry node must connect to the main mix');
   near(dry.gain.value, 1);
+  const transmissionMid = voice.nodes.find((node) => node.frequency?.value === 1500);
+  const transmissionHigh = voice.nodes.find((node) => node.frequency?.value === 5000);
+  assert.ok(transmissionMid && transmissionHigh, 'material transmission filters must be present');
+  near(transmissionMid.gain.value, -10);
+  near(transmissionHigh.gain.value, -22);
   const reverbSends = voice.nodes.filter((node) =>
     [audio.rev.small, audio.rev.large, audio.rev.corridor].some((bus) => node.connections?.includes(bus)));
   assert.ok(reverbSends.some((send) => send.gain.value > 0.18), 'room reverb must remain audible');
@@ -382,10 +387,16 @@ test('persistent streams keep a full-strength dry signal and restrained reverb s
   audio.rev = { small: new FakeNode(), large: new FakeNode(), corridor: new FakeNode() };
   const voice = audio.stream({});
   assert.ok(voice);
-  voice.place([0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 4, 0]);
+  const record = [0, 0, 1, 1, 20000, 1, 0, 0, 0, 2, 0, 1, 4, 0, ...Array(12).fill(0), 1, 8, 18, 30];
+  voice.place(record);
   const dry = connectedTo(context.createdNodes, audio.world);
   assert.ok(dry, 'persistent stream dry node must connect to the world bus');
   near(dry.gain.value, 1);
+  const transmissionMid = context.createdNodes.find((node) => node.frequency?.value === 1500);
+  const transmissionHigh = context.createdNodes.find((node) => node.frequency?.value === 5000);
+  assert.ok(transmissionMid && transmissionHigh, 'stream material transmission filters must be present');
+  near(transmissionMid.gain.value, -10);
+  near(transmissionHigh.gain.value, -22);
   const sends = context.createdNodes.filter((node) =>
     [audio.rev.small, audio.rev.large, audio.rev.corridor].some((bus) => node.connections?.includes(bus)));
   assert.ok(sends.some((send) => send.gain.value > 0.1), 'persistent media must carry audible room reverb');
