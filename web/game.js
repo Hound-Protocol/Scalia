@@ -932,7 +932,7 @@ try {
     let cur = new URLSearchParams(location.search).get('lab') || 'clear', speed = 1, labels = true;
     const panel = document.createElement('div'); panel.id = 'labPanel';
     panel.innerHTML = `<h5>AI LAB</h5><div class="scen">${SCEN.map(([k, n]) => `<button data-s="${k}">${n}</button>`).join('')}</div>
-      <div class="spd">${SPEEDS.map((x) => `<button data-v="${x}">${x === 0 ? 'Pause' : x + '×'}</button>`).join('')}<button data-l>Labels</button><button data-r>Restart</button></div>
+      <div class="spd">${SPEEDS.map((x) => `<button data-v="${x}">${x === 0 ? 'Pause' : x + '×'}</button>`).join('')}<button data-l>Labels</button><button data-r>Restart</button><button data-d>Deploy</button></div>
       <div class="note"></div><div class="feed"></div><div style="color:#8a9680;margin-top:4px">- slower (to pause) · + faster · Backspace restart</div>`;
     document.body.appendChild(panel);
     const marks = $('labMarks'), feed = panel.querySelector('.feed'), els = new Map();
@@ -954,6 +954,7 @@ try {
       else if (b.dataset.v !== undefined) setSpeed(Number(b.dataset.v));
       else if (b.hasAttribute('data-l')) { labels = !labels; paint(); }
       else if (b.hasAttribute('data-r')) start(cur);
+      else if (b.hasAttribute('data-d')) { feed.textContent = ''; panel.querySelector('.note').textContent = v.lab_deploy(); }
     });
     addEventListener('keydown', (e) => {
       if (e.target.closest && e.target.closest('input,textarea')) return;
@@ -1646,7 +1647,7 @@ try {
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
   let assaultOn = false, assaultPoll = 0, lastAlive = null;
-  // Sound records from the acoustics (26 floats each, see the viewer's take_sounds), into the mix.
+  // Sound records from the acoustics (27 floats each, see the viewer's take_sounds), into the mix.
   const STEPS_CONCRETE_N = STEPS_CONCRETE.length;
   let lastConcrete = -1;
   const concreteTake = () => { let k = Math.floor(Math.random() * STEPS_CONCRETE_N); if (k === lastConcrete) k = (k + 1) % STEPS_CONCRETE_N; lastConcrete = k; return STEPS_CONCRETE[k]; };
@@ -1654,11 +1655,11 @@ try {
     if (!s || !s.length) return;
     fireGraph();
     try {
-    for (let i = 0; i + 25 < s.length; i += 26) {
+    for (let i = 0; i + 26 < s.length; i += 27) {
       const [kind, loud, delay, gain, lowpass, room, rx, ry, below, dist] = s.subarray(i, i + 10);
       const space = s.subarray(i + 11, i + 14);
       const echoes = [0, 1, 2, 3].map((k) => s.subarray(i + 14 + k * 3, i + 17 + k * 3));
-      const at = { lowpass, rx, ry, below, dist, delay, space, echoes };
+      const at = { lowpass, rx, ry, below, dist, delay, space, echoes, far: s[i + 26] };
       if (kind === 3) audio.play(concreteTake(), { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16 });
       else if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2 });
       else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, rate: 0.45 });

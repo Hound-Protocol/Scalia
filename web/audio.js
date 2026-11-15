@@ -230,7 +230,7 @@ export class AudioEngine {
         const [gain, lowpass, room, rx, ry, below, dist, enc, size, cor] = [r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[11], r[12], r[13]].map((x) => num(x, 0));
         glide(g.gain, Math.max(0, Math.min(4, gain)));
         glide(lp.frequency, Math.max(200, Math.min(20000, lowpass || 20000)));
-        glide(hpf.frequency, Math.min(450, 30 + dist * 3));
+        glide(hpf.frequency, Math.min(90, 30 + dist * 0.3));
         const by = below * 0.35, len = Math.hypot(rx, ry, by);
         const [x, y, z] = len < 0.3 ? [0, 0, -1] : [rx / len, -by / len, -ry / len];
         glide(p.positionX, x); glide(p.positionY, y); glide(p.positionZ, z);
@@ -246,14 +246,17 @@ export class AudioEngine {
     // Anything odd coming in (a missing or non-finite number) is made safe here: audio never stops the game.
     const num = (x, d, lo, hi) => (Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d);
     o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), room: num(o.room, 0, 0, 1), dist: num(o.dist, 0, 0, 1e5),
-      rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), below: num(o.below, 0, 0, 1e4), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
+      far: num(o.far, 0, 0, 1), rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), below: num(o.below, 0, 0, 1e4), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
     const sp = o.space || [0, 30, 0];
     const enc = num(sp[0], 0, 0, 1), size = num(sp[1], 30, 0, 100), cor = num(sp[2], 0, 0, 1) * enc;
     if (o.gain <= 0.0005) return;
     // HDR: how loud it is at the ear, against the loudest lately.
     const heard = num(o.db, 100, 0, 200) + 20 * Math.log10(o.gain);
     const peak = this.peakNow();
-    if (heard < peak - this.windowDb) return;
+    // Close by (his own and his men's steps, a mag change at arm's length) nothing is lost under the fight: it
+    // is pushed down a little at most, never cut.
+    const near = o.dist < 15;
+    if (heard < peak - this.windowDb && !near) return;
     if (heard > peak) {
       // A new loudest: everything already playing well under it ducks for a moment (the ears clamp).
       const jump = heard - peak;
@@ -264,7 +267,7 @@ export class AudioEngine {
       this.peak = heard; this.peakAt = c.currentTime;
     }
     // Well under the peak: pushed down further (the loud fight masks the quiet things).
-    const under = Math.max(0, peak - heard - QUIET_DB);
+    const under = Math.min(near ? 12 : 1e9, Math.max(0, peak - heard - QUIET_DB));
     o.gain *= Math.pow(10, -under * 0.5 / 20);
     const buf = this.buffer(url); if (!buf) return;
     const pri = PRIORITY[o.kind] || 1;
@@ -285,11 +288,13 @@ export class AudioEngine {
     const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.rate || 1;
     const g = c.createGain(); g.gain.value = o.gain * (1 + 0.6 * inside);
     const body = c.createWaveShaper();
-    const drive = inside * close;
+    const drive = inside * close * (1 - o.far);
     if (drive > 0.05) { body.curve = this.crunch; body.oversample = '4x'; }
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
-    // Distance thins the low end too: what carries is the crack, not the boom.
-    const hpf = c.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = Math.min(450, 40 + o.dist * 3); hpf.Q.value = 0.6;
+    // The lows carry furthest (the air takes the highs, see the low-pass): only a little rumble is trimmed.
+    const hpf = c.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = Math.min(90, 30 + o.dist * 0.3); hpf.Q.value = 0.6;
+    // Distant fire is a boom more than a crack: the low end comes up as the top goes.
+    const boom = c.createBiquadFilter(); boom.type = 'lowshelf'; boom.frequency.value = 160; boom.gain.value = gun ? 7 * o.far : 0;
     const p = c.createPanner();
     p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1;
     // Around the head (the camera): right is +x, ahead is -z, below is -y. Below counts for less than the
@@ -304,7 +309,7 @@ export class AudioEngine {
     // Driven into the curve by how close and how enclosed; brought back down after it.
     const pre = c.createGain(); pre.gain.value = 1 + 2.5 * drive;
     const post = c.createGain(); post.gain.value = 1 / (1 + 1.2 * drive);
-    src.connect(g).connect(pre).connect(body).connect(post).connect(out).connect(hpf).connect(lp).connect(p);
+    src.connect(g).connect(pre).connect(body).connect(post).connect(out).connect(hpf).connect(boom).connect(lp).connect(p);
     p.connect(dry).connect(gun ? this.mix : this.world);
     // A room it is made in rings: small or large by size, or a corridor's flutter. Open ground: no ring.
     const roomy = Math.max(0, Math.min(1, (9 - size) / 5));
@@ -323,7 +328,7 @@ export class AudioEngine {
     // Outdoors a loud sound trails off in a soft echo rather than stopping dead: more the louder it is and the
     // more open the ground (rooms have their own ring).
     const loudness = Math.max(0, Math.min(1, (num(o.db, 100, 0, 200) - 110) / 40));
-    const airAmount = (1 - enc) * loudness * 0.45;
+    const airAmount = (1 - enc) * loudness * (0.45 + 0.5 * (gun ? o.far : 0));
     if (airAmount > 0.01) {
       const send = c.createGain(); send.gain.value = airAmount;
       p.connect(send).connect(this.air);
@@ -337,6 +342,32 @@ export class AudioEngine {
       const elp = c.createBiquadFilter(); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 5000) * 0.6; elp.Q.value = 0.5;
       const ep = c.createStereoPanner(); ep.pan.value = epan * 0.85;
       lp.connect(d).connect(eg).connect(elp).connect(ep).connect(this.mix);
+    }
+    // Distant fire rolls: the report comes back off the land and buildings far off, late, dark and soft, the
+    // further away the later.
+    if (gun && o.far > 0.05) {
+      const spread = 1 + o.dist / 150;
+      for (const [dt, gk, pan] of [[0.11, 0.4, -0.5], [0.27, 0.26, 0.45], [0.52, 0.15, -0.2], [0.9, 0.08, 0.3]]) {
+        const d = c.createDelay(4); d.delayTime.value = Math.min(3.9, dt * spread);
+        const eg = c.createGain(); eg.gain.value = gk * o.far;
+        const elp = c.createBiquadFilter(); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 1400); elp.Q.value = 0.4;
+        const ep = c.createStereoPanner(); ep.pan.value = pan;
+        lp.connect(d).connect(eg).connect(elp).connect(ep).connect(this.mix);
+      }
+    }
+    // A blast's shock: the pressure wave arrives with the sound and squeezes everything for a moment, more the
+    // closer (bodycam: the world goes dull and comes back).
+    if (o.kind === 'blast' && o.dist < 80 && this.muffle) {
+      const t0 = c.currentTime + Math.max(0, o.delay || 0);
+      const k = Math.max(0, 1 - o.dist / 80) * Math.min(1, o.gain);
+      const mf = this.muffle.frequency;
+      mf.cancelScheduledValues(t0); mf.setValueAtTime(mf.value, t0);
+      mf.linearRampToValueAtTime(Math.max(350, 22000 - 21500 * k), t0 + 0.02);
+      mf.setTargetAtTime(22000, t0 + 0.15 + 0.4 * k, 0.5 + k);
+      const wg = this.world.gain;
+      wg.cancelScheduledValues(t0); wg.setValueAtTime(wg.value, t0);
+      wg.linearRampToValueAtTime(Math.max(0.15, 1 - 0.8 * k), t0 + 0.02);
+      wg.setTargetAtTime(1, t0 + 0.2, 0.6);
     }
     if (inside > 0.3) {
       const t0 = c.currentTime + Math.max(0, o.delay || 0);

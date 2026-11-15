@@ -199,6 +199,152 @@ pub fn echoes(listener: (f32, f32, f32), source: (f32, f32), reflectors: &[(f32,
     kept
 }
 
+/// Air absorption (ISO 9613-1, about 20 °C and 70 % humidity): roughly 1.2e-9·f² dB per metre (8 kHz loses
+/// ~0.08 dB/m, 4 kHz ~0.02, 1 kHz next to nothing). The low-pass that stands for it over `d` metres is where the
+/// loss reaches 6 dB: near 7 kHz at 100 m, 4 kHz at 300 m, 2 kHz at a kilometre.
+pub fn air_lowpass_hz(d_m: f32) -> f32 {
+    (6.0 / (1.2e-9 * d_m.max(1.0))).sqrt().clamp(250.0, 20_000.0)
+}
+
+/// Cell of the propagation field (m).
+const FIELD_CELL_M: f32 = 0.5;
+/// Sound entering a wall from the air: what a plain masonry wall stops (dB, transmission loss).
+const WALL_ENTER_DB: f32 = 40.0;
+/// Every further half metre of solid stuff (a thick wall, a wall behind a wall's corner).
+const WALL_MORE_DB: f32 = 9.0;
+/// A shut door (a wooden leaf): far less than the wall it hangs in.
+const DOOR_DB: f32 = 18.0;
+/// The air's own small price per metre on the way round, so that of two ways the shorter wins.
+const AIR_DB_PER_M: f32 = 0.15;
+
+/// How sound gets from anywhere near the ears to the ears, through and round everything that stands there: a
+/// shortest-path flood over the solid grid from the listener (solid walls and shut doors cost what they stop;
+/// open doorways, windows and gaps cost nothing but the way round). A sound outside a room is heard through
+/// its open door if that is the easier way, and muffled through the walls if not; shutting the door changes it.
+/// Rebuilt when the ears move to another cell or a door changes.
+pub struct Field {
+    pub ear: (f32, f32),
+    origin: (f32, f32),
+    n: usize,
+    /// Per cell: total cost, the material loss along the best way (dB), and its length (m).
+    cost: Vec<f32>,
+    wall_db: Vec<f32>,
+    len_m: Vec<f32>,
+}
+
+/// What reaching the ears from a spot costs: loss through material (dB), the extra the way round adds
+/// (diffraction, dB), and how much the best way bends round things (m longer than straight).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Occlusion {
+    pub wall_db: f32,
+    pub bend_db: f32,
+    pub detour_m: f32,
+}
+
+impl Occlusion {
+    pub const NONE: Occlusion = Occlusion { wall_db: 0.0, bend_db: 0.0, detour_m: 0.0 };
+    pub fn gain(&self) -> f32 {
+        10f32.powf(-(self.wall_db + self.bend_db) / 20.0)
+    }
+    /// Walls let the lows through and stop the highs (a thump through masonry, a dull voice through a door);
+    /// sound bent round a corner loses some top too.
+    pub fn lowpass_hz(&self) -> f32 {
+        (18_000.0 * 10f32.powf(-self.wall_db / 35.0) / (1.0 + self.detour_m / 4.0)).clamp(180.0, 20_000.0)
+    }
+}
+
+impl Field {
+    /// Floods `radius_m` round the ears at `ear` (m), at chest height, over `sight` and its doors.
+    pub fn build(sight: &SightGrid, ear: (f32, f32), radius_m: f32) -> Field {
+        let n = (radius_m * 2.0 / FIELD_CELL_M).ceil() as usize | 1;
+        let half = (n / 2) as f32 * FIELD_CELL_M;
+        let origin = (ear.0 - half, ear.1 - half);
+        // 0 air, 1 solid, 2 shut door. A cell is solid if any quarter of it is (thin walls are not missed).
+        let mut kind = vec![0u8; n * n];
+        for j in 0..n {
+            for i in 0..n {
+                let (x, y) = (origin.0 + i as f32 * FIELD_CELL_M, origin.1 + j as f32 * FIELD_CELL_M);
+                let solid = [(0.125, 0.125), (0.375, 0.125), (0.125, 0.375), (0.375, 0.375)]
+                    .iter()
+                    .any(|(a, b)| sight.solid_at(((x + a) * 1000.0) as i64, ((y + b) * 1000.0) as i64, PATH_MM));
+                kind[j * n + i] = solid as u8;
+            }
+        }
+        for d in sight.doors.iter().filter(|d| d.shut()) {
+            let (cx, cy) = (d.at.0 as f32 / 1000.0, d.at.1 as f32 / 1000.0);
+            let w = d.width_mm as f32 / 2000.0;
+            let mut t = -w;
+            while t <= w {
+                let (x, y) = if d.along_x { (cx + t, cy) } else { (cx, cy + t) };
+                let (i, j) = (((x - origin.0) / FIELD_CELL_M) as isize, ((y - origin.1) / FIELD_CELL_M) as isize);
+                if i >= 0 && j >= 0 && (i as usize) < n && (j as usize) < n {
+                    kind[j as usize * n + i as usize] = 2;
+                }
+                t += FIELD_CELL_M * 0.5;
+            }
+        }
+        let mut cost = vec![f32::INFINITY; n * n];
+        let mut wall_db = vec![0.0f32; n * n];
+        let mut len_m = vec![0.0f32; n * n];
+        let start = (n / 2) * n + n / 2;
+        cost[start] = 0.0;
+        // Dijkstra on f32 costs (as ordered bits: all costs are positive).
+        let mut heap = std::collections::BinaryHeap::new();
+        heap.push(std::cmp::Reverse((0u32, start as u32)));
+        const NB: [(isize, isize, f32); 8] = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0), (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)];
+        while let Some(std::cmp::Reverse((c, k))) = heap.pop() {
+            let k = k as usize;
+            let c = f32::from_bits(c);
+            if c > cost[k] {
+                continue;
+            }
+            let (i, j) = ((k % n) as isize, (k / n) as isize);
+            for (di, dj, step) in NB {
+                let (a, b) = (i + di, j + dj);
+                if a < 0 || b < 0 || a as usize >= n || b as usize >= n {
+                    continue;
+                }
+                let q = b as usize * n + a as usize;
+                let metres = step * FIELD_CELL_M;
+                let tl = match (kind[k], kind[q]) {
+                    (_, 0) => 0.0,
+                    (1, 1) => WALL_MORE_DB * step,
+                    (_, 1) => WALL_ENTER_DB,
+                    (2, 2) => 0.0,
+                    (_, 2) => DOOR_DB,
+                    _ => 0.0,
+                };
+                let nc = c + tl + metres * AIR_DB_PER_M;
+                if nc < cost[q] {
+                    cost[q] = nc;
+                    wall_db[q] = wall_db[k] + tl;
+                    len_m[q] = len_m[k] + metres;
+                    heap.push(std::cmp::Reverse((nc.to_bits(), q as u32)));
+                }
+            }
+        }
+        Field { ear, origin, n, cost, wall_db, len_m }
+    }
+
+    /// How a sound at `at` (m) reaches the ears, if it lies inside the field.
+    pub fn at(&self, at: (f32, f32)) -> Option<Occlusion> {
+        let (i, j) = (((at.0 - self.origin.0) / FIELD_CELL_M).floor(), ((at.1 - self.origin.1) / FIELD_CELL_M).floor());
+        if i < 0.0 || j < 0.0 || i as usize >= self.n || j as usize >= self.n {
+            return None;
+        }
+        let k = j as usize * self.n + i as usize;
+        if !self.cost[k].is_finite() {
+            return None;
+        }
+        let straight = ((at.0 - self.ear.0).powi(2) + (at.1 - self.ear.1).powi(2)).sqrt();
+        // The grid's own staircase makes even a straight way a little longer: only a real way round counts.
+        let detour_m = (self.len_m[k] - straight * 1.08 - FIELD_CELL_M).max(0.0);
+        // Bent round an edge: a few dB at once, more the further round (diffraction, roughly).
+        let bend_db = if detour_m > 0.3 { (4.0 + 4.0 * (1.0 + detour_m).log2()).min(22.0) } else { 0.0 };
+        Some(Occlusion { wall_db: self.wall_db[k], bend_db, detour_m })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +415,74 @@ mod tests {
         let a = path(&g, (50.0, 40.0, 30.0), (50.0, 50.0), &inside);
         let b = path(&g, (20.0, 10.0, 30.0), (20.0, 20.0), &open);
         assert!(a.wet_room > 0.4 && b.wet_room < 0.05, "{a:?} {b:?}");
+    }
+
+    #[test]
+    fn far_off_the_air_takes_the_highs() {
+        assert!(air_lowpass_hz(10.0) > 19_000.0);
+        let (a, b, c) = (air_lowpass_hz(100.0), air_lowpass_hz(300.0), air_lowpass_hz(1_000.0));
+        assert!((6_000.0..8_000.0).contains(&a) && (3_500.0..4_600.0).contains(&b) && (1_800.0..2_600.0).contains(&c), "{a} {b} {c}");
+    }
+
+    /// A 10 x 10 m room round (50, 50) with a 1.5 m doorway in its east wall, its door open or shut.
+    fn room_with_door(state: scalia_ai::doors::DoorState) -> SightGrid {
+        let mut g = grid(&[
+            wall(50_000, 45_000, 10_300, 0),
+            wall(50_000, 55_000, 10_300, 0),
+            wall(45_000, 50_000, 10_300, 1),
+            wall(55_000, 47_000, 4_300, 1),
+            wall(55_000, 53_500, 3_300, 1),
+        ]);
+        g.doors = vec![scalia_ai::doors::Door::new((55_000, 50_500), false, 1_500, 2_100, state)];
+        g
+    }
+
+    #[test]
+    fn in_the_open_nothing_stands_between() {
+        let f = Field::build(&grid(&[]), (50.0, 50.0), 30.0);
+        let o = f.at((62.0, 55.0)).unwrap();
+        assert!(o.wall_db == 0.0 && o.bend_db == 0.0, "{o:?}");
+    }
+
+    #[test]
+    fn inside_a_room_the_outside_comes_through_the_open_door_and_is_walled_off_when_it_shuts() {
+        use scalia_ai::doors::DoorState;
+        let ear = (50.0, 50.0);
+        let open = Field::build(&room_with_door(DoorState::Open), ear, 30.0);
+        // East, outside, in line with the doorway: straight in.
+        let east = open.at((65.0, 50.5)).unwrap();
+        assert!(east.wall_db == 0.0 && east.bend_db < 6.0, "{east:?}");
+        // West, behind the far wall: the long way round through the door, much quieter and duller.
+        let west = open.at((38.0, 50.0)).unwrap();
+        assert!(west.gain() < east.gain() * 0.2 && west.lowpass_hz() < 5_000.0, "{west:?}");
+        // North-east, outside: round the corner through the doorway (bent, not through masonry).
+        let ne = open.at((60.0, 60.0)).unwrap();
+        assert!(ne.wall_db == 0.0 && ne.bend_db > 0.0 && ne.lowpass_hz() < 20_000.0, "{ne:?}");
+        // Shut the door: the east comes through the door's leaf, duller and quieter, still less than masonry.
+        let shut = Field::build(&room_with_door(DoorState::Closed), ear, 30.0);
+        let e2 = shut.at((65.0, 50.5)).unwrap();
+        assert!(e2.wall_db >= DOOR_DB && e2.wall_db < WALL_ENTER_DB && e2.gain() < east.gain() * 0.3, "{e2:?}");
+    }
+
+    #[test]
+    fn a_thick_wall_stops_more_than_a_thin_one() {
+        let thin = Field::build(&grid(&[wall(50_000, 50_000, 40_000, 1)]), (45.0, 50.0), 20.0).at((55.0, 50.0)).unwrap();
+        let mut w = wall(50_000, 50_000, 40_000, 1);
+        w.kind = PropKind::Wall { length_mm: 40_000, thickness_mm: 1_500 };
+        let thick = Field::build(&grid(&[w]), (45.0, 50.0), 20.0).at((55.0, 50.0)).unwrap();
+        assert!(thick.wall_db > thin.wall_db + 10.0, "{thin:?} {thick:?}");
+    }
+}
+#[cfg(test)]
+mod timing {
+    #[test]
+    #[ignore]
+    fn field_build_time() {
+        let g = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[]);
+        let t = std::time::Instant::now();
+        for k in 0..20 {
+            let _ = super::Field::build(&g, (50.0 + k as f32 * 0.5, 50.0), 35.0);
+        }
+        eprintln!("field: {:.2} ms each", t.elapsed().as_secs_f64() * 1000.0 / 20.0);
     }
 }

@@ -81,6 +81,10 @@ const PLANET_R: f32 = 651_898.6;
 const GROUND_TOP: f32 = 4.0 * PLANET_R;
 /// The zoom ladder: view heights in metres, one wheel notch per step. Up to GROUND_TOP the ground scene draws
 /// them (squad, platoon, company, battlefield, region, globe); above it the star system does (orbit to system).
+/// How far round the ears sound is followed through and round things (m); beyond, straight lines.
+const AUDIO_FIELD_M: f32 = 32.0;
+/// From the commander, where gunfire starts to sound distant (m): the edge of the closest view.
+const FAR_FROM_M: f32 = 12.0;
 const LADDER: [f32; 21] = [
     12.0, 25.0, 50.0, 100.0, 160.0, 400.0, 1_000.0, 3_000.0, 10_000.0, 30_000.0, 100_000.0, 300_000.0, 800_000.0,
     1_700_000.0, GROUND_TOP, 1e7, 5e7, 2.5e8, 1.2e9, 6e9, 1.5e11,
@@ -203,6 +207,12 @@ pub struct Viewer {
     cmd_fig: crate::anim::Animator,
     /// Which roofs are drawn (house footprint and size, house roof on, barracks roof on): rebuilt on change.
     roof_key: (i64, i64, i64, bool, bool),
+    /// Each door's last change (battle ms) and the frame time it was first drawn, so its swing plays in real
+    /// time whatever the battle clock is doing (stopped outside a battle, scaled in the lab).
+    door_seen: Vec<(i64, f64)>,
+    /// AI lab: the scenario laid out last and its layout seed (Deploy fills that same layout).
+    lab_name: String,
+    lab_seed: u64,
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
     /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms), last speed (m/s), smoothed
@@ -223,6 +233,9 @@ pub struct Viewer {
     /// The acoustic space per 2 m square of the testing ground (cleared when the map changes).
     audio_spaces: std::collections::HashMap<(i32, i32), scalia_audio::Env>,
     audio_reflectors: std::collections::HashMap<(i32, i32), Vec<(f32, f32)>>,
+    /// How sound reaches the commander's ears through and round everything near him, and what it was built for
+    /// (his metre square, the doors' states).
+    audio_field: Option<(scalia_audio::Field, (i32, i32, u64))>,
     /// How the next squad move is to be made (chosen on the radio).
     order_mode: Option<scalia_ai::leader::Mode>,
     /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
@@ -387,6 +400,9 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         god: false,
         cmd_fig: crate::anim::Animator::new(0.0),
         roof_key: (0, 0, 0, false, false),
+        door_seen: Vec::new(),
+        lab_name: String::new(),
+        lab_seed: 0,
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         turns: HashMap::new(),
@@ -399,6 +415,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         lab_wound: None,
         audio_spaces: std::collections::HashMap::new(),
         audio_reflectors: std::collections::HashMap::new(),
+        audio_field: None,
         order_mode: None,
         fx: crate::effects::Effects::default(),
         fx_lights: Vec::new(),
@@ -770,7 +787,18 @@ impl Viewer {
     }
     /// AI lab: clears the testing ground and sets up a scenario; the commander is placed to watch it. Returns
     /// a line saying what to watch for.
+    /// AI lab: lays a scenario out (a new compound layout for house clearing), with nobody on it yet.
     pub fn lab_start(&mut self, name: &str) -> String {
+        self.lab_seed = scalia_core::hash::mix64(self.frame_ms.to_bits() ^ 0x1ab5);
+        self.lab_name = name.to_string();
+        self.lab_setup(name, false)
+    }
+    /// AI lab: sends the troops of the scenario laid out last onto the same layout.
+    pub fn lab_deploy(&mut self) -> String {
+        let name = self.lab_name.clone();
+        self.lab_setup(&name, true)
+    }
+    fn lab_setup(&mut self, name: &str, deploy: bool) -> String {
         use crate::assault::{DEMO_SQUAD, LAB_RED};
         use scalia_ai::leader::{Mode, Order};
         let (lo, size) = ((BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 1000.0) as i64);
@@ -778,7 +806,7 @@ impl Viewer {
         // house, its ways in, the furniture, the cover outside and where the enemy stands); the other scenarios
         // use the fixed testing ground.
         let comp = !matches!(name, "contact" | "wounded" | "standoff");
-        let seed = scalia_core::hash::mix64(self.frame_ms.to_bits() ^ 0x1ab5);
+        let seed = self.lab_seed;
         let c = comp.then(|| crate::ground::compound(seed));
         let props = c.as_ref().map_or_else(base_props, |c| c.props.clone());
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
@@ -794,7 +822,7 @@ impl Viewer {
             map.killhouse_seed = Some(c.seed);
             map.live = Some(c.live);
         }
-        let mut a = crate::assault::Assault::field_with(map, killhouse_mm(), 7, self.lab_t, house);
+        let mut a = crate::assault::Assault::field_with(map, killhouse_mm(), 7, self.lab_t, house && deploy);
         // Which of the battle's doors are steel (by place: the compound's door list differs from the world's).
         let steel: Vec<(i64, i64)> = battle_doors().iter().zip(crate::ground::door_steel()).filter(|(_, s)| *s).map(|(d, _)| d.at).collect();
         self.door_steel = a.battle.doors.iter().map(|d| steel.contains(&d.at)).collect();
@@ -803,6 +831,7 @@ impl Viewer {
         self.base_grid.rebuild(&self.base_props);
         self.audio_spaces.clear();
         self.audio_reflectors.clear();
+        self.audio_field = None;
         let m = base_mesh(&self.base_props, self.base_h);
         self.gpu.upload("base", m.bytes());
         self.demo = false;
@@ -812,8 +841,8 @@ impl Viewer {
         let (watch, note) = match name {
             "contact" => {
                 // Inside the range, along its east side, past the house 6 m off its east wall.
-                a.spawn_squad(DEMO_SQUAD, 0, &block(range_mm().2 - 7_000, range_mm().1 + 2_000, 8));
-                a.order(DEMO_SQUAD, Order::Move { to: (range_mm().2 - 5_000, range_mm().3 - 3_000), mode: Mode::Plain });
+                if deploy { a.spawn_squad(DEMO_SQUAD, 0, &block(range_mm().2 - 7_000, range_mm().1 + 2_000, 8)); }
+                if deploy { a.order(DEMO_SQUAD, Order::Move { to: (range_mm().2 - 5_000, range_mm().3 - 3_000), mode: Mode::Plain }); }
                 // The house's doors stand open: its defenders see (and are seen) through them as Blue goes by.
                 for d in 0..a.battle.doors.len() {
                     a.battle.set_door(d, scalia_ai::doors::DoorState::Open, None);
@@ -821,42 +850,48 @@ impl Viewer {
                 ((range_mm().2 - 8_000, door.1), "On the range, Blue walks up past the house 6 m off its east wall; the defenders open up through the windows and the east door. Watch who takes cover, where, and when they move on.")
             }
             "wounded" => {
-                a.spawn_squad(DEMO_SQUAD, 0, &block(95_000, 40_000, 8));
-                a.order(DEMO_SQUAD, Order::Hold);
-                a.spawn_squad(LAB_RED, 1, &block(130_000, 40_000, 3));
-                a.order(LAB_RED, Order::Hold);
-                self.lab_wound = Some((DEMO_SQUAD, 2, 25));
+                if deploy { a.spawn_squad(DEMO_SQUAD, 0, &block(95_000, 40_000, 8)); }
+                if deploy { a.order(DEMO_SQUAD, Order::Hold); }
+                if deploy { a.spawn_squad(LAB_RED, 1, &block(130_000, 40_000, 3)); }
+                if deploy { a.order(LAB_RED, Order::Hold); }
+                self.lab_wound = deploy.then_some((DEMO_SQUAD, 2, 25));
                 ((105_000, 42_000), "One Blue man starts down and bleeding with Red 35 m east. Watch who goes to him and when (not into fire), the drag to cover, and the aid.")
             }
             "standoff" => {
-                a.spawn_squad(DEMO_SQUAD, 0, &block(78_000, 92_000, 8));
-                a.order(DEMO_SQUAD, Order::Move { to: (142_000, 95_000), mode: Mode::Confirmed });
-                a.spawn_squad(LAB_RED, 1, &block(140_000, 92_000, 8));
-                a.order(LAB_RED, Order::Move { to: (80_000, 95_000), mode: Mode::Confirmed });
+                if deploy { a.spawn_squad(DEMO_SQUAD, 0, &block(78_000, 92_000, 8)); }
+                if deploy { a.order(DEMO_SQUAD, Order::Move { to: (142_000, 95_000), mode: Mode::Confirmed }); }
+                if deploy { a.spawn_squad(LAB_RED, 1, &block(140_000, 92_000, 8)); }
+                if deploy { a.order(LAB_RED, Order::Move { to: (80_000, 95_000), mode: Mode::Confirmed }); }
                 ((110_000, 95_000), "Blue and Red, eight each with the same brain, advance on each other across the open north of the base. Watch bounding, cover and fire.")
             }
             _ => {
                 let c = c.as_ref().expect("the compound is laid out for house clearing");
-                a.spawn_squad(crate::assault::ENEMY_SQUAD, 1, &c.posts);
-                a.order(crate::assault::ENEMY_SQUAD, Order::Hold);
-                a.spawn_squad(DEMO_SQUAD, 0, &c.start);
-                a.order(DEMO_SQUAD, Order::Capture);
+                if deploy { a.spawn_squad(crate::assault::ENEMY_SQUAD, 1, &c.posts); }
+                if deploy { a.order(crate::assault::ENEMY_SQUAD, Order::Hold); }
+                if deploy { a.spawn_squad(DEMO_SQUAD, 0, &c.start); }
+                if deploy { a.order(DEMO_SQUAD, Order::Capture); }
                 let (o, n) = (c.house.origin, c.house.rooms.len());
                 let note = format!(
-                    "Training compound on the range (layout {:x}): a new house every run, {n} rooms, {} ways in, {} defenders posted at random inside, cover all around. Blue (12) takes it from the south.",
+                    "Training compound on the range (layout {:x}): a new house every run, {n} rooms, {} ways in, {} defenders posted at random inside, cover all around. Blue (12) takes it from the south. Press Deploy to send the troops in.",
                     c.seed & 0xffff,
                     c.house.doors.iter().filter(|d| d.rooms.0.is_none() || d.rooms.1.is_none()).count(),
                     c.posts.len()
                 );
                 self.assault = Some(a);
                 let _ = o;
+                if deploy {
+                    return "Deployed: Blue (12) moves on the house.".into();
+                }
                 self.cmd = ((range_mm().2 + 4_000) as f64 / 1000.0, (c.start[0].1 + 4_000) as f64 / 1000.0);
                 return note;
             }
         };
         self.assault = Some(a);
+        if deploy {
+            return "Deployed.".into();
+        }
         self.cmd = (watch.0 as f64 / 1000.0, watch.1 as f64 / 1000.0);
-        note.into()
+        format!("{note} Press Deploy to send the troops in.")
     }
     /// AI lab: the feed of leader steps and shouts since the last call, one per line.
     pub fn lab_feed(&mut self) -> String {
@@ -938,6 +973,24 @@ impl Viewer {
         self.audio_reflectors.insert(key, r.clone());
         r
     }
+    /// Where the ears are for what stands between: the commander's head on foot, the camera on the tablet.
+    fn ear(&self) -> (f32, f32) {
+        if self.tablet {
+            let l = self.audio_listener();
+            return (l.0, l.1);
+        }
+        (self.cmd.0 as f32, self.cmd.1 as f32)
+    }
+    /// The propagation field round the ears, rebuilt when they move a metre or a door opens or shuts.
+    fn ensure_field(&mut self, ear: (f32, f32)) {
+        let Some(a) = self.assault.as_ref() else { return };
+        let doors = a.battle.sight.doors.iter().enumerate().fold(0u64, |h, (i, d)| h.wrapping_mul(31).wrapping_add(i as u64 * 7 + d.shut() as u64));
+        let key = (ear.0.floor() as i32, ear.1.floor() as i32, doors);
+        if self.audio_field.as_ref().is_some_and(|f| f.1 == key) {
+            return;
+        }
+        self.audio_field = Some((scalia_audio::Field::build(&a.battle.sight, (key.0 as f32 + 0.5, key.1 as f32 + 0.5), AUDIO_FIELD_M), key));
+    }
     /// The space at a spot (open field, room, corridor), remembered per 2 m square until the map changes.
     fn space_at(&mut self, x: f32, y: f32) -> scalia_audio::Env {
         let open = scalia_audio::Env { enclosure: 0.0, size_m: 30.0, rt60_s: 0.25, corridor: 0.0 };
@@ -952,12 +1005,12 @@ impl Viewer {
         self.audio_spaces.insert(key, env);
         env
     }
-    /// Sounds since the last call, 26 floats each, worked out by the acoustics for the ears at the camera:
+    /// Sounds since the last call, 27 floats each, worked out by the acoustics for the ears at the camera:
     /// kind (0 shot, 1 blast, 2 footfall), loudness (footfalls: 0 walk .. 1 sprint), delay from now (s, travel
     /// time included), gain, low-pass (Hz), reverb of its own space 0..1, position from the ears (m: right,
     /// ahead, below), distance (m), walls between, its space (enclosure 0..1, size m, corridor 0..1), then four
     /// echoes off what stands around it (extra delay s, gain against the direct sound, pan -1..1; zeros when
-    /// there is nothing to bounce off).
+    /// there is nothing to bounce off), and last how distant it sounds (0 near .. 1 distant fire).
     pub fn take_sounds(&mut self) -> Vec<f32> {
         let l = self.audio_listener();
         let (lab_t, lab_speed) = (self.lab_t, self.lab_speed);
@@ -1019,22 +1072,48 @@ impl Viewer {
         let (dx, dy) = (sx - l.0, sy - l.1);
         let space = self.space_at(sx, sy);
         let refl = self.reflectors_at(sx, sy);
-        // Off the field battle there is no sight grid: the sound comes straight, the room still rings.
-        let p = match self.assault.as_ref() {
-            Some(a) => scalia_audio::path(&a.battle.sight, l, (sx, sy), &space),
-            None => scalia_audio::Path { delay_s: 0.0, gain: 1.0, lowpass_hz: 20000.0, wet_room: space.enclosure, walls: 0 },
+        let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
+        // Spreading (about -6 dB a doubling past 10 m, from the ears at the camera: zooming out quietens) and
+        // the air's own toll on the highs over the real distance.
+        let spread = 1.0 / (1.0 + dist / 10.0);
+        let air_hz = scalia_audio::air_lowpass_hz(dist);
+        // What stands between: walls, shut doors, the way round through open ones, all as heard at the
+        // commander's ears (inside a building the outside is muffled; zoomed out you still hear from where he
+        // stands). Beyond the flooded field: the walls on the straight line, at ear height.
+        let ear = self.ear();
+        self.ensure_field(ear);
+        let occ = match self.assault.as_ref() {
+            None => scalia_audio::Occlusion::NONE,
+            Some(a) => {
+                match self.audio_field.as_ref().and_then(|f| f.0.at((sx, sy))) {
+                    Some(o) => o,
+                    None => {
+                        let w = scalia_audio::walls_between(&a.battle.sight, (ear.0, ear.1, 1.6), (sx, sy, 1.4));
+                        scalia_audio::Occlusion { wall_db: w as f32 * 40.0, bend_db: 0.0, detour_m: 0.0 }
+                    }
+                }
+            }
         };
+        let gain = spread * occ.gain();
+        let lowpass = air_hz.min(occ.lowpass_hz());
+        // The space it is made in rings; through walls you hear more of that ring than of the sound itself.
+        let walls = (occ.wall_db / 30.0).round();
+        let wet_room = (space.enclosure * 0.6 + (occ.wall_db + occ.bend_db) / 40.0 * 0.15).clamp(0.0, 0.85);
+        // Distant fire: off the screen at the closest zoom (about 12 m from him) it starts to sound far off,
+        // fully so by four times that.
+        let from_him = ((sx - ear.0).powi(2) + (sy - ear.1).powi(2)).sqrt();
+        let far = ((from_him - FAR_FROM_M) / (FAR_FROM_M * 3.0)).clamp(0.0, 1.0);
         let echoes = scalia_audio::echoes(l, (sx, sy), &refl);
         // Right and ahead as the camera looks (ahead = up the screen, on the ground); below = the height.
         let (rx, ry) = (dx * r.x + dy * r.y, -dx * r.y + dy * r.x);
-        let dist = (dx * dx + dy * dy + l.2 * l.2).sqrt();
-        out.extend_from_slice(&[kind, loud, wait + p.delay_s, p.gain, p.lowpass_hz, p.wet_room, rx, ry, l.2, dist, p.walls as f32, space.enclosure, space.size_m, space.corridor]);
+        out.extend_from_slice(&[kind, loud, wait + dist / 343.0, gain, lowpass, wet_room, rx, ry, l.2, dist, walls, space.enclosure, space.size_m, space.corridor]);
         for k in 0..4 {
             match echoes.get(k) {
                 Some(e) => out.extend_from_slice(&[e.delay_s, e.gain, (e.dir.0 * r.x + e.dir.1 * r.y).clamp(-1.0, 1.0)]),
                 None => out.extend_from_slice(&[0.0, 0.0, 0.0]),
             }
         }
+        out.push(far);
     }
     /// Benchmark scene: `squads` squads of 12 around the commander (see `bench_army`). Returns the soldier count.
     pub fn bench_army(&mut self, squads: u32) -> u32 {
@@ -2679,7 +2758,14 @@ impl Viewer {
         }
         if let Some(a) = self.assault.as_ref() {
             let now = self.frame_ms;
-            let m = door_mesh(&a.battle.doors, &self.door_steel, self.base_h, |at| now - self.lab_real(at as f64));
+            self.door_seen.resize(a.battle.doors.len(), (0, 0.0));
+            for (seen, d) in self.door_seen.iter_mut().zip(&a.battle.doors) {
+                if seen.0 != d.changed_ms {
+                    *seen = (d.changed_ms, now);
+                }
+            }
+            let seen = &self.door_seen;
+            let m = door_mesh(&a.battle.doors, &self.door_steel, self.base_h, |i| now - seen[i].1);
             self.gpu.upload("doors", m.bytes());
             instanced.push(("doors".into(), "base_at".into()));
         }
@@ -2704,6 +2790,7 @@ impl Viewer {
                 self.base_props = props;
                 self.base_grid.rebuild(&self.base_props);
                 self.audio_spaces.clear();
+                self.audio_field = None;
                 self.audio_reflectors.clear();
                 let m = base_mesh(&self.base_props, self.base_h);
                 self.gpu.upload("base", m.bytes());
@@ -3951,7 +4038,7 @@ fn slab(m: &mut MeshBuilder, c: [[f32; 2]; 4], z0: f32, z1: f32, colour: f32) {
 /// The doors as they hang now: a leaf on its hinge across the doorway when shut, swung back into the room when
 /// open, knocked flat when breached; it swings over half a second from its last change (`since(ms)`: how long
 /// ago, in real ms, battle time ms happened). Steel doors are darker, with a heavier frame.
-fn door_mesh(doors: &[scalia_ai::doors::Door], steel: &[bool], h: f32, since: impl Fn(i64) -> f64) -> MeshBuilder {
+fn door_mesh(doors: &[scalia_ai::doors::Door], steel: &[bool], h: f32, since: impl Fn(usize) -> f64) -> MeshBuilder {
     use scalia_ai::doors::DoorState;
     use scalia_render::mesh::{code, kit, Part};
     let mut m = MeshBuilder::default();
@@ -3970,7 +4057,7 @@ fn door_mesh(doors: &[scalia_ai::doors::Door], steel: &[bool], h: f32, since: im
             DoorState::Closed | DoorState::Locked => (0.0, 88.0),
             DoorState::Breached => (100.0, 0.0),
         };
-        let k = ((since(d.changed_ms) / 450.0).clamp(0.0, 1.0) as f32).powf(0.6);
+        let k = ((since(i) / 450.0).clamp(0.0, 1.0) as f32).powf(0.6);
         let k = if d.changed_ms == 0 { 1.0 } else { k };
         let ang = (from + (to - from) * k).to_radians();
         let v = [u[0] * ang.cos() + n[0] * ang.sin(), u[1] * ang.cos() + n[1] * ang.sin()];
