@@ -94,6 +94,8 @@ pub enum Pose {
     /// both knees with the left palm planted. Drawn only as keys of the drop.
     DropReach = 34,
     DropPlant = 35,
+    /// Prone, rifle shouldered and held on a target; can also be layered over the crawl legs.
+    ProneAim = 36,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -131,6 +133,7 @@ impl Pose {
             33 => Pose::Drop,
             34 => Pose::DropReach,
             35 => Pose::DropPlant,
+            36 => Pose::ProneAim,
             _ => Pose::Stand,
         }
     }
@@ -411,7 +414,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::ProneAim => 1.0,
         _ => 0.0,
     }
 }
@@ -912,6 +915,14 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }
+        Pose::ProneAim => {
+            // Same supported prone rifle position, with the head lowered into a cheek weld.
+            p.prone = 1.0;
+            p.shoulder = [2.8, 2.8];
+            p.elbow = [1.3, 1.35];
+            p.rifle = std::f32::consts::FRAC_PI_2;
+            p.head = 0.82;
+        }
         Pose::StandAim => {
             // On the same athletic base as the ready (feet staggered, knees flexed, leaning in), rifle shouldered:
             // the rifle and head take back the lean so the sights stay level at the eye.
@@ -990,7 +1001,7 @@ const IDLE_PEEK_PERIOD_S: f32 = 5.2;
 pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
     let mut q = *p;
     // Moving gaits and the close-up tablet view supply their own motion (or must stay perfectly still).
-    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk | Pose::Tablet) {
+    if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk | Pose::Tablet | Pose::ProneAim) {
         return q;
     }
     let tau = std::f32::consts::TAU;
