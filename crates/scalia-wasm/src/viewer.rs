@@ -102,8 +102,6 @@ const CMD_AIM_WALK: f32 = 1.2;
 const CMD_CROUCH: f32 = 1.4;
 const CMD_CRAWL: f32 = 0.5;
 const CMD_SPRINT: f32 = 4.6;
-/// How fast the commander's turn can build up or ease off (rad/s²).
-const CMD_TURN_ACCEL: f32 = 28.0;
 /// His usual pace on foot (WASD): a jog. Alt held walks (CMD_WALK), Shift sprints.
 const CMD_JOG: f32 = 3.0;
 /// The commander winds up (m/s²) and brakes.
@@ -186,8 +184,6 @@ pub struct Viewer {
     /// sprinting, moving, and until when he is on the radio.
     cmd: (f64, f64),
     cmd_heading: f32,
-    /// His heading following the aim point while the rifle is up (motion.rs `AimTrack`).
-    cmd_aim: crate::motion::AimTrack,
     cmd_input: (f32, f32, bool),
     /// Alt held: walk instead of jog.
     cmd_walk: bool,
@@ -203,7 +199,8 @@ pub struct Viewer {
     /// Console god mode: the commander cannot be hurt.
     god: bool,
     /// His upper body (the layer, or the pose's own): now, the one before, since when (shader clock, s).
-    cmd_upper: (Pose, Pose, f32),
+    /// His animator (anim.rs): the same library every soldier is drawn with.
+    cmd_fig: crate::anim::Animator,
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
     /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms), last speed (m/s), smoothed
@@ -378,7 +375,6 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         agent_clock: -1.0,
         cmd: (70_000.0 / 1000.0 + 20.0, 20.0),
         cmd_heading: 0.0,
-        cmd_aim: crate::motion::AimTrack::default(),
         cmd_input: (0.0, 0.0, false),
         cmd_walk: false,
         cmd_moving: false,
@@ -387,7 +383,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_skid: crate::motion::Skid::None,
         cmd_spin: 0.0,
         god: false,
-        cmd_upper: (Pose::Stand, Pose::Stand, -1000.0),
+        cmd_fig: crate::anim::Animator::new(0.0),
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         turns: HashMap::new(),
@@ -2968,120 +2964,42 @@ impl Viewer {
                 self.cmd_speed = 0.0;
             }
         }
-        // Turn smoothly: towards where the rifle points while it is up (quicker), else where he walks.
-        let wrap = |mut d: f32| { while d > std::f32::consts::PI { d -= std::f32::consts::TAU; } while d < -std::f32::consts::PI { d += std::f32::consts::TAU; } d };
+        // How he looks doing it comes from the animation library (anim.rs), the same one every soldier uses: this
+        // only says what he is doing.
         let travel = (-self.cmd_dir.0).atan2(self.cmd_dir.1);
-        // A body turns with weight: the turn speeds up and slows down (angular acceleration), never past a
-        // human rate: about 5 rad/s with the rifle up, 6 walking, less the faster he runs (he bends round instead),
-        // 8 in a cut.
-        let face = match self.gun.toward.filter(|_| ready) {
-            Some((tx, ty)) => Some(((-tx).atan2(ty), 5.0)),
-            // In a cut he pivots round to where he is going while his body still slides the old way.
-            None if self.cmd_skid == crate::motion::Skid::Cut && len > 0.01 => Some(((-vx).atan2(vy), 8.0)),
-            None if self.cmd_moving => Some((travel, 6.0 - 2.0 * (self.cmd_speed / CMD_SPRINT).min(1.0))),
-            None => None,
+        let reloading = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)).is_some_and(|s| s.reloading_ms > 0);
+        let mut d = crate::anim::Drive::new(dt, ts);
+        d.vel = (self.cmd_dir.0 * self.cmd_speed, self.cmd_dir.1 * self.cmd_speed);
+        d.want = Some(want);
+        // A body turns with weight: towards where the rifle points while it is up (keeping pace with the cursor),
+        // pivoting round in a cut, else the way he goes (less sharply the faster he runs).
+        d.face = match self.gun.toward.filter(|_| ready) {
+            Some((tx, ty)) => crate::anim::Face::Aim { heading: (-tx).atan2(ty) },
+            None if self.cmd_skid == crate::motion::Skid::Cut && len > 0.01 => crate::anim::Face::Turn { heading: (-vx).atan2(vy), top: 8.0 },
+            None if self.cmd_moving => crate::anim::Face::Turn { heading: travel, top: 6.0 - 2.0 * (self.cmd_speed / CMD_SPRINT).min(1.0) },
+            None => crate::anim::Face::Keep,
         };
-        let spin = match face {
-            Some((want, top)) => {
-                let d = wrap(want - self.cmd_heading);
-                // The rate that would stop exactly on the target at full deceleration, capped.
-                (d.signum() * (2.0 * CMD_TURN_ACCEL * d.abs()).sqrt()).clamp(-top, top)
-            }
-            None => 0.0,
-        };
-        match self.gun.toward.filter(|_| ready) {
-            // Rifle up on a mark: the barrel keeps pace with the cursor and settles onto it with a short eased pivot.
-            Some((tx, ty)) => {
-                let mut a = self.cmd_aim;
-                a.heading = self.cmd_heading;
-                a.spin = self.cmd_spin;
-                a.step((-tx).atan2(ty), dt);
-                self.cmd_aim = a;
-                self.cmd_heading = a.heading;
-                self.cmd_spin = a.spin;
-            }
-            None => {
-                self.cmd_aim = crate::motion::AimTrack::new(self.cmd_heading, self.cmd_spin);
-                self.cmd_spin += (spin - self.cmd_spin).clamp(-CMD_TURN_ACCEL * dt, CMD_TURN_ACCEL * dt);
-                self.cmd_heading += self.cmd_spin * dt;
-            }
-        }
-        // Turning on the spot, his feet step him round (a shuffle) instead of sliding.
-        let shuffling = !self.cmd_moving && self.cmd_spin.abs() > 1.2 && self.gun.stance == 0;
-        // The way he moves from the way he faces (strafing, backing off with the rifle up).
-        // A shuffle steps sideways into the turn (the shorter side-step stride).
-        let move_dir = if self.cmd_moving { wrap(travel - self.cmd_heading) } else if shuffling { self.cmd_spin.signum() * std::f32::consts::FRAC_PI_2 } else { 0.0 };
-        // Legs by his real pace: walking while he winds up, the sprint only once he is really going.
-        // With a little give either way (hysteresis), so tapping a key or easing off near a threshold does not
-        // flick him between poses.
-        let was = self.cmd_pose.0;
-        // Skidding: feet planted while he slides (the stop leans him back); in a cut he drops low to pivot.
-        let legs = if self.cmd_skid == crate::motion::Skid::Cut {
-            Pose::Crouch
-        } else if self.cmd_skid == crate::motion::Skid::Stop {
-            // Hard stop: left leg thrown forward and out to brake, a short slide on it.
-            Pose::Brake
-        } else if self.cmd_speed > if was == Pose::Sprint { 3.7 } else { 4.0 } {
-            Pose::Sprint
-        } else if self.cmd_speed > if matches!(was, Pose::Run | Pose::Sprint) { 2.1 } else { 2.4 } {
-            Pose::Run
-        } else if self.cmd_speed > if matches!(was, Pose::Walk | Pose::Run | Pose::Sprint) { 0.05 } else { 0.2 } {
-            Pose::Walk
-        } else {
-            Pose::Stand
-        };
-        // Low, prone, rifle up or slung: the legs from his pace, the upper body from the rifle.
-        let (pose, upper) = if holding {
-            (Pose::Tablet, None)
-        } else if t < self.radio_until {
-            (Pose::Radio, None)
-        } else if dead {
-            (Pose::Dead, None)
-        } else if down {
-            (Pose::Wounded, None)
-        } else {
-            match self.gun.stance {
-                // Down on his belly he crawls (elbows and knees, rifle across the forearms) while he moves.
-                2 if self.cmd_moving && self.cmd_speed > 0.05 => (Pose::Crawl, None),
-                2 => (Pose::Prone, None),
-                1 if self.cmd_moving => (Pose::CrouchWalk, ready.then_some(Pose::CrouchAim)),
-                1 => (if ready { Pose::CrouchAim } else { Pose::Crouch }, None),
-                // Rifle in hand he stands combat ready (low ready, athletic); slung, he stands easy.
-                _ if legs == Pose::Brake => (Pose::Brake, None),
-                _ if legs == Pose::Stand && shuffling => (Pose::Walk, Some(if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Ready })),
-                _ if legs == Pose::Stand => (if ready { Pose::StandAim } else if self.gun.slung { Pose::Slung } else { Pose::Ready }, None),
-                _ => (legs, if ready { Some(Pose::StandAim) } else if self.gun.slung { Some(Pose::Slung) } else { None }),
-            }
-        };
-        if was != pose {
-            self.cmd_pose = (pose, was, scalia_render::pose::switch_start(self.cmd_pose.1, self.cmd_pose.2, pose, ts));
-        }
-        // Cadence from his real speed, integrated into the phase here: the planted foot keeps pace with the ground.
-        let steps = match pose {
-            // A shuffle round: short quick steps paced by how fast he turns.
-            Pose::Walk if shuffling => (self.cmd_spin.abs() * 0.45).clamp(0.8, 1.8),
-            Pose::Sprint | Pose::Run | Pose::Walk | Pose::CrouchWalk | Pose::Crawl => self.cmd_speed / stride_m(pose),
-            _ => 0.0,
-        };
-        self.cmd_gait = (self.cmd_gait + (steps * dt) as f64).fract();
+        d.stance = match self.gun.stance { 0 => crate::anim::Stance::Stand, 1 => crate::anim::Stance::Crouch, _ => crate::anim::Stance::Prone };
+        d.rifle = if reloading { crate::anim::Rifle::Reload } else if ready { crate::anim::Rifle::Aim } else if self.gun.slung { crate::anim::Rifle::Slung } else { crate::anim::Rifle::Ready };
+        d.sprint = !ready;
+        d.down = down;
+        d.dead = dead;
+        d.action = if holding { Some((Pose::Tablet, 0.0, None)) } else if t < self.radio_until { Some((Pose::Radio, 0.0, None)) } else { None };
+        let f = self.cmd_fig.step(&d);
+        self.cmd_heading = f.heading;
+        self.cmd_spin = self.cmd_fig.spin;
+        self.cmd_pose.0 = f.pose;
+        let pose = f.pose;
         // His gait phase (exactly what the shader is handed), for the footsteps.
-        self.cmd_phase = if steps > 0.0 { self.cmd_gait as f32 } else { -1.0 };
+        self.cmd_phase = if f.cadence < 0.0 && f.speed > 0.05 || f.footfall.is_some() { f.phase } else { -1.0 };
         self.commander_fight(ready, pose);
         let z = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
         let (rx, ry) = ((self.cmd.0 - self.origin.0) as f32, (self.cmd.1 - self.origin.1) as f32);
-        // The phase is always handed over (frozen when he stops), so legs blending out of a stride stay where they were.
-        let lean = self.bank_for(u64::MAX, self.cmd_heading, self.cmd_speed);
         let kick = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().position(|s| s.player).map(|i| a.kick(i))).unwrap_or(0.0);
-        let rec = [rx, ry, z, 9.0 + lean, self.cmd_heading, self.cmd_gait as f32, if steps == 0.0 && ts - self.cmd_pose.2 > 0.4 { 0.0 } else { -1.0 }, scalia_render::pose::pack_kick(pose, kick), self.cmd_pose.1 as u32 as f32, self.cmd_pose.2, scalia_render::pose::pack_layer(upper, move_dir), 0.0];
+        let rec = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, 0.0);
         // His muzzle as drawn, so his rounds leave from the end of his barrel.
-        let (roll, pitch) = scalia_render::pose::unpack_tilt(9.0 + lean);
-        let (q, b) = scalia_render::pose::barrel(scalia_render::pose::RIFLE, pose, upper, self.cmd_gait as f32, move_dir);
-        let bore = scalia_render::pose::figure_to_world(b, Vec3::ZERO, self.cmd_heading, roll, pitch).to_array();
-        let gun = (!self.gun.slung && scalia_render::pose::two_handed(upper.unwrap_or(pose)) > 0.0).then(|| {
-            let at = Vec3::new((self.cmd.0 * 1000.0) as f32, (self.cmd.1 * 1000.0) as f32, 0.0);
-            let w = scalia_render::pose::figure_to_world(q * 1000.0, at, self.cmd_heading, roll, pitch);
-            (w.x as i64, w.y as i64, w.z as i64)
-        });
+        let (tip, bore) = self.cmd_fig.barrel(&f, ((self.cmd.0 * 1000.0) as f32, (self.cmd.1 * 1000.0) as f32));
+        let gun = tip.filter(|_| !self.gun.slung).map(|w| (w[0] as i64, w[1] as i64, w[2] as i64));
         if let Some(a) = self.assault.as_mut() {
             if let Some(i) = a.battle.soldiers.iter().position(|s| s.player) {
                 a.set_muzzle(i, gun, bore);
@@ -3089,14 +3007,7 @@ impl Viewer {
         }
         // The diving camera passes through his head on its way to the tablet: he dissolves as it gets close.
         self.cmd_rec = rec;
-        // Raising or lowering the rifle over his legs blends the arms over LAYER_BLEND_S (common.wgsl `layer_back`).
-        let eff = upper.unwrap_or(pose);
-        if eff != self.cmd_upper.0 {
-            self.cmd_upper = (eff, self.cmd_upper.0, ts);
-        }
-        let remaining = 1.0 - ((ts - self.cmd_upper.2) / scalia_render::pose::LAYER_BLEND_S).clamp(0.0, 1.0);
-        let mut me = rec;
-        me[11] = scalia_render::pose::pack_fade_layer(self.cine_fade(self.frame_ms), Some(self.cmd_upper.1), remaining);
+        let me = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, self.cine_fade(self.frame_ms));
         self.gpu.upload_instances("commander_at", bytes(&me));
         instanced.push(("commander".into(), "commander_at".into()));
         // The tablet appears in his hands once they have come up to hold it.

@@ -315,6 +315,14 @@ impl Soldier {
     pub fn pace(&self) -> i64 {
         if self.moving { self.speed } else { 0 }
     }
+    /// The speed on him (mm/s), still there for a moment while he brakes after being told to stop (animation).
+    pub fn momentum(&self) -> i64 {
+        self.speed
+    }
+    /// Sets the speed on him (mm/s): for building test scenes.
+    pub fn set_momentum(&mut self, mm_s: i64) {
+        self.speed = mm_s;
+    }
 
     /// Down: wounded too badly to move or fight (alive, at or below DOWN_HP).
     pub fn down(&self) -> bool {

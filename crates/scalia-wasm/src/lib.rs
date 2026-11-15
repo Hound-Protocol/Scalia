@@ -10,6 +10,7 @@ use scalia_core::time::WorldMs;
 use scalia_core::world::World;
 use wasm_bindgen::prelude::*;
 
+pub mod anim;
 pub mod assault;
 pub mod effects;
 pub mod motion;

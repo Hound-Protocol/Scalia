@@ -1,0 +1,476 @@
+//! The animation library: one animator per figure, the same for the commander, every soldier and every enemy.
+//!
+//! A controller (the commander's input, a soldier's battle state) says what the figure is doing (`Drive`): how fast
+//! it is really moving and wants to move, where it wants to face, its stance, what its rifle is doing, any action.
+//! The animator turns that into what is drawn (`Frame`): legs and upper-body poses with hysteresis and blends,
+//! weighted turning with a foot shuffle on the spot, skids and hard stops, the step-out from still, the gait phase
+//! with footfalls, banking and pitching, falls, the shot kick, and the instance record the shader reads.
+//! Nothing about how a figure looks is decided anywhere else.
+
+use crate::motion::{skidding, AimTrack, Skid};
+use scalia_render::pose::{self, stride_m_dir, Pose, LAYER_BLEND_S};
+
+/// Pace lines (m/s) for the legs, with a little give either way so easing off near a line does not flick poses.
+const SPRINT_UP: f32 = 4.0;
+const SPRINT_DOWN: f32 = 3.7;
+const RUN_UP: f32 = 2.4;
+const RUN_DOWN: f32 = 2.1;
+const WALK_UP: f32 = 0.2;
+const WALK_DOWN: f32 = 0.05;
+/// Turning on the spot faster than this (rad/s), his feet step him round instead of sliding.
+const SHUFFLE_SPIN: f32 = 1.3;
+/// A body turns with weight: angular acceleration (rad/s²).
+pub const TURN_ACCEL: f32 = 28.0;
+const FALL_BACK_S: f32 = 1.1;
+const FALL_FORWARD_S: f32 = 0.95;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Stance {
+    Stand,
+    Crouch,
+    Prone,
+}
+
+/// What the rifle is doing.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Rifle {
+    /// In the hands at combat ready (low ready on an athletic base).
+    Ready,
+    /// Shouldered on a mark.
+    Aim,
+    /// Changing magazines.
+    Reload,
+    /// On the sling, hands free.
+    Slung,
+}
+
+/// Where the figure wants to face.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Face {
+    /// Nowhere in particular: he stays as he is.
+    Keep,
+    /// The way he goes or has been told to look; the turn rate is capped at `top` rad/s.
+    Turn { heading: f32, top: f32 },
+    /// The rifle on a mark: the barrel keeps pace with it and settles with a short eased pivot.
+    Aim { heading: f32 },
+}
+
+/// What a controller tells the animator each frame.
+#[derive(Copy, Clone, Debug)]
+pub struct Drive {
+    /// Seconds since the last frame, and the shader's clock (s).
+    pub dt: f32,
+    pub ts: f32,
+    /// Real velocity over the ground (m/s, world x/y).
+    pub vel: (f32, f32),
+    /// The velocity he is trying for (for skids); None when the controller does not know (no skids then).
+    pub want: Option<(f32, f32)>,
+    pub face: Face,
+    pub stance: Stance,
+    pub rifle: Rifle,
+    /// Allowed to sprint (sprint legs need this as well as the pace).
+    pub sprint: bool,
+    /// Aiming from cover (crouched aim over a wall).
+    pub in_cover: bool,
+    /// Shot down (alive, on the ground) or killed.
+    pub down: bool,
+    pub dead: bool,
+    /// An action that takes the whole body over (tablet, radio, throw, first aid, a step the leader has him on,
+    /// dragging...): its pose, cadence (steps/s, 0 still) and an optional upper pose over moving legs.
+    pub action: Option<(Pose, f32, Option<Pose>)>,
+}
+
+impl Drive {
+    pub fn new(dt: f32, ts: f32) -> Drive {
+        Drive { dt, ts, vel: (0.0, 0.0), want: None, face: Face::Keep, stance: Stance::Stand, rifle: Rifle::Ready, sprint: true, in_cover: false, down: false, dead: false, action: None }
+    }
+}
+
+/// What is drawn this frame.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Frame {
+    pub pose: Pose,
+    pub upper: Option<Pose>,
+    /// The way he moves relative to the way he faces (rad).
+    pub dir: f32,
+    /// Gait phase (0..1) and whether the shader should animate the idle (cadence 0) or take the phase (-1).
+    pub phase: f32,
+    pub cadence: f32,
+    pub heading: f32,
+    pub speed: f32,
+    /// Bank into turns and pitch with acceleration, packed for the colour's fraction (`pose::pack_tilt`).
+    pub lean: f32,
+    pub skid: Skid,
+    /// A foot came down this frame: how loud (sprint 1, run 0.8, walk 0.5, crouched 0.35).
+    pub footfall: Option<f32>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Animator {
+    pub heading: f32,
+    pub spin: f32,
+    /// How far he still has to turn (rad), and how long he has been turning hard one way (s): small corrections
+    /// (a man scanning his sector) are a twist of the body, not a shuffle of the feet.
+    gap: f32,
+    turning: f32,
+    aim: AimTrack,
+    speed: f32,
+    dir: f32,
+    accel: f32,
+    phase: f32,
+    legs: Pose,
+    /// The pose drawn, the one before it and when the switch started (shader blend, `pose::switch_start`).
+    shown: (Pose, Pose, f32),
+    /// The effective upper pose, the one before it and when it changed (layer blend).
+    upper: (Pose, Pose, f32),
+    /// Falling: since when (s, shader clock) and how.
+    fall: Option<(f32, Pose)>,
+    on_back: bool,
+    was_up: bool,
+    clock: f32,
+}
+
+impl Default for Animator {
+    fn default() -> Self {
+        Animator::new(0.0)
+    }
+}
+
+fn wrap(mut d: f32) -> f32 {
+    while d > std::f32::consts::PI {
+        d -= std::f32::consts::TAU;
+    }
+    while d < -std::f32::consts::PI {
+        d += std::f32::consts::TAU;
+    }
+    d
+}
+
+impl Animator {
+    pub fn new(heading: f32) -> Animator {
+        Animator {
+            heading,
+            spin: 0.0,
+            gap: 0.0,
+            turning: 0.0,
+            aim: AimTrack::new(heading, 0.0),
+            speed: 0.0,
+            dir: 0.0,
+            accel: 0.0,
+            phase: 0.0,
+            legs: Pose::Stand,
+            shown: (Pose::Ready, Pose::Ready, -1000.0),
+            upper: (Pose::Ready, Pose::Ready, -1000.0),
+            fall: None,
+            on_back: false,
+            was_up: true,
+            clock: 0.0,
+        }
+    }
+
+    /// A figure whose stride starts at `phase` (0..1), so a squad does not walk in step.
+    pub fn with_phase(heading: f32, phase: f32) -> Animator {
+        Animator { phase: phase.fract(), ..Animator::new(heading) }
+    }
+
+    /// The pose drawn now.
+    pub fn shown(&self) -> Pose {
+        self.shown.0
+    }
+
+    fn steer(&mut self, face: Face, dt: f32) {
+        match face {
+            Face::Aim { heading } => {
+                self.gap = wrap(heading - self.heading);
+                let mut a = self.aim;
+                a.heading = self.heading;
+                a.spin = self.spin;
+                a.step(heading, dt);
+                self.aim = a;
+                self.heading = a.heading;
+                self.spin = a.spin;
+            }
+            other => {
+                self.aim = AimTrack::new(self.heading, self.spin);
+                let want = match other {
+                    Face::Turn { heading, top } => {
+                        let d = wrap(heading - self.heading);
+                        self.gap = d;
+                        // The rate that would stop exactly on the target at full deceleration, capped.
+                        (d.signum() * (2.0 * TURN_ACCEL * d.abs()).sqrt()).clamp(-top, top)
+                    }
+                    _ => {
+                        self.gap = 0.0;
+                        0.0
+                    }
+                };
+                self.spin += (want - self.spin).clamp(-TURN_ACCEL * dt, TURN_ACCEL * dt);
+                self.heading = wrap(self.heading + self.spin * dt);
+            }
+        }
+    }
+
+    pub fn step(&mut self, d: &Drive) -> Frame {
+        let dt = d.dt.clamp(0.0, 0.1);
+        self.clock = d.ts;
+        let alive_up = !d.dead && !d.down;
+        let speed = (d.vel.0 * d.vel.0 + d.vel.1 * d.vel.1).sqrt();
+        if dt > 0.0 {
+            self.accel += ((speed - self.speed) / dt - self.accel) * (dt * 8.0).min(1.0);
+        }
+        let was_still = self.speed < WALK_DOWN;
+        self.speed = speed;
+        let moving = speed > WALK_DOWN;
+        let skid = if alive_up && d.stance == Stance::Stand { d.want.map_or(Skid::None, |w| skidding(d.vel, w)) } else { Skid::None };
+        if alive_up {
+            self.steer(d.face, dt);
+        } else {
+            self.spin = 0.0;
+        }
+        let travel = (-d.vel.0).atan2(d.vel.1);
+        let hard = self.spin.abs() > SHUFFLE_SPIN;
+        self.turning = if hard { self.turning + dt } else { 0.0 };
+        let shuffling = alive_up && !moving && hard && (self.gap.abs() > 0.35 || self.turning > 0.3) && d.stance == Stance::Stand && d.action.is_none();
+        self.dir = if moving { wrap(travel - self.heading) } else if shuffling { self.spin.signum() * std::f32::consts::FRAC_PI_2 } else { 0.0 };
+        // Legs by real pace, with hysteresis.
+        let was = self.legs;
+        let fast = matches!(was, Pose::Run | Pose::Sprint);
+        self.legs = if d.sprint && speed > if was == Pose::Sprint { SPRINT_DOWN } else { SPRINT_UP } {
+            Pose::Sprint
+        } else if speed > if fast { RUN_DOWN } else { RUN_UP } {
+            Pose::Run
+        } else if speed > if matches!(was, Pose::Walk | Pose::Run | Pose::Sprint) { WALK_DOWN } else { WALK_UP } {
+            Pose::Walk
+        } else {
+            Pose::Stand
+        };
+        // Setting off from still, he steps out with a foot straight away (not from the middle of a stride).
+        if was_still && moving {
+            self.phase = 0.12;
+        }
+        let aim = d.rifle == Rifle::Aim;
+        let reload = d.rifle == Rifle::Reload;
+        // Falls: shot down or killed, he goes down once (back or forward) before he lies there.
+        if self.was_up && !alive_up {
+            self.fall = Some((d.ts, if d.dead { Pose::FallForward } else { Pose::FallBack }));
+        }
+        if alive_up {
+            self.fall = None;
+            self.on_back = false;
+        } else if !d.dead {
+            self.on_back = true;
+        }
+        self.was_up = alive_up;
+        let falling = self.fall.and_then(|(t0, p)| {
+            let t = (d.ts - t0) / if p == Pose::FallBack { FALL_BACK_S } else { FALL_FORWARD_S };
+            (t < 1.0).then_some((p, t))
+        });
+        let carried = |legs: Pose| match d.rifle {
+            Rifle::Aim => Some(Pose::StandAim),
+            Rifle::Reload => Some(Pose::Reload),
+            Rifle::Slung => Some(Pose::Slung),
+            // Rifle in hand on the move he carries it and works his arms (the legs' own carry).
+            Rifle::Ready => (legs == Pose::Stand).then_some(Pose::Ready),
+        };
+        let (pose, upper, mut steps) = if let Some((p, _)) = falling {
+            (p, None, 0.0)
+        } else if d.dead {
+            (if self.on_back { Pose::DeadBack } else { Pose::Dead }, None, 0.0)
+        } else if d.down {
+            (Pose::Wounded, None, 0.3)
+        } else if let Some((p, cadence, up)) = d.action {
+            if moving && up.is_some() {
+                let legs = if d.stance == Stance::Stand { Pose::Walk } else { Pose::CrouchWalk };
+                (legs, up, speed / stride_m_dir(legs, self.dir))
+            } else {
+                (p, None, cadence)
+            }
+        } else {
+            match (d.stance, moving) {
+                (Stance::Prone, true) => (Pose::Crawl, None, speed / pose::CRAWL_STRIDE),
+                (Stance::Prone, false) => (Pose::Prone, None, 0.0),
+                (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
+                (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
+                (Stance::Stand, _) if skid == Skid::Stop => (Pose::Brake, None, 0.0),
+                // In a cut he drops low to pivot while his body still slides the old way.
+                (Stance::Stand, _) if skid == Skid::Cut => (Pose::Crouch, None, 0.0),
+                (Stance::Stand, _) if self.legs == Pose::Stand && shuffling => (Pose::Walk, carried(Pose::Stand), (self.spin.abs() * 0.45).clamp(0.8, 1.8)),
+                (Stance::Stand, _) if self.legs == Pose::Stand => (if reload { Pose::Reload } else { carried(Pose::Stand).unwrap_or(Pose::Ready) }, None, if reload { 0.4 } else { 0.0 }),
+                // Sprinting the rifle is across the chest, whatever was asked.
+                (Stance::Stand, _) if self.legs == Pose::Sprint => (Pose::Sprint, if d.rifle == Rifle::Slung { Some(Pose::Slung) } else { None }, speed / stride_m_dir(Pose::Sprint, self.dir)),
+                (Stance::Stand, _) => (self.legs, carried(self.legs), speed / stride_m_dir(self.legs, self.dir)),
+            }
+        };
+        if falling.is_some() {
+            steps = 0.0;
+        }
+        if self.shown.0 != pose {
+            self.shown = (pose, self.shown.0, pose::switch_start(self.shown.1, self.shown.2, pose, d.ts));
+        }
+        let eff = upper.unwrap_or(pose);
+        if eff != self.upper.0 {
+            self.upper = (eff, self.upper.0, d.ts);
+        }
+        // The phase is integrated here (cadence changes as he winds up and brakes) and handed to the shader as is.
+        let before = self.phase;
+        self.phase = (self.phase + steps * dt).fract();
+        let after = self.phase;
+        let crossed = |at: f32| if after >= before { before < at && after >= at } else { before < at || after >= at };
+        let footfall = (steps > 0.0 && matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk) && (crossed(0.0001) || crossed(0.5)))
+            .then(|| match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, _ => 0.5 });
+        let (phase, cadence) = match falling {
+            Some((_, t)) => (t, -1.0),
+            // The phase is always handed over (frozen when he stops) so legs blending out of a stride stay put;
+            // once settled the shader takes over the idle.
+            None => (self.phase, if steps == 0.0 && d.ts - self.shown.2 > 0.4 { 0.0 } else { -1.0 }),
+        };
+        let up = alive_up && falling.is_none();
+        let lean = if up { pose::pack_tilt(pose::bank(speed, self.spin), pose::accel_pitch(self.accel)) } else { 0.0 };
+        Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall }
+    }
+
+    /// The shader's instance record for this frame (scene.wgsl): `colour` is the palette index with the leader
+    /// (+32) and selection (+64 per level) flags; `kick` is the shot's kick (1 as a round leaves); `fade` dissolves
+    /// him.
+    pub fn record(&self, f: &Frame, at: (f32, f32, f32), colour: f32, kick: f32, fade: f32) -> [f32; 12] {
+        let remaining = 1.0 - ((self.clock - self.upper.2) / LAYER_BLEND_S).clamp(0.0, 1.0);
+        [
+            at.0,
+            at.1,
+            at.2,
+            colour + f.lean,
+            f.heading,
+            f.phase,
+            f.cadence,
+            pose::pack_kick(f.pose, kick),
+            self.shown.1 as u32 as f32,
+            self.shown.2,
+            pose::pack_layer(f.upper, f.dir),
+            pose::pack_fade_layer(fade, Some(self.upper.1), remaining),
+        ]
+    }
+
+    /// His muzzle and bore in the world (mm and unit vector), posed exactly as drawn; None when he cannot fire.
+    pub fn barrel(&self, f: &Frame, at_mm: (f32, f32)) -> (Option<[f32; 3]>, [f32; 3]) {
+        let (q, b) = pose::barrel(pose::RIFLE, f.pose, f.upper, f.phase, f.dir);
+        let (roll, pitch) = pose::unpack_tilt(9.0 + f.lean);
+        let bore = pose::figure_to_world(b, glam::Vec3::ZERO, f.heading, roll, pitch).to_array();
+        let armed = pose::two_handed(f.upper.unwrap_or(f.pose)) > 0.0;
+        let tip = armed.then(|| pose::figure_to_world(q * 1000.0, glam::Vec3::new(at_mm.0, at_mm.1, 0.0), f.heading, roll, pitch).to_array());
+        (tip, bore)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(a: &mut Animator, frames: usize, mut d: Drive) -> Frame {
+        let mut f = a.step(&d);
+        for _ in 1..frames {
+            d.ts += d.dt;
+            f = a.step(&d);
+        }
+        f
+    }
+
+    fn drive(ts: f32) -> Drive {
+        Drive::new(1.0 / 60.0, ts)
+    }
+
+    #[test]
+    fn standing_in_the_fight_he_is_combat_ready_and_aims_when_told() {
+        let mut a = Animator::new(0.0);
+        assert_eq!(run(&mut a, 5, drive(0.0)).pose, Pose::Ready);
+        let mut d = drive(1.0);
+        d.rifle = Rifle::Aim;
+        d.face = Face::Aim { heading: 0.0 };
+        assert_eq!(run(&mut a, 5, d).pose, Pose::StandAim);
+        d.rifle = Rifle::Slung;
+        d.face = Face::Keep;
+        assert_eq!(run(&mut a, 5, d).pose, Pose::Slung);
+    }
+
+    #[test]
+    fn legs_follow_real_pace_with_give_either_way() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.vel = (0.0, 1.2);
+        assert_eq!(run(&mut a, 3, d).pose, Pose::Walk);
+        d.vel = (0.0, 2.3);
+        assert_eq!(run(&mut a, 3, d).pose, Pose::Walk, "short of the run line");
+        d.vel = (0.0, 2.6);
+        assert_eq!(run(&mut a, 3, d).pose, Pose::Run);
+        d.vel = (0.0, 2.3);
+        assert_eq!(run(&mut a, 3, d).pose, Pose::Run, "easing off a touch keeps him running");
+        d.vel = (0.0, 4.4);
+        assert_eq!(run(&mut a, 3, d).pose, Pose::Sprint);
+        d.sprint = false;
+        assert_eq!(run(&mut a, 3, d).pose, Pose::Run, "no sprint without leave to sprint");
+    }
+
+    #[test]
+    fn soldiers_and_the_commander_get_the_same_frame_from_the_same_drive() {
+        let (mut a, mut b) = (Animator::new(0.3), Animator::new(0.3));
+        let mut d = drive(0.0);
+        d.vel = (1.0, 2.0);
+        d.want = Some((1.0, 2.0));
+        d.face = Face::Turn { heading: 1.0, top: 6.0 };
+        d.rifle = Rifle::Aim;
+        for k in 0..90 {
+            d.ts = k as f32 / 60.0;
+            assert_eq!(a.step(&d), b.step(&d));
+        }
+    }
+
+    #[test]
+    fn turning_on_the_spot_he_shuffles_his_feet() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.face = Face::Turn { heading: 2.5, top: 6.0 };
+        let f = run(&mut a, 12, d);
+        assert_eq!(f.pose, Pose::Walk, "stepping round");
+        assert_eq!(f.upper, Some(Pose::Ready), "rifle held at ready while he steps round");
+        assert!(f.dir.abs() > 1.0, "side steps into the turn");
+        let f = run(&mut a, 120, d);
+        assert_eq!(f.pose, Pose::Ready, "settled once round");
+        assert!((f.heading - 2.5).abs() < 0.02);
+    }
+
+    #[test]
+    fn a_hard_stop_from_a_sprint_plants_the_brake() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.vel = (0.0, 4.5);
+        d.want = Some((0.0, 4.5));
+        run(&mut a, 10, d);
+        d.want = Some((0.0, 0.0));
+        assert_eq!(run(&mut a, 1, d).pose, Pose::Brake);
+    }
+
+    #[test]
+    fn shot_down_he_falls_once_then_lies_there() {
+        let mut a = Animator::new(0.0);
+        run(&mut a, 3, drive(0.0));
+        let mut d = drive(1.0);
+        d.down = true;
+        assert_eq!(a.step(&d).pose, Pose::FallBack);
+        assert_eq!(run(&mut a, 90, d).pose, Pose::Wounded);
+        d.dead = true;
+        d.ts = 5.0;
+        assert_eq!(run(&mut a, 3, d).pose, Pose::DeadBack, "died on his back, stays on his back");
+    }
+
+    #[test]
+    fn setting_off_he_steps_out_and_his_feet_are_heard() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.vel = (0.0, 1.4);
+        let mut heard = 0;
+        for k in 0..120 {
+            d.ts = k as f32 / 60.0;
+            heard += a.step(&d).footfall.is_some() as usize;
+        }
+        assert!((3..=6).contains(&heard), "about two steps a second: {heard}");
+    }
+}

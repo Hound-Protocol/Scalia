@@ -2,7 +2,7 @@
 //! (pose, gait cadence, aim layer) and heard (shots, grenades, the leader's steps).
 use scalia_ai::battle::{Act, Bark, Battle, Event, Gait, Soldier, Stance};
 pub use scalia_ai::scenario::KILLHOUSE_ATTACKERS as ATTACKERS;
-use scalia_render::pose::{stride_m_dir, Pose};
+use scalia_render::pose::Pose;
 
 /// Leg changes by pace (m/s): running legs from RUN_FROM, sprinting legs from SPRINT_FROM (sprinters only).
 const RUN_FROM: f32 = 1.9;
@@ -81,32 +81,16 @@ pub struct Assault {
     clock: f64,
     now: f64,
     seen: usize,
-    /// Per soldier: drawn heading (eased) and its pose change (pose, previous pose, when it changed in shader seconds).
-    anim: Vec<(f32, Pose, Pose, f32)>,
-    /// Per soldier, smoothed: speed (m/s), direction of travel relative to his facing (rad), and until when
-    /// (viewer ms) he still counts as walking, so a pause between steps never drops the legs to a stand.
-    motion: Vec<(f32, f32, f64)>,
-    /// Per soldier: the legs he is on (walk, run, sprint), kept until his pace clearly calls for another.
-    legs: Vec<Pose>,
-    /// Per soldier: on his feet at the last drawing, and the fall he is in (started at viewer ms, which fall).
-    up: Vec<bool>,
-    falls: Vec<Option<(f64, Pose)>>,
-    /// Per soldier: lying on his back (went down wounded): if he dies there he stays on his back.
-    on_back: Vec<bool>,
-    /// Per soldier: gait phase integrated from his cadence (strides), and the viewer time it was last advanced.
-    gait: Vec<(f64, f64)>,
-    /// Per soldier: how hard he is turning (rad/s), his last pace (m/s) and acceleration (m/s²), smoothed: for
-    /// banking into turns and leaning into a push off or back against a stop.
-    turn: Vec<(f32, f32, f32)>,
+    /// Per soldier: his animator (anim.rs, the same library the commander uses), and the viewer time it was
+    /// last stepped.
+    figs: Vec<crate::anim::Animator>,
+    figs_at: f64,
     /// Per soldier: where his muzzle was last drawn (mm, z over the ground), for flashes and tracers.
     muzzle: Vec<Option<(i64, i64, i64)>>,
     /// Per soldier: which way his barrel pointed when last drawn (unit, world; zero = unknown).
     bore: Vec<[f32; 3]>,
     /// Per soldier: when he last fired (viewer ms, as `now`), for the rifle's kick.
     fired: Vec<f64>,
-    /// Per soldier: his upper body (layer or pose) now, the one before, since when (shader clock): for blending
-    /// the arms when the rifle comes up or down.
-    uppers: Vec<(Pose, Pose, f32)>,
     pub sounds: Vec<Sound>,
     pub fx: Vec<Fx>,
     /// The leader's steps as they start, for the radio.
@@ -125,9 +109,6 @@ pub struct Assault {
     reported: Vec<(u16, bool)>,
 }
 
-/// How long a fall takes (viewer ms; slower in the AI lab's slow motion).
-const FALL_BACK_MS: f64 = 1_100.0;
-const FALL_FORWARD_MS: f64 = 950.0;
 
 /// The enemy squad stationed in the training house.
 pub const ENEMY_SQUAD: u16 = 200;
@@ -162,7 +143,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, anim: Vec::new(), motion: Vec::new(), legs: Vec::new(), up: Vec::new(), falls: Vec::new(), on_back: Vec::new(), gait: Vec::new(), turn: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), uppers: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: now_ms, muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -171,22 +152,15 @@ impl Assault {
     fn sync_tables(&mut self) {
         // Counted on a table only this grows: `prev` is refilled every step (to every soldier, including one who
         // joined between steps, like the commander), so it cannot say who is still missing.
-        for i in self.anim.len()..self.battle.soldiers.len() {
+        for i in self.figs.len()..self.battle.soldiers.len() {
             if self.prev.len() <= i {
                 self.prev.push(self.battle.soldiers[i].pos);
             }
-            self.anim.push((0.0, Pose::Stand, Pose::Stand, -1000.0));
-            self.motion.push((0.0, 0.0, -1.0));
-            self.legs.push(Pose::Walk);
-            self.up.push(true);
-            self.on_back.push(false);
-            self.falls.push(None);
-            self.gait.push(((scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f64 / 1000.0, self.now));
-            self.turn.push((0.0, 0.0, 0.0));
+            let stride = (scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f32 / 1000.0;
+            self.figs.push(crate::anim::Animator::with_phase(heading_of(self.battle.soldiers[i].facing), stride));
             self.muzzle.push(None);
             self.bore.push([0.0; 3]);
             self.fired.push(f64::NEG_INFINITY);
-            self.uppers.push((Pose::Stand, Pose::Stand, -1000.0));
         }
     }
 
@@ -346,6 +320,8 @@ impl Assault {
         // Anyone who joined since the last step (the commander does, between steps) gets his tables first.
         self.sync_tables();
         let mut out = Vec::new();
+        let dt = ((self.now - self.figs_at) / 1000.0).clamp(0.0, 0.1) as f32;
+        self.figs_at = self.now;
         for i in 0..self.battle.soldiers.len() {
             // The commander's man is drawn as the commander.
             if self.battle.soldiers[i].team != team || self.battle.soldiers[i].player {
@@ -354,125 +330,23 @@ impl Assault {
             let (x, y) = self.position(i);
             let Some((rx, ry, z)) = place(x / 1000.0, y / 1000.0) else { continue };
             let s = &self.battle.soldiers[i];
-            let s_squad = s.squad;
-            let m = &mut self.motion[i];
-            // His own pace (the battle's wind-up and braking), not the step's distance: being nudged aside by a
-            // neighbour must not speed up his legs.
-            let raw = s.pace() as f32 / 1000.0;
-            if s.moving {
-                m.2 = self.now + 250.0;
-                let want = heading_of(s.vel) - heading_of(s.facing);
-                m.1 += wrap(want - m.1) * 0.3;
-            }
-            let walking = self.now < m.2;
-            m.0 += ((if walking { raw } else { 0.0 }) - m.0) * 0.25;
-            let m_speed = m.0;
-            let (mut pose, mut steps, mut upper, mut dir) = pose_of(s, walking, m.0, m.1);
-            // Turning on the spot, his feet step him round (a shuffle into the turn) instead of sliding.
-            let spin = self.turn[i].0;
-            if !walking && spin.abs() > 1.6 && matches!(pose, Pose::Ready | Pose::StandAim | Pose::Stand) && upper.is_none() {
-                upper = Some(pose);
-                pose = Pose::Walk;
-                steps = (spin.abs() * 0.45).clamp(0.8, 1.8);
-                dir = spin.signum() * std::f32::consts::FRAC_PI_2;
-            }
-            // Shot down or killed: he falls (stumbling back onto his back, or crumpling forward), once, before
-            // he lies there.
-            let on_feet = s.alive() && !s.down();
-            if self.up[i] && !on_feet {
-                self.falls[i] = Some((self.now, if s.alive() { Pose::FallBack } else { Pose::FallForward }));
-            }
-            if on_feet {
-                self.falls[i] = None;
-                self.on_back[i] = false;
-            } else if s.alive() {
-                self.on_back[i] = true;
-            }
-            // Died lying on his back: he stays on his back (no turning over onto his face).
-            if !s.alive() && self.on_back[i] && pose == Pose::Dead {
-                pose = Pose::DeadBack;
-            }
-            self.up[i] = on_feet;
-            let falling = self.falls[i].and_then(|(t0, fall)| {
-                let ms = if fall == Pose::FallBack { FALL_BACK_MS } else { FALL_FORWARD_MS };
-                let t = (self.now - t0) / ms;
-                (t < 1.0).then_some((fall, t as f32))
-            });
-            if let Some((fall, _)) = falling {
-                (pose, steps, upper, dir) = (fall, 0.0, None, 0.0);
-            }
-            // Walk, run and sprint legs change only when the pace is clearly past the line (no flicker).
-            if matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint) {
-                let held = self.legs[i];
-                let v = m.0;
-                let keep = match held {
-                    Pose::Walk => v < RUN_FROM + 0.25,
-                    Pose::Run => v >= RUN_FROM - 0.25 && !(pose == Pose::Sprint),
-                    Pose::Sprint => v >= SPRINT_FROM - 0.3 && s.gait == Gait::Sprint,
-                    _ => false,
-                };
-                if keep && held != pose {
-                    pose = held;
-                    steps = v / stride_m_dir(pose, dir);
-                }
-                self.legs[i] = pose;
-            }
+            let d = drive_of(s, dt, ts);
             let kick = self.kick(i);
-            let a = &mut self.anim[i];
-            // Heading eases round to his facing (the battle turns him at 4 rad/s; this only smooths the steps).
-            let want = heading_of(s.facing);
-            let turned = wrap(want - a.0) * 0.35;
-            a.0 += turned;
-            // How hard he is turning (rad/s, smoothed): he banks into it at pace.
-            let dt = ((self.now - self.gait[i].1) / 1000.0).clamp(0.0, 0.1) as f32;
-            if dt > 0.0005 {
-                let t = &mut self.turn[i];
-                t.0 += (turned / dt - t.0) * (dt * 6.0).min(1.0);
-                t.2 += ((m_speed - t.1) / dt - t.2) * (dt * 8.0).min(1.0);
-                t.1 = m_speed;
-            }
-            let a = &mut self.anim[i];
-            if a.1 != pose {
-                *a = (a.0, pose, a.1, ts);
-            }
-            // The phase is integrated here (cadence changes as he winds up and brakes) and handed to the shader as is.
-            let g = &mut self.gait[i];
-            let dt = ((self.now - g.1) / 1000.0).clamp(0.0, 0.1);
-            let before = g.0;
-            *g = ((g.0 + steps as f64 * dt).fract(), self.now);
-            // A footfall at each half of the stride (feet on the ground): heard nearby.
-            let after = g.0;
-            let crossed = |at: f64| if after >= before { before < at && after >= at } else { before < at || after >= at };
-            if steps > 0.0 && matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk) && (crossed(0.0001) || crossed(0.5)) {
-                let loud = match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, _ => 0.5 };
+            let fig = &mut self.figs[i];
+            let f = fig.step(&d);
+            if let Some(loud) = f.footfall {
                 self.sounds.push(Sound { x: x / 1000.0, y: y / 1000.0, blast: false, step: Some(loud), at: self.now, cue: Cue::None });
             }
-            let (phase, cadence) = match falling {
-                Some((_, t)) => (t, -1.0),
-                None => (g.0 as f32, if steps > 0.0 { -1.0 } else { 0.0 }),
-            };
             // The squad's leader is flagged (+32 on the colour) so the shader gives him his red beret.
-            let leader = if self.battle.leader_of(s_squad as usize) == Some(i) { 32.0 } else { 0.0 };
+            let leader = if self.battle.leader_of(s.squad as usize) == Some(i) { 32.0 } else { 0.0 };
             // A selected squad's men carry the selection tag (+64 per level) for the outline: stable, hurt, killed.
-            let tag = if self.selected.contains(&s_squad) { 64.0 * select_level(readiness(s.alive(), s.down(), s.health)) } else { 0.0 };
-            let (banked, pitched) = if on_feet { (scalia_render::pose::bank(m_speed, self.turn[i].0), scalia_render::pose::accel_pitch(self.turn[i].2)) } else { (0.0, 0.0) };
-            let lean = scalia_render::pose::pack_tilt(banked, pitched);
+            let tag = if self.selected.contains(&s.squad) { 64.0 * select_level(readiness(s.alive(), s.down(), s.health)) } else { 0.0 };
+            out.extend_from_slice(&fig.record(&f, (rx, ry, z), body(s.squad) + leader + tag, kick, 0.0));
             // Where his muzzle is now, posed exactly as drawn: rounds fired from here.
-            let heading = a.0;
-            let (q, b) = scalia_render::pose::barrel(scalia_render::pose::RIFLE, pose, upper, phase, dir);
-            self.muzzle[i] = on_feet.then(|| {
-                let w = scalia_render::pose::figure_to_world(q * 1000.0, glam::Vec3::new(x as f32, y as f32, 0.0), heading, banked, pitched);
-                (w.x as i64, w.y as i64, w.z as i64)
-            });
-            let b = scalia_render::pose::figure_to_world(b, glam::Vec3::ZERO, heading, banked, pitched);
-            self.bore[i] = if on_feet { b.to_array() } else { [0.0; 3] };
-            let eff = upper.unwrap_or(pose);
-            let u = &mut self.uppers[i];
-            if eff != u.0 {
-                *u = (eff, u.0, ts);
-            }
-            let layer_back = scalia_render::pose::pack_fade_layer(0.0, Some(u.1), 1.0 - ((ts - u.2) / scalia_render::pose::LAYER_BLEND_S).clamp(0.0, 1.0));
-            out.extend_from_slice(&[rx, ry, z, body(s_squad) + leader + tag + lean, a.0, phase, cadence, scalia_render::pose::pack_kick(pose, kick), a.2 as u32 as f32, a.3, scalia_render::pose::pack_layer(upper, dir), layer_back]);
+            let on_feet = s.alive() && !s.down();
+            let (tip, bore) = fig.barrel(&f, (x as f32, y as f32));
+            self.muzzle[i] = tip.filter(|_| on_feet).map(|w| (w[0] as i64, w[1] as i64, w[2] as i64));
+            self.bore[i] = if on_feet { bore } else { [0.0; 3] };
         }
         out
     }
@@ -510,16 +384,6 @@ impl Assault {
     }
 }
 
-/// An angle brought into -π..π.
-fn wrap(mut d: f32) -> f32 {
-    while d > std::f32::consts::PI {
-        d -= std::f32::consts::TAU;
-    }
-    while d < -std::f32::consts::PI {
-        d += std::f32::consts::TAU;
-    }
-    d
-}
 
 /// The renderer's heading for a facing vector (north is (0, 1000)): the angle the figure is turned by.
 /// How the AI lab names a squad in its feed.
@@ -581,74 +445,58 @@ pub fn heading_of(f: (i64, i64)) -> f32 {
     (-(f.0 as f32)).atan2(f.1 as f32)
 }
 
-/// What a soldier looks like doing what he does: the body pose, its cadence (strides per second), the aim layer
-/// over the legs, and the direction he moves relative to where he faces (radians, for strafing). `walking`,
-/// `speed` (m/s) and `dir` are the smoothed motion: the legs follow his real pace as he winds up and brakes,
-/// walking into a run into a sprint.
-pub fn pose_of(s: &Soldier, walking: bool, speed: f32, dir: f32) -> (Pose, f32, Option<Pose>, f32) {
-    if !s.alive() {
-        return (Pose::Dead, 0.0, None, 0.0);
-    }
-    // Down: on his back, writhing (weakly once treated).
-    if s.down() {
-        return (Pose::Wounded, if s.stable() { 0.12 } else { 0.3 }, None, 0.0);
-    }
-    // Dragging a casualty: crouched, backwards, hands on him.
-    if s.dragging().is_some() {
-        let moving = walking && speed > 0.15;
-        return if moving { (Pose::CrouchWalk, speed / stride_m_dir(Pose::CrouchWalk, dir), Some(Pose::Drag), dir) } else { (Pose::Drag, 0.0, None, 0.0) };
-    }
-    if let Some((act, _)) = s.act {
-        return (
-            match act {
-                Act::Throw => Pose::Throw,
-                Act::Drone => Pose::Drone,
-                // Filling and laying sandbags: down on one knee, working.
-                Act::Build => Pose::Crouch,
-                Act::Aid => Pose::Aid,
-                // Opening a door: the free hand out to the handle.
-                Act::Open => Pose::Signal,
-            },
-            if act == Act::Aid { 1.1 } else { 0.6 },
-            None,
-            0.0,
-        );
-    }
-    let moving = walking && speed > 0.15;
-    let dir = if moving { dir } else { 0.0 };
+/// What a soldier is doing, for his animator (anim.rs): his real pace and where it takes him, where he faces,
+/// his stance and rifle, and any action that takes him over (a throw, first aid, a step the leader has him on).
+pub fn drive_of(s: &Soldier, dt: f32, ts: f32) -> crate::anim::Drive {
+    use crate::anim::{Drive, Face, Rifle, Stance as S};
+    let mut d = Drive::new(dt, ts);
+    d.dead = !s.alive();
+    d.down = s.down();
+    // His own pace (winding up and braking; still there for a moment when told to stop).
+    let pace = if s.alive() && !s.down() { s.momentum() as f32 / 1000.0 } else { 0.0 };
+    let h = heading_of(s.vel);
+    let moving = s.moving && pace > 0.05;
+    d.vel = if pace > 0.05 { (-h.sin() * pace, h.cos() * pace) } else { (0.0, 0.0) };
+    // Stopping hard (told to stop with pace on him) shows as a braking skid.
+    d.want = Some(if s.moving { d.vel } else { (0.0, 0.0) });
+    d.sprint = s.gait == Gait::Sprint;
+    d.in_cover = s.cover.is_some();
+    d.stance = match s.stance { Stance::Stand => S::Stand, Stance::Crouch => S::Crouch, Stance::Prone => S::Prone };
     let reload = s.reloading_ms > 0;
-    // Standing still at a step the leader has him on: how that step looks (the stack, a peek round an
-    // edge, sweeping a room); in cover the cover poses come first.
-    if !moving && !reload && s.cover.is_none() {
-        match s.cue {
-            scalia_ai::battle::Cue::Stack => return (Pose::Stack, 0.0, None, 0.0),
-            scalia_ai::battle::Cue::Peek(right) => return (if right { Pose::LeanRight } else { Pose::LeanLeft }, 0.0, None, 0.0),
-            scalia_ai::battle::Cue::Sweep => return (Pose::Sweep, 0.3, None, 0.0),
-            // Listening to the briefing, down on a knee.
-            scalia_ai::battle::Cue::Kneel => return (Pose::Crouch, 0.0, None, 0.0),
-            // The leader talking his men through it, with his hands.
-            scalia_ai::battle::Cue::Brief => return (Pose::Signal, 0.45, None, 0.0),
-            scalia_ai::battle::Cue::None => {}
-        }
-    }
-    let upper = if reload { Some(Pose::Reload) } else if s.aim { Some(Pose::StandAim) } else { None };
     let aiming = s.aim || s.target.is_some();
-    match (s.stance, moving) {
-        (Stance::Prone, true) => (Pose::Crawl, speed / scalia_render::pose::CRAWL_STRIDE, None, 0.0),
-        (Stance::Prone, false) => (Pose::Prone, 0.0, None, 0.0),
-        (Stance::Crouch, true) => (Pose::CrouchWalk, speed / stride_m_dir(Pose::CrouchWalk, dir), upper, dir),
-        (Stance::Crouch, false) => (if reload { Pose::Reload } else if aiming { if s.cover.is_some() { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, if reload { 0.4 } else { 0.0 }, None, 0.0),
-        (Stance::Stand, true) => {
-            // The legs go by how fast he really is, not the gait he is heading for.
-            let pose = if speed >= SPRINT_FROM && s.gait == Gait::Sprint { Pose::Sprint } else if speed >= RUN_FROM { Pose::Run } else { Pose::Walk };
-            // Running he carries the rifle and runs (arms working); he only keeps it shouldered on the run with
-            // an enemy in his sights. Sprinting, it is across the chest.
-            let upper = if pose == Pose::Sprint || pose == Pose::Run && s.target.is_none() && !reload { None } else { upper };
-            (pose, speed / stride_m_dir(pose, dir), upper, dir)
-        }
-        // In the fight a man standing is never at ease: combat ready (low ready on an athletic base).
-        (Stance::Stand, false) => (if reload { Pose::Reload } else if aiming { Pose::StandAim } else { Pose::Ready }, if reload { 0.4 } else { 0.0 }, None, 0.0),
+    d.rifle = if reload { Rifle::Reload } else if aiming && !(pace >= RUN_FROM && s.target.is_none()) { Rifle::Aim } else { Rifle::Ready };
+    let facing = heading_of(s.facing);
+    d.face = if aiming { Face::Aim { heading: facing } } else { Face::Turn { heading: facing, top: if moving { 6.0 - 2.0 * (pace / SPRINT_FROM).min(1.0) } else { 5.0 } } };
+    // Dragging a casualty: crouched, backing off, hands on him.
+    if s.dragging().is_some() {
+        d.stance = S::Crouch;
+        d.action = Some((Pose::Drag, 0.0, Some(Pose::Drag)));
+    } else if let Some((act, _)) = s.act {
+        let p = match act {
+            Act::Throw => Pose::Throw,
+            Act::Drone => Pose::Drone,
+            // Filling and laying sandbags: down on one knee, working.
+            Act::Build => Pose::Crouch,
+            Act::Aid => Pose::Aid,
+            // Opening a door: the free hand out to the handle.
+            Act::Open => Pose::Signal,
+        };
+        d.action = Some((p, if act == Act::Aid { 1.1 } else { 0.6 }, None));
+    } else if !moving && !reload && s.cover.is_none() {
+        // Standing still at a step the leader has him on: how that step looks (the stack, a peek round an edge,
+        // sweeping a room); in cover the cover poses come first.
+        d.action = match s.cue {
+            scalia_ai::battle::Cue::Stack => Some((Pose::Stack, 0.0, None)),
+            scalia_ai::battle::Cue::Peek(right) => Some((if right { Pose::LeanRight } else { Pose::LeanLeft }, 0.0, None)),
+            scalia_ai::battle::Cue::Sweep => Some((Pose::Sweep, 0.3, None)),
+            // Listening to the briefing, down on a knee.
+            scalia_ai::battle::Cue::Kneel => Some((Pose::Crouch, 0.0, None)),
+            // The leader talking his men through it, with his hands.
+            scalia_ai::battle::Cue::Brief => Some((Pose::Signal, 0.45, None)),
+            scalia_ai::battle::Cue::None => None,
+        };
     }
+    d
 }
 
 #[cfg(test)]
@@ -657,26 +505,44 @@ mod tests {
 
     #[test]
     fn soldiers_look_like_what_they_are_doing() {
+        use crate::anim::Animator;
+        // A few frames of the shared animator on his battle state, at `pace` m/s heading `vel`.
+        let look = |s: &Soldier| {
+            let mut a = Animator::new(heading_of(s.facing));
+            let mut f = a.step(&drive_of(s, 1.0 / 60.0, 0.0));
+            for k in 1..20 {
+                f = a.step(&drive_of(s, 1.0 / 60.0, k as f32 / 60.0));
+            }
+            f
+        };
         let mut s = Soldier::new(0, 0, (0, 0), Stance::Stand);
-        assert_eq!(pose_of(&s, false, 0.0, 0.0).0, Pose::Ready);
+        s.facing = (0, 1_000);
+        assert_eq!(look(&s).pose, Pose::Ready);
         s.target = Some(3);
-        assert_eq!(pose_of(&s, false, 0.0, 0.0).0, Pose::StandAim);
-        // Walking left of his facing at 1.5 m/s, rifle up: walking legs, aiming upper body.
+        assert_eq!(look(&s).pose, Pose::StandAim);
+        // Walking left of his facing, rifle up: walking legs, aiming upper body, moving sideways.
         s.aim = true;
-        let (p, steps, upper, dir) = pose_of(&s, true, 1.5, std::f32::consts::FRAC_PI_2);
-        assert_eq!((p, upper), (Pose::Walk, Some(Pose::StandAim)));
-        assert!(steps > 0.5 && dir == std::f32::consts::FRAC_PI_2, "{steps} {dir}");
+        s.moving = true;
+        s.vel = (-1_000, 0);
+        s.set_momentum(1_500);
+        let f = look(&s);
+        assert_eq!((f.pose, f.upper), (Pose::Walk, Some(Pose::StandAim)));
+        assert!((f.dir - std::f32::consts::FRAC_PI_2).abs() < 0.05, "{}", f.dir);
         // Sprinting legs need a sprint order and the pace for it.
-        assert_eq!(pose_of(&s, true, 4.3, 0.0).0, Pose::Run, "fast, but not told to sprint");
-        // Told to run but still winding up: walking legs until he is really going, then running ones.
-        s.gait = Gait::Run;
-        assert_eq!(pose_of(&s, true, 1.2, 0.0).0, Pose::Walk);
-        assert_eq!(pose_of(&s, true, 3.4, 0.0).0, Pose::Run);
+        s.target = None;
+        s.aim = false;
+        s.vel = (0, 1_000);
+        s.set_momentum(4_300);
+        assert_eq!(look(&s).pose, Pose::Run, "fast, but not told to sprint");
+        s.gait = Gait::Sprint;
+        assert_eq!(look(&s).pose, Pose::Sprint);
         s.stance = Stance::Crouch;
-        assert_eq!(pose_of(&s, true, 1.0, 0.0).0, Pose::CrouchWalk);
+        s.set_momentum(1_000);
+        assert_eq!(look(&s).pose, Pose::CrouchWalk);
         s.health = 0;
-        assert_eq!(pose_of(&s, true, 1.0, 0.0).0, Pose::Dead);
+        assert_eq!(look(&s).pose, Pose::FallForward, "killed: he goes down first");
     }
+
 
     #[test]
     fn a_squad_spawned_on_the_field_goes_where_it_is_told_and_reports_once() {
@@ -736,7 +602,7 @@ mod tests {
                 }
                 continue;
             }
-            poses.push(a.anim[ATTACKERS + 7].1);
+            poses.push(a.figs[ATTACKERS + 7].shown());
         }
         // A defender standing at his post: never a walking pose.
         assert!(poses.len() > 30 && poses.iter().all(|&p| !matches!(p, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk)), "{:?}", &poses.iter().filter(|p| matches!(p, Pose::Walk)).count());
