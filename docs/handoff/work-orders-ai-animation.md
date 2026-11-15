@@ -7,12 +7,12 @@ grows with the battle; prefer shader-side and table work; LOD.
 
 ## Track AI
 
-### AI-1. Re-apply batch 1
+### AI-1. Re-apply batch 1 (done, 15 Nov, 88a9f7f)
 - `git revert 36281b5` (brings back fire lanes, kneel when the enemy is known, spacing, staggered reactions).
 - It was rolled back during the freeze hunt; the freeze was a stuck browser, not this.
 - Re-run `lab_behaviour_report` and compare with the numbers in the AI audit doc.
 
-### AI-2. Batch 2 (from the audit)
+### AI-2. Batch 2 (from the audit) (side-step and shake-out done, 15 Nov, 52f96a7)
 - Blocked shooters side-step a pace to clear the lane instead of only waiting.
 - Formation on contact: a squad in column shakes out into a line so more men can fire forward.
 - Next ranked items from the audit doc after these.
@@ -62,6 +62,9 @@ grows with the battle; prefer shader-side and table work; LOD.
 
 ### AN-7. Small fixes
 - Intro: the zoom-out after the eyes open ends at the closest zoom level, not the widest (work order v2, H).
+
+## Lab (15 Nov)
+- Clear house runs in a training compound on the range: a new house every run (`ground.rs` `compound`, `Killhouse::generate_within`), random defenders and cover. `compound_report` (ignored test) measures house clearing over many layouts: 30 runs gave 28/30 taken, 8.0 of 12 standing, 93 s.
 
 ## Order
 - AI: 1, 2, 3, then 4.
