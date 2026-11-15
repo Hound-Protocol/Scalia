@@ -35,6 +35,9 @@ impl IntelReport {
     /// Confidence after linear decay. Future-dated reports are not exposed.
     pub fn confidence_at(&self, now_ms: i64, fade_per_second: u16) -> Option<u16> {
         let age = now_ms.checked_sub(self.observed_at_ms)?;
+        if age < 0 {
+            return None;
+        }
         let decay = (age / 1_000).saturating_mul(fade_per_second as i64);
         Some((self.confidence as i64 - decay).clamp(0, 1_000) as u16)
     }
