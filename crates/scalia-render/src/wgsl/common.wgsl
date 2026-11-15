@@ -209,7 +209,7 @@ const IDLE_PEEK_PERIOD_S: f32 = 5.2;
 fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   var q = p0;
   // Moving gaits and the close-up tablet view supply their own motion (or must stay perfectly still).
-  if (pose == 1u || pose == 2u || pose == 7u || pose == 11u || pose == 10u) { return q; }
+  if (pose == 1u || pose == 2u || pose == 7u || pose == 11u || pose == 10u || pose >= 21u) { return q; }
   let tau = 6.2831853;
   let breathe = sin(tau * (t / 3.8 + seed));
 
