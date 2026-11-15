@@ -1158,24 +1158,28 @@ try {
   };
   // While a set transmits, the net hiss runs through the analyser for real (band-limited noise), and a squelch tail
   // closes each transmission.
-  let bed = null;
+  let bed = null, bedInput = null;
+  const bedBus = () => {
+    if (bedInput) return bedInput;
+    const c = audioGraph(); if (!c) return null;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.7;
+    const gain = c.createGain(); gain.gain.value = 1;
+    bp.connect(gain).connect(analyser);
+    bedInput = bp;
+    return bedInput;
+  };
   const startBed = () => {
     const c = audioGraph(); if (!c || bed) return;
     if (c.state === 'suspended') c.resume().catch(() => {});
+    const via = bedBus(); if (!via) return;
     const buf = c.createBuffer(1, c.sampleRate * 2, c.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.002 ? 3 : 1); // hiss with crackle
-    const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
-    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.7;
-    const g = c.createGain(); g.gain.value = 0; g.gain.setTargetAtTime(0.06, c.currentTime, 0.03);
-    src.connect(bp).connect(g).connect(analyser); src.start();
-    bed = { src, g, c };
+    bed = audio.playBuffer(buf, { gain: 0.06, category: 'radio', priority: 2, via, loop: true, fadeIn: 0.03 });
   };
   const stopBed = () => {
     if (!bed) return;
-    const { src, g, c } = bed; bed = null;
-    const t = c.currentTime;
-    g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0.11, t); g.gain.exponentialRampToValueAtTime(0.0004, t + 0.2);
-    src.stop(t + 0.22);
+    const voice = bed; bed = null;
+    voice.stop(0.2);
   };
   // A voice heard over a radio: most energy between 300 Hz and 3 kHz, little below or above.
   const voiceShape = edges.slice(0, BANDS).map((f, k) => { const g = Math.sqrt(f * edges[k + 1]); return Math.exp(-Math.pow(Math.log(g / 1100) / 1.0, 2)); });
@@ -1301,10 +1305,14 @@ try {
   const playClip = (buf, clean) => new Promise((done) => {
     const c = audioGraph();
     if (c.state === 'suspended') c.resume().catch(() => {});
-    const src = c.createBufferSource(); src.buffer = buf; src.connect(clean ? analyser : radioChain());
-    let over = false; const end = () => { if (!over) { over = true; done(); } };
-    src.onended = end; setTimeout(end, buf.duration * 1000 + 600);
-    src.start();
+    let over = false, timeout = null;
+    const end = () => { if (!over) { over = true; if (timeout !== null) clearTimeout(timeout); done(); } };
+    const voice = audio.playBuffer(buf, {
+      gain: 1, category: 'radio', priority: 2,
+      via: clean ? analyser : radioChain(), onended: end,
+    });
+    if (!voice) { end(); return; }
+    timeout = setTimeout(() => { voice.stop(); end(); }, buf.duration * 1000 + 600);
   });
   const keyUp = async () => { radio.classList.add('up'); await new Promise((r) => setTimeout(r, 450)); };
   const transmit = async (cls, who, name, text, voice) => {
@@ -1722,7 +1730,7 @@ try {
     version: { group: 'Game', help: 'which build this is', run: () => `${document.title} ${VERSION_LINE} (${new URL(import.meta.url).searchParams.get('v') || 'local build'})` },
     perf: { group: 'Game', help: 'show or hide the performance panel', run: () => { const p = $('perf'); p.hidden = !p.hidden; return `performance panel ${p.hidden ? 'hidden' : 'shown'}`; } },
     reload: { group: 'Game', help: 'reload the page', run: () => { setTimeout(() => location.reload(), 150); return 'reloading'; } },
-    audio: { group: 'Audio', help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
+    audio: { group: 'Audio', help: 'listener space, HDR peak and voice lifecycle', run: () => { const e = v.audio_env(), a = audio.voiceStats(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB | voices ${a.active} active / ${a.tails} tails / ${a.nodes} nodes | dropped ${a.dropped}, stolen ${a.stolen}`; } },
   });
   const pause = { on: false };
   const toggleAssault = () => {

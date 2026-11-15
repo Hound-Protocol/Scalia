@@ -290,26 +290,17 @@ export function createMenu({ viewer, onEnter, wake = () => {}, audio }) {
     while (z > a && Math.abs(d[z]) < th) z--;
     return [a / b.sampleRate, (z + 1) / b.sampleRate];
   }
-  // Plays a decoded sound: `vol`, optionally looped over its audible part, through `via` (a node) if given.
-  // Returns { src, gain, stop(fadeS) } or null if it is not decoded (yet).
+  // Menu and cinematic sounds share Auralis' voice cap, cancellation and node cleanup.
   function play(name, vol, { loop = false, via = null, fadeIn = 0 } = {}) {
     const b = ready(name);
-    if (!ctx || !b) return null;
-    const src = ctx.createBufferSource();
-    src.buffer = b;
-    const gain = ctx.createGain();
-    const now = ctx.currentTime;
-    gain.gain.setValueAtTime(fadeIn > 0 ? 0 : vol, now);
-    if (fadeIn > 0) gain.gain.linearRampToValueAtTime(vol, now + fadeIn);
-    src.connect(gain).connect(via || audio?.ui || ctx.destination);
-    let at = 0;
-    if (loop) { const [a, z] = audible(b); src.loop = true; src.loopStart = a; src.loopEnd = z; at = a; }
-    src.start(now, at);
-    const stop = (fade = 0.03) => {
-      const t = ctx.currentTime;
-      try { gain.gain.cancelScheduledValues(t); gain.gain.setValueAtTime(gain.gain.value, t); gain.gain.linearRampToValueAtTime(0, t + fade); src.stop(t + fade + 0.02); } catch (_) { /* already stopped */ }
-    };
-    return { src, gain, stop };
+    if (!ctx || !b || !audio?.playBuffer) return null;
+    let loopStart = 0, loopEnd = 0;
+    if (loop) [loopStart, loopEnd] = audible(b);
+    return audio.playBuffer(b, {
+      gain: vol, category: 'ui', priority: 2,
+      via: via || audio.ui || ctx.destination,
+      loop, loopStart, loopEnd, fadeIn,
+    });
   }
   let wakeLp = null;
   let tune = null, amb1 = null, amb3 = null, travel = null, enter = null, eyesSnd = null, ambFilter = null;

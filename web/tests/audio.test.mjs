@@ -8,18 +8,25 @@ let sourceCreations = 0;
 
 class FakeNode {
   constructor() {
-    this.gain = { value: 1, setTargetAtTime() {} };
-    this.frequency = { value: 1, setTargetAtTime() {} };
+    const param = () => ({ value: 1, setTargetAtTime(value) { this.value = value; }, cancelScheduledValues() {}, setValueAtTime(value) { this.value = value; }, linearRampToValueAtTime(value) { this.value = value; } });
+    this.gain = param();
+    this.frequency = param();
+    this.playbackRate = param();
+    this.delayTime = param();
+    this.pan = param();
     this.Q = { value: 0 };
     this.positionX = { value: 0, setTargetAtTime() {} };
     this.positionY = { value: 0, setTargetAtTime() {} };
     this.positionZ = { value: 0, setTargetAtTime() {} };
   }
-  connect() { return this; }
+  connect(destination) { this.connections ??= []; this.connections.push(destination); return destination; }
+  disconnect() { this.disconnected = true; }
 }
 
 class FakeAudioContext {
   currentTime = 0;
+  constructor() { this.createdNodes = []; }
+  track(node) { this.createdNodes.push(node); return node; }
   createMediaElementSource(element) {
     sourceCreations++;
     if (connectedElements.has(element)) {
@@ -28,11 +35,66 @@ class FakeAudioContext {
       throw error;
     }
     connectedElements.add(element);
-    return new FakeNode();
+    return this.track(new FakeNode());
   }
-  createGain() { return new FakeNode(); }
-  createBiquadFilter() { return new FakeNode(); }
-  createPanner() { return new FakeNode(); }
+  createGain() { return this.track(new FakeNode()); }
+  createBiquadFilter() { return this.track(new FakeNode()); }
+  createPanner() { return this.track(new FakeNode()); }
+  createStereoPanner() { return this.track(new FakeNode()); }
+  createWaveShaper() { return this.track(new FakeNode()); }
+  createDelay() { return this.track(new FakeNode()); }
+  createBufferSource() {
+    const source = this.track(new FakeNode());
+    source.start = (...args) => { source.startArgs = args; };
+    source.stop = (when) => { source.stopAt = when; source.onended?.(); };
+    return source;
+  }
+}
+
+
+
+function playbackEngine() {
+  const audio = new AudioEngine();
+  const context = new FakeAudioContext();
+  audio.ctx = context;
+  audio.ensure = () => context;
+  audio.buffer = () => ({ duration: 0.2 });
+  audio.world = new FakeNode();
+  audio.mix = new FakeNode();
+  audio.ui = new FakeNode();
+  audio.air = new FakeNode();
+  audio.rev = { small: new FakeNode(), large: new FakeNode(), corridor: new FakeNode() };
+  audio.crunch = new Float32Array(8);
+  audio.heat = 0;
+  audio.heatAt = 0;
+  audio.muffle = null;
+  audio.ringGain = null;
+  return audio;
+}
+
+function lifecycleEngine() {
+  const audio = Object.create(AudioEngine.prototype);
+  audio.active = [];
+  audio.voices = new Set();
+  audio.tails = [];
+  audio.voiceSequence = 0;
+  audio.voiceMetrics = { dropped: 0, stolen: 0, completed: 0, cleaned: 0 };
+  return audio;
+}
+
+function addVoice(audio, priority = 1, gain = 0.1, tailSeconds = 0) {
+  const source = {
+    onended: null,
+    stopped: false,
+    stop() { this.stopped = true; this.onended?.(); },
+  };
+  const node = new FakeNode();
+  const voice = audio._registerVoice(source, [source, node], {
+    category: 'test', priority, gain, tailSeconds,
+  });
+  voice.out = new FakeNode();
+  voice.state = 'playing';
+  return { voice, source, node };
 }
 
 function engine() {
@@ -145,4 +207,137 @@ test('spatialPosition normalises diagonal vectors and contains invalid inputs', 
   near(Math.hypot(...diagonal), 1);
   const invalid = spatialPosition(Number.NaN, Infinity, Number.NaN);
   assert.deepEqual(invalid, [0, 0, -1]);
+});
+
+
+test('voice handles stop and clean up their owned graph exactly once', () => {
+  const audio = lifecycleEngine();
+  const { voice, source, node } = addVoice(audio, 2, 0.4);
+  assert.equal(audio.active.length, 1);
+  assert.equal(audio.voices.size, 1);
+  assert.equal(voice.handle.stop(), true);
+  assert.equal(source.stopped, true);
+  assert.equal(voice.handle.state, 'ended');
+  assert.equal(node.disconnected, true);
+  assert.deepEqual(audio.voiceStats(), {
+    active: 0, tails: 0, tracked: 0, nodes: 0,
+    dropped: 0, stolen: 0, completed: 1, cleaned: 1,
+  });
+  assert.equal(voice.handle.stop(), false);
+});
+
+test('voice allocator deterministically steals a lower-priority voice at the 64 voice cap', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 64 }, () => addVoice(audio, 1, 0.1));
+  assert.equal(audio.active.length, 64);
+  assert.equal(audio._admitVoice(2, 0.05), true);
+  assert.equal(voices[0].source.stopped, true);
+  assert.equal(voices[0].voice.handle.state, 'ended');
+  assert.equal(audio.active.length, 63);
+  assert.equal(audio.voiceStats().stolen, 1);
+  audio.stopAll();
+  assert.equal(audio.voiceStats().tracked, 0);
+});
+
+test('UI priority cannot steal higher-priority gunfire when all 64 slots are occupied', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 64 }, () => addVoice(audio, 3, 0.5));
+  assert.equal(audio._admitVoice(2, 1), false);
+  assert.equal(audio.active.length, 64);
+  assert.equal(voices.every(({ source }) => !source.stopped), true);
+  assert.equal(audio.voiceStats().dropped, 1);
+  audio.stopAll();
+});
+
+test('completed voice tails are bounded and retired nodes are disconnected', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 65 }, () => addVoice(audio, 1, 0.1, 0.5));
+  for (const { source } of voices) source.onended();
+  assert.equal(audio.tails.length, 64);
+  assert.equal(voices[0].voice.handle.state, 'ended');
+  assert.equal(voices[0].node.disconnected, true);
+  assert.equal(audio.voiceStats().nodes, 64 * 2);
+  audio.stopAll();
+  assert.equal(audio.voiceStats().tracked, 0);
+  assert.equal(audio.voiceStats().nodes, 0);
+});
+
+
+test('play() returns a cancellable handle and disconnects every voice-owned node', () => {
+  const audio = playbackEngine();
+  const handle = audio.play('test-shot', {
+    kind: 'shot', db: 100, gain: 1, room: 0, rx: 0, ry: 1,
+    below: 0, dist: 1, lowpass: 20000, space: [0, 30, 0], echoes: [],
+  });
+  assert.ok(handle);
+  assert.equal(handle.state, 'playing');
+  assert.equal(audio.voiceStats().active, 1);
+  assert.ok(audio.voiceStats().nodes >= 10);
+  assert.equal(handle.cancel(), true);
+  assert.equal(handle.state, 'ended');
+  assert.equal(audio.voiceStats().tracked, 0);
+  assert.equal(audio.voiceStats().nodes, 0);
+  assert.equal(audio.ctx.createdNodes.every((node) => node.disconnected), true);
+});
+
+test('playUi() participates in the same voice cap and cancellation lifecycle', () => {
+  const audio = playbackEngine();
+  const handle = audio.playUi('ui-click', 0.8);
+  assert.ok(handle);
+  assert.equal(handle.category, 'ui');
+  assert.equal(audio.voiceStats().active, 1);
+  assert.equal(handle.stop(), true);
+  assert.equal(audio.voiceStats().active, 0);
+  assert.equal(audio.voiceStats().nodes, 0);
+});
+
+
+test('reverb, air and echo branches retain then disconnect every auxiliary node', () => {
+  const audio = playbackEngine();
+  const handle = audio.play('dense-blast', {
+    kind: 'blast', db: 150, gain: 1, room: 1, rx: 0, ry: 1,
+    below: 0, dist: 1, far: 0.5, lowpass: 20000,
+    space: [0.5, 30, 0], echoes: [[0.1, 0.5, 0]],
+  });
+  assert.ok(handle);
+  const source = [...audio.voices][0].src;
+  source.onended();
+  assert.equal(handle.state, 'tailing');
+  assert.equal(audio.voiceStats().tails, 1);
+  assert.ok(audio.voiceStats().nodes > 20);
+  audio.stopAll();
+  assert.equal(handle.state, 'ended');
+  assert.equal(audio.voiceStats().nodes, 0);
+  assert.equal(audio.ctx.createdNodes.every((node) => node.disconnected), true);
+});
+
+
+test('playBuffer() manages looping menu voices and supports graceful fade cancellation', () => {
+  const audio = playbackEngine();
+  let ended = 0;
+  const handle = audio.playBuffer({ duration: 4 }, {
+    gain: 0.6, category: 'ui', priority: 2, loop: true,
+    loopStart: 0.2, loopEnd: 3.5, fadeIn: 0.4, onended: () => ended++,
+  });
+  assert.ok(handle);
+  assert.equal(handle.state, 'playing');
+  assert.equal(handle.category, 'ui');
+  assert.equal(handle.src.loop, true);
+  assert.deepEqual(handle.src.startArgs, [0, 0.2]);
+  assert.equal(handle.gain.gain.value, 0.6);
+  assert.equal(handle.stop(0.05), true);
+  assert.equal(handle.src.stopAt, 0.07);
+  assert.equal(handle.state, 'ended');
+  assert.equal(ended, 1);
+  assert.equal(audio.voiceStats().nodes, 0);
+});
+
+
+test('voice allocator steals the quietest voice within the lowest priority tier', () => {
+  const audio = lifecycleEngine();
+  const voices = Array.from({ length: 64 }, (_, i) => addVoice(audio, 1, i === 17 ? 0.01 : 0.2));
+  assert.equal(audio._admitVoice(1, 0.1), true);
+  assert.equal(voices[17].source.stopped, true);
+  assert.equal(voices[0].source.stopped, false);
+  audio.stopAll();
 });

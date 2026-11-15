@@ -13,13 +13,14 @@
 // Built for headphones (HRTF). Impulse responses are generated here, nothing to download.
 
 const VOICES = 64;
+const MAX_TAILS = 64;
 // HDR audio (as Frostbite): every sound has a logical loudness (dB at the source); what reaches the ear is that
 // plus the acoustics' gain. The loudest thing heard lately sets a window: anything more than WINDOW_DB below it
 // is not played at all, anything well below it is pushed down further, and the peak relaxes over seconds.
 // Presets as in Battlefield: HiFi keeps a wide range (60 dB), War Tapes squeezes it (25 dB: punchy, loud).
 const HDR = { hifi: 60, wartapes: 25 };
 const QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
-const PRIORITY = { blast: 3, shot: 2, step: 1 };
+const PRIORITY = { blast: 4, shot: 3, ui: 2, radio: 2, step: 1 };
 
 // Convert the camera-relative ground vector into the listener's HRTF coordinate frame.
 // +x is right, -z is ahead, +z is behind, and -y is below the listener.
@@ -91,9 +92,124 @@ export class AudioEngine {
     this.buffers = new Map();
     this.bufferLoads = new Map();
     this.active = [];
+    this.voices = new Set();
+    this.tails = [];
+    this.voiceSequence = 0;
+    this.voiceMetrics = { dropped: 0, stolen: 0, completed: 0, cleaned: 0 };
     this.env = { enclosure: 0, size: 30, rt60: 0.25, corridor: 0, pda: 0 };
     this.peak = PEAK_FLOOR_DB; this.peakAt = 0;
     this.hdr = 'wartapes'; this.windowDb = HDR.wartapes;
+  }
+
+  _pruneActive() {
+    this.active = this.active.filter((voice) => !voice.done && voice.state !== 'stopping');
+  }
+
+  _admitVoice(priority, gain) {
+    this._pruneActive();
+    if (this.active.length < VOICES) return true;
+    const worst = this.active.reduce((a, b) => {
+      if (a.pri !== b.pri) return a.pri < b.pri ? a : b;
+      if (a.gain !== b.gain) return a.gain < b.gain ? a : b;
+      return a.id < b.id ? a : b;
+    });
+    if (worst.pri > priority || (worst.pri === priority && worst.gain >= gain)) {
+      this.voiceMetrics.dropped++;
+      return false;
+    }
+    this.voiceMetrics.stolen++;
+    this._stopVoice(worst, 'stolen');
+    return true;
+  }
+
+  _registerVoice(src, nodes, { category = 'world', priority = 1, gain = 1, tailSeconds = 0, out = null, onended = null } = {}) {
+    const voice = {
+      id: ++this.voiceSequence, src, nodes, category, pri: priority, gain,
+      tailSeconds: Math.max(0, Math.min(4.2, tailSeconds)), state: 'scheduled', done: false,
+      timer: null, reason: null, out,
+    };
+    const engine = this;
+    voice.handle = {
+      id: voice.id,
+      category,
+      src,
+      gain: out,
+      get state() { return voice.state; },
+      stop(fadeSeconds = 0) { return engine._stopVoice(voice, 'cancelled', fadeSeconds); },
+      cancel() { return engine._stopVoice(voice, 'cancelled'); },
+    };
+    this.voices.add(voice);
+    this.active.push(voice);
+    src.onended = () => { this._finishVoice(voice); onended?.(voice.handle); };
+    return voice;
+  }
+
+  _stopVoice(voice, reason = 'stopped', fadeSeconds = 0) {
+    if (!voice || voice.done || voice.state === 'stopping' || voice.state === 'tailing' || voice.state === 'ended') return false;
+    voice.state = 'stopping';
+    voice.reason = reason;
+    voice.done = true;
+    this.active = this.active.filter((item) => item !== voice);
+    const fade = Number.isFinite(fadeSeconds) ? Math.max(0, Math.min(10, fadeSeconds)) : 0;
+    try {
+      if (fade > 0 && voice.out?.gain && this.ctx) {
+        const t = this.ctx.currentTime;
+        voice.out.gain.cancelScheduledValues(t);
+        voice.out.gain.setValueAtTime(voice.out.gain.value, t);
+        voice.out.gain.linearRampToValueAtTime(0, t + fade);
+        voice.src.stop(t + fade + 0.02);
+      } else voice.src.stop();
+    } catch (_) { this._finishVoice(voice); }
+    return true;
+  }
+
+  _finishVoice(voice) {
+    if (!voice || voice.state === 'tailing' || voice.state === 'ended') return;
+    voice.done = true;
+    this.active = this.active.filter((item) => item !== voice);
+    this.voiceMetrics.completed++;
+    if (voice.tailSeconds <= 0) {
+      this._cleanupVoice(voice);
+      return;
+    }
+    voice.state = 'tailing';
+    this.tails.push(voice);
+    while (this.tails.length > MAX_TAILS) this._cleanupVoice(this.tails[0]);
+    voice.timer = setTimeout(() => this._cleanupVoice(voice), voice.tailSeconds * 1000);
+  }
+
+  _cleanupVoice(voice) {
+    if (!voice || voice.state === 'ended') return;
+    if (voice.timer !== null) clearTimeout(voice.timer);
+    voice.timer = null;
+    for (const node of voice.nodes) {
+      try { node.disconnect(); } catch (_) { /* already disconnected */ }
+    }
+    voice.state = 'ended';
+    voice.done = true;
+    this.active = this.active.filter((item) => item !== voice);
+    this.tails = this.tails.filter((item) => item !== voice);
+    this.voices.delete(voice);
+    this.voiceMetrics.cleaned++;
+  }
+
+  voiceStats() {
+    let nodeCount = 0;
+    for (const voice of this.voices) nodeCount += voice.nodes.length;
+    return {
+      active: this.active.length,
+      tails: this.tails.length,
+      tracked: this.voices.size,
+      nodes: nodeCount,
+      ...this.voiceMetrics,
+    };
+  }
+
+  stopAll() {
+    for (const voice of [...this.voices]) {
+      if (!voice.done) this._stopVoice(voice, 'shutdown');
+      this._cleanupVoice(voice);
+    }
   }
 
   /// HDR preset: 'hifi' (60 dB window) or 'wartapes' (25 dB).
@@ -157,19 +273,49 @@ export class AudioEngine {
     return route;
   }
 
+  /// Play a decoded buffer through an Auralis bus with the same bounded lifecycle as world one-shots.
+  playBuffer(buffer, { gain = 1, category = 'ui', priority = PRIORITY[category] || 1, via = null,
+    loop = false, loopStart = 0, loopEnd = 0, fadeIn = 0, onended = null } = {}) {
+    const c = this.ensure(); if (!c || !buffer) return null;
+    const safeGain = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
+    if (!this._admitVoice(priority, safeGain)) return null;
+    const source = c.createBufferSource();
+    source.buffer = buffer;
+    source.loop = Boolean(loop);
+    if (source.loop) {
+      source.loopStart = Math.max(0, Number.isFinite(loopStart) ? loopStart : 0);
+      source.loopEnd = Math.max(source.loopStart, Number.isFinite(loopEnd) ? loopEnd : 0);
+    }
+    const level = c.createGain();
+    const now = c.currentTime;
+    const fade = Number.isFinite(fadeIn) ? Math.max(0, Math.min(10, fadeIn)) : 0;
+    level.gain.setValueAtTime(fade > 0 ? 0 : safeGain, now);
+    if (fade > 0) level.gain.linearRampToValueAtTime(safeGain, now + fade);
+    const destination = via && typeof via.connect === 'function' ? via : this.ui;
+    source.connect(level).connect(destination);
+    const voice = this._registerVoice(source, [source, level], {
+      category, priority, gain: safeGain, tailSeconds: 0, out: level, onended,
+    });
+    try {
+      source.start(now, source.loop ? source.loopStart : 0);
+      voice.state = 'playing';
+      return voice.handle;
+    } catch (error) {
+      this._cleanupVoice(voice);
+      throw error;
+    }
+  }
+
   /// Play a decoded, non-spatial interface sound through the Auralis master limiter.
   playUi(url, gain = 1) {
-    const c = this.ensure(); if (!c) return;
+    const c = this.ensure(); if (!c) return null;
     const buffer = this.buffer(url);
     if (!buffer) {
       const pending = this.bufferLoads.get(url);
       if (pending) pending.then(() => this.playUi(url, gain)).catch(() => {});
-      return;
+      return null;
     }
-    const source = c.createBufferSource(); source.buffer = buffer;
-    const level = c.createGain(); level.gain.value = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
-    source.connect(level).connect(this.ui);
-    source.start();
+    return this.playBuffer(buffer, { gain, category: 'ui', priority: PRIORITY.ui, via: this.ui });
   }
 
   /// Creates the graph on first use (browsers allow audio only after a user gesture).
@@ -372,7 +518,7 @@ export class AudioEngine {
       const jump = heard - peak;
       if (jump > 12) {
         const duck = Math.pow(10, -Math.min(24, (jump - 12) * 0.6) / 20);
-        for (const v of this.active) if (!v.done) { v.out.gain.cancelScheduledValues(c.currentTime); v.out.gain.setTargetAtTime(v.out.gain.value * duck, c.currentTime, 0.02); v.out.gain.setTargetAtTime(v.out.gain.value, c.currentTime + 0.4, 0.6); }
+        for (const v of this.active) if (!v.done && v.out?.gain) { v.out.gain.cancelScheduledValues(c.currentTime); v.out.gain.setTargetAtTime(v.out.gain.value * duck, c.currentTime, 0.02); v.out.gain.setTargetAtTime(v.out.gain.value, c.currentTime + 0.4, 0.6); }
       }
       this.peak = heard; this.peakAt = c.currentTime;
     }
@@ -381,42 +527,37 @@ export class AudioEngine {
     o.gain *= Math.pow(10, -under * 0.5 / 20);
     const buf = this.buffer(url); if (!buf) return;
     const pri = PRIORITY[o.kind] || 1;
-    this.active = this.active.filter((v) => !v.done);
-    if (this.active.length >= VOICES) {
-      // Full: the quietest of the least important voices gives way, or this one is dropped.
-      const worst = this.active.reduce((a, b) => (a.pri - b.pri || a.gain - b.gain) <= 0 ? a : b);
-      if (worst.pri > pri || (worst.pri === pri && worst.gain >= o.gain)) return;
-      try { worst.src.stop(); } catch (_) {}
-      worst.done = true;
-    }
+    if (!this._admitVoice(pri, o.gain)) return null;
     // Gunfire inside (Battlefield 3 / bodycam): it overwhelms. Close shots crunch (saturated), the room rings
     // hard and keeps ringing as the fire goes on, the walls slap the crack straight back, everything else is
     // shoved aside for a moment, and close by the ears ring and dull.
     const gun = o.kind === 'shot' || o.kind === 'blast';
     const inside = gun ? enc : 0;
     const close = Math.max(0, Math.min(1, 1 - o.dist / 30));
-    const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.rate || 1;
-    const g = c.createGain(); g.gain.value = o.gain * (1 + 0.6 * inside);
-    const body = c.createWaveShaper();
+    const nodes = [];
+    const own = (node) => { nodes.push(node); return node; };
+    const src = own(c.createBufferSource()); src.buffer = buf; src.playbackRate.value = o.rate || 1;
+    const g = own(c.createGain()); g.gain.value = o.gain * (1 + 0.6 * inside);
+    const body = own(c.createWaveShaper());
     const drive = inside * close * (1 - o.far);
     if (drive > 0.05) { body.curve = this.crunch; body.oversample = '4x'; }
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
+    const lp = own(c.createBiquadFilter()); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
     // The lows carry furthest (the air takes the highs, see the low-pass): only a little rumble is trimmed.
-    const hpf = c.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = Math.min(90, 30 + o.dist * 0.3); hpf.Q.value = 0.6;
+    const hpf = own(c.createBiquadFilter()); hpf.type = 'highpass'; hpf.frequency.value = Math.min(90, 30 + o.dist * 0.3); hpf.Q.value = 0.6;
     // Distant fire is a boom more than a crack: the low end comes up as the top goes.
-    const boom = c.createBiquadFilter(); boom.type = 'lowshelf'; boom.frequency.value = 160; boom.gain.value = gun ? 7 * o.far : 0;
-    const p = c.createPanner();
+    const boom = own(c.createBiquadFilter()); boom.type = 'lowshelf'; boom.frequency.value = 160; boom.gain.value = gun ? 7 * o.far : 0;
+    const p = own(c.createPanner());
     p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1;
     // Around the head (the camera): right is +x, ahead is -z, below is -y. Below counts for less than the
     // ground direction, so left and right stay clear from high up.
     const [x, y, z] = spatialPosition(o.rx, o.ry, o.below);
     p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
     // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
-    const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5;
-    const out = c.createGain();
+    const dry = own(c.createGain()); dry.gain.value = 1 - o.room * 0.5;
+    const out = own(c.createGain());
     // Driven into the curve by how close and how enclosed; brought back down after it.
-    const pre = c.createGain(); pre.gain.value = 1 + 2.5 * drive;
-    const post = c.createGain(); post.gain.value = 1 / (1 + 1.2 * drive);
+    const pre = own(c.createGain()); pre.gain.value = 1 + 2.5 * drive;
+    const post = own(c.createGain()); post.gain.value = 1 / (1 + 1.2 * drive);
     src.connect(g).connect(pre).connect(body).connect(post).connect(out).connect(hpf).connect(boom).connect(lp).connect(p);
     p.connect(dry).connect(gun ? this.mix : this.world);
     // A room it is made in rings: small or large by size, or a corridor's flutter. Open ground: no ring.
@@ -430,7 +571,7 @@ export class AudioEngine {
     for (const [busIn, w] of sends) {
       const amount = w * o.room * (1 + 2.6 * inside) * (1 + (inside > 0 ? this.heat : 0));
       if (amount < 0.01) continue;
-      const send = c.createGain(); send.gain.value = amount;
+      const send = own(c.createGain()); send.gain.value = amount;
       p.connect(send).connect(busIn);
     }
     // Outdoors a loud sound trails off in a soft echo rather than stopping dead: more the louder it is and the
@@ -438,17 +579,17 @@ export class AudioEngine {
     const loudness = Math.max(0, Math.min(1, (num(o.db, 100, 0, 200) - 110) / 40));
     const airAmount = (1 - enc) * loudness * (0.45 + 0.5 * (gun ? o.far : 0));
     if (airAmount > 0.01) {
-      const send = c.createGain(); send.gain.value = airAmount;
+      const send = own(c.createGain()); send.gain.value = airAmount;
       p.connect(send).connect(this.air);
     }
     // Echoes off what stands around it: each a little later, weaker and darker, from the wall's side.
     for (const e of o.echoes || []) {
       const [edelay, egain, epan] = [num(e[0], 0, 0, 2), num(e[1], 0, 0, 1), num(e[2], 0, -1, 1)];
       if (egain < 0.02) continue;
-      const d = c.createDelay(2); d.delayTime.value = edelay;
-      const eg = c.createGain(); eg.gain.value = egain;
-      const elp = c.createBiquadFilter(); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 5000) * 0.6; elp.Q.value = 0.5;
-      const ep = c.createStereoPanner(); ep.pan.value = epan * 0.85;
+      const d = own(c.createDelay(2)); d.delayTime.value = edelay;
+      const eg = own(c.createGain()); eg.gain.value = egain;
+      const elp = own(c.createBiquadFilter()); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 5000) * 0.6; elp.Q.value = 0.5;
+      const ep = own(c.createStereoPanner()); ep.pan.value = epan * 0.85;
       lp.connect(d).connect(eg).connect(elp).connect(ep).connect(this.mix);
     }
     // Distant fire rolls: the report comes back off the land and buildings far off, late, dark and soft, the
@@ -456,10 +597,10 @@ export class AudioEngine {
     if (gun && o.far > 0.05) {
       const spread = 1 + o.dist / 150;
       for (const [dt, gk, pan] of [[0.11, 0.4, -0.5], [0.27, 0.26, 0.45], [0.52, 0.15, -0.2], [0.9, 0.08, 0.3]]) {
-        const d = c.createDelay(4); d.delayTime.value = Math.min(3.9, dt * spread);
-        const eg = c.createGain(); eg.gain.value = gk * o.far;
-        const elp = c.createBiquadFilter(); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 1400); elp.Q.value = 0.4;
-        const ep = c.createStereoPanner(); ep.pan.value = pan;
+        const d = own(c.createDelay(4)); d.delayTime.value = Math.min(3.9, dt * spread);
+        const eg = own(c.createGain()); eg.gain.value = gk * o.far;
+        const elp = own(c.createBiquadFilter()); elp.type = 'lowpass'; elp.frequency.value = Math.min(lp.frequency.value, 1400); elp.Q.value = 0.4;
+        const ep = own(c.createStereoPanner()); ep.pan.value = pan;
         lp.connect(d).connect(eg).connect(elp).connect(ep).connect(this.mix);
       }
     }
@@ -481,9 +622,9 @@ export class AudioEngine {
       const t0 = c.currentTime + Math.max(0, o.delay || 0);
       // The slap: the nearest walls throw the crack straight back (a few, close together, from both sides).
       for (const [dt, gk, pan] of [[0.007, 0.7, -0.6], [0.013, 0.55, 0.6], [0.021, 0.45, -0.3], [0.034, 0.3, 0.2]]) {
-        const d = c.createDelay(0.1); d.delayTime.value = dt * (0.6 + size / 20);
-        const eg = c.createGain(); eg.gain.value = gk * inside;
-        const ep = c.createStereoPanner(); ep.pan.value = pan;
+        const d = own(c.createDelay(0.1)); d.delayTime.value = dt * (0.6 + size / 20);
+        const eg = own(c.createGain()); eg.gain.value = gk * inside;
+        const ep = own(c.createStereoPanner()); ep.pan.value = pan;
         lp.connect(d).connect(eg).connect(ep).connect(this.mix);
       }
       // The bang shoves everything else aside for a moment (footsteps, the room's own noises).
@@ -510,9 +651,29 @@ export class AudioEngine {
         }
       }
     }
-    const v = { src, pri, gain: o.gain, out, done: false };
-    src.onended = () => { v.done = true; };
-    this.active.push(v);
-    src.start(c.currentTime + Math.max(0, o.delay || 0));
+    // Keep the source graph only as long as its audible tails need it. Every node created for this voice
+    // is tracked and disconnected on retirement; tail retention is bounded independently from live voices.
+    const maxEcho = (o.echoes || []).reduce((m, e) => Math.max(m, num(e[0], 0, 0, 2)), 0);
+    const farTail = gun && o.far > 0.05 ? Math.min(3.9, 0.9 * (1 + o.dist / 150)) + 0.12 : 0;
+    const hasRoomTail = sends.some(([bus, weight]) => weight * o.room * (1 + 2.6 * inside) * (1 + (inside > 0 ? this.heat : 0)) > 0.01);
+    const hasAirTail = airAmount > 0.01;
+    const tailSeconds = Math.min(4.2, Math.max(
+      maxEcho > 0 ? maxEcho + 0.12 : 0,
+      farTail,
+      hasRoomTail ? 3.1 : 0,
+      hasAirTail ? 2.1 : 0,
+      inside > 0.3 ? 0.12 : 0,
+    ));
+    const voice = this._registerVoice(src, nodes, {
+      category: o.kind || 'world', priority: pri, gain: o.gain, tailSeconds, out,
+    });
+    try {
+      src.start(c.currentTime + Math.max(0, o.delay || 0));
+      voice.state = 'playing';
+      return voice.handle;
+    } catch (error) {
+      this._cleanupVoice(voice);
+      throw error;
+    }
   }
 }
