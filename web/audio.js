@@ -132,8 +132,10 @@ export class AudioEngine {
     voice.handle = {
       id: voice.id,
       category,
+      src,
+      gain: out,
       get state() { return voice.state; },
-      stop() { return engine._stopVoice(voice, 'cancelled'); },
+      stop(fadeSeconds = 0) { return engine._stopVoice(voice, 'cancelled', fadeSeconds); },
       cancel() { return engine._stopVoice(voice, 'cancelled'); },
     };
     this.voices.add(voice);
@@ -142,13 +144,22 @@ export class AudioEngine {
     return voice;
   }
 
-  _stopVoice(voice, reason = 'stopped') {
+  _stopVoice(voice, reason = 'stopped', fadeSeconds = 0) {
     if (!voice || voice.done || voice.state === 'stopping' || voice.state === 'tailing' || voice.state === 'ended') return false;
     voice.state = 'stopping';
     voice.reason = reason;
     voice.done = true;
     this.active = this.active.filter((item) => item !== voice);
-    try { voice.src.stop(); } catch (_) { this._finishVoice(voice); }
+    const fade = Number.isFinite(fadeSeconds) ? Math.max(0, Math.min(10, fadeSeconds)) : 0;
+    try {
+      if (fade > 0 && voice.out?.gain && this.ctx) {
+        const t = this.ctx.currentTime;
+        voice.out.gain.cancelScheduledValues(t);
+        voice.out.gain.setValueAtTime(voice.out.gain.value, t);
+        voice.out.gain.linearRampToValueAtTime(0, t + fade);
+        voice.src.stop(t + fade + 0.02);
+      } else voice.src.stop();
+    } catch (_) { this._finishVoice(voice); }
     return true;
   }
 
@@ -260,27 +271,49 @@ export class AudioEngine {
     return route;
   }
 
+  /// Play a decoded buffer through an Auralis bus with the same bounded lifecycle as world one-shots.
+  playBuffer(buffer, { gain = 1, category = 'ui', priority = PRIORITY[category] || 1, via = null,
+    loop = false, loopStart = 0, loopEnd = 0, fadeIn = 0 } = {}) {
+    const c = this.ensure(); if (!c || !buffer) return null;
+    const safeGain = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
+    if (!this._admitVoice(priority, safeGain)) return null;
+    const source = c.createBufferSource();
+    source.buffer = buffer;
+    source.loop = Boolean(loop);
+    if (source.loop) {
+      source.loopStart = Math.max(0, Number.isFinite(loopStart) ? loopStart : 0);
+      source.loopEnd = Math.max(source.loopStart, Number.isFinite(loopEnd) ? loopEnd : 0);
+    }
+    const level = c.createGain();
+    const now = c.currentTime;
+    const fade = Number.isFinite(fadeIn) ? Math.max(0, Math.min(10, fadeIn)) : 0;
+    level.gain.setValueAtTime(fade > 0 ? 0 : safeGain, now);
+    if (fade > 0) level.gain.linearRampToValueAtTime(safeGain, now + fade);
+    const destination = via && typeof via.connect === 'function' ? via : this.ui;
+    source.connect(level).connect(destination);
+    const voice = this._registerVoice(source, [source, level], {
+      category, priority, gain: safeGain, tailSeconds: 0, out: level,
+    });
+    try {
+      source.start(now, source.loop ? source.loopStart : 0);
+      voice.state = 'playing';
+      return voice.handle;
+    } catch (error) {
+      this._cleanupVoice(voice);
+      throw error;
+    }
+  }
+
   /// Play a decoded, non-spatial interface sound through the Auralis master limiter.
   playUi(url, gain = 1) {
-    const c = this.ensure(); if (!c) return;
+    const c = this.ensure(); if (!c) return null;
     const buffer = this.buffer(url);
     if (!buffer) {
       const pending = this.bufferLoads.get(url);
       if (pending) pending.then(() => this.playUi(url, gain)).catch(() => {});
-      return;
+      return null;
     }
-    const safeGain = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
-    const priority = PRIORITY.ui;
-    if (!this._admitVoice(priority, safeGain)) return null;
-    const source = c.createBufferSource(); source.buffer = buffer;
-    const level = c.createGain(); level.gain.value = safeGain;
-    source.connect(level).connect(this.ui);
-    const voice = this._registerVoice(source, [source, level], {
-      category: 'ui', priority, gain: safeGain, tailSeconds: 0, out: level,
-    });
-    try { source.start(); } catch (error) { this._cleanupVoice(voice); throw error; }
-    voice.state = 'playing';
-    return voice.handle;
+    return this.playBuffer(buffer, { gain, category: 'ui', priority: PRIORITY.ui, via: this.ui });
   }
 
   /// Creates the graph on first use (browsers allow audio only after a user gesture).
