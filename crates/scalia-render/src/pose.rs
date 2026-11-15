@@ -918,10 +918,9 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 1.0;
         }
         Pose::ProneAim => {
-            // Same supported prone rifle position, with the head lowered into a cheek weld.
+            // Start from the solved two-handed aim rig, then roll the figure onto the elbows.
+            aim_arms(&mut p);
             p.prone = 1.0;
-            p.shoulder = [2.8, 2.8];
-            p.elbow = [1.3, 1.35];
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 0.82;
         }
