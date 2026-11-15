@@ -62,3 +62,5 @@
 @media (prefers-reduced-motion: reduce) {
   .interaction-hint.is-live { animation: none; }
 }
+
+body.in-menu #interactionHints { visibility: hidden; }
