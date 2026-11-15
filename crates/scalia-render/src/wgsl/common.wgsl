@@ -209,13 +209,13 @@ const IDLE_PEEK_PERIOD_S: f32 = 5.2;
 fn idle(p0: PP, pose: u32, t: f32, seed: f32) -> PP {
   var q = p0;
   // Moving gaits and the close-up tablet view supply their own motion (or must stay perfectly still).
-  if (pose == 1u || pose == 2u || pose == 7u || pose == 11u || pose == 10u || (pose >= 21u && pose != 36u)) { return q; }
+  if (pose == 1u || pose == 2u || pose == 7u || pose == 11u || pose == 10u || pose >= 21u) { return q; }
   let tau = 6.2831853;
   let breathe = sin(tau * (t / 3.8 + seed));
 
   // Prone: the chest works against the elbows, with only a small head scan and rifle settle.
   // Keep the legs and body-to-ground transform fixed so the soldier never floats or sinks.
-  if (pose == 5u || pose == 36u) {
+  if (pose == 5u) {
     q.sh = q.sh + vec2f(IDLE_PRONE_BREATH * breathe);
     q.head = q.head + IDLE_PRONE_HEAD_BREATH * breathe;
     q.look = q.look + IDLE_PRONE_SCAN * sin(tau * (t / IDLE_PRONE_SCAN_PERIOD_S + seed * 1.4));
@@ -535,14 +535,6 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.tilt = 0.05 * s + 0.04 * lateral;
     p.rifle = 1.5707963;
     p.head = 1.0;
-  } else if (pose == 36u) {
-    // Prone-native support: elbows beside the chest, forearms lifted from the dirt and rifle on the sight line.
-    // The shared grip solver places the left palm on the handguard.
-    p.prone = 1.0;
-    p.sh = vec2f(2.8);
-    p.el = vec2f(1.3, 1.35);
-    p.rifle = 1.5707963;
-    p.head = 1.0;
   } else if (pose == 28u) {
     p.sh = vec2f(0.08);
     p.el = vec2f(0.3);
@@ -594,7 +586,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -667,8 +659,6 @@ fn grip(p_in: PP, w_in: f32) -> PP {
   if (w <= 0.0) { return p_in; }
   var p = p_in;
   p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
-  // The prone body rotates the shoulder line with the whole figure: reach directly, without rifle pitch.
-  if (p.prone >= 0.999) { return reach_left(p_in, guard(p_in), w, 2.0); }
   return reach_left(p, guard(p), w, 0.7);
 }
 

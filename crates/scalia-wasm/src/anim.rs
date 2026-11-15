@@ -143,8 +143,6 @@ pub struct Animator {
     /// (None when settled).
     stance: Stance,
     drop: Option<f32>,
-    /// Latches the aimed variant of the prone transition so changing direction mid-drop reverses the same motion.
-    drop_aim: bool,
 }
 
 impl Default for Animator {
@@ -184,7 +182,6 @@ impl Animator {
             clock: 0.0,
             stance: Stance::Stand,
             drop: None,
-            drop_aim: false,
         }
     }
 
@@ -290,15 +287,9 @@ impl Animator {
         let settled = alive_up && falling.is_none() && d.action.is_none();
         if !settled {
             self.drop = None;
-            self.drop_aim = false;
             self.stance = d.stance;
         } else if d.stance != self.stance {
             if self.drop.is_some() || d.stance == Stance::Prone || self.stance == Stance::Prone {
-                // Latch the aim style only when a drop starts. If the order reverses halfway through, it uses
-                // the same keys backwards instead of switching animation sets under the character.
-                if self.drop.is_none() {
-                    self.drop_aim = aim;
-                }
                 let from = self.drop.unwrap_or(drop_at(self.stance));
                 self.drop = Some(from);
             }
@@ -310,8 +301,7 @@ impl Animator {
             let next = if at < to { (at + DROP_RATE * dt).min(to) } else { (at - DROP_RATE * dt).max(to) };
             if next == to {
                 self.drop = None;
-                landed = Some(match (d.stance, aim) { (Stance::Stand, true) => Pose::StandAim, (Stance::Stand, false) => Pose::Ready, (Stance::Crouch, true) => Pose::CrouchAim, (Stance::Crouch, false) => Pose::Crouch, (Stance::Prone, true) => Pose::ProneAim, (Stance::Prone, false) => Pose::Prone });
-                self.drop_aim = false;
+                landed = Some(match d.stance { Stance::Stand => Pose::Ready, Stance::Crouch => Pose::Crouch, Stance::Prone => Pose::Prone });
             } else {
                 self.drop = Some(next);
             }
@@ -341,8 +331,8 @@ impl Animator {
             }
         } else {
             match (d.stance, moving) {
-                (Stance::Prone, true) => (Pose::Crawl, if aim { Some(Pose::ProneAim) } else { None }, speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
-                (Stance::Prone, false) => (if aim { Pose::ProneAim } else { Pose::Prone }, None, 0.0),
+                (Stance::Prone, true) => (Pose::Crawl, None, speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
+                (Stance::Prone, false) => (Pose::Prone, None, 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
                 (Stance::Stand, _) if skid == Skid::Stop => (Pose::Brake, None, 0.0),
@@ -400,7 +390,7 @@ impl Animator {
         // set to how far between them he is (pose.rs `drop_keys`); a drop interrupted mid-way blends from the kneel.
         let (pose, prev, since) = match (f.pose, self.shown.1) {
             (Pose::Drop, _) => {
-                let (from, to, u) = if self.drop_aim { pose::drop_aim_keys(f.phase) } else { pose::drop_keys(f.phase) };
+                let (from, to, u) = pose::drop_keys(f.phase);
                 (to, from, self.clock - u * pose::BLEND_S)
             }
             (p, Pose::Drop) => (p, Pose::Crouch, self.shown.2),
@@ -499,78 +489,6 @@ mod tests {
 
     fn drive(ts: f32) -> Drive {
         Drive::new(1.0 / 60.0, ts)
-    }
-
-    #[test]
-    fn prone_aim_is_selected_when_still_and_layered_over_all_crawl_directions() {
-        let mut a = Animator::new(0.0);
-        let mut d = drive(0.0);
-        d.stance = Stance::Prone;
-        d.rifle = Rifle::Aim;
-        d.face = Face::Aim { heading: 0.0 };
-        let still = run(&mut a, 90, d);
-        assert_eq!(still.pose, Pose::ProneAim);
-        d.ts = a.clock;
-        assert!(a.barrel(&still, (0.0, 0.0)).0.is_some(), "aimed prone soldier remains armed");
-
-        for (vel, expected) in [
-            ((0.0, 0.35), 0.0),
-            ((0.0, -0.35), std::f32::consts::PI),
-            ((-0.35, 0.0), std::f32::consts::FRAC_PI_2),
-            ((0.35, 0.0), -std::f32::consts::FRAC_PI_2),
-        ] {
-            d.vel = vel;
-            let mut f = a.step(&d);
-            for _ in 1..24 {
-                d.ts += d.dt;
-                f = a.step(&d);
-            }
-            assert_eq!(f.pose, Pose::Crawl);
-            assert_eq!(f.upper, Some(Pose::ProneAim), "aim remains layered over the crawl");
-            assert!((wrap(f.dir - expected)).abs() < 0.02, "direction {:?}: expected {expected}, got {}", vel, f.dir);
-            assert_eq!(f.cadence, -1.0, "the shader consumes the animator-integrated crawl phase");
-            assert!(a.barrel(&f, (0.0, 0.0)).0.is_some(), "crawling while aiming keeps a valid muzzle");
-        }
-    }
-
-    #[test]
-    fn aimed_prone_transitions_use_aimed_endpoints_and_reverse_cleanly() {
-        let mut a = Animator::new(0.0);
-        let mut d = drive(0.0);
-        d.rifle = Rifle::Aim;
-        d.face = Face::Aim { heading: 0.0 };
-        assert_eq!(run(&mut a, 8, d).pose, Pose::StandAim);
-        d.ts = a.clock;
-
-        d.stance = Stance::Prone;
-        let mut reached_drop = false;
-        let mut phase = 0.0;
-        for k in 0..24 {
-            d.ts += d.dt;
-            let f = a.step(&d);
-            if f.pose == Pose::Drop {
-                reached_drop = true;
-                phase = f.phase;
-                let record = a.record(&f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
-                let (from, to, _) = pose::drop_aim_keys(f.phase);
-                assert_eq!(record[7] as u32, to as u32);
-                assert_eq!(record[8] as u32, from as u32);
-            }
-        }
-        assert!(reached_drop && a.drop_aim, "aim variant latched for the transition");
-
-        // Reverse while halfway down: the same aim-key path is traversed backwards, with no phase jump.
-        d.stance = Stance::Stand;
-        d.ts += d.dt;
-        let first = a.step(&d);
-        assert_eq!(first.pose, Pose::Drop);
-        assert!(first.phase < phase, "reversing goes back up the same drop: {} -> {}", phase, first.phase);
-        for _ in 0..140 {
-            d.ts += d.dt;
-            let f = a.step(&d);
-            if f.pose != Pose::Drop { assert_eq!(f.pose, Pose::StandAim); }
-        }
-        assert_eq!(a.shown(), Pose::StandAim);
     }
 
     #[test]

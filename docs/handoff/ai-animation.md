@@ -33,7 +33,7 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
   - `examples/anim_audit` checks foot slide, loop seams, grips and blends.
 - **Pose ids:**
   - Standing and moving: Stand 0, Walk 1, Run 2, Sprint 7, StandAim 6, Ready 30, Slung 28, Brake 31.
-  - Low: Crouch 3, CrouchWalk 11, CrouchAim 14, CoverAim 4, Cover 8, Prone 5, Crawl 32, ProneAim 36.
+  - Low: Crouch 3, CrouchWalk 11, CrouchAim 14, CoverAim 4, Cover 8, Prone 5, Crawl 32.
   - Leans and CQB: LeanLeft 12, LeanRight 13, Stack 15, Sweep 16.
   - Actions: Radio 9, Tablet 10, Throw 17, Reload 18, Signal 19, Drone 20, Aid 23.
   - Casualties: Wounded 21, Drag 22, Dead 24, DeadBack 27, FallBack 25, FallForward 26.
@@ -58,8 +58,8 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
 - **Hook still missing:** incoming fire can already change a soldier's mind (cover first), but there is no visual "flinch / drop" reaction yet.
 
 ### AN-2 implementation notes (15 Nov)
-- Prone crawl forward/back/side, the ProneAim pose and aimed get-down/get-up transitions are implemented; automated checks are the merge gate, with visual in-game sign-off still outstanding.
-- `ProneAim` is pose 36; it is a real two-handed prone firing pose and can layer over directional `Crawl`.
+- Prone drop/get-up uses Drop, DropReach and DropPlant keys; controller tests cover stand/prone, crouch/prone and reversing mid-drop.
+- Prone aiming/firing remains unfinished: the current procedural rig cannot place the support hand on the fore-end while keeping both arms clear of the ground. It remains a separate rig-tuned pose task.
 - `Crawl` uses the animator's travel direction to reverse diagonal timing when backing up and to change support width when crawling sideways.
 - Aimed drop/get-up transitions use aimed endpoints and latch their animation path so reversing halfway up/down does not switch to the non-aimed keys.
 - `scripts/check.sh` and the animation audit are the merge gates; visual browser review remains a separate sign-off.

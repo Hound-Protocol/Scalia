@@ -108,23 +108,6 @@ fn idle_animation_constants_match_between_rust_and_wgsl() {
 
 
 #[test]
-fn prone_aim_pose_is_mirrored_in_the_shader() {
-    use scalia_render::pose::{params, wgsl_literal, Pose};
-    let want = wgsl_literal(&params(Pose::ProneAim, 0.0));
-    let body = &WGSL[WGSL.find("pose == 36u").unwrap()..];
-    let body = &body[..body.find("\n  } else if").unwrap_or(body.len())];
-    let expected = [
-        "p.prone = 1.0;",
-        "p.sh = vec2f(2.8);",
-        "p.el = vec2f(1.3, 1.35);",
-        "p.rifle = 1.5707963;",
-        "p.head = 1.0;",
-    ];
-    for line in expected { assert!(body.contains(line), "shader prone aim missing: {line}"); }
-    assert!(want.contains("1.570796"), "Rust reference keeps the rifle rotated onto the prone aiming line: {want}");
-}
-
-#[test]
 fn crawl_directional_terms_match_in_rust_and_wgsl() {
     assert!(RS.contains("phase * std::f32::consts::TAU + dir"), "Rust crawl phase uses travel direction");
     assert!(WGSL.contains("phase * 6.2831853 + dir"), "WGSL crawl phase uses travel direction");
@@ -136,21 +119,3 @@ fn crawl_directional_terms_match_in_rust_and_wgsl() {
 }
 
 
-#[test]
-fn prone_aim_is_two_handed_in_the_shader() {
-    use scalia_render::pose::{two_handed, Pose};
-    let body = &WGSL[WGSL.find("fn two_handed(").unwrap()..];
-    let body = &body[..body.find("\n").unwrap()];
-    assert!(body.contains("pose == 36u"), "shader grip correction must include ProneAim");
-    assert_eq!(two_handed(Pose::ProneAim), 1.0);
-}
-
-
-#[test]
-fn prone_grip_uses_direct_reach_while_other_poses_keep_rifle_pitch_correction() {
-    assert!(RS.contains("if p.prone >= 0.999"));
-    assert!(RS.contains("reach_left_capped(p, held(RIFLE_GUARD, p), w, REACH_MAX)"));
-    assert!(RS.contains("const GRIP_MAX: f32 = 0.7;"));
-    assert!(WGSL.contains("if (p.prone >= 0.999) { return reach_left(p_in, guard(p_in), w, 2.0); }"));
-    assert!(WGSL.contains("return reach_left(p, guard(p), w, 0.7);"));
-}

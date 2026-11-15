@@ -94,8 +94,6 @@ pub enum Pose {
     /// both knees with the left palm planted. Drawn only as keys of the drop.
     DropReach = 34,
     DropPlant = 35,
-    /// Prone with the rifle shouldered and both hands holding it on the sights.
-    ProneAim = 36,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -133,7 +131,6 @@ impl Pose {
             33 => Pose::Drop,
             34 => Pose::DropReach,
             35 => Pose::DropPlant,
-            36 => Pose::ProneAim,
             _ => Pose::Stand,
         }
     }
@@ -263,11 +260,7 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     if w <= 0.0 {
         return *p;
     }
-    // A prone body rotates the shoulder line with the whole figure, so tilting the rifle as in an upright
-    // stance moves the target the wrong way. Reach directly to the handguard instead.
-    if p.prone >= 0.999 {
-        return reach_left_capped(p, held(RIFLE_GUARD, p), w, REACH_MAX);
-    }
+
     // Upright and crouched weapon poses use the normal rifle-pitch correction before arm reach.
     let mut p0 = *p;
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
@@ -412,7 +405,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::ProneAim => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake => 1.0,
         _ => 0.0,
     }
 }
@@ -903,16 +896,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }
-        Pose::ProneAim => {
-            // Prone-native support: elbows stay beside the chest, forearms are raised off the dirt, and the
-            // rifle is laid along the line of sight. The shared grip solver places the left palm on the guard.
-            p.prone = 1.0;
-            p.shoulder = [2.8, 2.8];
-            p.elbow = [1.3, 1.35];
-            p.abduct[0] = -0.45;
-            p.rifle = std::f32::consts::FRAC_PI_2;
-            p.head = 1.0;
-        }
+
         Pose::Drop => return drop_params(phase),
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
@@ -1009,7 +993,7 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
 
     // Prone: the chest works against the elbows, with only a small head scan and rifle settle.
     // Keep the legs and body-to-ground transform fixed so the soldier never floats or sinks.
-    if matches!(pose, Pose::Prone | Pose::ProneAim) {
+    if pose == Pose::Prone {
         q.shoulder[0] += IDLE_PRONE_BREATH * breathe;
         q.shoulder[1] += IDLE_PRONE_BREATH * breathe;
         q.head += IDLE_PRONE_HEAD_BREATH * breathe;
@@ -1106,20 +1090,6 @@ pub fn drop_keys(t: f32) -> (Pose, Pose, f32) {
     }
 }
 
-// The aimed drop follows the same hand-to-ground keys, entering and leaving through aimed stances so the rifle
-// does not snap down to Ready when the player changes stance while aiming.
-pub fn drop_aim_keys(t: f32) -> (Pose, Pose, f32) {
-    let t = t.clamp(0.0, 1.0);
-    if t < DROP_KNEEL {
-        (Pose::StandAim, Pose::CrouchAim, t / DROP_KNEEL)
-    } else if t < DROP_REACH {
-        (Pose::CrouchAim, Pose::DropReach, (t - DROP_KNEEL) / (DROP_REACH - DROP_KNEEL))
-    } else if t < DROP_PLANT {
-        (Pose::DropReach, Pose::DropPlant, (t - DROP_REACH) / (DROP_PLANT - DROP_REACH))
-    } else {
-        (Pose::DropPlant, Pose::ProneAim, (t - DROP_PLANT) / (1.0 - DROP_PLANT))
-    }
-}
 
 /// Most of the way over, the chest kept well down (so the head never rises as the body pivots from the knee to the
 /// boots), the left palm on the ground ahead taking the weight (found by search: 4 cm up, 0.8 m ahead of the

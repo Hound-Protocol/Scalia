@@ -54,7 +54,7 @@ fn crouching_is_lower_and_prone_is_flat() {
 
 #[test]
 fn aiming_points_the_rifle_forward_at_shoulder_height() {
-    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45), (Pose::ProneAim, 0.05, 0.45)] {
+    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45)] {
         let v = posed(pose, 0.0);
         let rifle: Vec<Vec3> = v.iter().filter(|p| p.0 == Part::Rifle).map(|p| p.1).collect();
         let tip = rifle.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
@@ -65,23 +65,6 @@ fn aiming_points_the_rifle_forward_at_shoulder_height() {
     }
 }
 
-
-#[test]
-fn prone_aim_is_two_handed_and_keeps_the_rifle_level_in_front() {
-    use scalia_render::pose::{barrel, grip};
-    let base = params(Pose::ProneAim, 0.0);
-    assert_eq!(two_handed(Pose::ProneAim), 1.0);
-    assert_eq!(base.prone, 1.0);
-    let held_pose = grip(&base, two_handed(Pose::ProneAim));
-    let gap = hand(&held_pose, Side::Left).distance(held(RIFLE_GUARD, &held_pose));
-    assert!(gap < 0.04, "support hand is off the handguard by {gap:.3} m");
-    let v: Vec<_> = figure().vertices.iter().map(|vertex| (part_of(vertex.color), pose_vertex(Vec3::from(vertex.pos), part_of(vertex.color), &held_pose))).collect();
-    let top = v.iter().map(|p| p.1.z).fold(f32::MIN, f32::max);
-    let low = v.iter().map(|p| p.1.z).fold(f32::MAX, f32::min);
-    assert!(top < 0.7 && low > -0.06, "prone aim clips or rises off the ground: {low}..{top}");
-    let (tip, bore) = barrel(scalia_render::pose::RIFLE, Pose::ProneAim, None, 0.0, 0.0);
-    assert!(tip.y > 0.55 && bore.y > 0.85, "prone rifle must point forward: tip {tip:?}, bore {bore:?}");
-}
 
 #[test]
 fn crawling_has_continuous_directional_cycles_forward_backward_and_sideways() {

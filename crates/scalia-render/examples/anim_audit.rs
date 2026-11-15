@@ -99,14 +99,14 @@ fn main() {
     }
 
     println!("\nLeft palm to the rifle handguard (m, worst over the cycle, after grip()); the right palm holds the grip by construction");
-    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim, Pose::ProneAim] {
+    for pose in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim] {
         // Worst over the cycle, as drawn (after grip()).
         let guard = (0..16).map(|k| { let p = grip(&params(pose, k as f32 / 16.0), two_handed(pose)); hand(&p, Side::Left).distance(held(RIFLE_GUARD, &p)) }).fold(0.0, f32::max);
         println!("{:<10} guard {:>6.3}", format!("{pose:?}"), guard);
         if guard > 0.03 { println!("  !! {pose:?}: the left hand is off the handguard"); bad += 1; }
     }
     println!("\nLeft palm to the handguard through idle motion and blends, after grip()");
-    let holds = [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim, Pose::ProneAim];
+    let holds = [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::Cover, Pose::StandAim];
     let gap = |p: &PoseParams| { let q = grip(p, 1.0); hand(&q, Side::Left).distance(held(RIFLE_GUARD, &q)) };
     for &pose in &holds {
         let m = (0..3000).map(|i| gap(&idle(&params(pose, 0.25), pose, i as f32 * 0.02, 0.37))).fold(0.0, f32::max);
