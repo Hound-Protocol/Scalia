@@ -35,10 +35,12 @@ pub enum Furnish {
     Bench,
     /// A weapons rack.
     Rack,
+    /// A jukebox on a small square table (the table's top at 0.78 m, the box on it).
+    Jukebox,
 }
 
 impl Furnish {
-    pub const ALL: [Furnish; 5] = [Furnish::Bunk, Furnish::Locker, Furnish::Table, Furnish::Bench, Furnish::Rack];
+    pub const ALL: [Furnish; 6] = [Furnish::Bunk, Furnish::Locker, Furnish::Table, Furnish::Bench, Furnish::Rack, Furnish::Jukebox];
     /// Its height (mm).
     pub fn height_mm(self) -> i64 {
         match self {
@@ -47,6 +49,7 @@ impl Furnish {
             Furnish::Table => 780,
             Furnish::Bench => 470,
             Furnish::Rack => 1_300,
+            Furnish::Jukebox => 1_350,
         }
     }
 }

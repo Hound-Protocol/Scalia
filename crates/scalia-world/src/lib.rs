@@ -54,6 +54,7 @@ pub enum Item {
     Table,
     Bench,
     Rack,
+    Jukebox,
 }
 
 impl Item {
@@ -64,6 +65,7 @@ impl Item {
             Item::Table => Furnish::Table,
             Item::Bench => Furnish::Bench,
             Item::Rack => Furnish::Rack,
+            Item::Jukebox => Furnish::Jukebox,
         }
     }
 }

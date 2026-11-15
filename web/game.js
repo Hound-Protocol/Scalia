@@ -5,6 +5,7 @@ import { installConsole } from './console.js';
 import { createErrors } from './errors.js';
 import { preload, fileBytes } from './preload.js';
 import { createMenu } from './menu.js';
+import { createJukebox } from './jukebox.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
@@ -1627,6 +1628,7 @@ try {
   // Battle sounds go through the Pack Engine audio graph (audio.js): the acoustics place every shot, blast and
   // footfall (walls, distance, zoom, the listener's space, headphones 3D), the graph plays it.
   const audio = new AudioEngine();
+  const jukebox = createJukebox({ audio, viewer: () => window.scaliaViewer });
   // For the intro (outside this block): waking up filters the world's sound.
   window.scaliaAudio = audio;
   audio.fetchBytes = fileBytes;
@@ -1775,6 +1777,13 @@ try {
       return;
     }
     if (k === 'e' && !$('answerCall').hidden) { answer(); return; }
+    // E: use what is in reach (the commander on foot): the jukebox's player, or the nearest door.
+    if (k === 'e' && !e.repeat && !tabletUp) {
+      if (jukebox?.open) { jukebox.close(); return; }
+      if (v.interact() === 'jukebox') jukebox?.toggle();
+      return;
+    }
+    if (k === 'escape' && jukebox?.open) { jukebox.close(); return; }
     if (invOpen) { invKey(k, e); return; }
     if (k === 'q' && !e.repeat && !tabletUp) { openInv(); return; }
     if (DEBUG && k === '1') setScene('ships');

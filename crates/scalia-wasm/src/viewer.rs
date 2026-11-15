@@ -201,6 +201,8 @@ pub struct Viewer {
     /// His upper body (the layer, or the pose's own): now, the one before, since when (shader clock, s).
     /// His animator (anim.rs): the same library every soldier is drawn with.
     cmd_fig: crate::anim::Animator,
+    /// Which roofs are drawn (house footprint and size, house roof on, barracks roof on): rebuilt on change.
+    roof_key: (i64, i64, i64, bool, bool),
     cmd_gait: f64,
     cmd_pose: (Pose, Pose, f32),
     /// Per figure (key): last heading, smoothed turn rate (rad/s), when (ms), last speed (m/s), smoothed
@@ -384,6 +386,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         cmd_spin: 0.0,
         god: false,
         cmd_fig: crate::anim::Animator::new(0.0),
+        roof_key: (0, 0, 0, false, false),
         cmd_gait: 0.37,
         cmd_pose: (Pose::Stand, Pose::Stand, -1000.0),
         turns: HashMap::new(),
@@ -777,10 +780,7 @@ impl Viewer {
         let comp = !matches!(name, "contact" | "wounded" | "standoff");
         let seed = scalia_core::hash::mix64(self.frame_ms.to_bits() ^ 0x1ab5);
         let c = comp.then(|| crate::ground::compound(seed));
-        let mut props = base_props();
-        if let Some(c) = &c {
-            props.extend(c.props.iter().copied());
-        }
+        let props = c.as_ref().map_or_else(base_props, |c| c.props.clone());
         let mut map = scalia_ai::save::MapSpec::new(lo, lo, size, size, &props);
         map.doors = battle_doors();
         map.killhouse = Some(killhouse_mm());
@@ -789,12 +789,15 @@ impl Viewer {
         let house = matches!(name, "contact");
         map.live = if house { Some(range_live_mm()) } else { None };
         if let Some(c) = &c {
-            map.doors.extend(c.doors.iter().copied());
+            map.doors = c.doors.clone();
             map.killhouse = Some(c.house.origin);
             map.killhouse_seed = Some(c.seed);
             map.live = Some(c.live);
         }
         let mut a = crate::assault::Assault::field_with(map, killhouse_mm(), 7, self.lab_t, house);
+        // Which of the battle's doors are steel (by place: the compound's door list differs from the world's).
+        let steel: Vec<(i64, i64)> = battle_doors().iter().zip(crate::ground::door_steel()).filter(|(_, s)| *s).map(|(d, _)| d.at).collect();
+        self.door_steel = a.battle.doors.iter().map(|d| steel.contains(&d.at)).collect();
         // The ground drawn and walked on is the battle's map (the compound comes and goes with the scenario).
         self.base_props = a.battle.map_spec().map(|m| m.props()).unwrap_or_else(base_props);
         self.base_grid.rebuild(&self.base_props);
@@ -840,13 +843,14 @@ impl Viewer {
                 a.order(DEMO_SQUAD, Order::Capture);
                 let (o, n) = (c.house.origin, c.house.rooms.len());
                 let note = format!(
-                    "Training compound (layout {:x}): a new house every run, {n} rooms, {} ways in, {} defenders posted at random inside, cover all around. Blue (12) takes it from the south.",
+                    "Training compound on the range (layout {:x}): a new house every run, {n} rooms, {} ways in, {} defenders posted at random inside, cover all around. Blue (12) takes it from the south.",
                     c.seed & 0xffff,
                     c.house.doors.iter().filter(|d| d.rooms.0.is_none() || d.rooms.1.is_none()).count(),
                     c.posts.len()
                 );
                 self.assault = Some(a);
-                self.cmd = ((o.0 - 6_000) as f64 / 1000.0, (o.1 - 14_000) as f64 / 1000.0);
+                let _ = o;
+                self.cmd = ((range_mm().2 + 4_000) as f64 / 1000.0, (c.start[0].1 + 4_000) as f64 / 1000.0);
                 return note;
             }
         };
@@ -1814,6 +1818,47 @@ impl Viewer {
         self.zoom_step = STEP_FIELD_MAX;
     }
 
+    /// Where the jukebox is ([x, y] metres; empty if there is none).
+    pub fn jukebox_at(&self) -> Vec<f64> {
+        jukebox_mm().map_or(Vec::new(), |(x, y)| vec![x as f64 / 1000.0, y as f64 / 1000.0])
+    }
+    /// How a sound made at (x, y) metres reaches the ears now: one record laid out as `take_sounds` (kind 0,
+    /// loudness 1). For a sound that keeps playing (the jukebox): the page re-asks a few times a second.
+    pub fn hear_at(&mut self, x: f64, y: f64) -> Vec<f32> {
+        let l = self.audio_listener();
+        let (r, _, _) = scalia_render::camera::basis(self.last_cam.1);
+        let mut out = Vec::new();
+        self.sound_record(&mut out, l, r, (x as f32, y as f32), 0.0, 1.0, 0.0);
+        out
+    }
+    /// E, on foot: the commander uses what is in reach. Returns "jukebox" when he is at the jukebox (the page
+    /// opens its player), "door" when he opened or shut the nearest door, or "" with nothing in reach.
+    pub fn interact(&mut self) -> String {
+        if self.scene != Scene::Ground {
+            return String::new();
+        }
+        let me = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
+        let d2 = |p: (i64, i64)| ((p.0 - me.0) as f64).hypot((p.1 - me.1) as f64);
+        if jukebox_mm().is_some_and(|j| d2(j) < 2_000.0) {
+            return "jukebox".into();
+        }
+        let Some(a) = self.assault.as_mut() else { return String::new() };
+        let near = a.battle.doors.iter().enumerate().map(|(i, d)| (i, d2(d.at))).filter(|&(_, d)| d < 1_800.0).min_by(|x, y| x.1.total_cmp(&y.1));
+        let Some((i, _)) = near else { return String::new() };
+        use scalia_ai::doors::DoorState;
+        let me_soldier = a.battle.soldiers.iter().position(|s| s.player);
+        let to = match a.battle.doors[i].state {
+            DoorState::Open | DoorState::Breached => DoorState::Closed,
+            _ => DoorState::Open,
+        };
+        // A breached door has nothing left to shut; a locked one does not give to a hand on the handle.
+        if matches!(a.battle.doors[i].state, DoorState::Breached | DoorState::Locked) {
+            return String::new();
+        }
+        a.battle.set_door(i, to, me_soldier);
+        "door".into()
+    }
+
     pub fn scene_name(&self) -> String {
         match self.scene {
             Scene::Ships => "ships",
@@ -2602,6 +2647,36 @@ impl Viewer {
             self.update_commander(t, ts, instanced);
         }
         instanced.push(("base".into(), "base_at".into()));
+        // Roofs over the training house and the barracks, until the camera (or the commander) goes in.
+        {
+            let house = self.assault.as_ref().and_then(|a| a.battle.house()).map(|k| (k.origin, ((k.size_m.0 * 1000.0) as i64, (k.size_m.1 * 1000.0) as i64)));
+            let (cx, cy) = (self.last_cam.0.x as f64 + self.origin.0, self.last_cam.0.y as f64 + self.origin.1);
+            let within = |r: (i64, i64, i64, i64), x: f64, y: f64| { let (x, y) = ((x * 1000.0) as i64, (y * 1000.0) as i64); x > r.0 - 1_000 && x < r.2 + 1_000 && y > r.1 - 1_000 && y < r.3 + 1_000 };
+            let inside = |r: (i64, i64, i64, i64)| within(r, cx, cy) || within(r, self.cmd.0, self.cmd.1);
+            let house_r = house.map(|(o, s)| (o.0, o.1, o.0 + s.0, o.1 + s.1));
+            let barracks = barracks_mm();
+            let key = (house_r.map_or(0, |r| r.0 ^ (r.1 << 20)), house_r.map_or(0, |r| r.2), house_r.map_or(0, |r| r.3), house_r.is_some_and(|r| !inside(r)), !inside(barracks));
+            if key != self.roof_key {
+                self.roof_key = key;
+                let mut m = MeshBuilder::default();
+                let mut roof = |r: (i64, i64, i64, i64), top: f32| {
+                    let f = |v: i64| v as f32 / 1000.0;
+                    m.cuboid([f(r.0) - 0.25, f(r.1) - 0.25, self.base_h + top], [f(r.2) + 0.25, f(r.3) + 0.25, self.base_h + top + 0.12], scalia_render::mesh::code(2, scalia_render::mesh::Part::Body));
+                };
+                if let (true, Some(r)) = (key.3, house_r) {
+                    roof(r, scalia_core::killhouse::WALL_TOP_M);
+                }
+                if key.4 {
+                    roof(barracks, 2.78);
+                }
+                if key.3 || key.4 {
+                    self.gpu.upload("roofs", m.bytes());
+                }
+            }
+            if self.roof_key.3 || self.roof_key.4 {
+                instanced.push(("roofs".into(), "base_at".into()));
+            }
+        }
         if let Some(a) = self.assault.as_ref() {
             let now = self.frame_ms;
             let m = door_mesh(&a.battle.doors, &self.door_steel, self.base_h, |at| now - self.lab_real(at as f64));
@@ -3706,6 +3781,7 @@ fn prop_kind(p: &Prop) -> &'static str {
             Furnish::Table => "table",
             Furnish::Bench => "bench",
             Furnish::Rack => "weapons rack",
+            Furnish::Jukebox => "jukebox",
         },
     }
 }
@@ -3827,6 +3903,17 @@ fn furniture_mesh(m: &mut MeshBuilder, p: &Prop, item: Furnish, h: f32) {
         Furnish::Locker => {
             m.cuboid([x - hx, y - hy, h], [x + hx, y + hy, h + top], c(kit::STRAP));
             m.cuboid([x - 0.01, y - hy - 0.01, h + 0.1], [x + 0.01, y + hy + 0.01, h + top - 0.1], c(kit::METAL));
+        }
+        Furnish::Jukebox => {
+            // A small square table, and the jukebox on it: a wooden cabinet with a lit front and a speaker grille.
+            let t = 0.78;
+            legs(m, t - 0.04, 0.035, kit::COYOTE_DARK);
+            m.cuboid([x - hx, y - hy, h + t - 0.04], [x + hx, y + hy, h + t], c(13));
+            let (bx, by) = (0.26f32, 0.18f32);
+            m.cuboid([x - bx, y - by, h + t], [x + bx, y + by, h + top], c(kit::COYOTE_DARK));
+            // The front faces the room (south, -y): a lit panel above the grille.
+            m.cuboid([x - bx + 0.04, y - by - 0.012, h + t + 0.32], [x + bx - 0.04, y - by, h + top - 0.05], c(kit::LENS));
+            m.cuboid([x - bx + 0.06, y - by - 0.012, h + t + 0.06], [x + bx - 0.06, y - by, h + t + 0.26], c(kit::METAL));
         }
         Furnish::Table => {
             legs(m, top - 0.04, 0.04, kit::COYOTE_DARK);

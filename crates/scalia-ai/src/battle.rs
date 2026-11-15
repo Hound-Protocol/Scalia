@@ -460,6 +460,11 @@ impl Battle {
     /// Sets a door's state: sight through it at once, the walking grid when it is locked or unlocked, and
     /// routes planned through a newly locked door are planned again. A door that cannot be locked is shut
     /// instead.
+    /// The building the battle is fought over (the training house), if any.
+    pub fn house(&self) -> Option<&Killhouse> {
+        self.building.as_ref().map(|b| &b.0)
+    }
+
     pub fn set_door(&mut self, i: usize, state: crate::doors::DoorState, by: Option<usize>) {
         use crate::doors::DoorState;
         let Some(d) = self.doors.get_mut(i) else { return };
@@ -543,7 +548,7 @@ impl Battle {
         let (nav, sight, cover) = map.grids();
         let mut b = Battle::with_map(nav, sight, cover, soldiers, seed);
         if let Some(o) = map.killhouse {
-            b.set_building(match map.killhouse_seed { Some(seed) => Killhouse::generate(o.0, o.1, seed), None => Killhouse::new(o.0, o.1) });
+            b.set_building(match map.killhouse_seed { Some(seed) => Killhouse::generate_within(o.0, o.1, seed, crate::save::HOUSE_MAX_M), None => Killhouse::new(o.0, o.1) });
         }
         b.doors = map.doors.clone();
         b.map = Some(map);

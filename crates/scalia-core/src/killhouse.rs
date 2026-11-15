@@ -132,8 +132,14 @@ impl Killhouse {
     /// A house laid out afresh from `seed`, for training: 24 to 32 m by 16 to 22 m, split into rooms of at least
     /// 4 m (5 to 9 of them), every room reachable, two to four ways in from outside, windows along the outer walls.
     pub fn generate(x_mm: i64, y_mm: i64, seed: u64) -> Killhouse {
+        Killhouse::generate_within(x_mm, y_mm, seed, (32, 22))
+    }
+
+    /// As `generate`, the footprint capped at `max_m` (whole metres; at least 18 by 14).
+    pub fn generate_within(x_mm: i64, y_mm: i64, seed: u64, max_m: (u64, u64)) -> Killhouse {
         let mut r = Rand(seed ^ 0x6b17_4f05);
-        let (w, h) = (24.0 + r.below(9) as f64, 16.0 + r.below(7) as f64);
+        let (mw, mh) = (max_m.0.max(18), max_m.1.max(14));
+        let (w, h) = ((mw - 8).max(18) as f64 + r.below(9.min(mw - (mw - 8).max(18) + 1)) as f64, (mh - 6).max(14) as f64 + r.below(7.min(mh - (mh - 6).max(14) + 1)) as f64);
         // Split the footprint (binary space partition) into rooms; each split is an inner wall.
         let mut stack = vec![(0.0, 0.0, w, h)];
         let (mut rooms, mut walls) = (Vec::new(), Vec::new());

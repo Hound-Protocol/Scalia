@@ -54,6 +54,7 @@ Catalog(kinds: [
     Kind(id: "locker", name: "Wall locker", class: Furniture, shape: Furniture(Locker), size: (600, 500), material: Steel,
         spots: [Spot(use: Work, at: (0, 700), face: (0, -1))]),
     Kind(id: "table", name: "Mess table", class: Furniture, shape: Furniture(Table), size: (3000, 1000), material: Wood),
+    Kind(id: "jukebox", name: "Jukebox", class: Furniture, shape: Furniture(Jukebox), size: (800, 800), material: Wood),
     // Bench: seats along it, facing +y (towards the table).
     Kind(id: "bench", name: "Bench", class: Furniture, shape: Furniture(Bench), size: (3000, 350), material: Wood,
         spots: [

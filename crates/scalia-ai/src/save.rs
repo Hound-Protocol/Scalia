@@ -22,6 +22,9 @@ pub enum Command {
     Door { door: usize, state: crate::doors::DoorState },
 }
 
+/// The largest generated training house (metres): it has to fit the live-fire range with room to approach.
+pub const HOUSE_MAX_M: (u64, u64) = (28, 18);
+
 /// The ground a battle is fought on: its area (mm), its props, and the training house if there is one.
 /// The navigation, sight and cover grids are rebuilt from this, so a save holds the map, not the grids.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -143,6 +143,8 @@ MapFile(
         Placed(kind: "locker", at: (152400, 23600), turn: 2),
         Placed(kind: "locker", at: (153050, 23600), turn: 2),
         Placed(kind: "table", at: (136000, 10000)),
+        // The jukebox in the common room, on a small square table against the north wall (E to use it).
+        Placed(kind: "jukebox", at: (136000, 23200)),
         Placed(kind: "bench", at: (136000, 9100)),
         Placed(kind: "bench", at: (136000, 10900), turn: 2),
         Placed(kind: "table", at: (136000, 17000)),

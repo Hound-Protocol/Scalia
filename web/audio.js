@@ -203,6 +203,44 @@ export class AudioEngine {
   /// kind, space: [enclosure, size m, corridor], echoes: [[extra delay s, gain, pan], ...] }: room is how much
   /// rings in the room it is made in; rx/ry/below place it around the ears (the camera); echoes come off what
   /// stands around it.
+  /// A sound that keeps playing at one place (the jukebox): an <audio> element through the same acoustics as
+  /// every other sound (distance, walls, the room's ring, around the head), re-aimed with `place(record)` (a
+  /// `hear_at` record) a few times a second. Its own volume and three tone controls sit before the acoustics.
+  stream(el) {
+    const c = this.ensure(); if (!c) return null;
+    const src = c.createMediaElementSource(el);
+    const vol = c.createGain(); vol.gain.value = 0.5;
+    const eq = (type, f, q) => { const b = c.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q) b.Q.value = q; return b; };
+    const bass = eq('lowshelf', 120), treble = eq('peaking', 2500, 0.8), highs = eq('highshelf', 8000);
+    const g = c.createGain(); g.gain.value = 0;
+    const hpf = eq('highpass', 30, 0.6), lp = eq('lowpass', 20000, 0.5);
+    const p = c.createPanner(); p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0;
+    const dry = c.createGain();
+    src.connect(vol).connect(bass).connect(treble).connect(highs).connect(g).connect(hpf).connect(lp).connect(p).connect(dry).connect(this.world);
+    const sends = [this.rev.small, this.rev.large, this.rev.corridor].map((bus) => { const s = c.createGain(); s.gain.value = 0; p.connect(s).connect(bus); return s; });
+    const num = (x, d) => (Number.isFinite(x) ? x : d);
+    const glide = (param, v) => param.setTargetAtTime(v, c.currentTime, 0.08);
+    return {
+      /// 0..2 (1 = as recorded).
+      volume(v) { glide(vol.gain, Math.max(0, Math.min(2, v))); },
+      /// Each 0..10, 5 flat: bass, treble (presence) and highs, ±12 dB.
+      tone(b, t, h) { for (const [f, x] of [[bass, b], [treble, t], [highs, h]]) glide(f.gain, (Math.max(0, Math.min(10, x)) - 5) * 2.4); },
+      place(r) {
+        if (!r || r.length < 14) return;
+        const [gain, lowpass, room, rx, ry, below, dist, enc, size, cor] = [r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[11], r[12], r[13]].map((x) => num(x, 0));
+        glide(g.gain, Math.max(0, Math.min(4, gain)));
+        glide(lp.frequency, Math.max(200, Math.min(20000, lowpass || 20000)));
+        glide(hpf.frequency, Math.min(450, 30 + dist * 3));
+        const by = below * 0.35, len = Math.hypot(rx, ry, by);
+        const [x, y, z] = len < 0.3 ? [0, 0, -1] : [rx / len, -by / len, -ry / len];
+        glide(p.positionX, x); glide(p.positionY, y); glide(p.positionZ, z);
+        glide(dry.gain, 1 - room * 0.5);
+        const roomy = Math.max(0, Math.min(1, (9 - size) / 5)), c2 = cor * enc;
+        [enc * roomy * (1 - c2), enc * (1 - roomy) * (1 - c2), c2].forEach((w, k) => glide(sends[k].gain, w * room));
+      },
+    };
+  }
+
   play(url, o) {
     const c = this.ensure(); if (!c) return;
     // Anything odd coming in (a missing or non-finite number) is made safe here: audio never stops the game.
