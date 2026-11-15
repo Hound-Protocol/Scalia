@@ -52,23 +52,25 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 - Remove parallel graphs only after route parity and regression tests.
 **Acceptance:** one context; every audible source accounted for; no duplicate media-source errors; all existing controls audible and functional.
 
-### AU-02 — Voice lifecycle and allocation
+### AU-03 — Voice lifecycle and allocation
 - Introduce explicit voice handles and categories.
 - Define deterministic priority/stealing policy and cleanup on ended/stolen/cancelled voices.
 - Reuse or pool nodes only where profiling proves beneficial.
 - Verify the 64-voice cap and no orphaned graph nodes.
 **Acceptance:** stress test at and above cap; bounded node count; no stale voices.
 
-### AU-03 — Acoustic correctness
+### AU-04 — Acoustic correctness
 - Add focused tests for distance curves, wall/door/window edge cases, moving listener, source/listener height, propagation delay and reflection geometry.
 - Verify Rust outputs are consumed consistently by browser playback.
 - Review coupling to AI SightGrid without duplicating geometry.
 **Acceptance:** repeatable tests and representative listening scenes.
 
-### AU-04 — Spatial audio
+### AU-02 — Spatial audio & occlusion
 - Verify HRTF direction mapping, listener orientation, source elevation, distance and zoom scaling.
+- Apply 3D line-of-sight obstruction for the elevated tablet camera; retain the propagation field for on-foot diffraction and door routing.
+- Verify walls, thick walls, open/shut doors, corners and fallback behaviour outside the propagation field.
 - Test headphone and stereo fallback behaviour.
-**Acceptance:** directional test scene produces correct perceived direction and stable movement.
+**Acceptance:** directional test scene produces correct perceived direction; occlusion changes correctly with listener height and geometry; movement remains stable.
 
 ### AU-05 — Mixing and dynamics
 - Implement category buses, master controls, snapshots and ducking.
@@ -105,3 +107,14 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 - Added media-element route ownership checks and tests for reuse, analyser routing and stream/route conflicts.
 
 **Verification:** tests added; execution and in-browser listening checks remain pending. Do not merge until CI and manual playback checks pass.
+
+
+## AU-02 execution record — 2026-11-15
+
+**Implementation:** isolated on `audio/au-02-spatial-occlusion-2026-11-15`.
+
+- Centralised camera-relative-to-HRTF coordinate conversion in a pure, tested helper used by one-shots and persistent streams.
+- Corrected tablet-camera obstruction to trace the actual elevated 3D listener-to-source line; on-foot playback continues to use the propagation field for diffraction and door routing.
+- Added regression tests for left/right/front/rear/below direction mapping, vector normalisation, invalid values, and elevated/blocked tablet listener paths.
+
+**Verification:** automated tests are pending CI. Browser headphone/stereo listening checks remain required before considering the spatial result fully verified.

@@ -21,6 +21,16 @@ const HDR = { hifi: 60, wartapes: 25 };
 const QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
 const PRIORITY = { blast: 3, shot: 2, step: 1 };
 
+// Convert the camera-relative ground vector into the listener's HRTF coordinate frame.
+// +x is right, -z is ahead, +z is behind, and -y is below the listener.
+export function spatialPosition(rx, ry, below = 0) {
+  const x = Number.isFinite(rx) ? rx : 0;
+  const y = Number.isFinite(ry) ? ry : 0;
+  const by = (Number.isFinite(below) ? Math.max(0, below) : 0) * 0.35;
+  const len = Math.hypot(x, y, by);
+  return len < 0.3 ? [0, 0, -1] : [x / len, -by / len, -y / len];
+}
+
 // A media element may have exactly one MediaElementAudioSourceNode for its lifetime.
 // Keep this module-wide so separate AudioEngine instances cannot reconnect the same element.
 const MEDIA_ELEMENT_STREAMS = new WeakMap();
@@ -330,8 +340,7 @@ export class AudioEngine {
         glide(g.gain, Math.max(0, Math.min(4, gain)));
         glide(lp.frequency, Math.max(200, Math.min(20000, lowpass || 20000)));
         glide(hpf.frequency, Math.min(90, 30 + dist * 0.3));
-        const by = below * 0.35, len = Math.hypot(rx, ry, by);
-        const [x, y, z] = len < 0.3 ? [0, 0, -1] : [rx / len, -by / len, -ry / len];
+        const [x, y, z] = spatialPosition(rx, ry, below);
         glide(p.positionX, x); glide(p.positionY, y); glide(p.positionZ, z);
         glide(dry.gain, 1 - room * 0.5);
         const roomy = Math.max(0, Math.min(1, (9 - size) / 5)), c2 = cor * enc;
@@ -400,9 +409,7 @@ export class AudioEngine {
     p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1;
     // Around the head (the camera): right is +x, ahead is -z, below is -y. Below counts for less than the
     // ground direction, so left and right stay clear from high up.
-    const by = o.below * 0.35;
-    const len = Math.hypot(o.rx, o.ry, by);
-    const [x, y, z] = len < 0.3 ? [0, 0, -1] : [o.rx / len, -by / len, -o.ry / len];
+    const [x, y, z] = spatialPosition(o.rx, o.ry, o.below);
     p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
     // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
     const dry = c.createGain(); dry.gain.value = 1 - o.room * 0.5;
