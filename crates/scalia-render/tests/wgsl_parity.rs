@@ -145,3 +145,11 @@ fn prone_aim_is_two_handed_in_the_shader() {
     assert!(body.contains("pose == 36u"), "shader grip correction must include ProneAim");
     assert_eq!(two_handed(Pose::ProneAim), 1.0);
 }
+
+
+#[test]
+fn prone_grip_limit_is_mirrored_without_changing_other_pose_limits() {
+    assert!(RS.contains("const GRIP_MAX: f32 = 0.7;"));
+    assert!(RS.contains("const PRONE_GRIP_MAX: f32 = 1.5;"));
+    assert!(WGSL.contains("select(0.7, 1.5, p.prone >= 0.999)"));
+}
