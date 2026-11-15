@@ -1739,11 +1739,10 @@ try {
     // Alt walks: keep the browser from taking it for its menu.
     if (k === 'alt') { e.preventDefault(); return; }
     if (k === 'k' && !e.repeat && !tabletUp) { toggleAssault(); return; }
-    if (e.key === 'F1') { e.preventDefault(); const c = $('controls'); c.hidden = !c.hidden; store.set('scalia.controls', c.hidden ? '0' : '1'); return; }
-    // Diegetic field controls: hold H for a medical self-check; tap R to reload or hold to inspect ammunition.
+    // Diegetic field controls: tap H to start/cancel a medical self-check; tap/hold R for reload/ammo check.
     if (scene === 'ground' && !tabletUp && !invOpen) {
       if (k === 'u' && !e.repeat) { fieldFeedback.toggleControls(); return; }
-      if (k === 'h') { if (!e.repeat) fieldFeedback.beginHealthCheck(performance.now()); return; }
+      if (k === 'h') { if (!e.repeat) fieldFeedback.toggleHealthCheck(performance.now()); return; }
       if (k === 'r') { if (!e.repeat) fieldFeedback.beginAmmoCheck(performance.now()); return; }
     }
     // The commander's rifle and stance (on foot, tablet down).
@@ -1788,11 +1787,10 @@ try {
   addEventListener('keyup', (e) => {
     const k = e.key.toLowerCase();
     held.delete(k);
-    if (k === 'h') fieldFeedback.endHealthCheck(performance.now());
     if (k === 'r') fieldFeedback.endAmmoCheck(performance.now());
     if (e.key === 'Alt') e.preventDefault();
   });
-  addEventListener('blur', () => { held.clear(); fieldFeedback.endHealthCheck(performance.now()); fieldFeedback.rStarted = 0; });
+  addEventListener('blur', () => { held.clear(); fieldFeedback.cancelHealthCheck(performance.now()); fieldFeedback.rStarted = 0; });
 
   // Performance panel: CPU and GPU bars against the frame budget, and a frame-time graph.
   const P = (id) => document.getElementById(id);
@@ -1928,7 +1926,8 @@ Click to copy and close.`;
         // On foot: WASD walks the commander (Shift sprints); the camera follows him.
         const mx = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
         const my = (held.has('w') || held.has('arrowup') ? 1 : 0) - (held.has('s') || held.has('arrowdown') ? 1 : 0);
-        v.move_commander(mx, my, held.has('shift') && fieldFeedback.stamina > 0.01);
+        const sprinting = held.has('shift') && (mx !== 0 || my !== 0) && fieldFeedback.stamina > 0.01;
+        v.move_commander(mx, my, sprinting);
         v.commander_walk(held.has('alt'));
       }
       if (held.has(',') || held.has('<')) v.rotate(-1.5 * dt);
@@ -1945,7 +1944,7 @@ Click to copy and close.`;
       errors.guard('map', () => { drawMapMarks(); drawScan(); });
       errors.guard('footsteps', footsteps);
       errors.guard('weapon', weaponTick);
-      errors.guard('field feedback', () => fieldFeedback.update(now, dt, JSON.parse(lastWeapon || v.commander_weapon_state()), held.has('shift') && fieldFeedback.stamina > 0.01));
+      errors.guard('field feedback', () => fieldFeedback.update(now, dt, JSON.parse(lastWeapon || v.commander_weapon_state()), held.has('shift') && fieldFeedback.stamina > 0.01, held.has('w') || held.has('a') || held.has('s') || held.has('d') || held.has('arrowup') || held.has('arrowdown') || held.has('arrowleft') || held.has('arrowright')));
       errors.guard('battle sound', () => assaultTick(now));
       const cpuFrame = performance.now() - t0;
       cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
