@@ -103,6 +103,7 @@ export class AudioEngine {
   setWake(hz) {
     this.wakeHz = Math.min(22000, Math.max(200, hz));
     if (this.wakeLp) this.wakeLp.frequency.value = this.wakeHz;
+    if (this.mediaWakeLp) this.mediaWakeLp.frequency.value = this.wakeHz;
   }
   /// Applies tablet attention muffling to music and ambience only.
   setMediaMuffle(on) {
@@ -196,10 +197,12 @@ export class AudioEngine {
     this.muffle.connect(this.wakeLp);
     this.mix = c.createGain(); this.mix.connect(this.muffle);
     this.world = c.createGain(); this.world.connect(this.mix);
-    // Persistent music and ambience have their own tablet-muffle stage, without muffling footsteps or gunfire.
+    // Persistent music and ambience keep their own tablet-muffle and wake stages, separate from combat ducking
+    // and the tablet speaker band-pass. They still share Auralis' master limiter.
     this.mediaFilter = c.createBiquadFilter(); this.mediaFilter.type = 'lowpass'; this.mediaFilter.frequency.value = 20000; this.mediaFilter.Q.value = 0.6;
     this.mediaGain = c.createGain(); this.mediaGain.gain.value = 1;
-    this.mediaFilter.connect(this.mediaGain).connect(this.world);
+    this.mediaWakeLp = c.createBiquadFilter(); this.mediaWakeLp.type = 'lowpass'; this.mediaWakeLp.frequency.value = this.wakeHz || 22000; this.mediaWakeLp.Q.value = 0.5;
+    this.mediaFilter.connect(this.mediaGain).connect(this.mediaWakeLp).connect(lim);
     // UI and cinematic sounds bypass world effects, but still pass through Auralis' master limiter.
     this.ui = c.createGain(); this.ui.connect(lim);
     // Room heat: sustained fire indoors keeps the room ringing on top of itself (rises per shot, fades in ~1.5 s).
