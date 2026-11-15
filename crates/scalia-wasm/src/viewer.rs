@@ -25,7 +25,10 @@ fn sound_occlusion(
     listener_height: f32,
     camera_listener: bool,
 ) -> scalia_audio::Occlusion {
-    let height = if camera_listener { listener_height } else { 1.6 };
+    // The rendered camera height controls propagation distance, but it is not the listener's
+    // physical height above the floor. Project obstruction tests onto a standing ear position so
+    // a tactical overhead camera does not acoustically "see" over every normal-height door.
+    let height = 1.6;
     if camera_listener {
         let from = scalia_ai::sight::Point {
             x: (ear.0 * 1000.0) as i64,
@@ -4478,7 +4481,7 @@ mod audio_spatial_tests {
     }
 
     #[test]
-    fn rendered_camera_listener_height_is_used_for_occlusion() {
+    fn overhead_camera_does_not_make_the_listener_hear_over_normal_height_walls() {
         let wall = Prop {
             kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
             x_mm: 50_000,
@@ -4488,13 +4491,23 @@ mod audio_spatial_tests {
         let sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[wall]);
         let ear = (40.0, 50.0);
         let source = (60.0, 50.0);
-        let field = scalia_audio::Field::build(&sight, ear, 32.0);
 
-        let ground_listener = sound_occlusion(&sight, Some(&field), ear, source, 1.6, false);
-        let elevated_camera = sound_occlusion(&sight, None, ear, source, 19.2, true);
+        let ground_listener = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        let overhead_camera = sound_occlusion(&sight, None, ear, source, 19.2, true);
 
-        assert!(ground_listener.gain() < 0.8 && ground_listener.lowpass_hz() < 18_000.0, "{ground_listener:?}");
-        assert_eq!(elevated_camera, scalia_audio::Occlusion::NONE, "{elevated_camera:?}");
+        assert!(ground_listener.wall_db >= 40.0, "{ground_listener:?}");
+        assert_eq!(overhead_camera, ground_listener, "camera zoom height must not lift the acoustic obstruction ray");
+    }
+
+    #[test]
+    fn overhead_camera_still_hears_a_shut_door_as_a_muffled_barrier() {
+        use scalia_ai::doors::{Door, DoorState};
+        let mut sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[]);
+        sight.doors = vec![Door::new((50_000, 50_000), false, 2_000, 2_100, DoorState::Closed)];
+
+        let shut = sound_occlusion(&sight, None, (40.0, 50.0), (60.0, 50.0), 19.2, true);
+        assert_eq!(shut.wall_db, 18.0, "{shut:?}");
+        assert!(shut.lowpass_hz() < 6_000.0, "{shut:?}");
     }
 
     #[test]
