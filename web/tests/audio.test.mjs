@@ -75,3 +75,42 @@ test('jukebox replaces an already-routed media element and obtains a controllabl
   assert.ok(result.voice);
   assert.deepEqual(calls, [original, replacement]);
 });
+test('routeMedia() reuses one media source and preserves its selected bus', () => {
+  const element = {};
+  const context = new FakeAudioContext();
+  const audio = engine();
+  audio.ensure = () => context;
+  audio.mediaFilter = new FakeNode();
+  audio.ui = new FakeNode();
+
+  const first = audio.routeMedia(element, 'world');
+  assert.ok(first);
+  assert.equal(first.bus, 'world');
+  assert.equal(audio.routeMedia(element, 'world'), first);
+  assert.equal(audio.routeMedia(element, 'ui'), null);
+  assert.equal(sourceCreations, 2);
+});
+
+test('routeMedia() accepts an analyser node as its destination', () => {
+  const element = {};
+  const context = new FakeAudioContext();
+  const audio = engine();
+  const analyser = new FakeNode();
+  audio.ensure = () => context;
+
+  const route = audio.routeMedia(element, analyser);
+  assert.ok(route);
+  assert.equal(route.bus, analyser);
+  assert.equal(sourceCreations, 3);
+});
+
+test('stream() does not claim an element already routed by Auralis media routing', () => {
+  const element = {};
+  const context = new FakeAudioContext();
+  const audio = engine();
+  audio.ensure = () => context;
+  audio.mediaFilter = new FakeNode();
+
+  assert.ok(audio.routeMedia(element, 'world'));
+  assert.equal(audio.stream(element), null);
+});
