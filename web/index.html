@@ -100,7 +100,9 @@
   /* Solid black from the first frame (the game never shows through); only its contents fade in. */
   #menu { position: fixed; inset: 0; z-index: 90; overflow: hidden; background: #000; }
   #menuSky, #menuMarks, #menu .mn-ui, #menu .mn-foot { opacity: 0; transition: opacity 1.6s ease-out; }
-  #menu.shown :is(#menuSky, #menuMarks, .mn-ui, .mn-foot) { opacity: 1; }
+  /* Plain selectors (no :is with ids) so the flying rule below can still hide the title and Start. */
+  #menu.shown #menuSky, #menu.shown #menuMarks { opacity: 1; }
+  #menu.shown .mn-ui, #menu.shown .mn-foot { opacity: 1; }
   #menu.flying { background: transparent; }
   /* Vignette and a faint moving grain over the galaxy (cheap: CSS only). */
   #menu::after { content: ''; position: absolute; inset: 0; pointer-events: none;

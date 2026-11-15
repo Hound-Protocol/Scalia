@@ -27,6 +27,8 @@ const ELEV = 0.6154797;       // The game camera's elevation (scalia-render came
 const PLANET_M = 3.2e6;       // The planet framed whole (viewer.rs shows the globe above 4 planet radii, 2.6e6 m).
 const FIELD_M = 50;           // The widest field zoom (viewer.rs LADDER[STEP_FIELD_MAX]).
 const AMB_TO_HZ = 5000;       // The zoom's ambience narrows to this.
+// After the pull-back the camera keeps drifting the same way at about 5% of its top speed (pull-backs per PULL_MS).
+const DRIFT = 0.14;
 const TRAVEL_LEAD_MS = 1000;  // The zoom's travel sound starts this far ahead of the zoom, to match its rush.
 // The menu's camera is cinematic: 50 degrees vertical field of view (the game's own camera takes over at the
 // planet). Distances are scaled so the framing matches the earlier 35.5 degree lens.
@@ -390,7 +392,9 @@ export function createMenu({ viewer, onEnter }) {
     if (step === 4 && e >= T_HIT) { step = 5; travel?.stop(0.04); travel = null; }
     if (e < T_GALAXY) {
       // 1. Pulling back to the 20 degree view, then holding on the galaxy.
-      const k = settle(e / PULL_MS);
+      // It slows to a drift (about 5% of its top speed) and keeps going the same way while the galaxy is held.
+      const t = e / PULL_MS;
+      const k = t <= 1 ? (1 - DRIFT) * settle(t) + DRIFT * t : 1 + DRIFT * (t - 1);
       drawSky(now, lerp3(REST_EYE, PULL_EYE, k), REST_AT, flightSpin, 1 - smooth(e / 400));
       return;
     }
