@@ -21,6 +21,10 @@ const HDR = { hifi: 60, wartapes: 25 };
 const QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
 const PRIORITY = { blast: 3, shot: 2, step: 1 };
 
+// A media element may have exactly one MediaElementAudioSourceNode for its lifetime.
+// Keep this module-wide so separate AudioEngine instances cannot reconnect the same element.
+const MEDIA_ELEMENT_STREAMS = new WeakMap();
+
 /// A stereo impulse response: decaying noise (darker as it decays), plus early reflections.
 function impulse(ctx, seconds, rt60, early, damp) {
   const rate = ctx.sampleRate, n = Math.floor(rate * seconds);
@@ -207,8 +211,25 @@ export class AudioEngine {
   /// every other sound (distance, walls, the room's ring, around the head), re-aimed with `place(record)` (a
   /// `hear_at` record) a few times a second. Its own volume and three tone controls sit before the acoustics.
   stream(el) {
+    if (!el || (typeof el !== 'object' && typeof el !== 'function')) return null;
+    // Repeated requests must reuse the original source node and processing graph. The Web Audio
+    // API forbids creating a second MediaElementSourceNode for the same HTMLMediaElement.
+    const existing = MEDIA_ELEMENT_STREAMS.get(el);
+    if (existing) return existing.stream;
+
     const c = this.ensure(); if (!c) return null;
-    const src = c.createMediaElementSource(el);
+    let src;
+    try {
+      src = c.createMediaElementSource(el);
+    } catch (error) {
+      // Another audio path may already own this element's one permitted source node.
+      // Do not let InvalidStateError escape and interrupt gameplay.
+      if (error?.name === 'InvalidStateError') {
+        console.warn('[Scalia audio] Media element already has a source node; duplicate routing skipped.', error);
+        return null;
+      }
+      throw error;
+    }
     const vol = c.createGain(); vol.gain.value = 0.5;
     const eq = (type, f, q) => { const b = c.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q) b.Q.value = q; return b; };
     const bass = eq('lowshelf', 120), treble = eq('peaking', 2500, 0.8), highs = eq('highshelf', 8000);
@@ -220,7 +241,7 @@ export class AudioEngine {
     const sends = [this.rev.small, this.rev.large, this.rev.corridor].map((bus) => { const s = c.createGain(); s.gain.value = 0; p.connect(s).connect(bus); return s; });
     const num = (x, d) => (Number.isFinite(x) ? x : d);
     const glide = (param, v) => param.setTargetAtTime(v, c.currentTime, 0.08);
-    return {
+    const stream = {
       /// 0..2 (1 = as recorded).
       volume(v) { glide(vol.gain, Math.max(0, Math.min(2, v))); },
       /// Each 0..10, 5 flat: bass, treble (presence) and highs, ±12 dB.
@@ -239,6 +260,8 @@ export class AudioEngine {
         [enc * roomy * (1 - c2), enc * (1 - roomy) * (1 - c2), c2].forEach((w, k) => glide(sends[k].gain, w * room));
       },
     };
+    MEDIA_ELEMENT_STREAMS.set(el, { context: c, source: src, stream });
+    return stream;
   }
 
   play(url, o) {
