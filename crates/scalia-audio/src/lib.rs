@@ -257,9 +257,9 @@ impl Occlusion {
     /// Residual attenuation relative to the bass band, applied as separate mid/high EQ cuts.
     pub fn mid_cut_db(&self) -> f32 { (self.mid_db - self.low_db).max(0.0) }
     pub fn high_cut_db(&self) -> f32 { (self.high_db - self.low_db).max(0.0) }
-    /// A convenient summary cutoff for diagnostics and legacy callers.
+    /// Diffraction/air summary cutoff. Material losses are applied separately by the three-band EQ.
     pub fn lowpass_hz(&self) -> f32 {
-        (18_000.0 * 10f32.powf(-self.high_cut_db() / 35.0) / (1.0 + self.detour_m / 4.0)).clamp(180.0, 20_000.0)
+        (18_000.0 / (1.0 + self.detour_m / 4.0)).clamp(180.0, 20_000.0)
     }
 }
 
