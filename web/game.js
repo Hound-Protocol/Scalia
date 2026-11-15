@@ -1108,13 +1108,16 @@ try {
   const BANDS = 20, F_LO = 40, F_HI = 10000;
   let actx = null, analyser = null, fbins = null;
   const audioGraph = () => {
-    if (actx) return actx;
-    try {
-      actx = new AudioContext();
-      analyser = actx.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0.55;
-      analyser.connect(actx.destination);
+    const engine = window.scaliaAudio;
+    if (!engine) return null;
+    const context = engine.ensure();
+    if (!context) return null;
+    if (!analyser) {
+      actx = context;
+      analyser = context.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0.55;
+      analyser.connect(engine.ui);
       fbins = new Float32Array(analyser.frequencyBinCount);
-    } catch (_) { actx = null; }
+    }
     return actx;
   };
   // Plays a sound through the analyser (falls back to plain playback before audio is allowed).
@@ -1122,7 +1125,10 @@ try {
     const a = proto.cloneNode(); a.volume = vol;
     a.onended = done; a.onerror = done; setTimeout(done, 1500);
     const ctx = audioGraph();
-    if (ctx) { try { if (ctx.state === 'suspended') ctx.resume(); ctx.createMediaElementSource(a).connect(analyser); } catch (_) { /* plain */ } }
+    if (ctx) {
+      try { window.scaliaAudio.routeMedia(a, analyser); }
+      catch (_) { /* plain playback remains the fallback */ }
+    }
     a.play().catch(done);
   });
   const edges = Array.from({ length: BANDS + 1 }, (_, k) => F_LO * Math.pow(F_HI / F_LO, k / BANDS));
@@ -1240,11 +1246,7 @@ try {
   // The talkie button: a click as the button is pressed and another as it is let go.
   const keyClick = new Audio('./sfx/radio-key.mp3'); keyClick.preload = 'auto';
   const click = () => playAnalysed(keyClick, 0.8);
-  const clickPlain = () => new Promise((done) => {
-    const a = keyClick.cloneNode(); a.volume = 0.8;
-    a.onended = done; a.onerror = done; setTimeout(done, 450);
-    a.play().catch(done);
-  });
+  const clickPlain = () => playAnalysed(keyClick, 0.8);
   // One net, one speaker at a time: the commander's orders and the units' own calls queue up; urgent calls go first.
   let onAir = false;
   const net = [];
