@@ -1103,7 +1103,7 @@ impl Viewer {
         // His own steps come from the middle (the camera follows him, so any offset only says where the camera
         // sits): no left, right or behind. Loudness, dullness and the room's ring still follow the camera's
         // distance, so zooming out quietens them.
-        if out.len() >= 10 {
+        if out.len() >= 30 {
             out[2] = 0.0; // no travel delay
             // Walls between him and the point under the camera are not between him and the ears: distance only.
             let d = out[9];
@@ -1112,6 +1112,10 @@ impl Viewer {
             out[6] = 0.0; // right
             out[7] = 0.0; // ahead
             out[8] = 0.0; // below
+            // His own footsteps are not transmitted through the barrier between him and the camera.
+            out[27] = 0.0;
+            out[28] = 0.0;
+            out[29] = 0.0;
         }
         out
     }
