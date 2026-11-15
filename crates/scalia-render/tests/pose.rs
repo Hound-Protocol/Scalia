@@ -161,6 +161,43 @@ fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
 }
 
 #[test]
+fn probe_prone_aim_left_arm_and_twist() {
+    use scalia_render::pose::ground_drop_side;
+    let base = params(Pose::Prone, 0.0);
+    let aim = params(Pose::StandAim, 0.0);
+    let mut found = 0;
+    let mut best = (f32::MAX, 0.0f32, 0.0f32, 0.0f32);
+    for k in 0..=100 {
+        let u = k as f32 / 100.0;
+        for j in 0..=55 {
+            let turn = j as f32 / 100.0;
+            let mut p = base;
+            p.shoulder[0] = base.shoulder[0] + (aim.shoulder[0] - base.shoulder[0]) * u;
+            p.elbow[0] = base.elbow[0] + (aim.elbow[0] - base.elbow[0]) * u;
+            p.reach[0] = base.reach[0] + (aim.reach[0] - base.reach[0]) * u;
+            p.abduct[0] = base.abduct[0] + (aim.abduct[0] - base.abduct[0]) * u;
+            p.rifle = std::f32::consts::FRAC_PI_2;
+            p.rifle_yaw = turn;
+            p.twist = -turn;
+            p.look = turn;
+            p.head = 0.82;
+            p.prone = 1.0;
+            p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat);
+            let q = grip(&p, 1.0);
+            let gap = hand(&q, Side::Left).distance(held(RIFLE_GUARD, &q));
+            let low = figure().vertices.iter().map(|v| pose_vertex(Vec3::from(v.pos), part_of(v.color), &q).z).fold(f32::MAX, f32::min);
+            if gap + (0.0f32.max(-0.05 - low)) < best.0 { best = (gap + (0.0f32.max(-0.05 - low)), u, turn, low); }
+            if gap < 0.05 && low > -0.05 {
+                println!("FEASIBLE u={u:.2} turn={turn:.2} gap={gap:.4} bottom={low:.4}");
+                found += 1;
+            }
+        }
+    }
+    println!("BEST score={:.4} u={:.2} turn={:.2} bottom={:.4}", best.0, best.1, best.2, best.3);
+    assert!(found > 0, "no prone left-arm solution; best={best:?}");
+}
+
+#[test]
 fn aiming_tucks_the_firing_elbow_and_reaches_across_with_the_other() {
     let pp = params(Pose::StandAim, 0.0);
     // The right (firing) elbow is tucked and bent; the left arm reaches nearly straight to the rifle and swings in.
