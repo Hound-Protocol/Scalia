@@ -1944,7 +1944,7 @@ Click to copy and close.`;
       errors.guard('map', () => { drawMapMarks(); drawScan(); });
       errors.guard('footsteps', footsteps);
       errors.guard('weapon', weaponTick);
-      errors.guard('field feedback', () => fieldFeedback.update(now, dt, JSON.parse(lastWeapon || v.commander_weapon_state()), held.has('shift') && fieldFeedback.stamina > 0.01, held.has('w') || held.has('a') || held.has('s') || held.has('d') || held.has('arrowup') || held.has('arrowdown') || held.has('arrowleft') || held.has('arrowright')));
+      errors.guard('field feedback', () => { const moving = held.has('w') || held.has('a') || held.has('s') || held.has('d') || held.has('arrowup') || held.has('arrowdown') || held.has('arrowleft') || held.has('arrowright'); const sprinting = moving && held.has('shift') && fieldFeedback.stamina > 0.01; fieldFeedback.update(now, dt, JSON.parse(lastWeapon || v.commander_weapon_state()), sprinting, moving && !sprinting); });
       errors.guard('battle sound', () => assaultTick(now));
       const cpuFrame = performance.now() - t0;
       cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
