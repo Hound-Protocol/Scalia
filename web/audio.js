@@ -398,6 +398,27 @@ export class AudioEngine {
     return c;
   }
 
+  /// Decode critical one-shots before the player enters the field.
+  async prepare(urls, onProgress = () => {}) {
+    const context = this.ensure();
+    if (!context) throw new Error('Web Audio is unavailable; sound assets cannot be decoded.');
+    const failures = [];
+    let completed = 0;
+    await Promise.all(urls.map(async (url) => {
+      try {
+        const ready = this.buffer(url);
+        if (!ready) {
+          const pending = this.bufferLoads.get(url);
+          if (!pending) throw new Error('Audio decode did not start');
+          await pending;
+        }
+        if (!this.buffers.get(url) || this.buffers.get(url) === 'loading') throw new Error('Audio decode returned no buffer');
+      } catch (error) { failures.push({ url, error: error?.message || String(error) }); }
+      finally { completed++; onProgress({ completed, total: urls.length, url, ok: !failures.some((item) => item.url === url), error: failures.find((item) => item.url === url)?.error || null }); }
+    }));
+    return failures;
+  }
+
   /// Loads (once) and returns a decoded sound, or null while it is still loading.
   buffer(url) {
     const b = this.buffers.get(url);

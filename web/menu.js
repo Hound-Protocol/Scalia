@@ -270,7 +270,17 @@ export function createMenu({ viewer, onEnter, wake = () => {}, audio }) {
   const load = (name, url) => {
     const context = ensureContext();
     if (!context || bufs[name]) return;
-    bufs[name] = queue = queue.then(() => fetch(url)).then((r) => r.arrayBuffer()).then((a) => context.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => { console.warn('menu sound', url, e); });
+    const cached = audio?.buffer?.(url);
+    if (cached) { bufs[name] = cached; return; }
+    const pending = audio?.bufferLoads?.get(url);
+    if (pending) {
+      bufs[name] = queue = queue.then(() => pending).then((b) => (bufs[name] = b)).catch((e) => { console.warn('menu sound', url, e); });
+      return;
+    }
+    bufs[name] = queue = queue.then(() => fetch(url)).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.arrayBuffer();
+    }).then((a) => context.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => { console.warn('menu sound', url, e); });
   };
   const loadSequence = () => {
     load('flash2', './sfx/menu-flash2-thump.mp3');
