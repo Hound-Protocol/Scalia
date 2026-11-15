@@ -167,6 +167,31 @@ pub const MAGS: i32 = 6;
 const TOP_UP: i32 = 12;
 /// From this suppression on he mostly keeps his head down, firing only now and then.
 const PINNED: i32 = 600;
+/// Approximate anatomical region recorded for a confirmed hit. This is a probabilistic zone,
+/// not a precision skeletal hitbox; aimed-point and wound severity modelling are separate work.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HitLocation {
+    Head, Neck, Chest, Abdomen, LeftArm, RightArm, LeftLeg, RightLeg,
+}
+impl HitLocation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Head => "head", Self::Neck => "neck", Self::Chest => "chest", Self::Abdomen => "abdomen",
+            Self::LeftArm => "left_arm", Self::RightArm => "right_arm", Self::LeftLeg => "left_leg", Self::RightLeg => "right_leg",
+        }
+    }
+}
+/// A deterministic weighted anatomical zone for a confirmed hit.
+fn hit_location(seed: u64, roll: u64, shooter: usize, target: usize) -> HitLocation {
+    let n = mix64(seed ^ roll.rotate_left(19) ^ (shooter as u64).rotate_left(37) ^ target as u64) % 100;
+    match n {
+        0..=3 => HitLocation::Head, 4..=6 => HitLocation::Neck, 7..=36 => HitLocation::Chest,
+        37..=56 => HitLocation::Abdomen, 57..=66 => HitLocation::LeftArm, 67..=76 => HitLocation::RightArm,
+        77..=88 => HitLocation::LeftLeg, _ => HitLocation::RightLeg,
+    }
+}
+
 pub const DAMAGE: i32 = 35;
 /// Marksmanship (‰): the chance a round hits a man standing still in the open at 10 m or less, the shooter
 /// steady and calm. A rookie hits half; no soldier, however seasoned, ever does better than 85 %. Range,
@@ -253,6 +278,9 @@ pub struct Soldier {
     pub stance: Stance,
     pub moving: bool,
     pub health: i32,
+    /// Anatomical regions struck by confirmed hits; empty for an uninjured soldier.
+    #[serde(default)]
+    pub injuries: Vec<HitLocation>,
     pub ammo: i32,
     pub mags: i32,
     /// 0 calm .. 1000 pinned.
@@ -323,7 +351,7 @@ pub struct Soldier {
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, kneel_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, injuries: Vec::new(), ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, kneel_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -1622,6 +1650,7 @@ impl Battle {
                 t.shot_by = Some((i as u32, now));
                 t.suppression = (t.suppression + if hit { SUPPRESS_HIT } else { SUPPRESS_MISS }).min(1_000);
                 if hit {
+                    t.injuries.push(hit_location(self.seed, self.rolls, i, j));
                     t.health = t.health.saturating_sub(DAMAGE);
                     if !t.alive() {
                         self.dead_logged[j] = true;
