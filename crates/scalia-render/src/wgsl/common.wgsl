@@ -535,12 +535,12 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 36u) {
-    // Prone aim: shoulder the rifle, reach across to the handguard, then lay the full figure onto the ground.
+    // Prone-native support: elbows beside the chest, forearms lifted from the dirt and rifle on the sight line.
+    // The shared grip solver places the left palm on the handguard.
     p.prone = 1.0;
-    carry(&p, 5u);
-    p.rifle = p.rifle + 1.5707963;
-    p.twist = -p.ryaw;
-    p.look = p.ryaw;
+    p.sh = vec2f(2.8);
+    p.el = vec2f(1.3, 1.35);
+    p.rifle = 1.5707963;
     p.head = 1.0;
   } else if (pose == 28u) {
     p.sh = vec2f(0.08);

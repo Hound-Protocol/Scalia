@@ -905,10 +905,12 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 1.0;
         }
         Pose::ProneAim => {
-            // Same ground contact as prone, but the rifle is shouldered and the left hand reaches to the handguard.
+            // Prone-native support: elbows stay beside the chest, forearms are raised off the dirt, and the
+            // rifle is laid along the line of sight. The shared grip solver places the left palm on the guard.
             p.prone = 1.0;
-            aim_arms(&mut p);
-            p.rifle += std::f32::consts::FRAC_PI_2;
+            p.shoulder = [2.8, 2.8];
+            p.elbow = [1.3, 1.35];
+            p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }
         Pose::Drop => return drop_params(phase),
