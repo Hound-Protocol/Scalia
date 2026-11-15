@@ -1641,6 +1641,108 @@ impl Viewer {
         }
         format!("[{}]", out.join(","))
     }
+    /// Active interactables projected through the same orthographic camera as unit labels.
+    /// The UI receives metadata, not object-specific presentation rules.
+    fn active_hint_data(&self) -> Vec<crate::hints::HintData> {
+        use scalia_ai::doors::DoorState;
+        if self.scene != Scene::Ground || self.tablet {
+            return Vec::new();
+        }
+
+        let mut hints = Vec::new();
+        let player = (self.cmd.0, self.cmd.1);
+
+        if let Some((x_mm, y_mm)) = jukebox_mm() {
+            let (x, y) = (x_mm as f64 / 1000.0, y_mm as f64 / 1000.0);
+            let distance = (x - player.0).hypot(y - player.1);
+            let radius = 2.0;
+            if distance <= radius {
+                hints.push(crate::hints::HintData {
+                    id: "jukebox".into(),
+                    target_transform: [x, y, 0.0],
+                    local_vertical_offset: 1.0,
+                    caption_text: "USE JUKEBOX".into(),
+                    input_token: "{+use}".into(),
+                    on_screen_icon: "keycap".into(),
+                    off_screen_icon: "arrow".into(),
+                    trigger_radius: radius,
+                    clamp_to_screen: true,
+                    show_offscreen_arrow: false,
+                    priority: 100,
+                    allow_multiple: false,
+                    distance,
+                });
+            }
+        }
+
+        if let Some(assault) = self.assault.as_ref() {
+            for (index, door) in assault.battle.doors.iter().enumerate() {
+                let caption = match door.state {
+                    DoorState::Closed => "OPEN DOOR",
+                    DoorState::Open => "CLOSE DOOR",
+                    DoorState::Locked | DoorState::Breached => continue,
+                };
+                let (x, y) = (door.at.0 as f64 / 1000.0, door.at.1 as f64 / 1000.0);
+                let distance = (x - player.0).hypot(y - player.1);
+                let radius = 1.8;
+                if distance > radius {
+                    continue;
+                }
+                hints.push(crate::hints::HintData {
+                    id: format!("door:{index}"),
+                    target_transform: [x, y, 0.0],
+                    local_vertical_offset: 1.15,
+                    caption_text: caption.into(),
+                    input_token: "{+use}".into(),
+                    on_screen_icon: "keycap".into(),
+                    off_screen_icon: "arrow".into(),
+                    trigger_radius: radius,
+                    clamp_to_screen: true,
+                    show_offscreen_arrow: false,
+                    priority: 80,
+                    allow_multiple: false,
+                    distance,
+                });
+            }
+        }
+
+        crate::hints::prioritize(hints)
+    }
+
+    /// JSON interaction hints: id, caption, input token, projected anchor, range and display policy.
+    /// Coordinates are normalized to the active canvas (0..1, y down).
+    pub fn hint_marks(&mut self) -> String {
+        let (target, yaw, view_h) = self.last_cam;
+        let (right, up, _) = scalia_render::camera::basis(yaw);
+        let aspect = self.size.0 as f32 / self.size.1.max(1) as f32;
+        let origin = self.origin;
+        let mut out = Vec::new();
+
+        for hint in self.active_hint_data() {
+            let x = hint.target_transform[0];
+            let y = hint.target_transform[1];
+            let z = self.height_at(x as f32, y as f32) + hint.target_transform[2] as f32 + hint.local_vertical_offset;
+            let relative = Vec3::new((x - origin.0) as f32, (y - origin.1) as f32, z) - target;
+            let sx = 0.5 + relative.dot(right) / (view_h * aspect);
+            let sy = 0.5 - relative.dot(up) / view_h;
+            out.push(format!(
+                "{{\"id\":{},\"caption\":{},\"input\":{},\"action\":{},\"icon\":{},\"offscreenIcon\":{},\"x\":{sx:.5},\"y\":{sy:.5},\"radius\":{:.2},\"priority\":{},\"allowMultiple\":{},\"clampToScreen\":{},\"showOffscreenArrow\":{}}}",
+                crate::json_str(&hint.id),
+                crate::json_str(&hint.caption_text),
+                crate::json_str(&hint.input_token),
+                crate::json_str(&hint.id),
+                crate::json_str(&hint.on_screen_icon),
+                crate::json_str(&hint.offscreen_icon),
+                hint.trigger_radius,
+                hint.priority,
+                hint.allow_multiple,
+                hint.clamp_to_screen,
+                hint.show_offscreen_arrow,
+            ));
+        }
+        format!("[{}]", out.join(","))
+    }
+
     /// Every unit as seen by the camera that is active right now (the field camera, or the tablet map's inside
     /// `use_map(true)`): JSON [{id, cs, n, x, y, r, sel, you, men: [[x, y, readiness, health]], ready: [stable, wounded,
     /// incapacitated, deceased], u}] with x, y as fractions of the canvas (0..1, y down), u a metre as a fraction of
