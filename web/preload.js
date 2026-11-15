@@ -20,7 +20,7 @@ export async function preload(urls, onProgress = () => {}) {
     let result;
     try { result = { url, buffer: await fileBytes(url), ok: true, error: null }; }
     catch (error) { result = { url, buffer: null, ok: false, error: error?.message || String(error) }; }
-    finally { completed++; onProgress({ completed, total: urls.length, url }); }
+    finally { completed++; onProgress({ completed, total: urls.length, url, ok: result.ok, error: result.error }); }
     return result;
   }));
   return { results, failures: results.filter((r) => !r.ok) };
@@ -31,12 +31,13 @@ export async function verifyFiles(urls, onProgress = () => {}) {
   const worker = async () => {
     while (next < urls.length) {
       const url = urls[next++];
+      let ok = true, message = null;
       try {
         const response = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         if (response.headers.get('content-length') === '0') throw new Error('Empty asset');
-      } catch (error) { failures.push({ url, error: error?.message || String(error) }); }
-      finally { completed++; onProgress({ completed, total: urls.length, url }); }
+      } catch (error) { ok = false; message = error?.message || String(error); failures.push({ url, error: message }); }
+      finally { completed++; onProgress({ completed, total: urls.length, url, ok, error: message }); }
     }
   };
   await Promise.all(Array.from({ length: Math.min(8, urls.length) }, worker));

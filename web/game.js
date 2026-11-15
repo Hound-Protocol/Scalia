@@ -94,7 +94,10 @@ const MENU_AUDIO = ['./sfx/menu-music.mp3', './sfx/menu-flash2-thump.mp3', './sf
   './sfx/space-ambience-03-short.mp3', './sfx/menu-eyes-braam.mp3'];
 const STREAM_ASSETS = ['./sfx/ambience-wind.mp3', './sfx/jukebox/hard-rock-metal.mp3', './sfx/jukebox/hard-rock-sport.mp3',
   './sfx/jukebox/heavy-music.mp3', './sfx/jukebox/polet.mp3', './sfx/jukebox/ransom.mp3', './sfx/jukebox/virus.mp3',
-  './sfx/music-vance.mp3', './sfx/space-ambience-01.mp3', './sfx/space-ambience-03.mp3', './sfx/menu-flash1-door.mp3'];
+  './sfx/music-vance.mp3', './sfx/space-ambience-01.mp3', './sfx/space-ambience-03.mp3', './sfx/menu-flash1-door.mp3',
+  './sfx/weapons/deagle-mag-in.mp3', './sfx/weapons/deagle-mag-out.mp3', './sfx/weapons/deagle-shot.mp3', './sfx/weapons/deagle-slide.mp3',
+  './sfx/weapons/m1911-mag.mp3', './sfx/weapons/m1911-shot.mp3', './sfx/weapons/m1911-slide.mp3',
+  './sfx/weapons/mp5-bolt.mp3', './sfx/weapons/mp5-mag-in.mp3', './sfx/weapons/mp5-mag-out.mp3', './sfx/weapons/mp5-shot.mp3'];
 const UI_ASSETS = ['./voice/manifest.json',
   './img/fp_body.webp', './img/fp_left.webp', './img/fp_lwalkie_back.webp', './img/fp_lwalkie_front.webp',
   './img/fp_right.webp', './img/fp_thumb.webp', './img/pda_front.webp', './img/walkie.webp',
@@ -106,11 +109,11 @@ const audio = new AudioEngine();
 audio.fetchBytes = fileBytes;
 window.scaliaAudio = audio;
 const bootLog = $('protoLoadList'), bootBar = $('protoLoad');
-function bootProgress(done, total, label, phase) {
+function bootProgress(done, total, label, phase, ok = true, error = null) {
   const pct = total ? Math.floor(done * 100 / total) : 0;
   if (bootBar) { bootBar.style.setProperty('--p', pct + '%'); bootBar.dataset.text = `${phase} ${done}/${total} · ${label}`; }
   if (bootLog) {
-    const line = `[OK] ${label}`;
+    const line = `${ok ? '[OK]' : '[FAILED]'} ${label}${error ? ': ' + error : ''}`;
     if (!bootLog.textContent.split('\n').includes(line)) bootLog.textContent += (bootLog.textContent ? '\n' : '') + line;
     bootLog.scrollTop = bootLog.scrollHeight;
   }
@@ -123,7 +126,7 @@ async function verifyImage(url) {
 }
 const loaded = (async () => {
   const urls = [WASM_URL, ...SOUNDS, ...MENU_AUDIO, ...UI_ASSETS];
-  const download = await preload(urls, ({ completed, total, url }) => bootProgress(completed, total, url.replace('./', ''), 'Downloading'));
+  const download = await preload(urls, ({ completed, total, url, ok, error }) => bootProgress(completed, total, url.replace('./', ''), 'Downloading', ok, error));
   const failures = download.failures.map(({ url, error }) => ({ url, error }));
   const get = (url) => download.results.find((r) => r.url === url);
   const wasm = get(WASM_URL);
@@ -151,12 +154,12 @@ const loaded = (async () => {
     } catch (error) { failures.push({ url: './voice/manifest.json', error: error?.message || String(error) }); }
   }
   const deferred = [...STREAM_ASSETS, ...voiceFiles];
-  failures.push(...await verifyFiles(deferred, ({ completed, total, url }) =>
-    bootProgress(completed, total, url.replace('./', ''), 'Checking assets')));
+  failures.push(...await verifyFiles(deferred, ({ completed, total, url, ok, error }) =>
+    bootProgress(completed, total, url.replace('./', ''), 'Checking assets', ok, error)));
 
   try {
-    failures.push(...await audio.prepare([...SOUNDS, ...MENU_AUDIO], ({ completed, total, url }) =>
-      bootProgress(completed, total, url.replace('./', ''), 'Decoding audio')));
+    failures.push(...await audio.prepare([...SOUNDS, ...MENU_AUDIO], ({ completed, total, url, ok, error }) =>
+      bootProgress(completed, total, url.replace('./', ''), 'Decoding audio', ok, error)));
   } catch (error) { failures.push({ url: 'Web Audio initialization', error: error?.message || String(error) }); }
 
   if (bootBar) { bootBar.style.setProperty('--p', '100%'); bootBar.dataset.text = failures.length ? `Ready · ${failures.length} asset warning(s)` : 'Ready · all startup assets verified'; }

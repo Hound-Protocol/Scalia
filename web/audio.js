@@ -414,7 +414,7 @@ export class AudioEngine {
         }
         if (!this.buffers.get(url) || this.buffers.get(url) === 'loading') throw new Error('Audio decode returned no buffer');
       } catch (error) { failures.push({ url, error: error?.message || String(error) }); }
-      finally { completed++; onProgress({ completed, total: urls.length, url }); }
+      finally { completed++; onProgress({ completed, total: urls.length, url, ok: !failures.some((item) => item.url === url), error: failures.find((item) => item.url === url)?.error || null }); }
     }));
     return failures;
   }
