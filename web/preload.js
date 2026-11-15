@@ -1,60 +1,44 @@
-// Preloading: the engine and every short sound are downloaded while the prototype notice is up, with real
-// progress, so nothing waits for its file the first time it plays. Music and wind are long and stream on their
-// own. Sounds are kept as bytes here and decoded once audio is allowed (the first click).
-
-const bytes = new Map(); // path (no query) -> Promise<ArrayBuffer>
+// Startup asset loader. Every required asset is fetched and checked; failures are returned, never hidden.
+const bytes = new Map();
 const key = (url) => new URL(url, location.href).pathname;
-
-/// The bytes of a file, from the preload when it has it, else fetched now (and kept).
 export function fileBytes(url) {
   const k = key(url);
-  if (!bytes.has(k)) bytes.set(k, fetch(url).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.arrayBuffer(); }));
+  if (!bytes.has(k)) bytes.set(k, fetch(url).then((r) => {
+    if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+    return r.arrayBuffer();
+  }).then((buf) => {
+    if (!buf.byteLength) throw new Error(`${url}: empty response`);
+    return buf;
+  }));
   const p = bytes.get(k);
   p.catch(() => bytes.delete(k));
   return p;
 }
-
-/// Downloads `urls` in parallel; `onProgress(done bytes, total bytes, files done, files)` as they come in.
-/// Resolves when all are in (a failed file is skipped: it is fetched again when first played).
-export function preload(urls, onProgress = () => {}) {
-  const sizes = new Map(), got = new Map();
-  let files = 0;
-  const report = () => {
-    let total = 0, done = 0;
-    for (const u of urls) { total += sizes.get(u) || 0; done += got.get(u) || 0; }
-    onProgress(done, total, files, urls.length);
-  };
-  return Promise.all(urls.map(async (u) => {
-    const k = key(u);
-    try {
-      const r = await fetch(u);
-      if (!r.ok) throw new Error(String(r.status));
-      sizes.set(u, Number(r.headers.get('content-length')) || 0);
-      const reader = r.body && r.body.getReader();
-      let buf;
-      if (!reader) buf = await r.arrayBuffer();
-      else {
-        const parts = [];
-        let n = 0;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          parts.push(value); n += value.length;
-          got.set(u, n); report();
-        }
-        const all = new Uint8Array(n);
-        let at = 0;
-        for (const p of parts) { all.set(p, at); at += p.length; }
-        buf = all.buffer;
-      }
-      if (!sizes.get(u)) sizes.set(u, buf.byteLength);
-      got.set(u, buf.byteLength);
-      bytes.set(k, Promise.resolve(buf));
-      return buf;
-    } catch (_) {
-      return null;
-    } finally {
-      files++; report();
-    }
+export async function preload(urls, onProgress = () => {}) {
+  let completed = 0;
+  const results = await Promise.all(urls.map(async (url) => {
+    let result;
+    try { result = { url, buffer: await fileBytes(url), ok: true, error: null }; }
+    catch (error) { result = { url, buffer: null, ok: false, error: error?.message || String(error) }; }
+    finally { completed++; onProgress({ completed, total: urls.length, url }); }
+    return result;
   }));
+  return { results, failures: results.filter((r) => !r.ok) };
+}
+export async function verifyFiles(urls, onProgress = () => {}) {
+  const failures = [];
+  let next = 0, completed = 0;
+  const worker = async () => {
+    while (next < urls.length) {
+      const url = urls[next++];
+      try {
+        const response = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (response.headers.get('content-length') === '0') throw new Error('Empty asset');
+      } catch (error) { failures.push({ url, error: error?.message || String(error) }); }
+      finally { completed++; onProgress({ completed, total: urls.length, url }); }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, urls.length) }, worker));
+  return failures;
 }

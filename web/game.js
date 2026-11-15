@@ -82,8 +82,7 @@ const music = (() => {
   return m;
 })();
 
-// Everything short is fetched now, while the prototype notice is up: the engine and every sound effect (music and
-// wind stream on their own). The notice shows the progress and lets you in once it is all here.
+// Required startup assets are fetched, validated, and decoded before the prototype notice unlocks.
 const SOUNDS = ['./sfx/context-menu.mp3', './sfx/dive-whoosh.mp3', './sfx/m4-shot.mp3', './sfx/map-zoom.mp3', './sfx/pda-close.mp3',
   './sfx/pda-leave.mp3', './sfx/pda-open.mp3', './sfx/pda-tap.mp3', './sfx/radio-key.mp3', './sfx/steps-concrete-1.mp3',
   './sfx/steps-concrete-2.mp3', './sfx/steps-concrete-3.mp3', './sfx/steps-grass.mp3', './sfx/unit-select.mp3',
@@ -91,21 +90,84 @@ const SOUNDS = ['./sfx/context-menu.mp3', './sfx/dive-whoosh.mp3', './sfx/m4-sho
   './sfx/weapons/ar15-shot.mp3', './sfx/weapons/ar15-mag-out.mp3', './sfx/weapons/ar15-mag-in.mp3', './sfx/weapons/ar15-bolt.mp3',
   './sfx/weapons/ak47-shot.mp3', './sfx/weapons/ak47-mag-out.mp3', './sfx/weapons/ak47-mag-in.mp3', './sfx/weapons/ak47-bolt.mp3',
   './sfx/weapons/m1911-dry.mp3', './sfx/menu-boom.mp3', './sfx/menu-travel.mp3', './sfx/menu-enter.mp3'];
+const MENU_AUDIO = ['./sfx/menu-music.mp3', './sfx/menu-flash2-thump.mp3', './sfx/space-ambience-01-short.mp3',
+  './sfx/space-ambience-03-short.mp3', './sfx/menu-eyes-braam.mp3'];
+const STREAM_ASSETS = ['./sfx/ambience-wind.mp3', './sfx/jukebox/hard-rock-metal.mp3', './sfx/jukebox/hard-rock-sport.mp3',
+  './sfx/jukebox/heavy-music.mp3', './sfx/jukebox/polet.mp3', './sfx/jukebox/ransom.mp3', './sfx/jukebox/virus.mp3',
+  './sfx/music-vance.mp3', './sfx/space-ambience-01.mp3', './sfx/space-ambience-03.mp3', './sfx/menu-flash1-door.mp3'];
+const UI_ASSETS = ['./voice/manifest.json',
+  './img/fp_body.webp', './img/fp_left.webp', './img/fp_lwalkie_back.webp', './img/fp_lwalkie_front.webp',
+  './img/fp_right.webp', './img/fp_thumb.webp', './img/pda_front.webp', './img/walkie.webp',
+  './fonts/saira-condensed-latin-400-normal.woff2', './fonts/saira-condensed-latin-500-normal.woff2',
+  './fonts/saira-condensed-latin-700-normal.woff2', './fonts/saira-stencil-one-latin-400-normal.woff2'];
 const BUILD = new URL(import.meta.url).searchParams.get('v');
 const WASM_URL = new URL(`./pkg/scalia_wasm_bg.wasm${BUILD ? '?v=' + BUILD : ''}`, import.meta.url).href;
-const loaded = (() => {
-  const bar = $('protoLoad');
-  const show = (done, total, files, n) => {
-    if (!bar) return;
-    const pct = files >= n ? 100 : Math.min(99, total ? Math.floor(100 * done / total) : Math.floor(100 * files / n));
-    bar.style.setProperty('--p', pct + '%');
-    bar.dataset.text = files >= n ? 'Ready' : `Loading ${pct}%  ·  ${(done / 1048576).toFixed(1)} MB`;
-  };
-  return preload([WASM_URL, ...SOUNDS], show);
+const audio = new AudioEngine();
+audio.fetchBytes = fileBytes;
+window.scaliaAudio = audio;
+const bootLog = $('protoLoadList'), bootBar = $('protoLoad');
+function bootProgress(done, total, label, phase) {
+  const pct = total ? Math.floor(done * 100 / total) : 0;
+  if (bootBar) { bootBar.style.setProperty('--p', pct + '%'); bootBar.dataset.text = `${phase} ${done}/${total} · ${label}`; }
+  if (bootLog) {
+    const line = `[OK] ${label}`;
+    if (!bootLog.textContent.split('\n').includes(line)) bootLog.textContent += (bootLog.textContent ? '\n' : '') + line;
+    bootLog.scrollTop = bootLog.scrollHeight;
+  }
+}
+async function verifyImage(url) {
+  const image = new Image(); image.src = url;
+  if (image.decode) await image.decode();
+  else await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error('Image decode failed')); });
+  if (!image.naturalWidth || !image.naturalHeight) throw new Error('Image has no decoded dimensions');
+}
+const loaded = (async () => {
+  const urls = [WASM_URL, ...SOUNDS, ...MENU_AUDIO, ...UI_ASSETS];
+  const download = await preload(urls, ({ completed, total, url }) => bootProgress(completed, total, url.replace('./', ''), 'Downloading'));
+  const failures = download.failures.map(({ url, error }) => ({ url, error }));
+  const get = (url) => download.results.find((r) => r.url === url);
+  const wasm = get(WASM_URL);
+  if (!wasm?.ok) throw new Error(`Engine download failed: ${wasm?.error || 'missing WebAssembly file'}`);
+
+  const images = UI_ASSETS.filter((url) => /\.(webp|png|jpe?g)$/i.test(url));
+  await Promise.all(images.map(async (url) => {
+    try { await verifyImage(url); }
+    catch (error) { failures.push({ url, error: error?.message || String(error) }); }
+  }));
+  for (const url of UI_ASSETS.filter((item) => /\.woff2?$/i.test(item))) {
+    try {
+      const faces = await document.fonts.load(url.includes('stencil') ? '26px "Saira Stencil One"' : '16px "Saira Condensed"');
+      if (!faces.length || faces.some((face) => face.status !== 'loaded')) throw new Error('Font did not load');
+    } catch (error) { failures.push({ url, error: error?.message || String(error) }); }
+  }
+
+  const manifest = get('./voice/manifest.json');
+  let voiceFiles = [];
+  if (manifest?.ok) {
+    try {
+      const data = JSON.parse(new TextDecoder().decode(manifest.buffer));
+      voiceFiles = [...new Set(Object.values(data).flatMap((voice) => Object.values(voice)).map((file) => './voice/' + file))];
+      if (!voiceFiles.length) throw new Error('Voice manifest contains no clips');
+    } catch (error) { failures.push({ url: './voice/manifest.json', error: error?.message || String(error) }); }
+  }
+  const deferred = [...STREAM_ASSETS, ...voiceFiles];
+  failures.push(...await verifyFiles(deferred, ({ completed, total, url }) =>
+    bootProgress(completed, total, url.replace('./', ''), 'Checking assets')));
+
+  try {
+    failures.push(...await audio.prepare([...SOUNDS, ...MENU_AUDIO], ({ completed, total, url }) =>
+      bootProgress(completed, total, url.replace('./', ''), 'Decoding audio')));
+  } catch (error) { failures.push({ url: 'Web Audio initialization', error: error?.message || String(error) }); }
+
+  if (bootBar) { bootBar.style.setProperty('--p', '100%'); bootBar.dataset.text = failures.length ? `Ready · ${failures.length} asset warning(s)` : 'Ready · all startup assets verified'; }
+  if (bootLog && failures.length) for (const failure of failures)
+    bootLog.textContent += `\n[FAILED] ${failure.url}: ${failure.error}`;
+  return { wasmBytes: wasm.buffer, failures };
 })();
 try {
-  const wasmBytes = (await loaded)[0];
-  await init(wasmBytes ? { module_or_path: wasmBytes } : undefined);
+  const { wasmBytes, failures: assetFailures } = await loaded;
+  if (assetFailures.length) console.warn('[Scalia assets] Startup asset warnings:', assetFailures);
+  await init({ module_or_path: wasmBytes });
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser.');
 
   // Canvas in device pixels; the viewer renders at 1/scale of that and scales up with sharp pixels.
@@ -1272,7 +1334,8 @@ try {
   // decoded; they play through the handset's radio chain (narrow band, overdriven speaker, compression) into the
   // analyser, so the trace follows the real voice. A line with no clip falls back to the browser's speech voice.
   let voiceManifest = null;
-  fetch('./voice/manifest.json', { cache: 'no-cache' }).then((r) => r.json()).then((m) => { voiceManifest = m; }).catch(() => {});
+  fileBytes('./voice/manifest.json').then((b) => { voiceManifest = JSON.parse(new TextDecoder().decode(b)); })
+    .catch((error) => console.warn('[Scalia assets] Radio voice manifest failed:', error));
   const clipCache = new Map();
   const clipFor = (vid, text) => {
     const f = voiceManifest && voiceManifest[vid] && voiceManifest[vid][text];
@@ -1280,7 +1343,7 @@ try {
     if (!f || !c) return Promise.resolve(null);
     if (!clipCache.has(f)) {
       clipCache.set(f, fetch(`./voice/${f}`).then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
-        .then((b) => c.decodeAudioData(b)).catch(() => { clipCache.delete(f); return null; }));
+        .then((b) => c.decodeAudioData(b)).catch((error) => { clipCache.delete(f); console.warn('[Scalia assets] Radio clip failed:', f, error); return null; }));
     }
     return clipCache.get(f);
   };
@@ -1614,11 +1677,8 @@ try {
   // ---- Training assault (K): a squad takes the killhouse from the enemy inside, on the battle AI ----
   // Battle sounds go through the Pack Engine audio graph (audio.js): the acoustics place every shot, blast and
   // footfall (walls, distance, zoom, the listener's space, headphones 3D), the graph plays it.
-  const audio = new AudioEngine();
   const jukebox = createJukebox({ audio, viewer: () => window.scaliaViewer });
   // For the intro (outside this block): waking up filters the world's sound.
-  window.scaliaAudio = audio;
-  audio.fetchBytes = fileBytes;
   const SHOT = './sfx/m4-shot.mp3', STEPS = './sfx/steps-grass.mp3';
   // Each side's rifle (Rust assault.rs `Cue`): ours an AR-15, theirs an AK-47; the handling heard close by.
   const GUN = {
@@ -1986,9 +2046,10 @@ const VERSION_LINE = VERSION.startsWith('__') ? 'Local build' : `${VERSION} · $
   let ready = false;
   const goBtn = document.getElementById('protoGo');
   goBtn.disabled = true;
-  loaded.then(() => {
-    // Loading done: the loading screen fades and the notice comes up.
+  loaded.then(({ failures }) => {
+    // Loading done: the loading screen fades and the notice comes up, with any failed assets listed.
     ready = true; goBtn.disabled = false;
+    if (failures.length) goBtn.textContent = 'ENTER · ' + failures.length + ' ASSET WARNING(S)';
     box.classList.remove('wait');
     const boot = document.getElementById('boot');
     if (boot) { boot.classList.add('done'); setTimeout(() => boot.remove(), 400); }

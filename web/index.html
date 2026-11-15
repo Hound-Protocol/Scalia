@@ -188,6 +188,8 @@
   #boot .load { position: relative; height: 3px; background: rgba(255,255,255,0.1); --p: 0%; }
   #boot .load::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: #e0a526; transition: width 0.15s linear; }
   #boot .load::after { content: attr(data-text); position: absolute; left: 0; right: 0; text-align: center; top: 9px; font-size: 11px; letter-spacing: 0.08em; color: #9aa58a; white-space: pre; }
+  #boot .load-list { margin: 22px 0 0; max-height: 30vh; overflow: auto; color: #9aa58a; font: 10px/1.5 ui-monospace, monospace;
+    white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; scrollbar-width: thin; }
   #boot .boot-error { margin: 24px 0 0; color: #ffb29e; font: 12px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; text-align: center; }
   #boot .boot-retry { display: block; margin: 14px auto 0; padding: 7px 14px; color: #e3d6aa; background: #24291e; border: 1px solid #68734a; cursor: pointer; font: inherit; }
   #proto button:disabled { opacity: 0.45; cursor: progress; filter: grayscale(0.6); }
@@ -764,7 +766,7 @@
   <div id="menuLids"></div>
   <div id="menuBars" aria-hidden="true"><i></i><i></i></div>
 </div>
-<div id="boot" role="status" aria-live="polite"><div class="bx"><h1>SCALIA</h1><div class="load" id="protoLoad" data-text="Loading…"></div></div></div>
+<div id="boot" role="status" aria-live="polite"><div class="bx"><h1>SCALIA</h1><div class="load" id="protoLoad" data-text="Preparing startup assets…"></div><pre class="load-list" id="protoLoadList">Waiting for startup checks…</pre></div></div>
 <div id="proto" class="wait"><div class="card">
   <div class="owner">Courtesy and property of Erik J. aka TrueMan</div>
   <div class="tag">⚠ PROTOTYPE</div>
