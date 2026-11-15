@@ -313,9 +313,10 @@ test('reverb, air and echo branches retain then disconnect every auxiliary node'
 
 test('playBuffer() manages looping menu voices and supports graceful fade cancellation', () => {
   const audio = playbackEngine();
+  let ended = 0;
   const handle = audio.playBuffer({ duration: 4 }, {
     gain: 0.6, category: 'ui', priority: 2, loop: true,
-    loopStart: 0.2, loopEnd: 3.5, fadeIn: 0.4,
+    loopStart: 0.2, loopEnd: 3.5, fadeIn: 0.4, onended: () => ended++,
   });
   assert.ok(handle);
   assert.equal(handle.state, 'playing');
@@ -326,6 +327,7 @@ test('playBuffer() manages looping menu voices and supports graceful fade cancel
   assert.equal(handle.stop(0.05), true);
   assert.equal(handle.src.stopAt, 0.07);
   assert.equal(handle.state, 'ended');
+  assert.equal(ended, 1);
   assert.equal(audio.voiceStats().nodes, 0);
 });
 
