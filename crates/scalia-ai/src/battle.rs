@@ -821,7 +821,9 @@ impl Battle {
                     // From a standstill a man takes a moment to react, and no two alike: a squad does not set
                     // off as one.
                     // (Walking moves only: a dash for cover or a room entry on the bang goes at once.)
-                    if !self.soldiers[i].moving && gait == Gait::Walk && self.soldiers[i].cue == Cue::None {
+                    // (Only a man who had settled on his spot: a destination that keeps moving, like a place in a
+                    // formation, must not hold him back again and again.)
+                    if (self.soldiers[i].settled || self.soldiers[i].path_to.is_none()) && self.soldiers[i].react_ms <= 0 && gait == Gait::Walk && self.soldiers[i].cue == Cue::None {
                         self.rolls += 1;
                         self.soldiers[i].react_ms = REACT_MIN_MS + (self.roll(i, self.rolls) as i64 * REACT_SPREAD_MS as i64 / 1_000) as i32;
                     }
@@ -1028,11 +1030,11 @@ impl Battle {
                 (fact::CONTACT, contact),
             ];
             let facts = bits.iter().fold(0u64, |a, &(b, on)| if on { a | 1 << b } else { a });
-            // Holding his ground with the enemy known but out of sight: he gets down on a knee rather than stand
-            // tall in the open (refreshed while it lasts).
+            // Holding his ground, or waiting his turn in a bound (overwatch), with the enemy known but out of sight:
+            // he gets down on a knee rather than stand tall in the open (refreshed while it lasts).
             // (Outdoors only: posted at a window he must stand to see out.)
             let known = contact || self.contacts[s.squad as usize].iter().any(|c| self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
-            let hold_low = known && !indoors && s.target.is_none() && matches!(s.task, Task::Hold { .. }) && !s.moving && s.cover.is_none() && !busy;
+            let hold_low = known && !indoors && s.target.is_none() && !matches!(s.task, Task::Idle) && !s.moving && s.cover.is_none() && !busy;
             let sit = Situation { facts, suppression: s.suppression, target_close, mag_empty: s.ammo <= 0, aim: s.aim, aiding: busy };
             let mind = think(&sit);
             let doing = mind.doing();
