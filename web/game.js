@@ -8,9 +8,11 @@ import { createMenu } from './menu.js';
 import { createJukebox } from './jukebox.js';
 import { HintManager } from './hints.js';
 import { FieldFeedback } from './field-feedback.js';
+import { CrosshairController } from './crosshair.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
+const crosshair = new CrosshairController({ canvas, line: $('aimLine'), ring: $('reticle'), dot: $('aimDot') });
 // Error handling: every part of a frame runs guarded; a dead engine gets a crash screen (errors.js).
 const errors = createErrors('__UPDATE__');
 
@@ -543,7 +545,7 @@ try {
   // The rifle on screen: rounds left, the aim line while aiming, and a small kick of the view on every shot.
   // `climb` is the crosshair's recoil (0 settled): each round throws it out along the barrel and opens the ring,
   // and it settles back on its own; `side` is that round's sideways twitch.
-  let lastShots = 0, kick = 0, lastWeapon = '', climb = 0, side = 0, lastTick = performance.now();
+  let lastShots = 0, kick = 0, lastWeapon = '';
   // For crash reports: what the player last did (keys and mouse buttons), kept on the page side so a report can be
   // written even when the engine has died.
   const inputs = [];
@@ -556,39 +558,16 @@ try {
     const box = $('weapon'), line = $('aimLine');
     const on = scene === 'ground' && !tabletUp && !tabletShown;
     box.hidden = !on; line.hidden = true;
-    if (!on) { canvas.style.transform = ''; $('reticle').hidden = true; $('aimDot').hidden = true; canvas.style.cursor = ''; return; }
+    if (!on) { canvas.style.transform = ''; crosshair.hide(); canvas.style.cursor = ''; return; }
     lastWeapon = v.commander_weapon_state();
     const w = JSON.parse(lastWeapon);
     box.querySelector('b').textContent = w.slung ? 'SLUNG' : String(w.ammo);
     box.querySelector('small').textContent = w.reloading ? 'RELOADING' : `/ ${w.spare}`;
     box.querySelector('em').textContent = ['STANDING', 'CROUCHED', 'PRONE'][w.stance] || '';
     box.classList.toggle('low', !w.slung && w.ammo <= 5);
-    // Aiming (as in Helldivers): the reticle sits where the rifle really points, trailing the mouse while he
-    // swings round, sized by how wide his rounds go; a small dot marks the mouse itself, whose cursor is hidden.
-    const ret = $('reticle'), dot = $('aimDot');
-    if (w.line) {
-      const [x0, y0, x1, y1] = w.line, cw = canvas.clientWidth, ch = canvas.clientHeight;
-      const l = line.firstElementChild;
-      l.setAttribute('x1', (x0 * cw).toFixed(1)); l.setAttribute('y1', (y0 * ch).toFixed(1));
-      l.setAttribute('x2', (x1 * cw).toFixed(1)); l.setAttribute('y2', (y1 * ch).toFixed(1));
-      line.hidden = false;
-      const now = performance.now(), dt = Math.min(0.1, (now - lastTick) / 1000);
-      lastTick = now;
-      if (w.shots > lastShots) { climb = Math.min(1.6, climb + 0.55 * (w.shots - lastShots)); side = (Math.random() - 0.5) * 2; }
-      climb *= Math.exp(-dt / 0.11);
-      // Out along the barrel (screen direction from the muzzle to the mark), with a little twitch across it.
-      const dx = (x1 - x0) * cw, dy = (y1 - y0) * ch, dl = Math.hypot(dx, dy) || 1;
-      const kx = (dx / dl) * 12 * climb - (dy / dl) * 4 * side * climb, ky = (dy / dl) * 12 * climb + (dx / dl) * 4 * side * climb;
-      const r = 7 + 16 * (w.spread || 0) + 7 * climb;
-      ret.style.transform = `translate(${(x1 * cw + kx).toFixed(1)}px, ${(y1 * ch + ky).toFixed(1)}px)`;
-      ret.style.setProperty('--r', r.toFixed(1) + 'px');
-      ret.hidden = false;
-      dot.style.transform = `translate(${gun.x}px, ${gun.y}px)`;
-      dot.hidden = false;
-      canvas.style.cursor = 'none';
-    } else {
-      ret.hidden = true; dot.hidden = true; canvas.style.cursor = '';
-    }
+    // The reticle is driven by the live character weapon state; the pointer dot remains player input.
+    crosshair.update({ state: w, pointer: { x: gun.x, y: gun.y }, active: on });
+
     if (w.shots > lastShots) kick = Math.min(1, kick + 0.6 * (w.shots - lastShots));
     lastShots = w.shots;
     if (kick > 0.01 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
