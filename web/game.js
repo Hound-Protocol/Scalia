@@ -1986,7 +1986,10 @@ const UPDATE = '__UPDATE__';
   // Past the notice (shown alone on black): the main menu fades in (its music, then Start and the sequence); the
   // game's music and the wind
   // come in once the commander's eyes are open.
-  const menu = createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); },
+  // `?nomenu` skips the main menu and its galaxy entirely (straight from the notice into the game): for finding
+  // what freezes a browser, and for quick testing.
+  const noMenu = new URLSearchParams(location.search).has('nomenu');
+  const menu = noMenu ? { show() { document.getElementById('menu')?.remove(); music.start(); ambience(); } } : createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); },
     // Waking up: every sound in the scene through one low-pass the eyes' opening sweeps open.
     wake: (hz) => { worldAudio.wake(hz); try { window.scaliaAudio?.setWake(hz); } catch (_) { /* engine not up */ } } });
   const ver = document.getElementById('menuVer'); if (ver) ver.textContent = UPDATE.startsWith('__') ? '(local)' : UPDATE;
