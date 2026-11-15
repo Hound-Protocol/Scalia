@@ -20,7 +20,7 @@ const MAX_TAILS = 64;
 // Presets as in Battlefield: HiFi keeps a wide range (60 dB), War Tapes squeezes it (25 dB: punchy, loud).
 const HDR = { hifi: 60, wartapes: 25 };
 const QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
-const PRIORITY = { blast: 3, shot: 2, ui: 2, radio: 2, step: 1 };
+const PRIORITY = { blast: 4, shot: 3, ui: 2, radio: 2, step: 1 };
 
 // Convert the camera-relative ground vector into the listener's HRTF coordinate frame.
 // +x is right, -z is ahead, +z is behind, and -y is below the listener.
