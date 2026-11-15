@@ -290,6 +290,7 @@ export class AudioEngine {
     // API forbids creating a second MediaElementSourceNode for the same HTMLMediaElement.
     const existing = MEDIA_ELEMENT_STREAMS.get(el);
     if (existing) return existing.stream;
+    if (MEDIA_ELEMENT_ROUTES.has(el)) return null;
 
     const c = this.ensure(); if (!c) return null;
     let src;
