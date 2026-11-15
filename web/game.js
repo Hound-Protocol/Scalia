@@ -1687,7 +1687,7 @@ try {
   const STEP_SAY = { approach: 'moving up on the house', drone: 'drone up, looking inside', stack: 'stacked on the door', grenade: 'frag out',
     storm: 'going in', 'slow entry': 'entering slow', clear: 'clearing rooms', 'room clear': 'room clear', consolidate: 'consolidating', holding: 'house is ours, holding' };
   let assaultOn = false, assaultPoll = 0, lastAlive = null;
-  // Sound records from the acoustics (27 floats each, see the viewer's take_sounds), into the mix.
+  // Sound records from the acoustics (30 floats each, see the viewer's take_sounds), into the mix.
   const STEPS_CONCRETE_N = STEPS_CONCRETE.length;
   let lastConcrete = -1;
   const concreteTake = () => { let k = Math.floor(Math.random() * STEPS_CONCRETE_N); if (k === lastConcrete) k = (k + 1) % STEPS_CONCRETE_N; lastConcrete = k; return STEPS_CONCRETE[k]; };
@@ -1695,11 +1695,12 @@ try {
     if (!s || !s.length) return;
     fireGraph();
     try {
-    for (let i = 0; i + 26 < s.length; i += 27) {
+    for (let i = 0; i + 29 < s.length; i += 30) {
       const [kind, loud, delay, gain, lowpass, room, rx, ry, below, dist] = s.subarray(i, i + 10);
       const space = s.subarray(i + 11, i + 14);
       const echoes = [0, 1, 2, 3].map((k) => s.subarray(i + 14 + k * 3, i + 17 + k * 3));
-      const at = { lowpass, rx, ry, below, dist, delay, space, echoes, far: s[i + 26] };
+      const at = { lowpass, rx, ry, below, dist, delay, space, echoes, far: s[i + 26],
+        lowDb: s[i + 27], midDb: s[i + 28], highDb: s[i + 29] };
       if (kind === 3) audio.play(concreteTake(), { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16 });
       else if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2 });
       else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, rate: 0.45 });
