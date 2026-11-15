@@ -1978,10 +1978,10 @@ const UPDATE = '__UPDATE__';
     if (boot) { boot.classList.add('done'); setTimeout(() => boot.remove(), 400); }
     goBtn.focus();
   });
-  // Past the notice: the main menu (its music, then Start and the flight in); the game's music and the wind
+  // Past the notice (shown alone on black): the main menu fades in (its music, then Start and the sequence); the
+  // game's music and the wind
   // come in once the commander's eyes are open.
   const menu = createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); } });
-  menu.preview();
   const ver = document.getElementById('menuVer'); if (ver) ver.textContent = UPDATE.startsWith('__') ? '(local)' : UPDATE;
   const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); menu.show(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.

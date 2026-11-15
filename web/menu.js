@@ -1,20 +1,32 @@
-// The main menu and its intro flight.
+// The main menu and its intro sequence.
 //
-// The menu is the galaxy seen low from the side, a few degrees above its disc, turning slowly, with home marked.
-// Start: a soft flash, the menu music cuts, the boom; a beat of stillness; then the camera heads straight for home,
-// slowly at first and ever faster, through the stars, into the engine's own star system, planet and field, and
-// down into the commander: whoosh, black. Then his eyes open (a round black border widening, with a blink) while
-// the view eases out to the widest field zoom, ending on him. Escape, Space or a click skips the flight; with
-// reduced motion it is a plain fade.
+// The prototype notice comes first, alone on black; then the menu fades in: the galaxy seen low from the side,
+// turning slowly, home marked, SCALIA and a pulsing Start that reads Deploy under the pointer. The menu theme is
+// played through Web Audio from a decoded buffer, so it starts at once and loops without a gap.
+//
+// Start / Deploy (the project lead's sequence, 14 Nov; camera moves follow his curve, position ~ t³: slow, then
+// faster and faster):
+//   1. Flash 1 ("cinematic hit door"), the music stops: for a second the camera pulls back to see the galaxy at a
+//      20 degree tilt while cinema bars slide in (they stay for the sequence).
+//   2. Flash 2 ("massive thump"): home from an isometric galactic angle, orbiting it very slowly to the right;
+//      deep space ambience 01.
+//   3. Flash 3: the commander's planet, held for 2 seconds with deep space ambience 03; then the zoom down into
+//      him (travel sound, the whoosh into his head) while the ambience fades and narrows to 5 kHz.
+//   Then black, and his eyes open on the field. Escape, Space or a click skips; with reduced motion it is a fade.
 
-const PAUSE_MS = 1000;        // Start to the camera moving: the beat after the boom.
-const GALAXY_MS = 2600;       // The flight through the galaxy (from the end of the pause).
-const HIT_MS = 6000;          // Start to the camera entering the commander.
+const PULL_MS = 1000;         // Flash 1 to flash 2: the pull-back.
+const GALAXY_MS = 4800;       // Flash 2 to flash 3: home from the galactic angle.
+const HOLD_MS = 2000;         // The planet held before the zoom.
+const ZOOM_MS = 3600;         // The zoom from the planet into his head.
 const BLACK_MS = 450;         // Inside him, in the dark.
 const OPEN_MS = 3600;         // Eyes opening and the view easing out to the field.
+const T_GALAXY = PULL_MS, T_PLANET = T_GALAXY + GALAXY_MS, T_ZOOM = T_PLANET + HOLD_MS, T_HIT = T_ZOOM + ZOOM_MS;
 const ELEV = 0.6154797;       // The game camera's elevation (scalia-render camera.rs ELEV).
-const FAR_M = 1.5e11;         // The widest zoom the engine has (the star system).
+const PLANET_M = 3.2e6;       // The planet framed whole (viewer.rs shows the globe above 4 planet radii, 2.6e6 m).
 const FIELD_M = 50;           // The widest field zoom (viewer.rs LADDER[STEP_FIELD_MAX]).
+const AMB_TO_HZ = 5000;       // The zoom's ambience narrows to this.
+// The project lead's speed curve: position over time as t³ (his chart: 0, .003, .04, .13, .31, .60, 1 at sixths).
+export const curve = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * t; };
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const smooth = (x) => { x = clamp01(x); return x * x * x * (x * (x * 6 - 15) + 10); };
@@ -202,14 +214,64 @@ export function createMenu({ viewer, onEnter }) {
   sky.addEventListener('webglcontextlost', (e) => { e.preventDefault(); draw = null; });
   sky.addEventListener('webglcontextrestored', makeRenderer);
 
-  const sound = (src, vol) => { const a = new Audio(src); a.preload = 'auto'; a.volume = vol; return a; };
-  const tune = sound('./sfx/menu-music.mp3', 0.55); tune.loop = true;
-  const boom = sound('./sfx/menu-boom.mp3', 0.9);
-  const travel = sound('./sfx/menu-travel.mp3', 0.8);
-  const enter = sound('./sfx/menu-enter.mp3', 0.85);
+  // Sound through Web Audio: everything decoded while the notice is up, so it plays the moment it is asked for.
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = AC ? new AC() : null;
+  const bufs = {};
+  const load = (name, url) => {
+    if (!ctx) return;
+    bufs[name] = fetch(url).then((r) => r.arrayBuffer()).then((a) => ctx.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => console.warn('menu sound', url, e));
+  };
+  load('tune', './sfx/menu-music.mp3');
+  load('flash1', './sfx/menu-flash1-door.mp3');
+  load('flash2', './sfx/menu-flash2-thump.mp3');
+  load('amb1', './sfx/space-ambience-01.mp3');
+  load('amb3', './sfx/space-ambience-03.mp3');
+  load('travel', './sfx/menu-travel.mp3');
+  load('enter', './sfx/menu-enter.mp3');
+  const ready = (name) => bufs[name] instanceof AudioBuffer ? bufs[name] : null;
+  // Where the sound in a buffer really starts and ends (MP3 encoders pad both ends with silence): the loop runs
+  // between them, so it comes round without a gap.
+  function audible(b) {
+    const d = b.getChannelData(0), th = 0.002;
+    let a = 0, z = d.length - 1;
+    while (a < z && Math.abs(d[a]) < th) a++;
+    while (z > a && Math.abs(d[z]) < th) z--;
+    return [a / b.sampleRate, (z + 1) / b.sampleRate];
+  }
+  // Plays a decoded sound: `vol`, optionally looped over its audible part, through `via` (a node) if given.
+  // Returns { src, gain, stop(fadeS) } or null if it is not decoded (yet).
+  function play(name, vol, { loop = false, via = null, fadeIn = 0 } = {}) {
+    const b = ready(name);
+    if (!ctx || !b) return null;
+    const src = ctx.createBufferSource();
+    src.buffer = b;
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(fadeIn > 0 ? 0 : vol, now);
+    if (fadeIn > 0) gain.gain.linearRampToValueAtTime(vol, now + fadeIn);
+    src.connect(gain).connect(via || ctx.destination);
+    let at = 0;
+    if (loop) { const [a, z] = audible(b); src.loop = true; src.loopStart = a; src.loopEnd = z; at = a; }
+    src.start(now, at);
+    const stop = (fade = 0.03) => {
+      const t = ctx.currentTime;
+      try { gain.gain.cancelScheduledValues(t); gain.gain.setValueAtTime(gain.gain.value, t); gain.gain.linearRampToValueAtTime(0, t + fade); src.stop(t + fade + 0.02); } catch (_) { /* already stopped */ }
+    };
+    return { src, gain, stop };
+  }
+  let tune = null, amb1 = null, amb3 = null, travel = null, enter = null, ambFilter = null;
+  const stopAll = (fade) => { for (const s of [tune, amb1, amb3, travel, enter]) s?.stop(fade); tune = amb1 = amb3 = travel = enter = null; };
+  function startTune() {
+    if (state !== 'menu' || tune || !ctx) return;
+    ctx.resume().catch(() => {});
+    tune = play('tune', 0.55, { loop: true, fadeIn: 0.4 });
+    // Not decoded yet (a slow connection): as soon as it is.
+    if (!tune && bufs.tune && bufs.tune.then) bufs.tune.then(() => startTune());
+  }
 
-  // 'menu' (waiting for Start), 'fly' (the intro), 'done'.
-  let state = 'hidden', t0 = 0, skipAt = null, raf = 0;
+  // 'hidden', 'menu' (waiting for Start), 'fly' (the sequence), 'done'.
+  let state = 'hidden', t0 = 0, skipAt = null, raf = 0, step = 0;
   const v = () => viewer();
   const intro = (m, e, f) => { try { v()?.set_intro(m, e, f); } catch (_) { /* engine down: the overlays still play */ } };
 
@@ -226,17 +288,13 @@ export function createMenu({ viewer, onEnter }) {
   const FOV = 0.62;
   const spinAt = (now) => now / 1000 * 0.018;
   let flightSpin = 0;
-
-  // The camera at `fly` (0 resting .. 1 at home) and `look` (0 at the core .. 1 at home): during the pause the
-  // gaze swings onto home; then the eye heads straight for it, the distance closing ever faster.
-  function camera(now, fly, look) {
-    const spin = state === 'fly' ? flightSpin : spinAt(now);
-    const c = Math.cos(spin), s = Math.sin(spin);
-    const h = [galaxy.home[0] * c - galaxy.home[1] * s, galaxy.home[0] * s + galaxy.home[1] * c, galaxy.home[2]];
-    const at = lerp3(REST_AT, h, smooth(look));
-    const left = Math.exp(Math.log(0.0006) * Math.pow(fly, 2.1));
-    return { eye: lerp3(h, REST_EYE, fly > 0 ? left : 1), at, spin };
-  }
+  // Pulled back: the same bearing, farther out and 20 degrees above the disc.
+  const restAz = Math.atan2(REST_EYE[1] - REST_AT[1], REST_EYE[0] - REST_AT[0]);
+  const at3 = (o, d, az, el) => [o[0] + d * Math.cos(el) * Math.cos(az), o[1] + d * Math.cos(el) * Math.sin(az), o[2] + d * Math.sin(el)];
+  const PULL_EYE = at3(REST_AT, 2.9, restAz, 20 * Math.PI / 180);
+  // The galactic angle on home: isometric (35.3 degrees down), close in, turning to the right.
+  const ISO_EL = Math.atan(1 / Math.SQRT2), ISO_D = 0.42, ORBIT = 0.05; // rad/s
+  const homeAt = (spin) => { const c = Math.cos(spin), s = Math.sin(spin); return [galaxy.home[0] * c - galaxy.home[1] * s, galaxy.home[0] * s + galaxy.home[1] * c, galaxy.home[2]]; };
 
   function drawMarks(project, now, alpha) {
     mctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -255,10 +313,9 @@ export function createMenu({ viewer, onEnter }) {
     mctx.fillStyle = `rgba(160,150,120,${0.9 * alpha})`; mctx.fillText('1st Battalion deployed', p[0] + rr + 44, p[1] + 40);
   }
 
-  function drawSky(now, fly, look, markAlpha) {
+  function drawSky(now, eye, at, spin, markAlpha) {
     fit();
-    const cam = camera(now, fly, look);
-    const project = draw ? draw(cam.eye, cam.at, cam.spin, FOV) : null;
+    const project = draw ? draw(eye, at, spin, FOV) : null;
     drawMarks(project, now, markAlpha);
   }
 
@@ -275,39 +332,85 @@ export function createMenu({ viewer, onEnter }) {
     if (x < 0.42) return 0.55 - 0.25 * smooth((x - 0.28) / 0.14);
     return 0.3 + 1.0 * smooth((x - 0.42) / 0.58);
   };
+  // A hard white flash that hides a cut.
+  function cut() {
+    flash.classList.remove('go', 'cut');
+    void flash.offsetWidth;
+    flash.classList.add('cut');
+  }
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    if (state === 'menu') { drawSky(now, 0, 0, 1); return; }
+    if (state === 'menu') { drawSky(now, REST_EYE, REST_AT, spinAt(now), 1); return; }
     if (state !== 'fly') return;
     const e = now - t0;
     if (skipAt !== null) return skipFrame(now);
     if (reduced) return gentle(e);
-    // The pause: everything holds; the gaze settles on home and its mark fades. Then the flight through the stars.
-    const g = (e - PAUSE_MS) / GALAXY_MS;
-    if (g < 1) {
-      drawSky(now, clamp01(g), clamp01(e / PAUSE_MS), 1 - smooth(e / (PAUSE_MS * 0.8)));
-      // Arriving: home's sun swells to white, and the engine's star system takes over behind it.
-      const fade = String(1 - smooth((g - 0.8) / 0.2));
-      sky.style.opacity = fade; marks.style.opacity = fade;
-      flash.style.opacity = String(0.5 * smooth((g - 0.72) / 0.16) * (1 - smooth((g - 0.9) / 0.1)));
-    } else if (sky.style.display !== 'none') {
-      sky.style.display = 'none'; marks.style.display = 'none'; flash.style.opacity = '0';
+    // The cuts, each under a flash, with its sound.
+    if (step === 0 && e >= T_GALAXY) {
+      step = 1; cut(); play('flash2', 0.9);
+      amb1 = play('amb1', 0.6, { loop: true, fadeIn: 0.25 });
     }
-    // The engine: from the star system down to his head, on a log path that keeps speeding up.
-    if (e < HIT_MS) {
-      const start = PAUSE_MS + GALAXY_MS * 0.8;
-      const u = clamp01((e - start) / (HIT_MS - start));
-      const m = logLerp(FAR_M, 1.0, Math.pow(u, 1.6));
+    if (step === 1 && e >= T_PLANET) {
+      step = 2; cut();
+      sky.style.display = 'none'; marks.style.display = 'none';
+      amb1?.stop(0.4); amb1 = null;
+      // The planet's ambience runs through a band that closes on 5 kHz as he zooms in.
+      if (ctx) {
+        const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 20;
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 20000;
+        hp.connect(lp).connect(ctx.destination);
+        ambFilter = { hp, lp };
+        amb3 = play('amb3', 0.6, { loop: true, via: hp, fadeIn: 0.3 });
+      }
+    }
+    if (step === 2 && e >= T_ZOOM) {
+      step = 3;
+      travel = play('travel', 0.8);
+    }
+    if (step === 3 && e >= T_HIT - 300) {
+      step = 4;
+      enter = play('enter', 0.85);
+    }
+    if (e < T_GALAXY) {
+      // 1. Pulling back to the 20 degree view.
+      const k = curve(e / PULL_MS);
+      drawSky(now, lerp3(REST_EYE, PULL_EYE, k), REST_AT, flightSpin, 1 - smooth(e / 400));
+      return;
+    }
+    if (e < T_PLANET) {
+      // 2. Home from the galactic angle, the camera orbiting it slowly to the right.
+      const h = homeAt(flightSpin);
+      const az = restAz - (e - T_GALAXY) / 1000 * ORBIT;
+      drawSky(now, at3(h, ISO_D, az, ISO_EL), h, flightSpin, 0.8 * smooth((e - T_GALAXY - 600) / 900));
+      return;
+    }
+    if (e < T_HIT) {
+      if (e < T_ZOOM) {
+        // 3. The planet, held (drifting in a touch).
+        intro(PLANET_M * (1 - 0.06 * smooth((e - T_PLANET) / HOLD_MS)), ELEV, 0);
+        return;
+      }
+      // The zoom: from the planet down to his head on the lead's curve (in log distance, so every scale passes).
+      const u = clamp01((e - T_ZOOM) / ZOOM_MS);
+      const m = logLerp(PLANET_M * 0.94, 1.0, curve(u));
       // Dropping straight down onto him over the last few hundred metres; he dissolves as the camera goes in.
       const steep = smooth((Math.log(400) - Math.log(m)) / Math.log(400));
       intro(m, ELEV + (1.5 - ELEV) * steep, smooth((Math.log(8) - Math.log(m)) / Math.log(8)));
-      lids.style.background = e > HIT_MS - 260 ? `rgba(0,0,0,${smooth((e - HIT_MS + 260) / 220)})` : 'none';
+      // The ambience fades and narrows: lows and highs cut in step until only 5 kHz is left, where it ends.
+      if (ambFilter && amb3) {
+        ambFilter.hp.frequency.value = logLerp(20, AMB_TO_HZ, u);
+        ambFilter.lp.frequency.value = logLerp(20000, AMB_TO_HZ, u);
+        amb3.gain.gain.value = 0.6 * Math.pow(1 - u, 1.5);
+      }
+      lids.style.background = e > T_HIT - 260 ? `rgba(0,0,0,${smooth((e - T_HIT + 260) / 220)})` : 'none';
       return;
     }
-    // Inside: dark. Then the eyes open on him from close behind, and the view eases out to the field.
-    const o = e - HIT_MS - BLACK_MS;
+    if (amb3) { amb3.stop(0.05); amb3 = null; }
+    // Inside: dark. Then the eyes open on him from close behind, the bars go, and the view eases out to the field.
+    const o = e - T_HIT - BLACK_MS;
     if (o < 0) { lids.style.background = '#000'; intro(2.5, ELEV, 0); return; }
+    root.classList.remove('letterbox');
     const k = o / OPEN_MS;
     setLids(eyes(k * 1.15));
     intro(logLerp(2.5, FIELD_M, smooth(k)), ELEV, 0);
@@ -326,6 +429,7 @@ export function createMenu({ viewer, onEnter }) {
     const s = now - skipAt;
     if (s < 220) { lids.style.background = `rgba(0,0,0,${smooth(s / 220)})`; return; }
     sky.style.display = 'none'; marks.style.display = 'none'; flash.style.opacity = '0';
+    root.classList.remove('letterbox');
     intro(FIELD_M, ELEV, 0);
     document.body.style.setProperty('--blur', '0px');
     lids.style.background = `rgba(0,0,0,${1 - smooth((s - 220) / 600)})`;
@@ -337,7 +441,7 @@ export function createMenu({ viewer, onEnter }) {
     state = 'done';
     cancelAnimationFrame(raf);
     try { v()?.end_intro(); } catch (_) { /* engine down */ }
-    travel.pause();
+    stopAll(0.3);
     document.body.style.removeProperty('--blur');
     root.remove();
     document.body.classList.remove('in-menu');
@@ -349,28 +453,25 @@ export function createMenu({ viewer, onEnter }) {
     if (state !== 'menu') return;
     flightSpin = spinAt(performance.now());
     state = 'fly';
+    step = 0;
     t0 = performance.now();
     root.classList.add('flying');
     if (foot) foot.style.opacity = '0';
-    // The menu music stops dead; the boom; a soft flash. The travel sound rises with the flight.
-    tune.pause();
-    boom.play().catch(() => {});
-    if (!reduced) {
-      setTimeout(() => { if (state === 'fly' && skipAt === null) travel.play().catch(() => {}); }, PAUSE_MS - 300);
-      setTimeout(() => { if (state === 'fly' && skipAt === null) enter.play().catch(() => {}); }, HIT_MS - 300);
-      flash.classList.add('go');
-      setTimeout(() => flash.classList.remove('go'), 800);
-    }
-    intro(FAR_M, ELEV, 0);
+    // Flash 1: the menu music stops dead, the door hit; the bars come in.
+    tune?.stop(0.03); tune = null;
+    ctx?.resume().catch(() => {});
+    play('flash1', 0.9);
+    if (!reduced) { root.classList.add('letterbox'); cut(); }
+    intro(PLANET_M, ELEV, 0);
   }
 
   function skip() {
     if (state !== 'fly' || skipAt !== null) return;
     skipAt = performance.now();
-    travel.pause(); enter.pause();
+    stopAll(0.2);
   }
 
-  // While the menu is up nothing else hears keys: Enter starts, Escape or Space skips the flight.
+  // While the menu is up nothing else hears keys: Enter starts, Escape or Space skips the sequence.
   function keys(e) {
     e.stopPropagation(); e.preventDefault();
     if (e.repeat) return;
@@ -382,26 +483,26 @@ export function createMenu({ viewer, onEnter }) {
   root.addEventListener('pointerdown', (e) => { if (state === 'fly') { e.preventDefault(); skip(); } });
 
   return {
-    // Shows the menu (after the prototype notice, so sound is allowed).
+    // Shows the menu after the prototype notice (a click or key there, so sound is allowed): it fades in over
+    // black and the theme starts at once.
     show() {
       state = 'menu';
       root.hidden = false;
       document.body.classList.add('in-menu');
+      requestAnimationFrame(() => root.classList.add('shown'));
       addEventListener('keydown', keys, true);
-      // The menu theme plays whatever the in-game music setting; if the browser holds it back, the next key or
-      // click starts it.
-      tune.play().catch(() => {
-        const again = () => { if (state === 'menu') tune.play().catch(() => {}); };
+      startTune();
+      // If the browser still holds sound back, the next key or click starts it.
+      if (!tune) {
+        const again = () => startTune();
         addEventListener('pointerdown', again, { once: true, capture: true });
         addEventListener('keydown', again, { once: true, capture: true });
-      });
+      }
       startBtn.focus();
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(frame);
     },
-    // A still of the flight (`fly` 0..1, `look` 0..1), for checking the camera by hand.
-    still(fly, look) { cancelAnimationFrame(raf); state = 'still'; drawSky(performance.now(), fly, look, 0); },
-    // The galaxy behind the loading screen and the notice, before sound is allowed.
-    preview() { state = 'menu'; root.hidden = false; document.body.classList.add('in-menu'); raf = requestAnimationFrame(frame); },
+    // A still of the resting view, for checking by hand.
+    still() { cancelAnimationFrame(raf); state = 'still'; root.hidden = false; drawSky(performance.now(), REST_EYE, REST_AT, 0, 0); },
   };
 }
