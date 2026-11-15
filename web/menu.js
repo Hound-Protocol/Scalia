@@ -6,9 +6,10 @@
 //
 // Start / Deploy (the project lead's sequence, 14 Nov; camera moves follow his curve, position ~ t³: slow, then
 // faster and faster):
-//   1. Flash 1 ("cinematic hit door"), the music stops: over 2 s the camera pulls back to see the galaxy at a
+//   Every flash sounds the same "massive thump".
+//   1. Flash 1, the music stops: over 2 s the camera pulls back to see the galaxy at a
 //      20 degree tilt while cinema bars slide in (they stay for the sequence); it holds there 2 s.
-//   2. Flash 2 ("massive thump"): 3 s on home from an isometric galactic angle, barely turning to the right;
+//   2. Flash 2: 3 s on home from an isometric galactic angle, barely turning to the right;
 //      deep space ambience 01.
 //   3. Flash 3: the commander's planet, held for 2 seconds with deep space ambience 03; then the zoom down into
 //      him (the travel sound a second ahead of it, cut as the camera reaches him; the whoosh into his head) while the ambience fades and narrows to 5 kHz.
@@ -238,7 +239,6 @@ export function createMenu({ viewer, onEnter }) {
     bufs[name] = fetch(url).then((r) => r.arrayBuffer()).then((a) => ctx.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => console.warn('menu sound', url, e));
   };
   load('tune', './sfx/menu-music.mp3');
-  load('flash1', './sfx/menu-flash1-door.mp3');
   load('flash2', './sfx/menu-flash2-thump.mp3');
   load('amb1', './sfx/space-ambience-01.mp3');
   load('amb3', './sfx/space-ambience-03.mp3');
@@ -366,7 +366,7 @@ export function createMenu({ viewer, onEnter }) {
       amb1 = play('amb1', 0.6, { loop: true, fadeIn: 0.25 });
     }
     if (step === 1 && e >= T_PLANET) {
-      step = 2; cut();
+      step = 2; cut(); play('flash2', 0.9);
       sky.style.display = 'none'; marks.style.display = 'none';
       amb1?.stop(0.4); amb1 = null;
       // The planet's ambience runs through a band that closes on 5 kHz as he zooms in.
@@ -473,10 +473,10 @@ export function createMenu({ viewer, onEnter }) {
     t0 = performance.now();
     root.classList.add('flying');
     if (foot) foot.style.opacity = '0';
-    // Flash 1: the menu music stops dead, the door hit; the bars come in.
+    // Flash 1: the menu music stops dead, the thump; the bars come in.
     tune?.stop(0.03); tune = null;
     ctx?.resume().catch(() => {});
-    play('flash1', 0.9);
+    play('flash2', 0.9);
     if (!reduced) { root.classList.add('letterbox'); cut(); }
     intro(PLANET_M, ELEV, 0);
   }
