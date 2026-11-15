@@ -24,6 +24,8 @@ class FakeNode {
 
 class FakeAudioContext {
   currentTime = 0;
+  constructor() { this.createdNodes = []; }
+  track(node) { this.createdNodes.push(node); return node; }
   createMediaElementSource(element) {
     sourceCreations++;
     if (connectedElements.has(element)) {
@@ -32,16 +34,16 @@ class FakeAudioContext {
       throw error;
     }
     connectedElements.add(element);
-    return new FakeNode();
+    return this.track(new FakeNode());
   }
-  createGain() { return new FakeNode(); }
-  createBiquadFilter() { return new FakeNode(); }
-  createPanner() { return new FakeNode(); }
-  createStereoPanner() { return new FakeNode(); }
-  createWaveShaper() { return new FakeNode(); }
-  createDelay() { return new FakeNode(); }
+  createGain() { return this.track(new FakeNode()); }
+  createBiquadFilter() { return this.track(new FakeNode()); }
+  createPanner() { return this.track(new FakeNode()); }
+  createStereoPanner() { return this.track(new FakeNode()); }
+  createWaveShaper() { return this.track(new FakeNode()); }
+  createDelay() { return this.track(new FakeNode()); }
   createBufferSource() {
-    const source = new FakeNode();
+    const source = this.track(new FakeNode());
     source.start = () => {};
     source.stop = () => source.onended?.();
     return source;
@@ -274,6 +276,7 @@ test('play() returns a cancellable handle and disconnects every voice-owned node
   assert.equal(handle.state, 'ended');
   assert.equal(audio.voiceStats().tracked, 0);
   assert.equal(audio.voiceStats().nodes, 0);
+  assert.equal(audio.ctx.createdNodes.every((node) => node.disconnected), true);
 });
 
 test('playUi() participates in the same voice cap and cancellation lifecycle', () => {
@@ -285,4 +288,24 @@ test('playUi() participates in the same voice cap and cancellation lifecycle', (
   assert.equal(handle.stop(), true);
   assert.equal(audio.voiceStats().active, 0);
   assert.equal(audio.voiceStats().nodes, 0);
+});
+
+
+test('reverb, air and echo branches retain then disconnect every auxiliary node', () => {
+  const audio = playbackEngine();
+  const handle = audio.play('dense-blast', {
+    kind: 'blast', db: 150, gain: 1, room: 1, rx: 0, ry: 1,
+    below: 0, dist: 1, far: 0.5, lowpass: 20000,
+    space: [1, 30, 0], echoes: [[0.1, 0.5, 0]],
+  });
+  assert.ok(handle);
+  const source = [...audio.voices][0].src;
+  source.onended();
+  assert.equal(handle.state, 'tailing');
+  assert.equal(audio.voiceStats().tails, 1);
+  assert.ok(audio.voiceStats().nodes > 20);
+  audio.stopAll();
+  assert.equal(handle.state, 'ended');
+  assert.equal(audio.voiceStats().nodes, 0);
+  assert.equal(audio.ctx.createdNodes.every((node) => node.disconnected), true);
 });
