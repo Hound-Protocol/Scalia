@@ -7,6 +7,7 @@ import { preload, fileBytes } from './preload.js';
 import { createMenu } from './menu.js';
 import { createJukebox } from './jukebox.js';
 import { HintManager } from './hints.js';
+import { FieldFeedback } from './field-feedback.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
@@ -893,6 +894,11 @@ try {
     canvas,
     visible: () => !tabletUp && !tabletShown && scene === 'ground' && $('answerCall').hidden && !jukebox.open,
   });
+  const fieldFeedback = new FieldFeedback({
+    viewer: v,
+    canvas,
+    active: () => scene === 'ground' && !tabletUp && !tabletShown && !invOpen && !jukebox.open,
+  });
   // ---- AI lab (?lab in the address) ----
   // Fixed scenarios on the testing ground to watch the battle AI together: slow motion and pause, what every
   // man is doing written over his head, and the leaders' steps and shouts in a feed. Keys: - slower (down to
@@ -1734,12 +1740,17 @@ try {
     if (k === 'alt') { e.preventDefault(); return; }
     if (k === 'k' && !e.repeat && !tabletUp) { toggleAssault(); return; }
     if (e.key === 'F1') { e.preventDefault(); const c = $('controls'); c.hidden = !c.hidden; store.set('scalia.controls', c.hidden ? '0' : '1'); return; }
+    // Diegetic field controls: hold H for a medical self-check; tap R to reload or hold to inspect ammunition.
+    if (scene === 'ground' && !tabletUp && !invOpen) {
+      if (k === 'u' && !e.repeat) { fieldFeedback.toggleControls(); return; }
+      if (k === 'h') { if (!e.repeat) fieldFeedback.beginHealthCheck(performance.now()); return; }
+      if (k === 'r') { if (!e.repeat) fieldFeedback.beginAmmoCheck(performance.now()); return; }
+    }
     // The commander's rifle and stance (on foot, tablet down).
     if (scene === 'ground' && !tabletUp && !e.repeat && !invOpen) {
-      if (k === 'h') { const slung = v.commander_holster(); if (slung) { gun.trigger = gun.aim = false; } flash(slung ? 'Rifle slung' : 'Rifle in hand'); return; }
+      if (k === 'g') { const slung = v.commander_holster(); if (slung) { gun.trigger = gun.aim = false; } flash(slung ? 'Rifle slung' : 'Rifle in hand'); return; }
       if (k === 'c') { v.commander_stance(1); return; }
       if (k === 'x') { v.commander_stance(2); return; }
-      if (k === 'r') { v.commander_reload(); return; }
     }
     if (k === 'tab') {
       e.preventDefault();
@@ -1774,7 +1785,14 @@ try {
     else if (k === 'p') flash(v.cycle_stance());
     else if (k === 'l') { capIndex = (capIndex + 1) % CAPS.length; store.set('scalia.cap', String(capIndex)); flash(`frame cap: ${CAPS[capIndex] || 'off'}`); }
   });
-  addEventListener('keyup', (e) => { held.delete(e.key.toLowerCase()); if (e.key === 'Alt') e.preventDefault(); });
+  addEventListener('keyup', (e) => {
+    const k = e.key.toLowerCase();
+    held.delete(k);
+    if (k === 'h') fieldFeedback.endHealthCheck(performance.now());
+    if (k === 'r') fieldFeedback.endAmmoCheck(performance.now());
+    if (e.key === 'Alt') e.preventDefault();
+  });
+  addEventListener('blur', () => { held.clear(); fieldFeedback.endHealthCheck(performance.now()); fieldFeedback.endAmmoCheck(performance.now()); });
   addEventListener('blur', () => held.clear());
 
   // Performance panel: CPU and GPU bars against the frame budget, and a frame-time graph.
@@ -1928,6 +1946,7 @@ Click to copy and close.`;
       errors.guard('map', () => { drawMapMarks(); drawScan(); });
       errors.guard('footsteps', footsteps);
       errors.guard('weapon', weaponTick);
+      errors.guard('field feedback', () => fieldFeedback.update(now, dt, JSON.parse(lastWeapon || v.commander_weapon_state()), held.has('shift')));
       errors.guard('battle sound', () => assaultTick(now));
       const cpuFrame = performance.now() - t0;
       cpuMs = cpuMs * 0.9 + cpuFrame * 0.1;
