@@ -60,15 +60,18 @@ impl Cue {
     }
 }
 
-/// Seconds since `team`'s figures were last stepped (0 the first time, at most 0.1), and mark them stepped now.
-fn figure_dt(clocks: &mut Vec<f64>, team: u8, now: f64) -> f32 {
-    let t = team as usize;
-    if clocks.len() <= t {
-        clocks.resize(t + 1, f64::NAN);
+/// Off-screen soldiers keep their animation state warm at 5 Hz; visible soldiers update every render pass.
+const HIDDEN_ANIMATION_INTERVAL_MS: f64 = 200.0;
+
+/// Whether this soldier's animator should advance, and by how much. Visibility always wins; hidden
+/// soldiers tick at a low rate so returning to the PDA view never reveals a frozen pose.
+fn animation_dt(last_ms: f64, now_ms: f64, visible: bool) -> Option<f32> {
+    let elapsed = (now_ms - last_ms).max(0.0);
+    if visible || elapsed >= HIDDEN_ANIMATION_INTERVAL_MS {
+        Some((elapsed / 1000.0).clamp(0.0, 0.2) as f32)
+    } else {
+        None
     }
-    let last = clocks[t];
-    clocks[t] = now;
-    if last.is_nan() { 0.0 } else { ((now - last) / 1000.0).clamp(0.0, 0.1) as f32 }
 }
 
 /// How hard a round past him makes a man flinch (a hit is 1).
@@ -123,9 +126,9 @@ pub struct Assault {
     /// Per soldier: his animator (anim.rs, the same library the commander uses), and the viewer time it was
     /// last stepped.
     figs: Vec<crate::anim::Animator>,
-    /// Per team: when its figures were last stepped (viewer ms). Each team is drawn by its own call, so each
-    /// keeps its own clock: one shared clock gave whichever team was drawn second no time at all.
-    figs_at: Vec<f64>,
+    /// Per soldier: last animation update (viewer ms). The field view and PDA map render separately;
+    /// per-team clocks made the second pass receive dt=0, freezing soldiers visible only on the PDA.
+    fig_at: Vec<f64>,
     /// Per soldier: where his muzzle was last drawn (mm, z over the ground), for flashes and tracers.
     muzzle: Vec<Option<(i64, i64, i64)>>,
     /// Per soldier: which way his barrel pointed when last drawn (unit, world; zero = unknown).
@@ -188,7 +191,7 @@ impl Assault {
     }
 
     fn from_battle(battle: Battle, now_ms: f64) -> Assault {
-        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), figs_at: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), heat: Vec::new(), shaken: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
+        let mut a = Assault { battle, prev: Vec::new(), clock: now_ms, now: now_ms, seen: 0, figs: Vec::new(), fig_at: Vec::new(), muzzle: Vec::new(), bore: Vec::new(), fired: Vec::new(), heat: Vec::new(), shaken: Vec::new(), sounds: Vec::new(), fx: Vec::new(), steps: Vec::new(), over: false, selected: Vec::new(), lab_log: Vec::new(), demo: false, squads: Vec::new(), done: Vec::new(), reported: Vec::new() };
         a.sync_tables();
         a
     }
@@ -203,6 +206,7 @@ impl Assault {
             }
             let stride = (scalia_core::hash::mix64(i as u64 ^ 0xa55a) % 1000) as f32 / 1000.0;
             self.figs.push(crate::anim::Animator::with_phase(heading_of(self.battle.soldiers[i].facing), stride));
+            self.fig_at.push(self.now);
             self.muzzle.push(None);
             self.bore.push([0.0; 3]);
             self.fired.push(f64::NEG_INFINITY);
@@ -380,23 +384,25 @@ impl Assault {
         // Anyone who joined since the last step (the commander does, between steps) gets his tables first.
         self.sync_tables();
         let mut out = Vec::new();
-        let dt = figure_dt(&mut self.figs_at, team, self.now);
         for i in 0..self.battle.soldiers.len() {
             // The commander's man is drawn as the commander.
             if self.battle.soldiers[i].team != team || self.battle.soldiers[i].player {
                 continue;
             }
             let (x, y) = self.position(i);
-            let Some((rx, ry, z)) = place(x / 1000.0, y / 1000.0) else { continue };
+            let placed = place(x / 1000.0, y / 1000.0);
             let s = &self.battle.soldiers[i];
+            let Some(dt) = animation_dt(self.fig_at[i], self.now, placed.is_some()) else { continue };
+            self.fig_at[i] = self.now;
             let d = drive_of(s, dt, ts);
             let kick = self.kick(i);
             let flinch = if s.alive() && !s.down() { self.flinch(i) } else { 0.0 };
             let fig = &mut self.figs[i];
             let f = fig.step(&d);
-            if let Some(loud) = f.footfall {
+            if let Some(loud) = f.footfall.filter(|_| placed.is_some()) {
                 self.sounds.push(Sound { x: x / 1000.0, y: y / 1000.0, blast: false, step: Some(loud), at: self.now, cue: Cue::None });
             }
+            let Some((rx, ry, z)) = placed else { continue };
             // The squad's leader is flagged (+32 on the colour) so the shader gives him his red beret.
             let leader = if self.battle.leader_of(s.squad as usize) == Some(i) { 32.0 } else { 0.0 };
             // A selected squad's men carry the selection tag (+64 per level) for the outline: stable, hurt, killed.
@@ -576,16 +582,16 @@ mod tests {
     }
 
     #[test]
-    fn both_teams_get_frame_time_when_drawn_one_after_the_other() {
-        // The viewer draws the enemy, then our squads, every frame: both must advance by the frame's time.
-        let mut clocks = Vec::new();
-        for f in 0..5 {
-            let now = 1_000.0 + 16.0 * f as f64;
-            let (foes, ours) = (super::figure_dt(&mut clocks, 1, now), super::figure_dt(&mut clocks, 0, now));
-            if f > 0 {
-                assert!((foes - 0.016).abs() < 1e-4 && (ours - 0.016).abs() < 1e-4, "frame {f}: enemy {foes}, ours {ours}");
-            }
-        }
+    fn visible_pda_soldiers_update_even_after_another_view_pass() {
+        assert_eq!(super::animation_dt(1_000.0, 1_000.0, true), Some(0.0));
+    }
+
+    #[test]
+    fn hidden_soldiers_tick_at_five_hz_and_resume_with_bounded_delta() {
+        let interval = super::HIDDEN_ANIMATION_INTERVAL_MS;
+        assert_eq!(super::animation_dt(1_000.0, 1_000.0 + interval - 1.0, false), None);
+        assert_eq!(super::animation_dt(1_000.0, 1_000.0 + interval, false), Some(0.2));
+        assert_eq!(super::animation_dt(1_000.0, 2_000.0, false), Some(0.2));
     }
 
     #[test]
