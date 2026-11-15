@@ -235,7 +235,7 @@ function finish(gl, prog, canvas, g) {
   };
 }
 
-export function createMenu({ viewer, onEnter, wake = () => {} }) {
+export function createMenu({ viewer, onEnter, wake = () => {}, audio }) {
   const root = document.getElementById('menu');
   const sky = document.getElementById('menuSky');
   const marks = document.getElementById('menuMarks');
@@ -260,8 +260,8 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
   sky.addEventListener('webglcontextrestored', makeRenderer);
 
   // Sound through Web Audio: everything decoded while the notice is up, so it plays the moment it is asked for.
-  const AC = window.AudioContext || window.webkitAudioContext;
-  const ctx = AC ? new AC() : null;
+  // Reuse Auralis' AudioContext; the menu has no independent output graph.
+  const ctx = audio?.ensure() || null;
   const bufs = {};
   // One at a time, so decoding never piles up while the engine is starting: only the menu theme during loading,
   // the sequence's sounds once the menu is up (they are short; the ambiences are 15 s cuts).
@@ -300,7 +300,7 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
     const now = ctx.currentTime;
     gain.gain.setValueAtTime(fadeIn > 0 ? 0 : vol, now);
     if (fadeIn > 0) gain.gain.linearRampToValueAtTime(vol, now + fadeIn);
-    src.connect(gain).connect(via || ctx.destination);
+    src.connect(gain).connect(via || audio?.ui || ctx.destination);
     let at = 0;
     if (loop) { const [a, z] = audible(b); src.loop = true; src.loopStart = a; src.loopEnd = z; at = a; }
     src.start(now, at);
@@ -414,7 +414,7 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
       if (ctx) {
         const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 20;
         const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 20000;
-        hp.connect(lp).connect(ctx.destination);
+        hp.connect(lp).connect(audio?.ui || ctx.destination);
         ambFilter = { hp, lp };
         amb3 = play('amb3', 0.6, { loop: true, via: hp, fadeIn: 0.3 });
       }
@@ -472,7 +472,7 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
     // The eyes open on a dark braam.
     if (step === 5) {
       step = 6;
-      if (ctx) { wakeLp = ctx.createBiquadFilter(); wakeLp.type = 'lowpass'; wakeLp.frequency.value = WAKE_FROM_HZ; wakeLp.Q.value = 0.5; wakeLp.connect(ctx.destination); }
+      if (ctx) { wakeLp = ctx.createBiquadFilter(); wakeLp.type = 'lowpass'; wakeLp.frequency.value = WAKE_FROM_HZ; wakeLp.Q.value = 0.5; wakeLp.connect(audio?.ui || ctx.destination); }
       eyesSnd = play('eyes', 0.3, { via: wakeLp });
     }
     root.classList.remove('letterbox');
