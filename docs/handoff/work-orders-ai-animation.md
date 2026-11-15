@@ -17,7 +17,7 @@ grows with the battle; prefer shader-side and table work; LOD.
 - Formation on contact: a squad in column shakes out into a line so more men can fire forward.
 - Next ranked items from the audit doc after these.
 
-### AI-3. Reference squad (the project lead's core ask)
+### AI-3. Reference squad (the project lead's core ask). Done 15 Nov: react to fire, regroup, abandon, reference squad test
 - Lab scenario: 12 soldiers and a sergeant, one order, an enemy formation.
 - Must show, each with a test:
   1. taking the order
@@ -31,12 +31,47 @@ grows with the battle; prefer shader-side and table work; LOD.
   9. regrouping
   10. completing or abandoning the objective by circumstance
 
-### AI-4. Deeper systems
-- Tactical memory: last-known enemy positions; limited and contextual.
-- Morale and psychology: fear, fatigue, cohesion and experience (ties into Composure and veterancy).
-- Knowledge only by sight or the radio; reports travel up the chain of command, with delay.
-- Interruptible plans and recovery when an action fails.
-- Then platoon (lieutenant) and company (captain) levels on the same principles.
+### AI-4. Deeper systems (plan, 15 Nov)
+Starting point: AI-3 gives the reference squad (12 riflemen plus a sergeant; react to fire, regroup, abandon) and
+its ten-step test (`crates/scalia-ai/tests/reference_squad.rs`). Every step below adds a check there or in a new test
+next to it, and keeps `hash_battle` stable unless meant to change the battle.
+
+1. **Tactical memory.** `Contact` already holds the last-known position and fading confidence per squad. Add:
+   - a sighting kind (seen, heard, shot from, reported) and how sure the position is;
+   - forgetting tied to the kind (heard fades fastest);
+   - men searching a last-known position instead of firing at it once it has gone stale;
+   - a cap per squad on how many contacts it keeps.
+
+   Test: an enemy who ducks behind a wall is fired at for a moment, then watched, then searched for.
+2. **Knowledge by sight and radio only.** Each squad knows only what its own men saw or heard, plus what reached
+   it by radio. Reports go to the leader, then up to the commander, after a short delay; a dead or busy radioman
+   delays them further. The commander's map shows reports with their age, not the truth. Test: two squads, only
+   one in sight of the enemy; the other learns of him only after the report delay.
+3. **Combat readiness (morale, the project lead's design, `combat-readiness.md`).**
+   - A per-man meter drains with deployment time, incoming fire, casualties nearby and nights without rest, and
+     recovers "at ease".
+   - The states Good, Pressured, Fractured and Severe scale aim, action times and failure chances (reloads, doors,
+     throws) and the quality of cover choice.
+   - Veterans drain slower.
+   - Cohesion: a squad that lost its sergeant or half its men drains faster.
+
+   Tests:
+   - A Severe squad loses the reference fight that a Good one wins.
+   - At ease recovers the meter at the stated rate.
+4. **Interruptible plans and recovery.**
+   - Every leader step has a timeout and a fallback: a door that won't open means another door or a breach; a
+     path that is blocked means a re-route; a man who doesn't arrive gets his role given to another.
+   - A failed step is logged as an `Order` event, so the lab feed shows it.
+
+   Test: in the compound, lock the chosen entry after the stack forms; the squad still gets in.
+5. **Platoon (lieutenant), then company (captain).**
+   - Same principles one level up: a lieutenant gives squads orders (support by fire, assault, hold).
+   - He gets the squads' reports with a delay and reassigns them when one breaks (an AI-3 abandon).
+
+   Lab scenario: two squads attack and a third gives fire support, with the lieutenant's steps in the feed.
+
+Order: 1 → 2 → 3 → 4 → 5. Steps 1 and 2 change what everyone knows, so they come before morale and plans build on
+that knowledge.
 
 ## Track Animation
 
