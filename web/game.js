@@ -11,7 +11,7 @@ import { CrosshairController } from './crosshair.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
-const crosshair = new CrosshairController({ canvas, line: $('aimLine'), ring: $('reticle'), dot: $('aimDot') });
+const crosshair = new CrosshairController({ canvas, line: $('aimLine'), referenceDot: $('reticle'), aimDot: $('aimDot') });
 // Error handling: every part of a frame runs guarded; a dead engine gets a crash screen (errors.js).
 const errors = createErrors('__UPDATE__');
 
@@ -622,7 +622,7 @@ try {
   // The rifle on screen: rounds left, the aim line while aiming, and a small kick of the view on every shot.
   // `climb` is the crosshair's recoil (0 settled): each round throws it out along the barrel and opens the ring,
   // and it settles back on its own; `side` is that round's sideways twitch.
-  let lastShots = 0, kick = 0, lastWeapon = '';
+  let lastWeapon = '';
   // For crash reports: what the player last did (keys and mouse buttons), kept on the page side so a report can be
   // written even when the engine has died.
   const inputs = [];
@@ -632,26 +632,18 @@ try {
   addEventListener('pointerup', (e) => remember(`mouse ${e.button} up`), true);
   errors.setContext(() => `scene ${scene}, tablet ${tabletUp ? 'up' : 'down'}${tabletUp ? ' (' + page + ')' : ''}, weapon ${lastWeapon || '-'}, inputs: ${inputs.join(', ')}`);
   const weaponTick = () => {
-    const box = $('weapon'), line = $('aimLine');
+    const box = $('weapon');
     const on = scene === 'ground' && !tabletUp && !tabletShown;
-    box.hidden = !on; line.hidden = true;
-    if (!on) { canvas.style.transform = ''; crosshair.hide(); canvas.style.cursor = ''; return; }
+    box.hidden = !on;
+    if (!on) { crosshair.hide(); canvas.style.cursor = ''; return; }
     lastWeapon = v.commander_weapon_state();
     const w = JSON.parse(lastWeapon);
     box.querySelector('b').textContent = w.slung ? 'SLUNG' : String(w.ammo);
     box.querySelector('small').textContent = w.reloading ? 'RELOADING' : `/ ${w.spare}`;
     box.querySelector('em').textContent = ['STANDING', 'CROUCHED', 'PRONE'][w.stance] || '';
     box.classList.toggle('low', !w.slung && w.ammo <= 5);
-    // The reticle is driven by the live character weapon state; the pointer dot remains player input.
-    crosshair.update({ state: w, pointer: { x: gun.x, y: gun.y }, active: on });
-
-    if (w.shots > lastShots) kick = Math.min(1, kick + 0.6 * (w.shots - lastShots));
-    lastShots = w.shots;
-    if (kick > 0.01 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      const a = 3 * kick;
-      canvas.style.transform = `translate(${((Math.random() - 0.5) * a).toFixed(2)}px, ${((Math.random() - 0.5) * a).toFixed(2)}px)`;
-      kick *= 0.78;
-    } else { kick = 0; canvas.style.transform = ''; }
+    // The trajectory and aim point come from the same weapon state used by the battle simulation.
+    crosshair.update({ state: w, active: on });
   };
   const footsteps = () => {
     const ph = v.scene_name() === 'ground' ? v.commander_phase() : -1;
