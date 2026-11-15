@@ -201,7 +201,7 @@ fn probe_prone_aim_arm_height_and_bore() {
                     let score = gap + (0.0f32.max(-0.05 - low)) + (0.0f32.max(0.95 - bore.y)) + bore.z.abs();
                     if score < best.0 { best = (score, u, v, lean, pitch, low); }
                     if gap < 0.05 && low > -0.05 && bore.y > 0.95 && bore.z.abs() < 0.1 {
-                        println!("FEASIBLE left={u:.2} right={v:.2} lean={lean:.2} pitch={pitch:.3} gap={gap:.4} bottom={low:.4} bore={bore:?}");
+                        panic!("FEASIBLE left={u:.2} right={v:.2} lean={lean:.2} pitch={pitch:.3} gap={gap:.4} bottom={low:.4} bore={bore:?} shoulders={:?} elbows={:?} reach={:?} abduct={:?}", q.shoulder, q.elbow, q.reach, q.abduct);
                         found += 1;
                     }
                 }
