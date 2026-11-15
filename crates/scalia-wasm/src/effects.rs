@@ -195,6 +195,23 @@ impl Effects {
         }
         m
     }
+    #[test]
+    fn muzzle_flash_is_a_single_static_pulse() {
+        let mut effects = Effects::default();
+        effects.shot(0.0, [0.0, 0.0, 0.0], [100.0, 0.0, 0.0], Some([1.0, 0.0, 0.0]), false, false);
+
+        let first = effects.mesh(0.0, (0.0, 0.0));
+        let middle = effects.mesh(8.0, (0.0, 0.0));
+        assert_eq!(first.vertices, middle.vertices, "flash geometry must remain identical throughout the pulse");
+        assert!(!first.vertices.is_empty());
+        assert!(effects.mesh(FLASH_MS, (0.0, 0.0)).vertices.is_empty(), "flash must be gone after one frame");
+
+        let light = effects.lights(8.0, (0.0, 0.0));
+        assert_eq!(light.len(), 1);
+        assert_eq!(light[0].intensity, 1.8, "flash light must not fade");
+        assert!(effects.lights(FLASH_LIGHT_MS, (0.0, 0.0)).is_empty());
+    }
+
 }
 
 #[cfg(test)]
@@ -245,27 +262,5 @@ mod tests {
             assert!(v.pos[1] > -0.12 && v.pos[1] < 0.6, "flash is a short tongue out of the muzzle: {:?}", v.pos);
             assert!((v.pos[2] - 1.4).abs() < 0.12, "{:?}", v.pos);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn muzzle_flash_is_a_single_static_pulse() {
-        let mut effects = Effects::default();
-        effects.shot(0.0, [0.0, 0.0, 0.0], [100.0, 0.0, 0.0], Some([1.0, 0.0, 0.0]), false, false);
-
-        let first = effects.mesh(0.0, (0.0, 0.0));
-        let middle = effects.mesh(25.0, (0.0, 0.0));
-        assert_eq!(first.vertices, middle.vertices, "flash geometry must remain identical throughout the pulse");
-        assert!(!first.vertices.is_empty());
-        assert!(effects.mesh(FLASH_MS, (0.0, 0.0)).vertices.is_empty(), "flash must be gone after its short pulse");
-
-        let light = effects.lights(25.0, (0.0, 0.0));
-        assert_eq!(light.len(), 1);
-        assert_eq!(light[0].intensity, 1.8, "flash light must not fade");
-        assert!(effects.lights(FLASH_LIGHT_MS, (0.0, 0.0)).is_empty());
     }
 }
