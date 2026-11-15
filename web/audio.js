@@ -278,6 +278,7 @@ export class AudioEngine {
     const voice = this._registerVoice(source, [source, level], {
       category: 'ui', priority, gain: safeGain, tailSeconds: 0,
     });
+    voice.out = level;
     try { source.start(); } catch (error) { this._cleanupVoice(voice); throw error; }
     voice.state = 'playing';
     return voice.handle;
@@ -434,7 +435,7 @@ export class AudioEngine {
     const bass = eq('lowshelf', 120), treble = eq('peaking', 2500, 0.8), highs = eq('highshelf', 8000);
     const g = c.createGain(); g.gain.value = 0;
     const hpf = eq('highpass', 30, 0.6), lp = eq('lowpass', 20000, 0.5);
-    const p = own(c.createPanner()); p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0;
+    const p = c.createPanner(); p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0;
     const dry = c.createGain();
     src.connect(vol).connect(bass).connect(treble).connect(highs).connect(g).connect(hpf).connect(lp).connect(p).connect(dry).connect(this.world);
     const sends = [this.rev.small, this.rev.large, this.rev.corridor].map((bus) => { const s = c.createGain(); s.gain.value = 0; p.connect(s).connect(bus); return s; });
@@ -483,7 +484,7 @@ export class AudioEngine {
       const jump = heard - peak;
       if (jump > 12) {
         const duck = Math.pow(10, -Math.min(24, (jump - 12) * 0.6) / 20);
-        for (const v of this.active) if (!v.done) { v.out.gain.cancelScheduledValues(c.currentTime); v.out.gain.setTargetAtTime(v.out.gain.value * duck, c.currentTime, 0.02); v.out.gain.setTargetAtTime(v.out.gain.value, c.currentTime + 0.4, 0.6); }
+        for (const v of this.active) if (!v.done && v.out?.gain) { v.out.gain.cancelScheduledValues(c.currentTime); v.out.gain.setTargetAtTime(v.out.gain.value * duck, c.currentTime, 0.02); v.out.gain.setTargetAtTime(v.out.gain.value, c.currentTime + 0.4, 0.6); }
       }
       this.peak = heard; this.peakAt = c.currentTime;
     }
@@ -511,7 +512,7 @@ export class AudioEngine {
     const hpf = own(c.createBiquadFilter()); hpf.type = 'highpass'; hpf.frequency.value = Math.min(90, 30 + o.dist * 0.3); hpf.Q.value = 0.6;
     // Distant fire is a boom more than a crack: the low end comes up as the top goes.
     const boom = own(c.createBiquadFilter()); boom.type = 'lowshelf'; boom.frequency.value = 160; boom.gain.value = gun ? 7 * o.far : 0;
-    const p = c.createPanner();
+    const p = own(c.createPanner());
     p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1;
     // Around the head (the camera): right is +x, ahead is -z, below is -y. Below counts for less than the
     // ground direction, so left and right stay clear from high up.
