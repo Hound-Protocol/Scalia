@@ -93,3 +93,15 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 - Perform browser listening checks for audible changes; automated tests alone do not prove sound quality.
 - Never merge unverified runtime changes.
 - Record exact test commands/results and known limitations in the PR.
+
+## AU-01 execution record — 2026-11-15
+
+**Implementation:** committed on `audio/au-01-unified-graph-2026-11-15`.
+
+- Auralis now owns the shared browser AudioContext and master-limited UI output bus.
+- Persistent music and wind route through a dedicated media/world path with tablet muffle and reboot fade controls.
+- Menu music, cinematic sequence, UI one-shots, radio analyser playback, tablet whoosh, update alert and jukebox all use the Auralis context.
+- Removed the separate world, UI and radio-analyser AudioContexts and the menu's independent AudioContext.
+- Added media-element route ownership checks and tests for reuse, analyser routing and stream/route conflicts.
+
+**Verification:** tests added; execution and in-browser listening checks remain pending. Do not merge until CI and manual playback checks pass.
