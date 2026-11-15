@@ -1716,7 +1716,7 @@ try {
     version: { group: 'Game', help: 'which build this is', run: () => `${document.title} ${VERSION_LINE} (${new URL(import.meta.url).searchParams.get('v') || 'local build'})` },
     perf: { group: 'Game', help: 'show or hide the performance panel', run: () => { const p = $('perf'); p.hidden = !p.hidden; return `performance panel ${p.hidden ? 'hidden' : 'shown'}`; } },
     reload: { group: 'Game', help: 'reload the page', run: () => { setTimeout(() => location.reload(), 150); return 'reloading'; } },
-    audio: { group: 'Audio', help: 'listener space and HDR peak', run: () => { const e = v.audio_env(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB, voices ${audio.active.filter((x) => !x.done).length}`; } },
+    audio: { group: 'Audio', help: 'listener space, HDR peak and voice lifecycle', run: () => { const e = v.audio_env(), a = audio.voiceStats(); return `enclosure ${e[0].toFixed(2)} size ${e[1].toFixed(1)} m reverb ${e[2].toFixed(2)} s corridor ${e[3].toFixed(2)} tablet ${e[4]} | HDR peak ${audio.peakNow().toFixed(0)} dB | voices ${a.active} active / ${a.tails} tails / ${a.nodes} nodes | dropped ${a.dropped}, stolen ${a.stolen}`; } },
   });
   const pause = { on: false };
   const toggleAssault = () => {
