@@ -107,6 +107,7 @@ impl TitanTaskBoard {
         at_ms: i64,
     ) -> Result<TaskId, TaskError> {
         self.check_time(at_ms)?;
+        self.check_event_capacity()?;
         let id = TaskId(self.next_id);
         self.next_id = self.next_id.checked_add(1).ok_or(TaskError::IdExhausted)?;
         self.tasks.insert(id, TitanTask {
@@ -139,6 +140,7 @@ impl TitanTaskBoard {
 
     pub fn report_progress(&mut self, id: TaskId, permille: u16, at_ms: i64) -> Result<(), TaskError> {
         self.check_time(at_ms)?;
+        self.check_event_capacity()?;
         if permille > 1_000 {
             return Err(TaskError::InvalidProgress);
         }
@@ -184,6 +186,7 @@ impl TitanTaskBoard {
     /// Reassigns any non-terminal task. Its objective and progress are retained; acknowledgement is required again.
     pub fn reassign(&mut self, id: TaskId, assignee: CommandNodeId, at_ms: i64) -> Result<(), TaskError> {
         self.check_time(at_ms)?;
+        self.check_event_capacity()?;
         let task = self.tasks.get_mut(&id).ok_or(TaskError::MissingTask)?;
         if task.state.is_terminal() {
             return Err(TaskError::TerminalTask);
@@ -204,6 +207,7 @@ impl TitanTaskBoard {
         event: TaskEventKind,
     ) -> Result<(), TaskError> {
         self.check_time(at_ms)?;
+        self.check_event_capacity()?;
         let task = self.tasks.get_mut(&id).ok_or(TaskError::MissingTask)?;
         if task.state.is_terminal() {
             return Err(TaskError::TerminalTask);
@@ -214,6 +218,10 @@ impl TitanTaskBoard {
         task.state = next;
         task.updated_at_ms = at_ms;
         self.push_event(at_ms, id, event)
+    }
+
+    fn check_event_capacity(&self) -> Result<(), TaskError> {
+        self.next_sequence.checked_add(1).map(|_| ()).ok_or(TaskError::IdExhausted)
     }
 
     fn check_time(&self, at_ms: i64) -> Result<(), TaskError> {
