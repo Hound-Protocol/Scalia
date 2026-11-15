@@ -46,13 +46,13 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
   - reload (now the commander's too, through the battle's reload state).
 - **Partial:**
   - crawl forward only (low crawl on elbows; no back or sideways yet; the rifle is cradled, not aimed);
-  - wounded idle; drag (crouch-walk legs plus drag arms).
+  - wounded idle; drag (crouch-walk legs plus drag arms);
+  - prone drop/get-up transition: the controller and pose path are implemented and unit-tested for standing and crouched entry, but aimed-state coverage and current visual sign-off are still required (anim.rs tests; pose.rs drop keys).
 - **Static poses (no motion of their own):**
   - cover, cover aim, prone, prone aim;
   - leans (peek), stack, signal, the radio and tablet holds, dead.
 - **Exist but not driven by AI decisions yet:** grenade throw (there is an action path, but it needs checking in the lab), drone launch.
 - **Missing:**
-  - stand ↔ crouch ↔ prone transitions (BF3 style, hand to the ground), including from the aim;
   - dive to cover, vault and step over obstacles, kneel to observe;
   - pistol (fire, reload) and weapon switching; handling per weapon class;
   - hit reactions while standing, limp, wounded crawl, carry, help up, death variations;
@@ -77,25 +77,15 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
 - **Today:** cover search builds the taken list once per pass (was O(N²)); the battle hash is unchanged.
 
 ## AI: what is next (work order C, project lead's feedback)
-1. Audit against the feedback's list before building (most of perception, cover, suppression and the leader exist).
-2. The **reference squad** in the lab: 12 soldiers and a sergeant, one order, an enemy formation. Reproducible, with a test for each step:
-   1. order
-   2. move
-   3. detect
-   4. own cover
-   5. coordinated fire
-   6. react to fire
-   7. suppress
-   8. casualties
-   9. regroup
-   10. complete or abandon
-3. **Gaps:**
-   - tactical memory (last known positions; limited);
-   - morale and psychology (fear, fatigue, cohesion, experience; ties into Composure and veterancy);
-   - knowledge only by sight or radio, with reports up the chain;
-   - interruptible plans and recovery from a failed action;
-   - individual timing so men don't act in lockstep.
-4. Then platoon (lieutenant) and company (captain) levels on the same principles.
+
+- **AI-3 reference squad — complete 15 Nov.** `crates/scalia-ai/tests/reference_squad.rs` contains the fixed-seed ten-step engagement test and a separate outmatched-squad-abandons test. Do not rebuild this scenario; keep both tests as regression coverage.
+- **AI-4 — active next work.** Continue from `docs/handoff/work-orders-ai-animation.md` in its stated order:
+  1. tactical memory and contact ageing;
+  2. sight/hearing/radio-only knowledge with delayed reports;
+  3. Combat readiness;
+  4. interruptible plans and recovery;
+  5. platoon, then company command.
+- Keep the reference squad as a regression test and preserve `hash_battle` unless a deliberate behavior change is documented.
 
 ## Rules of the road
 - Every completed feature has a test; animation work gets visual proof (stance sheet or in-game capture); AI work gets a reproducible lab scenario.

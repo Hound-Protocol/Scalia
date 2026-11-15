@@ -5,6 +5,7 @@ Repository: Hound-Protocol/Scalia
 Execution branch: work/scalia-readiness-2026-11-15
 Baseline: main at 1ce63601f9755e9881bcbed7f7445f8f5adc558a
 Safety snapshot: safety/baseline-main-1ce6360-2026-11-15 (same commit as baseline)
+Execution branch at this check: bb3f31508897d70d333dae953181175e68ffebce (one commit ahead of main, zero behind)
 
 ## Purpose and operating boundary
 
@@ -24,10 +25,11 @@ Hard rules:
 ## Verified starting point
 
 - The repository is public and the connected GitHub account has admin, push, and pull permissions.
-- At audit time, main, the execution branch, and the safety snapshot all pointed to 1ce63601f9755e9881bcbed7f7445f8f5adc558a.
-- GitHub reported the branches as unprotected. The safety branch is therefore not immutable; treat the no-write rule as an operational rule, not a GitHub-enforced safeguard.
-- The latest commit was the AI-4 planning document commit. The latest Pages workflow for that commit completed successfully on 15 November 2026.
-- The Pages workflow builds the WASM app and deploys GitHub Pages. It does not run scripts/verify.sh or cargo test --workspace.
+- Current refs: `main` and `safety/baseline-main-1ce6360-2026-11-15` remain at `1ce63601f9755e9881bcbed7f7445f8f5adc558a`; the execution branch is `bb3f31508897d70d333dae953181175e68ffebce`, one commit ahead and zero behind main.
+- GitHub reports `protected=false` for main, the work branch and the safety snapshot. The safety branch is therefore not immutable; the no-write rule is operational, not GitHub-enforced.
+- The current work-branch tip is the documentation-only commit `Add safe Scalia side-development work orders and audit`. Its combined commit status has no reported checks.
+- The latest Pages run is a successful deployment for main SHA `1ce63601f9755e9881bcbed7f7445f8f5adc558a` (15 Nov 2026, 05:35:46 UTC: https://github.com/Hound-Protocol/Scalia/actions/runs/43681755469). It is not a run for the work-branch commit.
+- The Pages workflow builds the WASM app and deploys GitHub Pages. It does not run `scripts/verify.sh` or `cargo test --workspace`.
 - scripts/verify.sh is the substantive validation sequence: workspace tests in debug and release, animation audit, simulation budget, battle budget, WASM build, and native/WASM checks. scripts/check.sh is a quiet logging wrapper around verify.sh.
 
 ## Architecture map (first-pass)
@@ -37,8 +39,8 @@ Hard rules:
 - crates/scalia-blueprint: vehicle blueprint parsing, validation, drawing, and mesh generation.
 - crates/scalia-render: Rust/wgpu renderer, procedural poses, mesh/camera code, WGSL shaders, and renderer tests.
 - crates/scalia-wasm: browser-facing WASM bridge, commander/soldier animation controller, battle-to-render integration, and viewer.
-- crates/scalia-audio: audio support.
-- crates/scalia-world: world-related crate; map its exact responsibilities and dependency boundaries in WO-002 rather than infer them from its name.
+- crates/scalia-audio: acoustic propagation and occlusion model (listener environment, wall crossings, echoes and field-based occlusion); browser playback/spatial source construction lives in web/audio.js.
+- crates/scalia-world: RON catalog/map loading, placed objects, building references, doors, interaction spots and the static testing-ground definition (crates/scalia-world/src/lib.rs:135-154, 159-193, 243-294).
 - crates/scalia-bench: simulation and battle benchmark executables.
 - web/: browser shell and page modules (game/menu/audio/debug/console), assets, and sound files.
 - blueprints/: shipped vehicle data; docs/ and docs/handoff/: design, plans, and agent handoffs.
@@ -53,7 +55,11 @@ Important ownership boundary: scalia-ai owns tactical decisions; scalia-wasm ada
 2. The prone drop/get-up transition is implemented through Pose::Drop and the drop phase. The animator tests include going_prone_kneels_plants_and_lies_down_then_gets_back_up and crouching_joins_the_drop_at_the_knee_and_a_change_of_mind_turns_back. The handoff that lists all stand/crouch/prone transitions as missing is stale at least for this tested controller path. Visual verification and checking every caller remain part of the animation audit.
 3. crates/scalia-ai/tests/reference_squad.rs exists and contains the ten-step reference squad test plus a separate outmatched-squad-abandons-the-attack test. The newer work-orders-ai-animation.md marks AI-3 complete. The older ai-animation.md still lists the reference squad as future work; update the older handoff rather than reimplementing AI-3.
 4. crates/scalia-ai/src/battle.rs currently collects occupied cover into a taken list once before the soldier decision loop. The earlier O(N^2) repeated scan described in the 14 November audit has already been changed; do not reapply that optimization.
-5. The verification script includes a benchmark gate for battle_bench --check 1000, in addition to tests, animation audit, aggregate budget checks, and WASM consistency checks.
+5. The verification script includes a benchmark gate for `battle_bench --check 1000`, in addition to tests, animation audit, aggregate budget checks and WASM consistency checks (`scripts/verify.sh`).
+6. Needs drain is already frame-rate invariant: `scalia-core/src/world.rs:28-35` uses cumulative absolute-time drain; `scalia-core/tests/world.rs:157-174` asserts exact equality for 30 fps, 144 fps and a single large tick.
+7. GPU surface acquisition errors are still collapsed: `scalia-render/src/gpu.rs:498-503` accepts success/suboptimal, then reconfigures and skips for every other result. Timeout, outdated/lost surface and out-of-memory/device-loss handling are not distinguished there.
+8. The intro zoom target is still the widest field: `web/menu.js:28, 481` uses `FIELD_M = 50`, while `viewer.rs:97-98, 1894-1897` maps `end_intro()` to `STEP_FIELD_MAX`. This conflicts with the 15 Nov requirement in work-order-v2 H to end at the closest on-foot zoom.
+9. The audio architecture is present but not browser-verified in this pass: `scalia-audio/src/lib.rs:223-258, 329-333` models acoustic fields/occlusion; `web/audio.js:108, 181, 288` creates the Web Audio context, decodes buffers and creates playback sources.
 
 ### Verified workflow and process gaps
 
@@ -63,11 +69,10 @@ Important ownership boundary: scalia-ai owns tactical decisions; scalia-wasm ada
 
 ### Documentation drift to reconcile
 
-- docs/handoff/work-orders-ai-animation.md is newer and marks AI-3 / the reference squad complete; docs/handoff/ai-animation.md still presents it as upcoming.
-- The same older animation handoff lists the prone transition as missing even though anim.rs has a tested Pose::Drop transition. Mark it implemented in code/tests, but do not claim visual sign-off until a current visual check is recorded.
-- STATUS.md reports GPU timestamp measurements in its Milestone 3 section, while its final open-items sentence still says GPU timing in the HUD is outstanding. Resolve this as either done or partially done, with exact remaining scope.
-- README.md directs contributors to scripts/verify.sh; CLAUDE.md says scripts/check.sh. These are not competing test suites: check.sh wraps verify.sh. State that relationship explicitly.
-- STATUS.md is a milestone snapshot and predates the latest AI/audio updates. Do not treat it as the sole source of current feature completion.
+- The older ai-animation.md had marked AI-3 as future work and listed prone transitions as missing. This pass reconciles it with work-orders-ai-animation.md and current controller/test evidence; aimed-state and visual sign-off remain open.
+- STATUS.md had GPU timestamp timing listed as both implemented and open. The stale open item is removed; distinct surface-error handling is now called out instead.
+- README.md now explains that scripts/check.sh is the quiet wrapper and scripts/verify.sh prints the stages; STATUS.md is explicitly labelled historical milestone evidence.
+- work-order-v2.md now marks the old cover-search and needs-drain issues as resolved in source/tests, rather than asking the next agent to redo them.
 
 ## Work order 001 — Safe side-branch operation
 
@@ -191,3 +196,28 @@ Acceptance criteria: each subsystem has a reproducible test or browser verificat
 ## Audit limitation
 
 This first pass used the repository tree, current docs, targeted source/test excerpts, and GitHub Actions metadata. The latest Pages workflow succeeded, but that workflow does not execute the full verify.sh suite. No local Rust build, browser session, GPU test, or full scripts/verify.sh run was executed during this first pass. Those checks must be run in the development environment before implementation is called verified.
+## Current execution audit (15 Nov 2026)
+
+### Repository and architecture evidence
+
+- Workspace membership is defined by the wildcard `crates/*` in the root `Cargo.toml`; the current tree contains eight crates: core, AI, audio, benchmark, blueprint, render, WASM and world.
+- Browser entry: `web/game.js` imports error/menu modules, initializes the WASM package and enters the game loop. `crates/scalia-wasm/src/lib.rs` exports the shared animation, assault, effects and motion modules; the viewer is compiled for wasm32.
+- Animation ownership is split cleanly: `scalia-wasm/src/anim.rs` defines `Drive`, `Frame` and `Animator`; `assault.rs:379-396` converts each battle soldier to a drive and steps its animator; `viewer.rs:3075+` owns the commander update path. Procedural pose construction and the matching WGSL mirror are in `scalia-render/src/pose.rs` and `wgsl/common.wgsl`.
+- AI ownership is in `scalia-ai`: `battle.rs` runs the fixed-step battle; `mind.rs` handles soldier goals; `leader.rs` handles squad plans; `tactics.rs` provides cover selection; `reference_squad.rs` is the current ten-step regression scenario.
+- `scalia-world` currently supplies loaded RON map/catalog data and object/door/spot definitions; it is not the same thing as `scalia-core::world::World`'s group/needs simulation.
+
+### Confirmed corrections and remaining gaps
+
+1. **AI-3 is implemented.** `reference_squad.rs:1-3, 34-48, 98-120` documents the 12-riflemen-plus-sergeant scenario, submits one squad move order, checks ten observable steps, and separately checks an outmatched squad abandoning. Keep it as regression coverage; AI-4 is next.
+2. **Prone drop/get-up is implemented in controller and pose code.** `anim.rs:317-356, 442-476` and `pose.rs:89-95, 1014-1033, 1523+` show the transition and tests. Do not describe the whole feature as missing. Aimed-state coverage and visual sign-off are still open.
+3. **Cover search was already optimized.** `battle.rs:944-950` creates the occupied-cover list once before the soldier decision pass; do not reapply the old O(N²) fix.
+4. **Needs-drain rounding is already fixed and tested.** `world.rs:28-35` uses absolute-time cumulative drain; `tests/world.rs:157-174` compares 30 fps, 144 fps and one large tick exactly. Do not add a redundant accumulator for the old fractional-loss issue.
+5. **GPU surface recovery remains coarse.** `gpu.rs:498-503` groups every non-success/non-suboptimal result into reconfigure-and-skip. Add typed handling and reason-specific reporting as a separate implementation work order, with tests for each recoverable/fatal case.
+6. **Intro zoom target remains wrong against the 15 Nov requirement.** `menu.js:28, 481` ends at the widest 50 m field target and `viewer.rs:97-98, 1894-1897` resets to `STEP_FIELD_MAX`. Change both ends together in a dedicated fix; confirm the exact nearest zoom value from the ladder before editing.
+7. **Audio is architecturally split but not acoustically validated here.** `scalia-audio` models propagation/occlusion; `web/audio.js` handles Web Audio playback. Verify real browser behavior, occlusion, doors/windows, ambience and autoplay before claiming completion.
+
+### Verification boundary
+
+- No local shell, Rust toolchain, browser or GPU is available through this GitHub-only pass. `scripts/check.sh` / `scripts/verify.sh` were inspected but not executed.
+- The work-branch commit has no reported status checks. The only recent successful workflow found is the main-only Pages deployment listed above; it is not a substitute for the full suite.
+- No gameplay code was changed. No PR was opened, no merge/deploy was requested, and main plus the safety baseline were not written.

@@ -21,8 +21,9 @@ Live demo (blueprints and a planet chunk, computed in WebAssembly): https://houn
 
 ## Check everything
 
-```
-bash scripts/verify.sh
+```sh
+bash scripts/check.sh   # concise result; full log in /tmp/verify.log
+bash scripts/verify.sh  # print every verification stage
 ```
 
-Needs Rust stable with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` 0.2.130 (`cargo install wasm-bindgen-cli --version 0.2.130 --locked`) and Node 22. See `STATUS.md` for what is measured and what is open.
+Needs Rust stable with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` 0.2.130 (`cargo install wasm-bindgen-cli --version 0.2.130 --locked`) and Node 22. `STATUS.md` is the historical milestone record; current side-development findings and work orders are in `docs/handoff/scalia-readiness-2026-11-15.md` and `docs/handoff/work-orders-ai-animation.md`.

@@ -1,6 +1,8 @@
 # Scalia core status
 
-Milestone 0 (core) and Milestone 1 (blueprints, planet, Pages page) are below. Everything is verified with one command: `bash scripts/verify.sh`.
+Milestone 0 (core), Milestone 1 (blueprints, planet, Pages page), and later milestone notes are recorded below with the evidence available at the time. These historical PASS results do not assert that the current side-development branch has passed the full suite. Run `bash scripts/check.sh` (quiet) or `bash scripts/verify.sh` (full output) to verify the current checkout.
+
+Current side-development status and active work orders: `docs/handoff/scalia-readiness-2026-11-15.md` and `docs/handoff/work-orders-ai-animation.md`.
 
 # Milestone 0
 
@@ -138,4 +140,5 @@ Decisions: `docs/superpowers/specs/2026-11-12-m3-engine-and-planets-decisions.md
 
 Open items: boarding seats use an abstract 20-column grid (about 60 m long) instead of the blueprint's interior, so no
 transport is drawn yet; sea level and the heightmap design (the noise is almost all above 0 m, so the globe has no oceans);
-regional terrain levels for a seamless zoom; GPU timing in the HUD; vehicles on the ground; a fresh review of the branch.
+regional terrain levels for a seamless zoom; vehicles on the ground; and distinct handling/reporting for GPU surface
+acquisition failures. GPU timestamp queries already measure the shadow, scene and upscale passes as described above.

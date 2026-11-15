@@ -135,14 +135,8 @@ The feedback doc (project lead) is folded into A to C above.
 
 ### G. Performance audit (ChatGPT, against 34054a9): fix plan
 I checked the claims against the code on 14 Nov:
-- **Confirmed: cover search is O(N²).**
-  - `battle.rs` `think()` (about line 953) collects every soldier's cover each time one soldier picks cover.
-  - Fix: build the occupied-cover set once per decision pass and update it as cover is claimed. Results must stay identical (determinism test: the battle hash is unchanged).
-- **Partly confirmed: simulation timing.**
-  - The battle already runs in fixed 50 ms steps, independent of frame rate (`assault.rs` STEP_MS).
-  - The world needs-drain (`scalia-core/src/world.rs` `drain`) is ticked from the render path (`viewer.rs` around lines 1287 and 2388), and integer truncation loses the fractions.
-  - Fix: fixed-step the world tick, keep the remainders, and add a test (the same game time at 30 fps and at 144 fps gives an identical state).
-  - Lower stakes than "critical" (needs, not combat), but correct.
+- **Resolved since this audit: cover-search scaling.** `battle.rs::think` now builds the occupied-cover list once before the soldier decision pass and keeps it current as cover is claimed (`crates/scalia-ai/src/battle.rs:944-950`). Do not reapply the old per-soldier full scan; retain deterministic hash regression checks.
+- **Resolved since this audit: needs-drain frame-rate drift.** `scalia-core/src/world.rs::drain` computes cumulative drain from absolute `from_ms` / `to_ms` times (`world.rs:28-35`). `crates/scalia-core/tests/world.rs::needs_drain_the_same_whatever_the_frame_rate` compares 30 fps, 144 fps and one large step for exact equality (test lines 157-174). The viewer still calls `World::tick` from input/render paths, but the old per-tick fractional-loss claim is no longer true; do not add a second accumulator for that issue.
 - **Shared scene preparation:** the main view and the tablet's view can rebuild the same instance lists. Fix: prepare the scene once per frame, with only the camera-specific parts per view. Measure first with the new performance panel (E).
 - **Allocations:** temporary vectors and HashMaps every frame, position clones, string-keyed GPU buffers (`gpu.rs` `drop_buffer(format!(...))`). Fix:
   - persistent scratch buffers;
