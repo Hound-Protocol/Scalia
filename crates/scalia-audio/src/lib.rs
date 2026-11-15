@@ -230,6 +230,8 @@ pub struct Field {
     cost: Vec<f32>,
     wall_db: Vec<f32>,
     len_m: Vec<f32>,
+    /// Material occupancy used to distinguish a genuinely clear ray from a route around an obstruction.
+    kind: Vec<u8>,
 }
 
 /// What reaching the ears from a spot costs: loss through material (dB), the extra the way round adds
@@ -333,7 +335,7 @@ impl Field {
                 }
             }
         }
-        Field { ear, origin, n, cost, wall_db, len_m }
+        Field { ear, origin, n, cost, wall_db, len_m, kind }
     }
 
     /// How a sound at `at` (m) reaches the ears, if it lies inside the field.
@@ -347,8 +349,20 @@ impl Field {
             return None;
         }
         let straight = ((at.0 - self.ear.0).powi(2) + (at.1 - self.ear.1).powi(2)).sqrt();
+        // The propagation grid's shortest-path length can be inflated by cell quantisation even when
+        // the direct ray is unobstructed. Check the actual ray before applying diffraction loss.
+        let steps = (straight / (FIELD_CELL_M * 0.5)).ceil().max(1.0) as usize;
+        let direct_clear = (0..=steps).all(|step| {
+            let t = step as f32 / steps as f32;
+            let x = self.ear.0 + (at.0 - self.ear.0) * t;
+            let y = self.ear.1 + (at.1 - self.ear.1) * t;
+            let i = ((x - self.origin.0) / FIELD_CELL_M).floor() as isize;
+            let j = ((y - self.origin.1) / FIELD_CELL_M).floor() as isize;
+            i >= 0 && j >= 0 && (i as usize) < self.n && (j as usize) < self.n
+                && self.kind[j as usize * self.n + i as usize] == 0
+        });
         // The grid's own staircase makes even a straight way a little longer: only a real way round counts.
-        let detour_m = (self.len_m[k] - straight * 1.08 - FIELD_CELL_M).max(0.0);
+        let detour_m = if direct_clear { 0.0 } else { (self.len_m[k] - straight * 1.08 - FIELD_CELL_M).max(0.0) };
         // Bent round an edge: a few dB at once, more the further round (diffraction, roughly).
         let bend_db = if detour_m > 0.3 { (4.0 + 4.0 * (1.0 + detour_m).log2()).min(22.0) } else { 0.0 };
         let wall_db = self.wall_db[k];
