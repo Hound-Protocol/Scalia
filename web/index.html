@@ -104,16 +104,10 @@
   #menu.shown #menuSky, #menu.shown #menuMarks { opacity: 1; }
   #menu.shown .mn-ui, #menu.shown .mn-foot { opacity: 1; }
   #menu.flying { background: transparent; }
-  /* Vignette and a faint moving grain over the galaxy (cheap: CSS only). */
+  /* Vignette over the galaxy. */
   #menu::after { content: ''; position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse 75% 70% at 50% 52%, transparent 55%, rgba(0, 0, 0, 0.55) 100%); }
   #menu.flying::after { opacity: 0; transition: opacity .6s; }
-  #menu .mn-grain { position: absolute; inset: -50%; pointer-events: none; opacity: 0.07; mix-blend-mode: screen;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-    animation: menu-grain .9s steps(6) infinite; }
-  #menu.flying .mn-grain { display: none; }
-  @keyframes menu-grain { 0% { transform: translate(0, 0); } 20% { transform: translate(-6%, 4%); } 40% { transform: translate(5%, -7%); }
-    60% { transform: translate(-3%, 8%); } 80% { transform: translate(7%, 2%); } 100% { transform: translate(0, 0); } }
   /* Cinema bars: slide in on Start, stay for the sequence, go as his eyes open. */
   #menuBars i { position: absolute; left: 0; right: 0; height: 0; background: #000; transition: height 1.4s cubic-bezier(.45, 0, .2, 1); z-index: 3; }
   #menuBars i:first-child { top: 0; }
@@ -153,7 +147,7 @@
   body.in-menu :is(#controls, #fieldHint, #wipMark, #perf, #radio, #weapon, #hud, #fieldLabels, #actions, #inventory, #answerCall, #reticle, #aimDot, #aimLine) { visibility: hidden; }
   body.in-menu #view { filter: blur(var(--blur, 0px)); }
   @media (prefers-reduced-motion: reduce) { #menu .mn-ui { transition: none; } #menuStart { animation: none; opacity: 1; } #menuFlash.go, #menuFlash.cut { animation: none; }
-    #menu .mn-grain { animation: none; } }
+  }
   /* The prototype notice: shown before play, over a blurred view of the game. */
   #proto { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
     background: #000; }
@@ -763,7 +757,6 @@
     <button id="menuStart"><span class="w"><span class="s">Start</span><span class="d" aria-hidden="true">Deploy</span></span></button>
   </div>
   <p class="mn-foot">Prototype build <span id="menuVer"></span></p>
-  <div class="mn-grain" aria-hidden="true"></div>
   <div id="menuFlash"></div>
   <div id="menuLids"></div>
   <div id="menuBars" aria-hidden="true"><i></i><i></i></div>

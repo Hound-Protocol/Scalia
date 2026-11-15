@@ -33,7 +33,8 @@
 - **Intro sequence sounds** (`web/sfx/menu-flash1-door.mp3`, `menu-flash2-thump.mp3`, `space-ambience-01.mp3`,
   `space-ambience-03.mp3`): "soundreality cinematic hit door 619512" (first flash), "blendertimer massive thump 116359"
   (every flash), "fronbondi_skegs sfx deep space travel ambience 01 358466" and "... ambience 03 358469"; supplied by
-  the project lead (Pixabay sound library naming). The door hit is no longer played.
+  the project lead (Pixabay sound library naming). The door hit is no longer played; the menu plays 15 s mono cuts of
+  the ambiences (`space-ambience-01-short.mp3`, `-03-short.mp3`).
 - **Eyes opening** (`web/sfx/menu-eyes-braam.mp3`): "sdanezis ultimate cinematic dark braam whoosh 3 607330";
   supplied by the project lead (Pixabay sound library naming).
 - **"walkie talkie"** by [FayBall](https://sketchfab.com/FayBall), licensed under

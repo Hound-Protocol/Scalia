@@ -237,17 +237,22 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
   const AC = window.AudioContext || window.webkitAudioContext;
   const ctx = AC ? new AC() : null;
   const bufs = {};
+  // One at a time, so decoding never piles up while the engine is starting: only the menu theme during loading,
+  // the sequence's sounds once the menu is up (they are short; the ambiences are 15 s cuts).
+  let queue = Promise.resolve();
   const load = (name, url) => {
-    if (!ctx) return;
-    bufs[name] = fetch(url).then((r) => r.arrayBuffer()).then((a) => ctx.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => console.warn('menu sound', url, e));
+    if (!ctx || bufs[name]) return;
+    bufs[name] = queue = queue.then(() => fetch(url)).then((r) => r.arrayBuffer()).then((a) => ctx.decodeAudioData(a)).then((b) => (bufs[name] = b)).catch((e) => { console.warn('menu sound', url, e); });
   };
   load('tune', './sfx/menu-music.mp3');
-  load('flash2', './sfx/menu-flash2-thump.mp3');
-  load('amb1', './sfx/space-ambience-01.mp3');
-  load('amb3', './sfx/space-ambience-03.mp3');
-  load('travel', './sfx/menu-travel.mp3');
-  load('enter', './sfx/menu-enter.mp3');
-  load('eyes', './sfx/menu-eyes-braam.mp3');
+  const loadSequence = () => {
+    load('flash2', './sfx/menu-flash2-thump.mp3');
+    load('amb1', './sfx/space-ambience-01-short.mp3');
+    load('amb3', './sfx/space-ambience-03-short.mp3');
+    load('travel', './sfx/menu-travel.mp3');
+    load('enter', './sfx/menu-enter.mp3');
+    load('eyes', './sfx/menu-eyes-braam.mp3');
+  };
   const ready = (name) => bufs[name] instanceof AudioBuffer ? bufs[name] : null;
   // Where the sound in a buffer really starts and ends (MP3 encoders pad both ends with silence): the loop runs
   // between them, so it comes round without a gap.
@@ -532,6 +537,7 @@ export function createMenu({ viewer, onEnter, wake = () => {} }) {
       requestAnimationFrame(() => root.classList.add('shown'));
       addEventListener('keydown', keys, true);
       startTune();
+      loadSequence();
       // If the browser still holds sound back, the next key or click starts it.
       if (!tune) {
         const again = () => startTune();
