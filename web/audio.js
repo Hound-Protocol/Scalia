@@ -1,4 +1,4 @@
-// Pack Engine audio, the browser side. The acoustics (Rust) work out how each sound reaches the listener
+// Auralis Audio Engine — browser-side Web Audio renderer for Pack Engine acoustics. The acoustics (Rust) work out how each sound reaches the listener
 // (gain, low-pass, how much is heard as reverb, where it is around his head) and what space he is in; this
 // graph applies it:
 //
