@@ -10,13 +10,16 @@ const element = () => ({
   removeChild(node) { this.children.splice(this.children.indexOf(node), 1); },
   get firstChild() { return this.children[0] ?? null; },
 });
-test('keeps a solid centre reference and follows the character muzzle aim point', () => {
+test('tracks the pointer reference and the character muzzle aim point in canvas coordinates', () => {
   const canvas = { clientWidth: 1000, clientHeight: 500, style: {} };
-  const group = element(), line = { hidden: true, querySelector: () => group, ownerDocument: { createElementNS: () => element() } };
+  const group = element(), line = { hidden: true, attrs: {}, setAttribute(key, value) { this.attrs[key] = value; }, querySelector: () => group, ownerDocument: { createElementNS: () => element() } };
   const referenceDot = element(), aimDot = element();
   const crosshair = new CrosshairController({ canvas, line, referenceDot, aimDot });
-  crosshair.update({ state: { line: [0.2, 0.4, 0.7, 0.6], recoil: 0.04 } });
+  crosshair.update({ state: { line: [0.2, 0.4, 0.7, 0.6], recoil: 0.04 }, pointer: { x: 125, y: 210 } });
   assert.equal(referenceDot.hidden, false);
+  assert.equal(referenceDot.style.transform, 'translate(125.0px, 210.0px)');
+  assert.equal(line.attrs.viewBox, '0 0 1000 500');
+  assert.equal(line.attrs.preserveAspectRatio, 'none');
   assert.equal(aimDot.style.transform, 'translate(700.0px, 300.0px)');
   assert.equal(aimDot.dataset.recoil, '0.04');
   assert.equal(group.children[0].attrs.stroke, '#ffffff');
