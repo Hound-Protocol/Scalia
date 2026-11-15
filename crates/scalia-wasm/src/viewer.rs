@@ -44,17 +44,30 @@ fn sound_occlusion(
         // Doors are stored separately from the static sight grid. A shut/locked leaf
         // attenuates sound, but less than masonry; open/breached doors add no loss.
         let doors = sight.doors.iter().filter(|door| door.blocks(from, to)).count();
+        let masonry = walls as f32;
+        let wood = doors as f32;
         return scalia_audio::Occlusion {
-            wall_db: walls as f32 * 40.0 + doors as f32 * 18.0,
+            wall_db: masonry * 40.0 + wood * 18.0,
             bend_db: 0.0,
             detour_m: 0.0,
+            // Approximate transmission-loss profiles: concrete blocks the whole spectrum;
+            // a closed wooden leaf attenuates speech/highs more than low-frequency energy.
+            low_db: masonry * 28.0 + wood * 8.0,
+            mid_db: masonry * 40.0 + wood * 18.0,
+            high_db: masonry * 52.0 + wood * 30.0,
         };
     }
     if let Some(occlusion) = field.and_then(|field| field.at(source)) {
         return occlusion;
     }
     let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
-    scalia_audio::Occlusion { wall_db: walls as f32 * 40.0, bend_db: 0.0, detour_m: 0.0 }
+    let wall_db = walls as f32 * 40.0;
+    scalia_audio::Occlusion {
+        wall_db, bend_db: 0.0, detour_m: 0.0,
+        low_db: walls as f32 * 28.0,
+        mid_db: wall_db,
+        high_db: walls as f32 * 52.0,
+    }
 }
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
@@ -1150,6 +1163,8 @@ impl Viewer {
             }
         }
         out.push(far);
+        // Three transmission-loss bands, appended to the stable 27-float sound record.
+        out.extend_from_slice(&[occ.low_db, occ.mid_db, occ.high_db]);
     }
     /// Benchmark scene: `squads` squads of 12 around the commander (see `bench_army`). Returns the soldier count.
     pub fn bench_army(&mut self, squads: u32) -> u32 {
