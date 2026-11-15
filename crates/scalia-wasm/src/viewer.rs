@@ -4522,7 +4522,7 @@ mod audio_spatial_tests {
 
         let shut = sound_occlusion(&sight, None, (40.0, 50.0), (60.0, 50.0), 19.2, true);
         assert_eq!(shut.wall_db, 18.0, "{shut:?}");
-        assert!(shut.lowpass_hz() < 6_000.0, "{shut:?}");
+        assert!(shut.high_cut_db() >= 22.0, "{shut:?}");
     }
 
     #[test]
