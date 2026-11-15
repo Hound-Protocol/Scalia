@@ -8,6 +8,7 @@ export class FieldFeedback {
     this.lastHealth = 100;
     this.lastStance = -1;
     this.sprintLoad = 0;
+    this.stamina = 1;
     this.checkPhase = null;
     this.checkPhaseAt = 0;
     this.checkDone = false;
@@ -78,7 +79,7 @@ export class FieldFeedback {
     this.report.hidden = false;
     this.messageUntil = now + duration;
   }
-  update(now, dt, weapon, sprinting) {
+  update(now, dt, weapon, sprinting, jogging) {
     const on = this.active();
     this.controls.hidden = !on || !this.controlsVisible;
     if (!on) { this.cancelHealthCheck(now); this.rStarted = 0; this.hurt.hidden = true; this.fatigue.hidden = true; return; }
