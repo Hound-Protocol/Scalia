@@ -4,10 +4,9 @@
 use scalia_render::gpu::PointLight;
 use scalia_render::mesh::{code, MeshBuilder, Part};
 
-/// Keep the flash alive long enough to survive a missed render tick at low frame rates.
-/// At 60 FPS this is about three frames; at 30 FPS it is about one to two.
-const FLASH_MS: f64 = 50.0;
-const FLASH_LIGHT_MS: f64 = 50.0;
+/// One 60 Hz frame: a brief, non-fading muzzle flash.
+const FLASH_MS: f64 = 16.7;
+const FLASH_LIGHT_MS: f64 = 16.7;
 const PUFF_MS: f64 = 450.0;
 const BLAST_MS: f64 = 180.0;
 const BLAST_LIGHT_MS: f64 = 300.0;
@@ -195,22 +194,6 @@ impl Effects {
         }
         m
     }
-    #[test]
-    fn muzzle_flash_is_a_single_static_pulse() {
-        let mut effects = Effects::default();
-        effects.shot(0.0, [0.0, 0.0, 0.0], [100.0, 0.0, 0.0], Some([1.0, 0.0, 0.0]), false, false);
-
-        let first = effects.mesh(0.0, (0.0, 0.0));
-        let middle = effects.mesh(8.0, (0.0, 0.0));
-        assert_eq!(first.vertices, middle.vertices, "flash geometry must remain identical throughout the pulse");
-        assert!(!first.vertices.is_empty());
-        assert!(effects.mesh(FLASH_MS, (0.0, 0.0)).vertices.is_empty(), "flash must be gone after one frame");
-
-        let light = effects.lights(8.0, (0.0, 0.0));
-        assert_eq!(light.len(), 1);
-        assert_eq!(light[0].intensity, 1.8, "flash light must not fade");
-        assert!(effects.lights(FLASH_LIGHT_MS, (0.0, 0.0)).is_empty());
-    }
 
 }
 
@@ -262,5 +245,21 @@ mod tests {
             assert!(v.pos[1] > -0.12 && v.pos[1] < 0.6, "flash is a short tongue out of the muzzle: {:?}", v.pos);
             assert!((v.pos[2] - 1.4).abs() < 0.12, "{:?}", v.pos);
         }
+    }
+    #[test]
+    fn muzzle_flash_is_a_single_static_pulse() {
+        let mut effects = Effects::default();
+        effects.shot(0.0, [0.0, 0.0, 0.0], [100.0, 0.0, 0.0], Some([1.0, 0.0, 0.0]), false, false);
+
+        let first = effects.mesh(0.0, (0.0, 0.0));
+        let middle = effects.mesh(8.0, (0.0, 0.0));
+        assert_eq!(first.vertices, middle.vertices, "flash geometry must remain identical throughout the pulse");
+        assert!(!first.vertices.is_empty());
+        assert!(effects.mesh(FLASH_MS, (0.0, 0.0)).vertices.is_empty(), "flash must be gone after one frame");
+
+        let light = effects.lights(8.0, (0.0, 0.0));
+        assert_eq!(light.len(), 1);
+        assert_eq!(light[0].intensity, 1.8, "flash light must not fade");
+        assert!(effects.lights(FLASH_LIGHT_MS, (0.0, 0.0)).is_empty());
     }
 }
