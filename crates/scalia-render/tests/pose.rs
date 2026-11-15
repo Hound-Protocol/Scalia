@@ -161,58 +161,6 @@ fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
 }
 
 #[test]
-fn probe_prone_aim_arm_height_and_bore() {
-    use scalia_render::pose::ground_drop_side;
-    let base = params(Pose::Prone, 0.0);
-    let aim = params(Pose::StandAim, 0.0);
-    let mut found = 0;
-    let mut best = (f32::MAX, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
-    for l in 0..=4 {
-        let u = 0.50 + l as f32 * 0.05;
-        for r in 0..=6 {
-            let v = 0.90 + r as f32 * 0.05;
-            for lean_step in -2..=4 {
-                let lean = lean_step as f32 * 0.05;
-                for pitch_step in -2..=2 {
-                    let pitch = std::f32::consts::FRAC_PI_2 + pitch_step as f32 * 0.025;
-                    let mut p = base;
-                    p.shoulder[0] = base.shoulder[0] + (aim.shoulder[0] - base.shoulder[0]) * u;
-                    p.elbow[0] = base.elbow[0] + (aim.elbow[0] - base.elbow[0]) * u;
-                    p.reach[0] = base.reach[0] + (aim.reach[0] - base.reach[0]) * u;
-                    p.abduct[0] = base.abduct[0] + (aim.abduct[0] - base.abduct[0]) * u;
-                    p.shoulder[1] = base.shoulder[1] + (aim.shoulder[1] - base.shoulder[1]) * v;
-                    p.elbow[1] = base.elbow[1] + (aim.elbow[1] - base.elbow[1]) * v;
-                    p.reach[1] = base.reach[1] + (aim.reach[1] - base.reach[1]) * v;
-                    p.abduct[1] = base.abduct[1] + (aim.abduct[1] - base.abduct[1]) * v;
-                    p.rifle = pitch;
-                    p.rifle_yaw = 0.55;
-                    p.twist = -0.55;
-                    p.look = 0.55;
-                    p.lean = lean;
-                    p.head = 0.82;
-                    p.prone = 1.0;
-                    p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat);
-                    let q = grip(&p, 1.0);
-                    let gap = hand(&q, Side::Left).distance(held(RIFLE_GUARD, &q));
-                    let low = figure().vertices.iter().map(|x| pose_vertex(Vec3::from(x.pos), part_of(x.color), &q).z).fold(f32::MAX, f32::min);
-                    let muzzle = pose_vertex(RIFLE.muzzle, Part::Rifle, &q);
-                    let breech = pose_vertex(RIFLE.breech, Part::Rifle, &q);
-                    let bore = (muzzle - breech).normalize();
-                    let score = gap + (0.0f32.max(-0.05 - low)) + (0.0f32.max(0.95 - bore.y)) + bore.z.abs();
-                    if score < best.0 { best = (score, u, v, lean, pitch, low); }
-                    if gap < 0.05 && low > -0.05 && bore.y > 0.95 && bore.z.abs() < 0.1 {
-                        panic!("FEASIBLE left={u:.2} right={v:.2} lean={lean:.2} pitch={pitch:.3} gap={gap:.4} bottom={low:.4} bore={bore:?} shoulders={:?} elbows={:?} reach={:?} abduct={:?}", q.shoulder, q.elbow, q.reach, q.abduct);
-                        found += 1;
-                    }
-                }
-            }
-        }
-    }
-    println!("BEST score={:.4} left={:.2} right={:.2} lean={:.2} pitch={:.3} bottom={:.4}", best.0, best.1, best.2, best.3, best.4, best.5);
-    assert!(found > 0, "no prone aim pose meets grip, ground, and bore constraints; best={best:?}");
-}
-
-#[test]
 fn aiming_tucks_the_firing_elbow_and_reaches_across_with_the_other() {
     let pp = params(Pose::StandAim, 0.0);
     // The right (firing) elbow is tucked and bent; the left arm reaches nearly straight to the rifle and swings in.
