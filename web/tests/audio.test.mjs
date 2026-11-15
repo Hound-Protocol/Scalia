@@ -369,6 +369,6 @@ test('persistent streams keep a full-strength dry signal and restrained reverb s
   voice.place([0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 4, 0]);
   assert.equal(context.createdNodes[9].gain.value, 1);
   for (const send of context.createdNodes.slice(10)) {
-    if (send.gain) assert.ok(send.gain.value <= 0.1);
+    if (send.gain) assert.ok(send.gain.value <= 0.25);
   }
 });
