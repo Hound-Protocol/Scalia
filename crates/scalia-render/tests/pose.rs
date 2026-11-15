@@ -54,7 +54,7 @@ fn crouching_is_lower_and_prone_is_flat() {
 
 #[test]
 fn aiming_points_the_rifle_forward_at_shoulder_height() {
-    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45)] {
+    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45), (Pose::ProneAim, 0.05, 0.45)] {
         let v = posed(pose, 0.0);
         let rifle: Vec<Vec3> = v.iter().filter(|p| p.0 == Part::Rifle).map(|p| p.1).collect();
         let tip = rifle.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
@@ -62,6 +62,40 @@ fn aiming_points_the_rifle_forward_at_shoulder_height() {
         assert!(tip.y > 0.55, "{pose:?}: rifle reaches only y {}", tip.y);
         assert!(low.z > lo - 0.15 && tip.z < hi + 0.15, "{pose:?}: rifle z {}..{}", low.z, tip.z);
         assert!(tip.z - low.z < 0.4, "{pose:?}: rifle is not level ({}..{})", low.z, tip.z);
+    }
+}
+
+
+#[test]
+fn prone_aim_is_two_handed_and_keeps_the_rifle_level_in_front() {
+    use scalia_render::pose::{barrel, grip};
+    let base = params(Pose::ProneAim, 0.0);
+    assert_eq!(two_handed(Pose::ProneAim), 1.0);
+    assert_eq!(base.prone, 1.0);
+    let held_pose = grip(&base, two_handed(Pose::ProneAim));
+    let gap = hand(&held_pose, Side::Left).distance(held(RIFLE_GUARD, &held_pose));
+    assert!(gap < 0.04, "support hand is off the handguard by {gap:.3} m");
+    let v = posed(Pose::ProneAim, 0.0);
+    let top = v.iter().map(|p| p.1.z).fold(f32::MIN, f32::max);
+    let low = v.iter().map(|p| p.1.z).fold(f32::MAX, f32::min);
+    assert!(top < 0.7 && low > -0.06, "prone aim clips or rises off the ground: {low}..{top}");
+    let (tip, bore) = barrel(scalia_render::pose::RIFLE, Pose::ProneAim, None, 0.0, 0.0);
+    assert!(tip.y > 0.55 && bore.y > 0.85, "prone rifle must point forward: tip {tip:?}, bore {bore:?}");
+}
+
+#[test]
+fn crawling_has_continuous_directional_cycles_forward_backward_and_sideways() {
+    use scalia_render::pose::params_dir;
+    let dirs = [0.0f32, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
+    let poses: Vec<_> = dirs.iter().map(|&dir| params_dir(Pose::Crawl, 0.23, dir)).collect();
+    assert!(poses.iter().all(|p| p.prone == 1.0 && p.rifle > 1.5), "crawl stays low with the rifle carried forward");
+    assert_ne!(poses[0].hip, poses[1].hip, "backwards crawl reverses the diagonal limb phase");
+    assert_ne!(poses[2].side, poses[3].side, "left and right crawl use opposite support patterns");
+    for &dir in &dirs {
+        let a = params_dir(Pose::Crawl, 0.0, dir);
+        let b = params_dir(Pose::Crawl, 1.0, dir);
+        assert!((a.twist - b.twist).abs() < 1e-5 && (a.tilt - b.tilt).abs() < 1e-5, "crawl cycle seam at {dir}");
+        assert!(a.hip.iter().chain(a.knee.iter()).chain(a.side.iter()).all(|v| v.is_finite()));
     }
 }
 

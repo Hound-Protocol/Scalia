@@ -94,6 +94,8 @@ pub enum Pose {
     /// both knees with the left palm planted. Drawn only as keys of the drop.
     DropReach = 34,
     DropPlant = 35,
+    /// Prone with the rifle shouldered and both hands holding it on the sights.
+    ProneAim = 36,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -131,6 +133,7 @@ impl Pose {
             33 => Pose::Drop,
             34 => Pose::DropReach,
             35 => Pose::DropPlant,
+            36 => Pose::ProneAim,
             _ => Pose::Stand,
         }
     }
@@ -405,7 +408,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::ProneAim => 1.0,
         _ => 0.0,
     }
 }
@@ -879,20 +882,28 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 0.12;
         }
         Pose::Crawl => {
-            // A low crawl: chest down on planted elbows, rifle cradled across the forearms with the muzzle ahead.
-            // Opposite limbs work together (right arm reaches as the left knee draws up, then the other pair) and
-            // the hips roll a little with the weight shift.
-            let s = (phase * std::f32::consts::TAU).sin();
+            // Low crawl: diagonal limbs alternate, with the cycle rotated by travel direction. This reverses the
+            // pull/push timing when backing up and changes the support pattern for either side-crawl.
+            let s = (phase * std::f32::consts::TAU + dir).sin();
+            let lateral = dir.sin();
             let draw = [s.max(0.0), (-s).max(0.0)];
             p.prone = 1.0;
             p.shoulder = [2.75 - 0.3 * s, 2.75 + 0.3 * s];
             p.elbow = [1.4 + 0.3 * s, 1.4 - 0.3 * s];
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
-            p.side = [-0.12 - 0.55 * draw[0], 0.12 + 0.55 * draw[1]];
-            p.twist = 0.06 * s;
-            p.tilt = 0.05 * s;
+            p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
+            p.abduct = [0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral];
+            p.twist = 0.06 * s + 0.08 * lateral;
+            p.tilt = 0.05 * s + 0.04 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
+            p.head = 1.0;
+        }
+        Pose::ProneAim => {
+            // Same ground contact as prone, but the rifle is shouldered and the left hand reaches to the handguard.
+            p.prone = 1.0;
+            aim_arms(&mut p);
+            p.rifle += std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }
         Pose::Drop => return drop_params(phase),
@@ -991,7 +1002,7 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
 
     // Prone: the chest works against the elbows, with only a small head scan and rifle settle.
     // Keep the legs and body-to-ground transform fixed so the soldier never floats or sinks.
-    if pose == Pose::Prone {
+    if matches!(pose, Pose::Prone | Pose::ProneAim) {
         q.shoulder[0] += IDLE_PRONE_BREATH * breathe;
         q.shoulder[1] += IDLE_PRONE_BREATH * breathe;
         q.head += IDLE_PRONE_HEAD_BREATH * breathe;
@@ -1085,6 +1096,21 @@ pub fn drop_keys(t: f32) -> (Pose, Pose, f32) {
         (Pose::DropReach, Pose::DropPlant, (t - DROP_REACH) / (DROP_PLANT - DROP_REACH))
     } else {
         (Pose::DropPlant, Pose::Prone, (t - DROP_PLANT) / (1.0 - DROP_PLANT))
+    }
+}
+
+// The aimed drop follows the same hand-to-ground keys, entering and leaving through aimed stances so the rifle
+// does not snap down to Ready when the player changes stance while aiming.
+pub fn drop_aim_keys(t: f32) -> (Pose, Pose, f32) {
+    let t = t.clamp(0.0, 1.0);
+    if t < DROP_KNEEL {
+        (Pose::StandAim, Pose::CrouchAim, t / DROP_KNEEL)
+    } else if t < DROP_REACH {
+        (Pose::CrouchAim, Pose::DropReach, (t - DROP_KNEEL) / (DROP_REACH - DROP_KNEEL))
+    } else if t < DROP_PLANT {
+        (Pose::DropReach, Pose::DropPlant, (t - DROP_REACH) / (DROP_PLANT - DROP_REACH))
+    } else {
+        (Pose::DropPlant, Pose::ProneAim, (t - DROP_PLANT) / (1.0 - DROP_PLANT))
     }
 }
 

@@ -33,7 +33,7 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
   - `examples/anim_audit` checks foot slide, loop seams, grips and blends.
 - **Pose ids:**
   - Standing and moving: Stand 0, Walk 1, Run 2, Sprint 7, StandAim 6, Ready 30, Slung 28, Brake 31.
-  - Low: Crouch 3, CrouchWalk 11, CrouchAim 14, CoverAim 4, Cover 8, Prone 5, Crawl 32.
+  - Low: Crouch 3, CrouchWalk 11, CrouchAim 14, CoverAim 4, Cover 8, Prone 5, Crawl 32, ProneAim 36.
   - Leans and CQB: LeanLeft 12, LeanRight 13, Stack 15, Sweep 16.
   - Actions: Radio 9, Tablet 10, Throw 17, Reload 18, Signal 19, Drone 20, Aid 23.
   - Casualties: Wounded 21, Drag 22, Dead 24, DeadBack 27, FallBack 25, FallForward 26.
@@ -45,20 +45,26 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
   - raising and lowering the rifle (blend), falls, the commander's hard-stop brake;
   - reload (now the commander's too, through the battle's reload state).
 - **Partial:**
-  - crawl forward only (low crawl on elbows; no back or sideways yet; the rifle is cradled, not aimed);
+  - crawl forward, backwards and sideways using one direction-aware low-crawl cycle; prone aim layers over the crawl;
   - wounded idle; drag (crouch-walk legs plus drag arms).
 - **Static poses (no motion of their own):**
-  - cover, cover aim, prone, prone aim;
+  - cover, cover aim, prone (now breathing/scanning), prone aim (now active and layerable);
   - leans (peek), stack, signal, the radio and tablet holds, dead.
 - **Exist but not driven by AI decisions yet:** grenade throw (there is an action path, but it needs checking in the lab), drone launch.
 - **Missing:**
-  - stand ↔ crouch ↔ prone transitions (BF3 style, hand to the ground), including from the aim;
+  - stand ↔ crouch ↔ prone transitions (BF3-style hand plant), including an aimed transition path;
   - dive to cover, vault and step over obstacles, kneel to observe;
   - pistol (fire, reload) and weapon switching; handling per weapon class;
   - hit reactions while standing, limp, wounded crawl, carry, help up, death variations;
   - animation LOD (cheap poses for distant figures);
   - foot IK on slopes.
 - **Hook still missing:** incoming fire can already change a soldier's mind (cover first), but there is no visual "flinch / drop" reaction yet.
+
+### AN-2 implementation notes (15 Nov)
+- `ProneAim` is pose 36; it is a real two-handed prone firing pose and can layer over directional `Crawl`.
+- `Crawl` uses the animator's travel direction to reverse diagonal timing when backing up and to change support width when crawling sideways.
+- Aimed drop/get-up transitions use aimed endpoints and latch their animation path so reversing halfway up/down does not switch to the non-aimed keys.
+- `scripts/check.sh` and the animation audit are the merge gates; visual browser review remains a separate sign-off.
 
 ## AI: what exists (crate `scalia-ai`)
 - **`battle.rs`:** the close battle in fixed 50 ms steps, deterministic (integer mm/ms; native and WASM hashes match).
