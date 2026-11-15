@@ -118,10 +118,10 @@ export class FieldFeedback {
             head: 'HEAD', neck: 'NECK', chest: 'CHEST', abdomen: 'ABDOMEN',
             left_arm: 'LEFT ARM', right_arm: 'RIGHT ARM', left_leg: 'LEFT LEG', right_leg: 'RIGHT LEG',
           }[site] || String(site).toUpperCase().replaceAll('_', ' '));
-          const injuryNote = injuryNames.length ? \` INJURY SITES: \${[...new Set(injuryNames)].join(', ')}.\` : '';
-          if (health <= 0) this.say(\`KIA — NO VITAL SIGNS.\${injuryNote}\`, now, 2000);
-          else if (weapon.down) this.say(\`INCAPACITATED — \${weapon.stable ? 'BLEEDING CONTROLLED.' : \`BLEEDING \${weapon.bleed_per_sec || 1} HP / SEC.\`}\${injuryNote}\`, now, 2000);
-          else if (health < 100) this.say(\`WOUNDED — \${health}% HEALTH.\${injuryNote}\`, now, 2000);
+          const injuryNote = injuryNames.length ? ` INJURY SITES: \${[...new Set(injuryNames)].join(', ')}.` : '';
+          if (health <= 0) this.say(`KIA — NO VITAL SIGNS.\${injuryNote}`, now, 2000);
+          else if (weapon.down) this.say(`INCAPACITATED — \${weapon.stable ? 'BLEEDING CONTROLLED.' : `BLEEDING \${weapon.bleed_per_sec || 1} HP / SEC.`}\${injuryNote}`, now, 2000);
+          else if (health < 100) this.say(`WOUNDED — \${health}% HEALTH.\${injuryNote}`, now, 2000);
           else this.say('ALL VITAL SIGNS NORMAL.', now, 2000);
           this.progress.hidden = true;
           this.checkPhase = 'report';
