@@ -326,8 +326,8 @@
   #aimLine { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 19; pointer-events: none; overflow: visible; }
   #aimLine[hidden], #reticle[hidden], #aimDot[hidden] { display: none; }
   #aimLine line { vector-effect: non-scaling-stroke; }
-  /* One fixed, fully opaque reference dot and one live weapon point at 60% opacity. */
-  #reticle { position: fixed; left: calc(50% - 2px); top: calc(50% - 2px); width: 4px; height: 4px; z-index: 20;
+  /* Opaque pointer reference and live weapon point; both are centred on their translated coordinates. */
+  #reticle { position: fixed; left: -2px; top: -2px; width: 4px; height: 4px; z-index: 20;
     pointer-events: none; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.65); }
   #aimDot { position: fixed; left: -2px; top: -2px; width: 4px; height: 4px; z-index: 20; pointer-events: none;
     border-radius: 50%; background: rgba(255,255,255,0.6); box-shadow: 0 0 0 1px rgba(0,0,0,0.55); }
