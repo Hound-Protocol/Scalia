@@ -654,7 +654,7 @@ mod tests {
             d.vel = (0.0, speed);
             d.ts += d.dt;
             let pose = a.step(&d).pose;
-            assert!(matches!(pose, Pose::Walk | Pose::Run), "no unrelated pose at {speed}: {pose:?}");
+            assert_eq!(pose, Pose::Run, "run hysteresis holds above the down threshold at {speed}");
         }
     }
 }
