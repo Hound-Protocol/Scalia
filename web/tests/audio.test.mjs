@@ -44,12 +44,12 @@ class FakeAudioContext {
     connectedElements.add(element);
     return this.track(new FakeNode());
   }
-  createGain() { return this.track(new FakeNode()); }
-  createBiquadFilter() { return this.track(new FakeNode()); }
-  createPanner() { return this.track(new FakeNode()); }
-  createStereoPanner() { return this.track(new FakeNode()); }
-  createWaveShaper() { return this.track(new FakeNode()); }
-  createDelay() { return this.track(new FakeNode()); }
+  createGain() { return this.track(Object.assign(new FakeNode(), { nodeType: 'gain' })); }
+  createBiquadFilter() { return this.track(Object.assign(new FakeNode(), { nodeType: 'biquad' })); }
+  createPanner() { return this.track(Object.assign(new FakeNode(), { nodeType: 'panner' })); }
+  createStereoPanner() { return this.track(Object.assign(new FakeNode(), { nodeType: 'stereo-panner' })); }
+  createWaveShaper() { return this.track(Object.assign(new FakeNode(), { nodeType: 'waveshaper' })); }
+  createDelay() { return this.track(Object.assign(new FakeNode(), { nodeType: 'delay' })); }
   createBufferSource() {
     const source = this.track(new FakeNode());
     source.start = (...args) => { source.startArgs = args; };
@@ -371,9 +371,12 @@ test('spatial one-shots keep a full-strength dry signal when room processing is 
     [audio.rev.small, audio.rev.large, audio.rev.corridor].some((bus) => node.connections?.includes(bus)));
   assert.ok(reverbSends.some((send) => send.gain.value > 0.18), 'room reverb must remain audible');
   for (const send of reverbSends) assert.ok(send.gain.value <= 0.45, 'room reverb must remain bounded');
+  // Identify the echo branch's gain by its graph role: echo gain -> low-pass filter -> stereo panner -> mix.
+  // A panner also exposes gain in this fake Web Audio graph, so a generic .gain search can select the wrong node.
   const echoGain = voice.nodes.find((node) =>
-    node !== dry && node.gain && reachesWithin(node, audio.mix, 3) &&
-    (node.connections || []).some((next) => next !== audio.mix));
+    node.nodeType === 'gain' && node.gain.value > 0.25 && node.gain.value <= 0.5 &&
+    node.connections?.some((next) => next.nodeType === 'biquad') &&
+    reachesWithin(node, audio.mix, 3));
   assert.ok(echoGain, 'geometric echo gain node must route to the mix through its filter/panner chain');
   assert.ok(echoGain.gain.value > 0.25 && echoGain.gain.value <= 0.5, 'geometric echo must remain audible but bounded');
   audio.stopAll();
