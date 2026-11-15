@@ -520,8 +520,11 @@ mod tests {
             ((0.35, 0.0), -std::f32::consts::FRAC_PI_2),
         ] {
             d.vel = vel;
-            d.ts += d.dt;
-            let f = run(&mut a, 24, d);
+            let mut f = a.step(&d);
+            for _ in 1..24 {
+                d.ts += d.dt;
+                f = a.step(&d);
+            }
             assert_eq!(f.pose, Pose::Crawl);
             assert_eq!(f.upper, Some(Pose::ProneAim), "aim remains layered over the crawl");
             assert!((wrap(f.dir - expected)).abs() < 0.02, "direction {:?}: expected {expected}, got {}", vel, f.dir);
