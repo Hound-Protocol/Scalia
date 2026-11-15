@@ -77,3 +77,20 @@ fn a_magazine_runs_dry_and_reloads_from_the_spares() {
     assert_eq!(b.soldiers[me].pos, (50_000, 30_000));
     assert!(b.log.iter().all(|e| !matches!(e, Event::Shot { shooter, .. } if *shooter == me)));
 }
+
+#[test]
+fn confirmed_hits_record_anatomical_regions_and_misses_do_not() {
+    let (mut b, me) = duel(&[]);
+    b.soldiers[0].health = 10_000;
+    let shots = hold(&mut b, me, (0, 1_000), true, 40_000);
+    let confirmed = shots.iter().filter(|(hit, target)| *hit && *target == Some(0)).count();
+    assert!(confirmed > 0, "the deterministic duel should produce confirmed hits");
+    assert_eq!(b.soldiers[0].injuries.len(), confirmed);
+    assert!(b.soldiers[0].injuries.iter().all(|site| matches!(
+        site,
+        scalia_ai::battle::HitLocation::Head | scalia_ai::battle::HitLocation::Neck
+            | scalia_ai::battle::HitLocation::Chest | scalia_ai::battle::HitLocation::Abdomen
+            | scalia_ai::battle::HitLocation::LeftArm | scalia_ai::battle::HitLocation::RightArm
+            | scalia_ai::battle::HitLocation::LeftLeg | scalia_ai::battle::HitLocation::RightLeg
+    )));
+}
