@@ -9,6 +9,7 @@ fn nums(s: &str) -> Vec<f32> {
     Regex::new(r"-?\d+\.\d+").unwrap().find_iter(s).map(|m| m.as_str().parse().unwrap()).collect()
 }
 
+
 #[test]
 fn stride_calls_match() {
     let rs: Vec<Vec<f32>> = Regex::new(r"stride\(&mut p, phase, ([^)]*)\)").unwrap().captures_iter(RS).map(|c| nums(&c[1])).collect();
