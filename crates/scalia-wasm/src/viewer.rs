@@ -1976,29 +1976,34 @@ impl Viewer {
     /// E, on foot: the commander uses what is in reach. Returns "jukebox" when he is at the jukebox (the page
     /// opens its player), "door" when he opened or shut the nearest door, or "" with nothing in reach.
     pub fn interact(&mut self) -> String {
-        if self.scene != Scene::Ground {
+        let Some(target) = self.active_hint_data().into_iter().next() else {
             return String::new();
-        }
-        let me = ((self.cmd.0 * 1000.0) as i64, (self.cmd.1 * 1000.0) as i64);
-        let d2 = |p: (i64, i64)| ((p.0 - me.0) as f64).hypot((p.1 - me.1) as f64);
-        if jukebox_mm().is_some_and(|j| d2(j) < 2_000.0) {
-            return "jukebox".into();
-        }
-        let Some(a) = self.assault.as_mut() else { return String::new() };
-        let near = a.battle.doors.iter().enumerate().map(|(i, d)| (i, d2(d.at))).filter(|&(_, d)| d < 1_800.0).min_by(|x, y| x.1.total_cmp(&y.1));
-        let Some((i, _)) = near else { return String::new() };
-        use scalia_ai::doors::DoorState;
-        let me_soldier = a.battle.soldiers.iter().position(|s| s.player);
-        let to = match a.battle.doors[i].state {
-            DoorState::Open | DoorState::Breached => DoorState::Closed,
-            _ => DoorState::Open,
         };
-        // A breached door has nothing left to shut; a locked one does not give to a hand on the handle.
-        if matches!(a.battle.doors[i].state, DoorState::Breached | DoorState::Locked) {
-            return String::new();
+
+        match target.action.as_str() {
+            "jukebox" => "jukebox".into(),
+            "door" => {
+                let Some(index) = target.id.strip_prefix("door:").and_then(|id| id.parse::<usize>().ok()) else {
+                    return String::new();
+                };
+                let Some(assault) = self.assault.as_mut() else {
+                    return String::new();
+                };
+                let Some(door) = assault.battle.doors.get(index) else {
+                    return String::new();
+                };
+                use scalia_ai::doors::DoorState;
+                let to = match door.state {
+                    DoorState::Closed => DoorState::Open,
+                    DoorState::Open => DoorState::Closed,
+                    DoorState::Locked | DoorState::Breached => return String::new(),
+                };
+                let me_soldier = assault.battle.soldiers.iter().position(|soldier| soldier.player);
+                assault.battle.set_door(index, to, me_soldier);
+                "door".into()
+            }
+            _ => String::new(),
         }
-        a.battle.set_door(i, to, me_soldier);
-        "door".into()
     }
 
     pub fn scene_name(&self) -> String {
