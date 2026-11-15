@@ -660,15 +660,15 @@ fn grip_try(p: PP, x: vec4f) -> PP {
   return t;
 }
 // Port of pose.rs `grip`: puts the left palm back on the handguard (GRIP_TILT 0.6, GRIP_DAMP 0.05,
-// GRIP_STEPS 6, GRIP_MAX 0.7 (1.5 prone); GRIP_RIFLE_COST 0 so the rifle unknown never moves).
+// GRIP_STEPS 6, GRIP_MAX 0.7; GRIP_RIFLE_COST 0 so the rifle unknown never moves).
 fn grip(p_in: PP, w_in: f32) -> PP {
   let w = w_in * (1.0 - p_in.sling);
   if (w <= 0.0) { return p_in; }
   var p = p_in;
   p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
-  // The prone shoulder line is farther from the handguard; other poses retain the 0.7-rad cap.
-  let cap = select(0.7, 1.5, p.prone >= 0.999);
-  return reach_left(p, guard(p), w, cap);
+  // The prone body rotates the shoulder line with the whole figure: reach directly, without rifle pitch.
+  if (p.prone >= 0.999) { return reach_left(p_in, guard(p_in), w, 2.0); }
+  return reach_left(p, guard(p), w, 0.7);
 }
 
 // Port of pose.rs `reach_left_capped`: the left palm onto `goal`, each joint's correction softly capped at

@@ -263,15 +263,16 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     if w <= 0.0 {
         return *p;
     }
-    // First tilt the rifle (around the right hand) just enough to bring the handguard within the left arm's
-    // reach; then the arm alone can always get there.
+    // A prone body rotates the shoulder line with the whole figure, so tilting the rifle as in an upright
+    // stance moves the target the wrong way. Reach directly to the handguard instead.
+    if p.prone >= 0.999 {
+        return reach_left_capped(p, held(RIFLE_GUARD, p), w, REACH_MAX);
+    }
+    // Upright and crouched weapon poses use the normal rifle-pitch correction before arm reach.
     let mut p0 = *p;
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
-    // The prone shoulder line is farther from the handguard; allow this pose a longer reach without
-    // increasing correction caps for any standing, moving or crouched weapon pose.
-    let cap = if p.prone >= 0.999 { PRONE_GRIP_MAX } else { GRIP_MAX };
-    reach_left_capped(p, held(RIFLE_GUARD, p), w, cap)
+    reach_left_capped(p, held(RIFLE_GUARD, p), w, GRIP_MAX)
 }
 
 /// Puts the left palm on `target` (figure frame): damped least-squares steps on the left shoulder, elbow and
@@ -371,8 +372,6 @@ pub const GRIP_REACH: f32 = 0.595;
 const GRIP_TILT: f32 = 0.6;
 /// Largest correction `grip` makes to any one joint (radians, soft).
 const GRIP_MAX: f32 = 0.7;
-/// Prone aim needs a longer support-arm correction because the shouldered rifle lies close to the ground.
-const PRONE_GRIP_MAX: f32 = 1.5;
 
 /// `grip`'s weight while blending pose `a` into `b` (`w0` as given to `blend`, eased the same way).
 pub fn grip_weight(a: Pose, b: Pose, w0: f32) -> f32 {

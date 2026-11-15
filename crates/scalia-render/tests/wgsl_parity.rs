@@ -147,8 +147,10 @@ fn prone_aim_is_two_handed_in_the_shader() {
 
 
 #[test]
-fn prone_grip_limit_is_mirrored_without_changing_other_pose_limits() {
+fn prone_grip_uses_direct_reach_while_other_poses_keep_rifle_pitch_correction() {
+    assert!(RS.contains("if p.prone >= 0.999"));
+    assert!(RS.contains("reach_left_capped(p, held(RIFLE_GUARD, p), w, REACH_MAX)"));
     assert!(RS.contains("const GRIP_MAX: f32 = 0.7;"));
-    assert!(RS.contains("const PRONE_GRIP_MAX: f32 = 1.5;"));
-    assert!(WGSL.contains("select(0.7, 1.5, p.prone >= 0.999)"));
+    assert!(WGSL.contains("if (p.prone >= 0.999) { return reach_left(p_in, guard(p_in), w, 2.0); }"));
+    assert!(WGSL.contains("return reach_left(p, guard(p), w, 0.7);"));
 }
