@@ -183,5 +183,6 @@ I checked the claims against the code on 14 Nov:
 - Make the transition between near-ground chunks and far planetary terrain visually seamless.
 - Eliminate visible terrain popping, scale jumps and coverage gaps while preserving the existing camera/planet bend behaviour.
 - Keep both rendering paths from running at full detail simultaneously; avoid loading spikes and preserve the per-frame tile-generation budget.
+- Audit finding: near chunks currently use detailed `height_mm` samples and `zone_colour`; far tiles use the coarse height field and ice-aware `far_colour`. Align the handoff's height and material inputs before adding any visual cross-fade.
 - Remove the white stamina-ring/vignette buildup. Keep stamina drain, regeneration and sprint gating unchanged. Audio feedback will be designed later; do not add a replacement cue in this pass.
 - Muzzle flash: reduce the visible burst to a near-one-frame pulse (~16.7 ms at 60 Hz), with no fade-in/out. Keep the flash light equally brief and non-fading.
