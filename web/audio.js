@@ -125,10 +125,10 @@ export class AudioEngine {
   /// Route a persistent HTML media element through Auralis. A media element gets one source node for life.
   routeMedia(el, bus = 'ui') {
     if (!el || (typeof el !== 'object' && typeof el !== 'function')) return null;
-    const c = this.ensure(); if (!c) return null;
     const existing = MEDIA_ELEMENT_ROUTES.get(el);
-    if (existing) return existing.context === c && existing.bus === bus ? existing : null;
+    if (existing) return existing.bus === bus ? existing : null;
     if (MEDIA_ELEMENT_STREAMS.has(el)) return null;
+    const c = this.ensure(); if (!c) return null;
     const destination = bus === 'world' ? this.mediaFilter : bus === 'ui' ? this.ui : (bus && typeof bus.connect === 'function' ? bus : null);
     if (!destination) return null;
     let source;
