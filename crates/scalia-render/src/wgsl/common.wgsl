@@ -217,7 +217,14 @@ fn turn(q: vec3f, a: f32) -> vec3f {
   return vec3f(q.x * c - q.y * s, q.x * s + q.y * c, q.z);
 }
 
+// The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
+// of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
+const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(0.933810, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.985742), vec2f(0.500000, 1.510598), 0.600000, 0.987349, 0.718250, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 0.208495, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
+
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
+  if (pose == 34u) { return DROP_REACH_P; }
+  if (pose == 35u) { return DROP_PLANT_P; }
   let sw = sin(phase * 6.2831853);
   var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0);
   if (pose == 0u) {
@@ -511,40 +518,6 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   return p;
 }
 
-// The drop to prone (pose 33; port of pose.rs `drop_params`): ready, down on a knee (0.35), over onto the
-// planted left hand ahead on the knee (0.55), weight on it most of the way over (0.78), flat (1). Built from the ready (30), kneel (3) and prone (5).
-fn drop_params(t0: f32) -> PP {
-  let t = clamp(t0, 0.0, 1.0);
-  let ready = pose_params(30u, 0.0, 0.0);
-  let kneel = pose_params(3u, 0.0, 0.0);
-  let flat = pose_params(5u, 0.0, 0.0);
-  var plant = blend(kneel, flat, 0.65);
-  plant.lean = plant.lean + 0.9;
-  plant.hip = vec2f(0.9, 0.9);
-  plant.knee = vec2f(1.35, 1.35);
-  plant.drop = ground_drop(plant.hip, plant.knee, plant.side, plant.flat);
-  plant.sh.x = 0.9;
-  plant.el.x = 0.5;
-  plant.reach.x = 0.1;
-  plant.abd.x = 0.15;
-  plant.head = 0.6;
-  var reach = kneel;
-  reach.lean = 1.1;
-  reach.sh.x = 1.0;
-  reach.el.x = 0.1;
-  reach.reach.x = 0.1;
-  reach.abd.x = 0.15;
-  reach.head = 0.9;
-  if (t < 0.35) { return blend(ready, kneel, t / 0.35); }
-  if (t < 0.55) { return blend(kneel, reach, (t - 0.35) / 0.2); }
-  if (t < 0.78) { return blend(reach, plant, (t - 0.55) / 0.23); }
-  return blend(plant, flat, (t - 0.78) / 0.22);
-}
-// Any pose's parameters, the composed ones (the drop) included.
-fn params_of(pose: u32, phase: f32, dir: f32) -> PP {
-  if (pose == 33u) { return drop_params(phase); }
-  return pose_params(pose, phase, dir);
-}
 
 // A rifle point held in the right palm (port of pose.rs `held`): pitch around the grip, turn around the
 // vertical through it, then into the palm.
@@ -719,8 +692,8 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     let layer = floor(d.z);
     let turn = fract(d.z) * 6.2831853;
     let dir = select(turn, turn - 6.2831853, turn > 3.1415927);
-    var pp = params_of(u32(b.w), phase, dir);
-    if (w < 1.0) { pp = blend(params_of(u32(d.x), phase, dir), pp, w); }
+    var pp = pose_params(u32(b.w), phase, dir);
+    if (w < 1.0) { pp = blend(pose_params(u32(d.x), phase, dir), pp, w); }
     // Instance c.z: an upper-body stance (pose id + 1) over these legs, e.g. walking while aiming.
     let base = pp;
     if (layer >= 1.0) { pp = upper_over(base, pose_params(u32(layer - 1.0), phase, 0.0)); }

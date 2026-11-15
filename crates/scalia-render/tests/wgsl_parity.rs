@@ -64,3 +64,27 @@ fn action_keyframes_match() {
     assert_eq!(rs, wg);
     assert_eq!(sorted(rk), sorted(wk));
 }
+
+/// The drop's middle keys are literals in the shader (`DROP_REACH_P`, `DROP_PLANT_P`): they must be exactly the
+/// Rust poses. On a mismatch the message holds the literal to paste.
+#[test]
+fn drop_keys_match() {
+    use scalia_render::pose::{params, wgsl_literal, Pose};
+    for (name, pose) in [("DROP_REACH_P", Pose::DropReach), ("DROP_PLANT_P", Pose::DropPlant)] {
+        let want = wgsl_literal(&params(pose, 0.0));
+        let line = WGSL.lines().find(|l| l.starts_with(&format!("const {name}: PP = "))).unwrap_or("");
+        let got = line.trim_start_matches(&format!("const {name}: PP = ")).trim_end_matches(';');
+        let (a, b) = (nums(got), nums(&want));
+        assert!(a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-5), "const {name}: PP = {want};");
+    }
+}
+
+/// Shader compilers inline every call, and `pose_params` is the biggest function in the shader: each extra call in
+/// `animate` multiplies what the GPU driver must compile at load (a long compile can stall the whole browser).
+#[test]
+fn animate_evaluates_poses_at_most_four_times() {
+    let body = &WGSL[WGSL.find("fn animate(").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    assert!(body.matches("pose_params(").count() <= 4, "pose_params called {} times in animate", body.matches("pose_params(").count());
+    assert_eq!(WGSL.matches("pose_params(").count() - 1, body.matches("pose_params(").count(), "and nowhere else");
+}

@@ -90,6 +90,10 @@ pub enum Pose {
     /// backwards to get up: a knee to the ground, the left hand planted ahead, then down onto the front. Built from
     /// the ready, the kneel and prone (`drop_params`), so it always lands exactly on them.
     Drop = 33,
+    /// The drop's middle keys (`drop_params`): over the knee with the left palm reaching for the ground, and on
+    /// both knees with the left palm planted. Drawn only as keys of the drop.
+    DropReach = 34,
+    DropPlant = 35,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -125,6 +129,8 @@ impl Pose {
             31 => Pose::Brake,
             32 => Pose::Crawl,
             33 => Pose::Drop,
+            34 => Pose::DropReach,
+            35 => Pose::DropPlant,
             _ => Pose::Stand,
         }
     }
@@ -890,6 +896,8 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 1.0;
         }
         Pose::Drop => return drop_params(phase),
+        Pose::DropReach => return drop_reach(),
+        Pose::DropPlant => return drop_plant(),
         Pose::Prone => {
             p.prone = 1.0;
             p.shoulder = [2.8, 2.8];
@@ -1006,11 +1014,31 @@ pub const DROP_PLANT: f32 = 0.78;
 /// The drop to prone at phase `t` (`Pose::Drop`): ready, then down on a knee, then over onto the planted left
 /// hand, then flat. common.wgsl `drop_params` mirrors it.
 pub fn drop_params(t: f32) -> PoseParams {
+    let (from, to, u) = drop_keys(t);
+    blend(&params(from, 0.0), &params(to, 0.0), u)
+}
+
+/// The two keys of the drop around phase `t` and how far between them (0..1): the shader is handed these (the
+/// pose and the previous pose, with the blend set to `u`) instead of evaluating the drop itself, which kept the
+/// vertex shader small enough to compile quickly everywhere.
+pub fn drop_keys(t: f32) -> (Pose, Pose, f32) {
     let t = t.clamp(0.0, 1.0);
-    let (ready, kneel, flat) = (params(Pose::Ready, 0.0), params(Pose::Crouch, 0.0), params(Pose::Prone, 0.0));
-    // Most of the way over, the chest kept well down (so the head never rises as the body pivots from the knee
-    // to the boots), the left palm on the ground ahead taking the weight (found by search: 4 cm up, 0.8 m ahead
-    // of the boots); the rifle stays in the right hand.
+    if t < DROP_KNEEL {
+        (Pose::Ready, Pose::Crouch, t / DROP_KNEEL)
+    } else if t < DROP_REACH {
+        (Pose::Crouch, Pose::DropReach, (t - DROP_KNEEL) / (DROP_REACH - DROP_KNEEL))
+    } else if t < DROP_PLANT {
+        (Pose::DropReach, Pose::DropPlant, (t - DROP_REACH) / (DROP_PLANT - DROP_REACH))
+    } else {
+        (Pose::DropPlant, Pose::Prone, (t - DROP_PLANT) / (1.0 - DROP_PLANT))
+    }
+}
+
+/// Most of the way over, the chest kept well down (so the head never rises as the body pivots from the knee to the
+/// boots), the left palm on the ground ahead taking the weight (found by search: 4 cm up, 0.8 m ahead of the
+/// boots); the rifle stays in the right hand.
+fn drop_plant() -> PoseParams {
+    let (kneel, flat) = (params(Pose::Crouch, 0.0), params(Pose::Prone, 0.0));
     let mut plant = blend(&kneel, &flat, 0.65);
     plant.lean += 0.9;
     // On both knees under him (search: knees about 20 cm up as drawn, boots on the ground), not floating.
@@ -1022,24 +1050,31 @@ pub fn drop_params(t: f32) -> PoseParams {
     plant.reach[0] = 0.1;
     plant.abduct[0] = 0.15;
     plant.head = 0.6;
-    // Between them, still on the knee: chest down over it and the left palm on the ground just ahead (search:
-    // about 15 cm up, 45 cm ahead), so he goes over onto the hand instead of rising off the knee.
-    let mut reach = kneel;
+    plant
+}
+
+/// Between the kneel and the plant, still on the knee: chest down over it and the left palm on the ground just
+/// ahead (search: about 15 cm up, 45 cm ahead), so he goes over onto the hand instead of rising off the knee.
+fn drop_reach() -> PoseParams {
+    let mut reach = params(Pose::Crouch, 0.0);
     reach.lean = 1.1;
     reach.shoulder[0] = 1.0;
     reach.elbow[0] = 0.1;
     reach.reach[0] = 0.1;
     reach.abduct[0] = 0.15;
     reach.head = 0.9;
-    if t < DROP_KNEEL {
-        blend(&ready, &kneel, t / DROP_KNEEL)
-    } else if t < DROP_REACH {
-        blend(&kneel, &reach, (t - DROP_KNEEL) / (DROP_REACH - DROP_KNEEL))
-    } else if t < DROP_PLANT {
-        blend(&reach, &plant, (t - DROP_REACH) / (DROP_PLANT - DROP_REACH))
-    } else {
-        blend(&plant, &flat, (t - DROP_PLANT) / (1.0 - DROP_PLANT))
-    }
+    reach
+}
+
+/// The shader's literal for a fixed pose (`const` in common.wgsl), field for field in its `PP` order.
+pub fn wgsl_literal(p: &PoseParams) -> String {
+    let f = |x: f32| format!("{x:.6}");
+    let v = |a: [f32; 2]| format!("vec2f({}, {})", f(a[0]), f(a[1]));
+    format!(
+        "PP({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        f(p.lean), v(p.hip), v(p.knee), v(p.shoulder), v(p.elbow), f(p.head), f(p.rifle), f(p.prone), f(p.drop),
+        v(p.reach), f(p.sling), f(p.bob), f(p.twist), f(p.look), v(p.abduct), f(p.rifle_yaw), v(p.side), f(p.flat), f(p.tilt)
+    )
 }
 
 fn kneel(p: &mut PoseParams) {

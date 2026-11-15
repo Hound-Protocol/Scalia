@@ -386,6 +386,16 @@ impl Animator {
     /// him.
     pub fn record(&self, f: &Frame, at: (f32, f32, f32), colour: f32, kick: f32, flinch: f32, fade: f32) -> [f32; 12] {
         let remaining = 1.0 - ((self.clock - self.upper.2) / LAYER_BLEND_S).clamp(0.0, 1.0);
+        // On the drop the shader is handed its two keys around the phase as pose and previous pose, with the blend
+        // set to how far between them he is (pose.rs `drop_keys`); a drop interrupted mid-way blends from the kneel.
+        let (pose, prev, since) = match (f.pose, self.shown.1) {
+            (Pose::Drop, _) => {
+                let (from, to, u) = pose::drop_keys(f.phase);
+                (to, from, self.clock - u * pose::BLEND_S)
+            }
+            (p, Pose::Drop) => (p, Pose::Crouch, self.shown.2),
+            (p, before) => (p, before, self.shown.2),
+        };
         [
             at.0,
             at.1,
@@ -394,9 +404,9 @@ impl Animator {
             f.heading,
             f.phase,
             f.cadence,
-            pose::pack_kick(f.pose, kick),
-            pose::pack_flinch(self.shown.1, flinch),
-            self.shown.2,
+            pose::pack_kick(pose, kick),
+            pose::pack_flinch(prev, flinch),
+            since,
             pose::pack_layer(f.upper, f.dir),
             pose::pack_fade_layer(fade, Some(self.upper.1), remaining),
         ]
@@ -575,5 +585,29 @@ mod tests {
             heard += a.step(&d).footfall.is_some() as usize;
         }
         assert!((3..=6).contains(&heard), "about two steps a second: {heard}");
+    }
+
+    #[test]
+    fn the_drop_reaches_the_shader_as_two_keys_and_a_blend() {
+        use scalia_render::pose::{drop_keys, BLEND_S};
+        let mut a = Animator::new(0.0);
+        run(&mut a, 3, drive(0.0));
+        let mut d = drive(1.0);
+        d.stance = Stance::Prone;
+        let mut seen = 0;
+        for k in 0..90 {
+            d.ts = 1.0 + k as f32 / 60.0;
+            let f = a.step(&d);
+            if f.pose != Pose::Drop {
+                continue;
+            }
+            seen += 1;
+            let r = a.record(&f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
+            let (from, to, u) = drop_keys(f.phase);
+            assert_eq!((r[7] as u32, r[8] as u32), (to as u32, from as u32));
+            assert!(((d.ts - r[9]) / BLEND_S - u).abs() < 1e-4, "the blend is how far between the keys");
+            assert!(r[7] as u32 != Pose::Drop as u32 && r[8] as u32 != Pose::Drop as u32, "the shader never sees the drop");
+        }
+        assert!(seen > 20);
     }
 }
