@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo "== browser audio routing regression tests"
+node --test web/tests/audio.test.mjs
+
 echo "== cargo test --workspace (debug)"
 cargo test --workspace -q
 echo "== cargo test --workspace --release"
