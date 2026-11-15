@@ -972,6 +972,14 @@ impl Viewer {
                 return (c.x, c.y, scalia_audio::camera_height_m(self.map_cam.ground_view));
             }
         }
+        // During the playable assault, the camera can lag behind or remain centred on the
+        // battlefield while the commander moves independently. The ears must follow the
+        // controlled soldier, otherwise his own muzzle appears to move left/right with WASD.
+        if self.scene == Scene::Ground && self.assault.is_some() && self.intro.is_none() && self.cine.is_none() {
+            let eye = match self.gun.stance { 1 => 1.05, 2 => 0.35, _ => 1.55 };
+            let ground = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
+            return (self.cmd.0 as f32, self.cmd.1 as f32, ground + eye);
+        }
         let (target, _, view_h) = self.last_cam;
         let (x, y) = (target.x as f64 + self.origin.0, target.y as f64 + self.origin.1);
         (x as f32, y as f32, scalia_audio::camera_height_m(view_h))
