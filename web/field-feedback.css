@@ -13,8 +13,8 @@
 .field-report { position:absolute; transform:translate(-50%,-100%); max-width:320px; padding:4px 8px; color:#fff; background:rgba(0,0,0,.36); border-bottom:1px solid rgba(255,255,255,.6); font-size:11px; letter-spacing:.04em; text-shadow:0 1px 4px #000; white-space:nowrap; animation:field-pop .16s ease-out both; }
 .field-stance { position:absolute; right:22px; top:50%; padding:5px 8px; border:1px solid rgba(255,255,255,.42); background:rgba(0,0,0,.22); font-size:9px; letter-spacing:.12em; text-shadow:0 1px 3px #000; }
 #weapon { display:none !important; }
-#fieldFeedback.field-hit { animation:field-impact .24s steps(2,end) 1; }
+#view.field-hit { animation:field-impact .32s steps(2,end) 1; }
 @keyframes field-hurt-pulse { from { opacity:.55; } to { opacity:1; } }
 @keyframes field-pop { from { opacity:0; transform:translate(-50%,-100%) scale(.92); } to { opacity:1; transform:translate(-50%,-100%) scale(1); } }
-@keyframes field-impact { 0% { transform:translate(0,0); } 25% { transform:translate(-9px,5px); } 50% { transform:translate(7px,-6px); } 75% { transform:translate(-4px,-2px); } 100% { transform:translate(0,0); } }
-@media (prefers-reduced-motion:reduce) { #fieldFeedback.field-hit { animation:none; } .field-vignette--hurt { animation:none; } }
+@keyframes field-impact { 0% { transform:translate(0,0) rotate(0); } 20% { transform:translate(-15px,8px) rotate(-.35deg); } 45% { transform:translate(12px,-10px) rotate(.28deg); } 70% { transform:translate(-6px,-3px) rotate(-.12deg); } 100% { transform:translate(0,0) rotate(0); } }
+@media (prefers-reduced-motion:reduce) { #view.field-hit { animation:none; } .field-vignette--hurt { animation:none; } }
