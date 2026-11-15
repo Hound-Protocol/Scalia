@@ -206,8 +206,10 @@ export class AudioEngine {
   }
 
   stopAll() {
-    for (const voice of [...this.active]) this._stopVoice(voice, 'shutdown');
-    for (const voice of [...this.tails]) this._cleanupVoice(voice);
+    for (const voice of [...this.voices]) {
+      if (!voice.done) this._stopVoice(voice, 'shutdown');
+      this._cleanupVoice(voice);
+    }
   }
 
   /// HDR preset: 'hifi' (60 dB window) or 'wartapes' (25 dB).
