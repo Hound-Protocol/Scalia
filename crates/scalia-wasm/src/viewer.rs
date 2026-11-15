@@ -966,7 +966,7 @@ impl Viewer {
     }
     /// Where the ears are: the camera (x, y, height; m). Above the middle of the view, as high as the view is
     /// big; while the tablet is up, above the middle of its map.
-    fn audio_listener(&self) -> (f32, f32, f32) {
+    fn audio_listener(&mut self) -> (f32, f32, f32) {
         if self.tablet {
             if let Some(c) = self.map_cam.ground_cam {
                 return (c.x, c.y, scalia_audio::camera_height_m(self.map_cam.ground_view));
@@ -1005,7 +1005,7 @@ impl Viewer {
         r
     }
     /// Where the ears are for what stands between: the commander's head on foot, the camera on the tablet.
-    fn ear(&self) -> (f32, f32) {
+    fn ear(&mut self) -> (f32, f32) {
         if self.tablet {
             let l = self.audio_listener();
             return (l.0, l.1);
