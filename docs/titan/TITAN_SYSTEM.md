@@ -129,3 +129,10 @@ Implemented in `crates/scalia-ai/src/titan.rs`:
 - Unit tests cover duplicate/missing parent rejection, authority validation and succession.
 
 **Integration boundary:** this registry is currently an additive authority model. Existing `Battle::command`, squad `Brain`, save format and tactical execution are unchanged. Battle submission/persistence integration is deferred until its replay and save compatibility can be tested end-to-end.
+
+
+## AI-03 implementation
+
+Implemented the additive lifecycle model in `crates/scalia-ai/src/titan_tasks.rs` (`TitanTaskBoard`). Tasks carry stable IDs, issuer/assignee, the existing `leader::Order`, priority, state and progress. Transitions are explicit and append ordered events. Interruption and blockage can resume; reassignment requires fresh acknowledgement and preserves progress; completion, failure and cancellation are terminal.
+
+**Integration boundary:** the task board is serializable but is not yet connected to `Battle::submit`, `Battle::apply_commands`, `Battle::history`, save/load or squad `Brain`. Those paths currently define the battle's replay and persistence contract. Wiring task state into them requires a deliberate save-format and replay migration, so AI-03 establishes and tests the lifecycle contract without changing combat execution.
