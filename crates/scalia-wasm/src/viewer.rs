@@ -307,6 +307,7 @@ pub struct Viewer {
     far_fade: Option<(u32, f64)>,
     /// Zoom: the ladder step aimed at and the view height (metres) the camera is gliding through.
     zoom_step: usize,
+    inspect_zoom: Option<usize>,
     zoom_m: f32,
     last_frame_ms: f64,
     planet: Planet,
@@ -485,6 +486,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         agent_now: 0.0,
         far_fade: None,
         zoom_step: STEP_GROUND,
+        inspect_zoom: None,
         zoom_m: LADDER[STEP_GROUND],
         last_frame_ms: 0.0,
         planet: Planet::demo(42),
@@ -2047,6 +2049,17 @@ impl Viewer {
     }
     /// Mouse wheel: one call is one step of the zoom ladder (positive zooms out); the camera glides there.
     /// One zoom step in or out; true when the view actually changed (not already at the end of the ladder).
+    /// Temporarily bring the camera in for the commander's self-check, restoring the exact prior zoom.
+    pub fn commander_inspect(&mut self, on: bool) {
+        if on {
+            if self.inspect_zoom.is_none() && self.scene == Scene::Ground && !self.tablet {
+                self.inspect_zoom = Some(self.zoom_step);
+                self.zoom_step = 0;
+            }
+        } else if let Some(step) = self.inspect_zoom.take() {
+            self.zoom_step = step;
+        }
+    }
     pub fn wheel(&mut self, delta: f64) -> bool {
         if self.scene == Scene::Ships {
             // The model viewer zooms freely.
