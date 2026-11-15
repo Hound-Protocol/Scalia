@@ -293,7 +293,7 @@ export function createMenu({ viewer, onEnter }) {
   const at3 = (o, d, az, el) => [o[0] + d * Math.cos(el) * Math.cos(az), o[1] + d * Math.cos(el) * Math.sin(az), o[2] + d * Math.sin(el)];
   const PULL_EYE = at3(REST_AT, 2.9, restAz, 20 * Math.PI / 180);
   // The galactic angle on home: isometric (35.3 degrees down), close in, turning to the right.
-  const ISO_EL = Math.atan(1 / Math.SQRT2), ISO_D = 0.42, ORBIT = 0.05; // rad/s
+  const ISO_EL = Math.atan(1 / Math.SQRT2), ISO_D = 1.35, ORBIT = 0.05; // rad/s; far enough to see the arms round home
   const homeAt = (spin) => { const c = Math.cos(spin), s = Math.sin(spin); return [galaxy.home[0] * c - galaxy.home[1] * s, galaxy.home[0] * s + galaxy.home[1] * c, galaxy.home[2]]; };
 
   function drawMarks(project, now, alpha) {
