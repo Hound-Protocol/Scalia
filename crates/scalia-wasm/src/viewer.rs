@@ -1555,15 +1555,15 @@ impl Viewer {
     /// The commander's weapon for the page, as JSON: rounds in the rifle and spare, reloading, slung, stance,
     /// rounds fired so far, health (0..100), and the aim line [x0, y0, x1, y1] (screen fractions) while aiming.
     pub fn commander_weapon_state(&mut self) -> String {
-        let (ammo, spare, reloading, health) = match self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)) {
-            Some(s) => (s.ammo, s.mags * scalia_ai::battle::MAG, s.reloading_ms > 0, s.health.max(0)),
-            None => (scalia_ai::battle::MAG, COMMANDER_MAGS * scalia_ai::battle::MAG, false, 100),
+        let (ammo, spare, reloading, health, down, stable) = match self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)) {
+            Some(s) => (s.ammo, s.mags * scalia_ai::battle::MAG, s.reloading_ms > 0, s.health.max(0), s.down(), s.stable()),
+            None => (scalia_ai::battle::MAG, COMMANDER_MAGS * scalia_ai::battle::MAG, false, 100, false, false),
         };
         let line = self.gun.line.map_or("null".to_string(), |l| format!("[{:.4},{:.4},{:.4},{:.4}]", l[0], l[1], l[2], l[3]));
         // How wide the rounds go now (0 steady .. 1 wild): moving, standing up and the hip open it; crouched or
         // prone and still close it. The page sizes the reticle by it.
         let spread = self.gun_spread();
-        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"spread\":{spread:.3},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots)
+        format!("{{\"ammo\":{ammo},\"spare\":{spare},\"reloading\":{reloading},\"slung\":{},\"stance\":{},\"shots\":{},\"health\":{health},\"down\":{down},\"stable\":{stable},\"bleed_per_sec\":{},\"spread\":{spread:.3},\"line\":{line}}}", self.gun.slung, self.gun.stance, self.gun.shots, if down && !stable { 1 } else { 0 })
     }
     /// Raises or lowers the tablet. The field view stays on the commander; the map has its own camera, which
     /// starts over the commander.

@@ -85,11 +85,10 @@ export class FieldFeedback {
     if (!on) { this.cancelHealthCheck(now); this.rStarted = 0; this.hurt.hidden = true; this.fatigue.hidden = true; return; }
 
     const health = Number.isFinite(weapon.health) ? weapon.health : 100;
-    if (health < this.lastHealth) {
+    // A real shot removes multiple health points; the downed bleed tick removes only one.
+    // Do not replay impact feedback while the commander is already on the ground.
+    if (health <= this.lastHealth - 2) {
       this.hitUntil = now + 900;
-      this.canvas.classList.remove('field-hit');
-      void this.canvas.offsetWidth;
-      this.canvas.classList.add('field-hit');
       this.say('I’m hit!', now, 1100);
     }
     this.lastHealth = health;
@@ -115,8 +114,10 @@ export class FieldFeedback {
         this.progressBar.style.width = (p * 100).toFixed(1) + '%';
         if (p >= 1) {
           this.checkDone = true;
-          if (health >= 100) this.say('I’m all well.', now, 2000);
-          else this.say('I’ve been hit. I can’t identify the wound yet.', now, 2000);
+          if (health <= 0) this.say('KIA — NO VITAL SIGNS.', now, 2000);
+          else if (weapon.down) this.say(weapon.stable ? 'INCAPACITATED — BLEEDING CONTROLLED.' : `INCAPACITATED — BLEEDING ${weapon.bleed_per_sec || 1} HP / SEC.`, now, 2000);
+          else if (health < 100) this.say(`WOUNDED — ${health}% HEALTH. WOUND LOCATION NOT YET TRACKED.`, now, 2000);
+          else this.say('ALL VITAL SIGNS NORMAL.', now, 2000);
           this.progress.hidden = true;
           this.checkPhase = 'report';
           this.checkPhaseAt = now;
