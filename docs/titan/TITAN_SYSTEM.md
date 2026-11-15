@@ -1,6 +1,6 @@
 # Titan System
 
-**Status:** Architecture definition  
+**Status:** Architecture definition + AI-01 command registry foundation  
 **Scope:** Unified AI architecture for Scalia  
 **Current implementation:** `scalia-ai` crate
 
@@ -116,3 +116,16 @@ Squad and soldier execution remain specialised. Do not force every layer through
 - **AI-02:** Define Titan Intelligence contracts and cross-squad information sharing.
 - **AI-03:** Define task lifecycle, interruption and recovery; then integrate the squad GOAP domain with real facts and executable actions.
 - **AI-04:** Add formation-level coordination only after command ownership and intelligence contracts are stable.
+
+
+## AI-01 implementation
+
+Implemented in `crates/scalia-ai/src/titan.rs`:
+
+- Stable command-node IDs and Commander / Operations / Squad Leader roles.
+- Validated hierarchy registration and squad command ownership.
+- Existing `leader::Order` reused as the squad command payload.
+- Deterministic succession to the nearest active ancestor authorised to own squads; assignments are cleared if no valid successor exists.
+- Unit tests cover duplicate/missing parent rejection, authority validation and succession.
+
+**Integration boundary:** this registry is currently an additive authority model. Existing `Battle::command`, squad `Brain`, save format and tactical execution are unchanged. Battle submission/persistence integration is deferred until its replay and save compatibility can be tested end-to-end.
