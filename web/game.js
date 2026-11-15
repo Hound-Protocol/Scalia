@@ -203,6 +203,7 @@ try {
     else if (info) gpuNote = ` | ${[info.vendor, info.architecture].filter(Boolean).join(' ')}`;
   } catch { /* informational only */ }
   const v = await wasm.start_viewer(canvas);
+  window.scaliaBoot?.update({ phase: 'Ready', ok: true, label: 'WebAssembly viewer initialized' });
   const pixelScale = (h) => Math.max(1, Math.round(h / 300)); // about 300 internal rows on any screen
   function resize() { const [w, h] = fit(); v.resize(w, h); v.set_pixel_scale(pixelScale(h)); }
   addEventListener('resize', resize);
