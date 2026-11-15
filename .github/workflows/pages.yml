@@ -48,8 +48,12 @@ jobs:
           # Updates are named by area with a running number per area, e.g. "Tablet update V 001": the area is the
           # commit's "Update:" trailer (no trailer: "Build"), the number counts that area's updates so far.
           area=$(git log -1 --format='%(trailers:key=Update,valueonly)' | head -1 | xargs)
-          if [ -z "$area" ]; then area=Build; count=$(git rev-list --count HEAD); else
-            count=$(git log --format='%(trailers:key=Update,valueonly)' | xargs -L1 | grep -cxF "$area"); fi
+          if [ -z "$area" ]; then
+            area=Build
+            count=$(git log --format='%H%x1f%(trailers:key=Update,valueonly)' | python3 -c 'import sys; print(sum(not line.rstrip("\\n").split("\\x1f", 1)[1].strip() for line in sys.stdin))')
+          else
+            count=$(git log --format='%(trailers:key=Update,valueonly)' | xargs -L1 | grep -cxF "$area")
+          fi
           n=$(printf '%s update V %03d' "$area" "$count")
           title=""
           # The game's version: the stage and series in VERSION (e.g. "Alpha 0.1"), then how many updates have
@@ -72,8 +76,9 @@ jobs:
                   # An Update: line not set off as a trailer (no blank line before it) still counts.
                   m = re.search(r'^Update:\s*(.+)$', body, re.M)
                   area = m.group(1).strip() if m else ''
+              # Match the build banner: commits without an Update: trailer are Build updates.
               if not area:
-                  continue
+                  area = 'Build'
               count[area] = count.get(area, 0) + 1
               # Everything in the commit: its subject and every line of its description (not the trailers).
               # Rejoin hard-wrapped lines: a new line only for a new item ("- ") or after a blank line.
