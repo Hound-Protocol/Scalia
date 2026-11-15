@@ -10,11 +10,6 @@ const element = () => ({
   removeChild(node) { this.children.splice(this.children.indexOf(node), 1); },
   get firstChild() { return this.children[0] ?? null; },
 });
-const makeLine = () => {
-  const line = element();
-  return { ...line, querySelector: () => line, ownerDocument: { createElementNS: () => element() }, group: line };
-};
-
 test('keeps a solid centre reference and follows the character muzzle aim point', () => {
   const canvas = { clientWidth: 1000, clientHeight: 500, style: {} };
   const group = element(), line = { hidden: true, querySelector: () => group, ownerDocument: { createElementNS: () => element() } };
