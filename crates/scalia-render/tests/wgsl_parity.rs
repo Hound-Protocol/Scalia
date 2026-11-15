@@ -135,3 +135,13 @@ fn crawl_directional_terms_match_in_rust_and_wgsl() {
         assert_eq!(rust, shader, "crawl directional parameter parity for {term}");
     }
 }
+
+
+#[test]
+fn prone_aim_is_two_handed_in_the_shader() {
+    use scalia_render::pose::{two_handed, Pose};
+    let body = &WGSL[WGSL.find("fn two_handed(").unwrap()..];
+    let body = &body[..body.find("\n").unwrap()];
+    assert!(body.contains("pose == 36u"), "shader grip correction must include ProneAim");
+    assert_eq!(two_handed(Pose::ProneAim), 1.0);
+}
