@@ -353,8 +353,8 @@ test('spatial one-shots keep a full-strength dry signal when room processing is 
   assert.ok(handle);
   const voice = [...audio.voices][0];
   assert.equal(voice.nodes[7].gain.value, 1, 'dry path must not be attenuated by room wetness');
-  assert.ok(voice.nodes[11].gain.value <= 0.18, 'reverb send must remain subordinate to dry signal');
-  assert.ok(voice.nodes[13].gain.value <= 0.25, 'geometric echo must remain subordinate to dry signal');
+  assert.ok(voice.nodes[11].gain.value > 0.18 && voice.nodes[11].gain.value <= 0.45, 'room reverb must remain audible without overwhelming dry signal');
+  assert.ok(voice.nodes[13].gain.value > 0.25 && voice.nodes[13].gain.value <= 0.5, 'geometric echo must remain audible but bounded');
   audio.stopAll();
 });
 
@@ -368,7 +368,7 @@ test('persistent streams keep a full-strength dry signal and restrained reverb s
   assert.ok(voice);
   voice.place([0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 4, 0]);
   assert.equal(context.createdNodes[9].gain.value, 1);
-  for (const send of context.createdNodes.slice(10)) {
-    if (send.gain) assert.ok(send.gain.value <= 0.1);
-  }
+  const sends = context.createdNodes.slice(10).filter((send) => send.gain);
+  assert.ok(sends.some((send) => send.gain.value > 0.1), 'persistent media must carry audible room reverb');
+  for (const send of sends) assert.ok(send.gain.value <= 0.35, 'persistent media reverb stays bounded');
 });
