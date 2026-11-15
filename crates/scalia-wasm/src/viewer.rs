@@ -15,9 +15,8 @@ fn camera_listener_position(target: Vec3, view_height: f32, origin: (f64, f64)) 
     )
 }
 
-/// Acoustic obstruction uses the propagation field for an on-foot listener, where diffraction around
-/// corners and open doors matters. The tablet listener is physically at camera height, so trace the actual
-/// 3D line instead of incorrectly applying a ground-level field to an elevated listener.
+/// Acoustic obstruction is evaluated along the rendered camera's 3D line of sight. A ground-level
+/// propagation field would incorrectly place the listener at the commander's feet when zoomed out.
 fn sound_occlusion(
     sight: &scalia_ai::sight::SightGrid,
     field: Option<&scalia_audio::Field>,
@@ -114,8 +113,6 @@ const PLANET_R: f32 = 651_898.6;
 const GROUND_TOP: f32 = 4.0 * PLANET_R;
 /// The zoom ladder: view heights in metres, one wheel notch per step. Up to GROUND_TOP the ground scene draws
 /// them (squad, platoon, company, battlefield, region, globe); above it the star system does (orbit to system).
-/// How far round the ears sound is followed through and round things (m); beyond, straight lines.
-const AUDIO_FIELD_M: f32 = 32.0;
 /// From the commander, where gunfire starts to sound distant (m): the edge of the closest view.
 const FAR_FROM_M: f32 = 12.0;
 const LADDER: [f32; 21] = [
@@ -266,9 +263,6 @@ pub struct Viewer {
     /// The acoustic space per 2 m square of the testing ground (cleared when the map changes).
     audio_spaces: std::collections::HashMap<(i32, i32), scalia_audio::Env>,
     audio_reflectors: std::collections::HashMap<(i32, i32), Vec<(f32, f32)>>,
-    /// How sound reaches the commander's ears through and round everything near him, and what it was built for
-    /// (his metre square, the doors' states).
-    audio_field: Option<(scalia_audio::Field, (i32, i32, u64))>,
     /// How the next squad move is to be made (chosen on the radio).
     order_mode: Option<scalia_ai::leader::Mode>,
     /// Muzzle flashes, tracers, hits and blasts on screen, and this frame's lights from them.
@@ -450,7 +444,6 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         lab_wound: None,
         audio_spaces: std::collections::HashMap::new(),
         audio_reflectors: std::collections::HashMap::new(),
-        audio_field: None,
         order_mode: None,
         fx: crate::effects::Effects::default(),
         fx_lights: Vec::new(),
@@ -868,7 +861,6 @@ impl Viewer {
         self.base_grid.rebuild(&self.base_props);
         self.audio_spaces.clear();
         self.audio_reflectors.clear();
-        self.audio_field = None;
         let m = base_mesh(&self.base_props, self.base_h);
         self.gpu.upload("base", m.bytes());
         self.demo = false;
@@ -1011,20 +1003,10 @@ impl Viewer {
         self.audio_reflectors.insert(key, r.clone());
         r
     }
-    /// Where the ears are for what stands between: the commander's head on foot, the camera on the tablet.
+    /// Where the camera listener is for what stands between.
     fn ear(&self) -> (f32, f32) {
         let listener = self.audio_listener();
         (listener.0, listener.1)
-    }
-    /// The propagation field round the ears, rebuilt when they move a metre or a door opens or shuts.
-    fn ensure_field(&mut self, ear: (f32, f32)) {
-        let Some(a) = self.assault.as_ref() else { return };
-        let doors = a.battle.sight.doors.iter().enumerate().fold(0u64, |h, (i, d)| h.wrapping_mul(31).wrapping_add(i as u64 * 7 + d.shut() as u64));
-        let key = (ear.0.floor() as i32, ear.1.floor() as i32, doors);
-        if self.audio_field.as_ref().is_some_and(|f| f.1 == key) {
-            return;
-        }
-        self.audio_field = Some((scalia_audio::Field::build(&a.battle.sight, (key.0 as f32 + 0.5, key.1 as f32 + 0.5), AUDIO_FIELD_M), key));
     }
     /// The space at a spot (open field, room, corridor), remembered per 2 m square until the map changes.
     fn space_at(&mut self, x: f32, y: f32) -> scalia_audio::Env {
@@ -4496,7 +4478,7 @@ mod audio_spatial_tests {
         let sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[wall]);
         let ear = (40.0, 50.0);
         let source = (60.0, 50.0);
-        let tablet = sound_occlusion(&sight, None, ear, source, 4.0, true);
-        assert!(tablet.wall_db >= 40.0, "{tablet:?}");
+        let camera = sound_occlusion(&sight, None, ear, source, 4.0, true);
+        assert!(camera.wall_db >= 40.0, "{camera:?}");
     }
 }
