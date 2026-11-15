@@ -1,6 +1,6 @@
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of, Part};
-use scalia_render::pose::{reach_left, reload_target, blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, Pose, PoseParams, Side, RIFLE_GUARD};
+use scalia_render::pose::{reach_left, reload_target, blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, barrel_with_phases, Pose, PoseParams, Side, RIFLE_GUARD, RIFLE};
 
 /// All figure vertices in a pose at a gait phase, in the figure's own frame (facing +y).
 fn posed(pose: Pose, phase: f32) -> Vec<(Part, Vec3)> {
@@ -54,7 +54,7 @@ fn crouching_is_lower_and_prone_is_flat() {
 
 #[test]
 fn aiming_points_the_rifle_forward_at_shoulder_height() {
-    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45)] {
+    for (pose, lo, hi) in [(Pose::StandAim, 1.2, 1.55), (Pose::CoverAim, 0.75, 1.25), (Pose::Prone, 0.05, 0.45), (Pose::ProneAim, 0.05, 0.45)] {
         let v = posed(pose, 0.0);
         let rifle: Vec<Vec3> = v.iter().filter(|p| p.0 == Part::Rifle).map(|p| p.1).collect();
         let tip = rifle.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
@@ -94,7 +94,7 @@ fn walking_swings_the_legs_and_running_leans_forward() {
 
 #[test]
 fn pose_ids_round_trip() {
-    for p in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::Cover, Pose::CoverAim, Pose::Prone, Pose::StandAim] {
+    for p in [Pose::Stand, Pose::Walk, Pose::Run, Pose::Sprint, Pose::Crouch, Pose::Cover, Pose::CoverAim, Pose::Prone, Pose::StandAim, Pose::ProneAim] {
         assert_eq!(Pose::from_id(p as u32), p);
     }
     assert_eq!(Pose::from_id(99), Pose::Stand);
@@ -141,6 +141,23 @@ fn prone_soldier_lifts_his_head_rests_on_his_elbows_and_shoulders_the_rifle() {
     // Rifle out in front of the head, at head height, butt near the shoulder.
     assert!(max(&rifle).y > max(&head).y + 0.2, "rifle tip {} behind head {}", max(&rifle).y, max(&head).y);
     assert!(min(&rifle).y < max(&head).y, "rifle butt not at the shoulder");
+}
+
+#[test]
+fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
+    let base = params(Pose::ProneAim, 0.0);
+    assert_eq!(base.prone, 1.0);
+    assert_eq!(two_handed(Pose::ProneAim), 1.0);
+    let held_pose = grip(&base, 1.0);
+    let miss = hand(&held_pose, Side::Left).distance(held(RIFLE_GUARD, &held_pose));
+    assert!(miss < 0.05, "support hand is {miss:.3} m from the handguard");
+
+    let (tip, bore) = barrel_with_phases(RIFLE, Pose::ProneAim, None, 0.0, 0.0, 0.0);
+    assert!(tip.y > 0.55, "muzzle points forward: {tip:?}");
+    assert!(bore.y > 0.95 && bore.z.abs() < 0.1, "prone bore is level and forward: {bore:?}");
+    let v = posed(Pose::ProneAim, 0.0);
+    assert!(top(&v) < 0.6, "prone aim stays low: {}", top(&v));
+    assert!(bottom(&v) > -0.05, "prone aim does not sink: {}", bottom(&v));
 }
 
 #[test]
