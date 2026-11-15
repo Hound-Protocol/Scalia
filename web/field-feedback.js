@@ -7,8 +7,10 @@ export class FieldFeedback {
     this.controlsVisible = true;
     this.lastHealth = 100;
     this.lastStance = -1;
+    this.sprintLoad = 0;
     this.stamina = 1;
-    this.checkStarted = 0;
+    this.checkPhase = null;
+    this.checkPhaseAt = 0;
     this.checkDone = false;
     this.rStarted = 0;
     this.rChecked = false;
@@ -22,12 +24,12 @@ export class FieldFeedback {
       <aside class="field-controls" aria-label="Field controls">
         <div><kbd>W A S D</kbd><span>MOVE</span></div>
         <div><kbd>SHIFT</kbd><span>SPRINT</span></div>
-        <div><kbd>H</kbd><span>HOLD · SELF CHECK</span></div>
+        <div><kbd>H</kbd><span>SELF CHECK</span></div>
         <div><kbd>R</kbd><span>TAP · RELOAD / HOLD · CHECK</span></div>
         <div><kbd>C / X</kbd><span>STANCE</span></div>
         <div><kbd>G</kbd><span>SLING / READY RIFLE</span></div>
         <div><kbd>TAB</kbd><span>FIELD PDA</span></div>
-        <small>U · HIDE CONTROLS</small>
+        <small>U · TOGGLE CONTROLS</small>
       </aside>
       <div class="field-vignette field-vignette--hurt"></div>
       <div class="field-vignette field-vignette--stamina"></div>
@@ -44,18 +46,24 @@ export class FieldFeedback {
     this.stance = this.el.querySelector('.field-stance');
   }
   toggleControls() { this.controlsVisible = !this.controlsVisible; this.controls.hidden = !this.controlsVisible; }
-  beginHealthCheck(now) {
-    if (!this.active() || this.checkStarted) return;
-    this.checkStarted = now;
+  toggleHealthCheck(now) {
+    if (!this.active()) return;
+    if (this.checkPhase) { this.cancelHealthCheck(now); return; }
+    this.checkPhase = 'checking';
+    this.checkPhaseAt = now;
     this.checkDone = false;
     this.progress.hidden = false;
+    this.report.hidden = true;
+    this.progressBar.style.width = '0%';
     this.viewer.commander_inspect(true);
   }
-  endHealthCheck(now) {
-    if (!this.checkStarted) return;
-    this.checkStarted = 0;
+  cancelHealthCheck(now) {
+    if (!this.checkPhase) return;
+    this.checkPhase = null;
+    this.checkPhaseAt = now;
     this.progress.hidden = true;
     this.progressBar.style.width = '0%';
+    this.report.hidden = true;
     this.viewer.commander_inspect(false);
   }
   beginAmmoCheck(now) { if (this.active()) { this.rStarted = now; this.rChecked = false; } }
@@ -71,10 +79,10 @@ export class FieldFeedback {
     this.report.hidden = false;
     this.messageUntil = now + duration;
   }
-  update(now, dt, weapon, sprinting) {
+  update(now, dt, weapon, sprinting, jogging) {
     const on = this.active();
     this.controls.hidden = !on || !this.controlsVisible;
-    if (!on) { this.endHealthCheck(now); this.rStarted = 0; this.hurt.hidden = true; this.fatigue.hidden = true; return; }
+    if (!on) { this.cancelHealthCheck(now); this.rStarted = 0; this.hurt.hidden = true; this.fatigue.hidden = true; return; }
 
     const health = Number.isFinite(weapon.health) ? weapon.health : 100;
     if (health < this.lastHealth) {
@@ -87,20 +95,39 @@ export class FieldFeedback {
     this.lastHealth = health;
     this.hurt.hidden = health >= 100 && now >= this.hitUntil;
     this.hurt.style.setProperty('--hurt', String(Math.max(0.12, (100 - health) / 100)));
-    this.stamina = Math.max(0, Math.min(1, this.stamina + (sprinting ? -0.20 : 0.12) * dt));
-    this.fatigue.hidden = this.stamina > 0.92;
-    this.fatigue.style.setProperty('--fatigue', String((1 - this.stamina) * 0.78));
+    const stance = weapon.stance ?? 0;
+    if (sprinting && this.stamina > 0) this.sprintLoad = Math.min(40, this.sprintLoad + dt);
+    else {
+      const regen = jogging ? 0.5 : (stance === 1 || stance === 2 ? 1.2 : 1.0);
+      this.sprintLoad = Math.max(0, this.sprintLoad - dt * regen);
+    }
+    this.stamina = 1 - Math.max(0, this.sprintLoad - 30) / 10;
+    this.fatigue.hidden = this.sprintLoad <= 30;
+    this.fatigue.style.setProperty('--fatigue', String(Math.max(0, this.sprintLoad - 30) / 10 * 0.78));
 
-    if (this.checkStarted) {
-      const p = Math.min(1, (now - this.checkStarted) / 1450);
-      this.progressBar.style.width = (p * 100).toFixed(1) + '%';
+    if (this.checkPhase) {
+      const elapsed = now - this.checkPhaseAt;
       const at = this.viewer.commander_screen();
       this.progress.style.left = (at[0] * innerWidth) + 'px';
       this.progress.style.top = (at[1] * innerHeight - 54) + 'px';
-      if (p >= 1 && !this.checkDone) {
-        this.checkDone = true;
-        if (health >= 100) this.say('I’m all well.', now);
-        else this.say('I’ve been hit. I can’t identify the wound yet.', now, 3600);
+      if (this.checkPhase === 'checking') {
+        const p = Math.min(1, elapsed / 1500);
+        this.progressBar.style.width = (p * 100).toFixed(1) + '%';
+        if (p >= 1) {
+          this.checkDone = true;
+          if (health >= 100) this.say('I’m all well.', now, 2000);
+          else this.say('I’ve been hit. I can’t identify the wound yet.', now, 2000);
+          this.progress.hidden = true;
+          this.checkPhase = 'report';
+          this.checkPhaseAt = now;
+        }
+      } else if (this.checkPhase === 'report' && elapsed >= 2000) {
+        this.checkPhase = 'return';
+        this.checkPhaseAt = now;
+        this.viewer.commander_inspect(false);
+      } else if (this.checkPhase === 'return' && elapsed >= 260) {
+        this.checkPhase = null;
+        this.report.hidden = true;
       }
     }
     if (this.rStarted && !this.rChecked && now - this.rStarted >= 520) {

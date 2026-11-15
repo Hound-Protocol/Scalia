@@ -308,6 +308,7 @@ pub struct Viewer {
     /// Zoom: the ladder step aimed at and the view height (metres) the camera is gliding through.
     zoom_step: usize,
     inspect_zoom: Option<usize>,
+    inspect_glide: bool,
     zoom_m: f32,
     last_frame_ms: f64,
     planet: Planet,
@@ -487,6 +488,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         far_fade: None,
         zoom_step: STEP_GROUND,
         inspect_zoom: None,
+        inspect_glide: false,
         zoom_m: LADDER[STEP_GROUND],
         last_frame_ms: 0.0,
         planet: Planet::demo(42),
@@ -2054,10 +2056,12 @@ impl Viewer {
         if on {
             if self.inspect_zoom.is_none() && self.scene == Scene::Ground && !self.tablet {
                 self.inspect_zoom = Some(self.zoom_step);
-                self.zoom_step = 0;
+                self.zoom_step = 1;
+                self.inspect_glide = true;
             }
         } else if let Some(step) = self.inspect_zoom.take() {
             self.zoom_step = step;
+            self.inspect_glide = true;
         }
     }
     pub fn wheel(&mut self, delta: f64) -> bool {
@@ -3638,11 +3642,13 @@ impl Viewer {
             return;
         }
         let goal = LADDER[self.zoom_step];
-        let k = 1.0 - (-dt / GLIDE_MS).exp();
+        let glide_ms = if self.inspect_glide { 220.0 } else { GLIDE_MS };
+        let k = 1.0 - (-dt / glide_ms).exp();
         let (a, b) = (self.zoom_m.ln(), goal.ln());
         let mut z = (a + (b - a) * k as f32).exp();
         if (z / goal - 1.0).abs() < 1e-3 {
             z = goal;
+            self.inspect_glide = false;
         }
         // The menu's intro flight sets the zoom outright.
         if let Some((view_m, _, _)) = self.intro {
