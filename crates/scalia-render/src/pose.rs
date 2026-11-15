@@ -918,14 +918,12 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 1.0;
         }
         Pose::ProneAim => {
-            // Start from the solved two-handed aim rig, then roll the figure onto the elbows.
-            aim_arms(&mut p);
+            // Keep the proven prone elbow/shoulder support geometry; the shared grip solver
+            // brings the left palm onto the handguard without pulling either arm through the floor.
             p.prone = 1.0;
+            p.shoulder = [2.8, 2.8];
+            p.elbow = [1.3, 1.35];
             p.rifle = std::f32::consts::FRAC_PI_2;
-            // The body faces the target directly when prone; no standing bladed-stance twist.
-            p.rifle_yaw = 0.0;
-            p.twist = 0.0;
-            p.look = 0.0;
             p.head = 0.82;
         }
         Pose::StandAim => {
