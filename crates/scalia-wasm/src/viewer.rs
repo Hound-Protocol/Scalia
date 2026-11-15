@@ -1644,65 +1644,26 @@ impl Viewer {
     /// Active interactables projected through the same orthographic camera as unit labels.
     /// The UI receives metadata, not object-specific presentation rules.
     fn active_hint_data(&self) -> Vec<crate::hints::HintData> {
-        use scalia_ai::doors::DoorState;
+        use crate::hints::{Interactable, JukeboxTarget};
         if self.scene != Scene::Ground || self.tablet {
             return Vec::new();
         }
 
-        let mut hints = Vec::new();
         let player = (self.cmd.0, self.cmd.1);
+        let mut hints = Vec::new();
 
-        if let Some((x_mm, y_mm)) = jukebox_mm() {
-            let (x, y) = (x_mm as f64 / 1000.0, y_mm as f64 / 1000.0);
-            let distance = (x - player.0).hypot(y - player.1);
-            let radius = 2.0;
-            if distance <= radius {
-                hints.push(crate::hints::HintData {
-                    id: "jukebox".into(),
-                    target_transform: [x, y, 0.0],
-                    local_vertical_offset: 1.0,
-                    caption_text: "USE JUKEBOX".into(),
-                    input_token: "{+use}".into(),
-                    on_screen_icon: "keycap".into(),
-                    off_screen_icon: "arrow".into(),
-                    trigger_radius: radius,
-                    clamp_to_screen: true,
-                    show_offscreen_arrow: false,
-                    priority: 100,
-                    allow_multiple: false,
-                    distance,
-                });
+        // Entities publish their own interaction metadata through the Interactable contract.
+        if let Some((x, y)) = jukebox_mm() {
+            let jukebox = JukeboxTarget { at_mm: (x, y) };
+            if let Some(hint) = jukebox.interaction_hint("jukebox".into(), player) {
+                hints.push(hint);
             }
         }
-
         if let Some(assault) = self.assault.as_ref() {
             for (index, door) in assault.battle.doors.iter().enumerate() {
-                let caption = match door.state {
-                    DoorState::Closed => "OPEN DOOR",
-                    DoorState::Open => "CLOSE DOOR",
-                    DoorState::Locked | DoorState::Breached => continue,
-                };
-                let (x, y) = (door.at.0 as f64 / 1000.0, door.at.1 as f64 / 1000.0);
-                let distance = (x - player.0).hypot(y - player.1);
-                let radius = 1.8;
-                if distance > radius {
-                    continue;
+                if let Some(hint) = door.interaction_hint(format!("door:{index}"), player) {
+                    hints.push(hint);
                 }
-                hints.push(crate::hints::HintData {
-                    id: format!("door:{index}"),
-                    target_transform: [x, y, 0.0],
-                    local_vertical_offset: 1.15,
-                    caption_text: caption.into(),
-                    input_token: "{+use}".into(),
-                    on_screen_icon: "keycap".into(),
-                    off_screen_icon: "arrow".into(),
-                    trigger_radius: radius,
-                    clamp_to_screen: true,
-                    show_offscreen_arrow: false,
-                    priority: 80,
-                    allow_multiple: false,
-                    distance,
-                });
             }
         }
 
