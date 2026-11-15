@@ -404,10 +404,8 @@ try {
   // viewer animates it); once it arrives the close-up takes over. Putting it away reverses that.
   let tabletShown = false;
   const whoosh = new Audio('./sfx/dive-whoosh.mp3'); whoosh.preload = 'auto';
-  // Interface sounds play from decoded buffers on one audio context: an <audio> clone per play re-reads the
-  // file and was sometimes too late or silent (the tablet's open sound). The element is only the fallback
-  // until the buffer is ready.
-  // UI effects share Auralis' context and master output. Buffers are warmed on the first user gesture.
+  // Interface sounds use decoded buffers through Auralis; no per-play HTMLAudio clones.
+  // Buffers are warmed on the first user gesture.
   const ui = { all: [] };
   const sfx = (src, vol) => {
     ui.all.push(src);
