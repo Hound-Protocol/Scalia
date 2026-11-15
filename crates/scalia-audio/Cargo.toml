@@ -2,6 +2,7 @@
 name = "scalia-audio"
 version = "0.1.0"
 edition = "2021"
+description = "Auralis Audio Engine: world-aware acoustic simulation for Scalia"
 
 [dependencies]
 scalia-ai = { path = "../scalia-ai" }
