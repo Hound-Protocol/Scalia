@@ -400,7 +400,7 @@ pub fn reload_target(p: &PoseParams, t: f32) -> Vec3 {
 
 /// Moves the left palm along the reload path, blended by weight so reloads can enter and leave over a pose blend.
 pub fn reload_hand(p: &PoseParams, phase: f32, weight: f32) -> PoseParams {
-    reach_left(p, reload_target(p, phase), weight, 2.0)
+    reach_left(p, reload_target(p, phase), weight)
 }
 
 /// The magazine well, a rifle point (rest pose): under the receiver just ahead of the grip.
