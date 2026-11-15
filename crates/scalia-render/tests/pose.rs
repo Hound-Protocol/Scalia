@@ -66,6 +66,22 @@ fn aiming_points_the_rifle_forward_at_shoulder_height() {
 }
 
 #[test]
+fn crawling_has_continuous_directional_cycles_forward_backward_and_sideways() {
+    use scalia_render::pose::params_dir;
+    let dirs = [0.0f32, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
+    let poses: Vec<_> = dirs.iter().map(|&dir| params_dir(Pose::Crawl, 0.23, dir)).collect();
+    assert!(poses.iter().all(|p| p.prone == 1.0 && p.rifle > 1.5), "crawl stays low with the rifle carried forward");
+    assert_ne!(poses[0].hip, poses[1].hip, "backwards crawl reverses the diagonal limb phase");
+    assert_ne!(poses[2].side, poses[3].side, "left and right crawl use opposite support patterns");
+    for &dir in &dirs {
+        let a = params_dir(Pose::Crawl, 0.0, dir);
+        let b = params_dir(Pose::Crawl, 1.0, dir);
+        assert!((a.twist - b.twist).abs() < 1e-5 && (a.tilt - b.tilt).abs() < 1e-5, "crawl cycle seam at {dir}");
+        assert!(a.hip.iter().chain(a.knee.iter()).chain(a.side.iter()).all(|v| v.is_finite()));
+    }
+}
+
+#[test]
 fn walking_swings_the_legs_and_running_leans_forward() {
     // The left foot strikes in front at phase 0 and leaves the ground behind at the end of its stance (0.6).
     let a = posed(Pose::Walk, 0.0);
