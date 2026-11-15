@@ -8,7 +8,7 @@ let sourceCreations = 0;
 
 class FakeNode {
   constructor() {
-    const param = () => ({ value: 1, setTargetAtTime() {}, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} });
+    const param = () => ({ value: 1, setTargetAtTime(value) { this.value = value; }, cancelScheduledValues() {}, setValueAtTime(value) { this.value = value; }, linearRampToValueAtTime(value) { this.value = value; } });
     this.gain = param();
     this.frequency = param();
     this.playbackRate = param();
@@ -322,7 +322,7 @@ test('playBuffer() manages looping menu voices and supports graceful fade cancel
   assert.equal(handle.category, 'ui');
   assert.equal(handle.src.loop, true);
   assert.deepEqual(handle.src.startArgs, [0, 0.2]);
-  assert.equal(handle.gain.gain.value, 1);
+  assert.equal(handle.gain.gain.value, 0.6);
   assert.equal(handle.stop(0.05), true);
   assert.equal(handle.src.stopAt, 0.07);
   assert.equal(handle.state, 'ended');
