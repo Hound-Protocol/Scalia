@@ -26,39 +26,12 @@ const store = {
 
 // World sounds (music, footsteps) go through one bus; with the tablet up it is muffled (low-passed and a little
 // quieter), as if the commander's attention has gone to the device. The tablet's own sounds and the radio stay clear.
-const worldAudio = (() => {
-  let ctx = null, filt = null, gain = null, wakeF = null, wakeHz = 22000;
-  const routed = new WeakSet();
-  const graph = () => {
-    if (ctx) return ctx;
-    try {
-      ctx = new AudioContext();
-      filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 20000; filt.Q.value = 0.6;
-      wakeF = ctx.createBiquadFilter(); wakeF.type = 'lowpass'; wakeF.frequency.value = wakeHz; wakeF.Q.value = 0.5;
-      gain = ctx.createGain(); filt.connect(wakeF).connect(gain).connect(ctx.destination);
-    } catch (_) { ctx = null; }
-    return ctx;
-  };
-  return {
-    // Sends an audio element through the bus (once per element).
-    add(el) {
-      const c = graph(); if (!c) return;
-      if (c.state === 'suspended') c.resume().catch(() => {});
-      if (routed.has(el)) return;
-      try { c.createMediaElementSource(el).connect(filt); routed.add(el); } catch (_) { /* plays unfiltered */ }
-    },
-    // Waking up (the intro's eyes opening): the bus heard through a low-pass at `hz`.
-    wake(hz) { wakeHz = Math.min(22000, Math.max(200, hz)); if (wakeF) wakeF.frequency.value = wakeHz; },
-    fadeOut(sec) { const c = graph(); if (!c) return; gain.gain.cancelScheduledValues(c.currentTime); gain.gain.setTargetAtTime(0, c.currentTime, sec / 3); },
-    muffle(on) {
-      const c = graph(); if (!c) return;
-      const t = c.currentTime;
-      filt.frequency.cancelScheduledValues(t); gain.gain.cancelScheduledValues(t);
-      filt.frequency.setTargetAtTime(on ? 600 : 20000, t, 0.12);
-      gain.gain.setTargetAtTime(on ? 0.55 : 1, t, 0.12);
-    },
-  };
-})();
+const worldAudio = {
+  add(el) { window.scaliaAudio?.routeMedia(el, 'world'); },
+  wake(hz) { window.scaliaAudio?.setWake(hz); },
+  fadeOut(sec) { window.scaliaAudio?.fadeMediaOut(sec); },
+  muffle(on) { window.scaliaAudio?.setMediaMuffle(on); },
+};
 
 // Ambience: wind through the trees, looping under everything (a world sound, so it is muffled with the tablet up).
 const ambience = () => {
@@ -434,32 +407,20 @@ try {
   // Interface sounds play from decoded buffers on one audio context: an <audio> clone per play re-reads the
   // file and was sometimes too late or silent (the tablet's open sound). The element is only the fallback
   // until the buffer is ready.
-  const ui = { ctx: null, all: [] };
-  const uiCtx = () => {
-    if (!ui.ctx) { try { ui.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { return null; } }
-    if (ui.ctx.state === 'suspended') ui.ctx.resume().catch(() => {});
-    return ui.ctx;
-  };
+  // UI effects share Auralis' context and master output. Buffers are warmed on the first user gesture.
+  const ui = { all: [] };
   const sfx = (src, vol) => {
-    const el = new Audio(src); el.preload = 'auto'; el.volume = vol;
-    let buf = null, loading = null;
-    const load = (c) => loading || (loading = fileBytes(src).then((b) => c.decodeAudioData(b.slice(0))).then((d) => { buf = d; }).catch(() => { loading = null; }));
-    ui.all.push(load);
-    return () => {
-      const c = uiCtx();
-      if (c && buf && c.state === 'running') {
-        const n = c.createBufferSource(); n.buffer = buf;
-        const g = c.createGain(); g.gain.value = vol;
-        n.connect(g).connect(c.destination); n.start();
-        return;
-      }
-      if (c) load(c);
-      const b = el.cloneNode(); b.volume = vol; b.play().catch(() => {});
-    };
+    ui.all.push(src);
+    return () => window.scaliaAudio?.playUi(src, vol);
   };
-  // The first touch of the page unlocks audio: decode every interface sound then.
-  addEventListener('pointerdown', () => { const c = uiCtx(); if (c) ui.all.forEach((l) => l(c)); }, { once: true, capture: true });
-  addEventListener('keydown', () => { const c = uiCtx(); if (c) ui.all.forEach((l) => l(c)); }, { once: true, capture: true });
+  const unlockAudio = () => {
+    const engine = window.scaliaAudio;
+    if (!engine) return;
+    engine.ensure();
+    for (const src of new Set(ui.all)) engine.buffer(src);
+  };
+  addEventListener('pointerdown', unlockAudio, { once: true, capture: true });
+  addEventListener('keydown', unlockAudio, { once: true, capture: true });
   const unitSelect = sfx('./sfx/unit-select.mp3', 0.6), menuOpen = sfx('./sfx/context-menu.mp3', 0.6);
   const pdaOpen = sfx('./sfx/pda-open.mp3', 0.7), pdaClose = sfx('./sfx/pda-leave.mp3', 0.3), pdaTap = sfx('./sfx/pda-tap.mp3', 0.6);
   // Every button on the tablet, on screen or on the device, taps.
@@ -478,7 +439,13 @@ try {
       v.set_tablet(true);
       // The swoosh as the camera starts its dive (after the rise and the half-second hold).
       clearTimeout(diveSound);
-      diveSound = setTimeout(() => { if (tabletUp) { const a = whoosh.cloneNode(); a.volume = 0.7; a.play().catch(() => {}); } }, DIVE_AT_MS);
+      diveSound = setTimeout(() => {
+        if (tabletUp) {
+          window.scaliaAudio?.routeMedia(whoosh, 'ui');
+          whoosh.currentTime = 0;
+          whoosh.play().catch(() => {});
+        }
+      }, DIVE_AT_MS);
       return;
     }
     if (tabletShown) pdaClose();
@@ -2004,7 +1971,8 @@ const VERSION_LINE = VERSION.startsWith('__') ? 'Local build' : `${VERSION} · $
   const noMenu = new URLSearchParams(location.search).has('nomenu');
   const menu = noMenu ? { show() { document.getElementById('menu')?.remove(); music.start(); ambience(); } } : createMenu({ viewer: () => window.scaliaViewer, store, onEnter: () => { music.start(); ambience(); },
     // Waking up: every sound in the scene through one low-pass the eyes' opening sweeps open.
-    wake: (hz) => { worldAudio.wake(hz); try { window.scaliaAudio?.setWake(hz); } catch (_) { /* engine not up */ } } });
+    audio: window.scaliaAudio,
+    wake: (hz) => { window.scaliaAudio?.setWake(hz); } });
   const ver = document.getElementById('menuVer'); if (ver) ver.textContent = VERSION_LINE;
   const go = () => { if (!ready) return; box.hidden = true; removeEventListener('keydown', key, true); menu.show(); };
   // While it is up, keys go nowhere else; Enter, Space or Escape enters.
@@ -2019,6 +1987,7 @@ if (BUILD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./s
   if (!mine) return; // local build
   const bar = document.getElementById('update');
   const alert = new Audio('./sfx/update-alert.mp3'); alert.preload = 'auto'; alert.volume = 0.6;
+  window.scaliaAudio?.routeMedia(alert, 'ui');
   document.getElementById('update-reload').addEventListener('click', reboot);
   let dismissed = null;
   document.getElementById('update-close').addEventListener('click', () => { bar.hidden = true; dismissed = bar.dataset.v; });
