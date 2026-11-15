@@ -5,6 +5,11 @@ use std::collections::HashMap;
 
 use glam::Vec3;
 
+/// Commander's ear height above the local ground. Auralis source heights use the same local frame.
+fn commander_ear_height(stance: u8) -> f32 {
+    match stance { 1 => 1.05, 2 => 0.35, _ => 1.55 }
+}
+
 /// Acoustic obstruction uses the propagation field for an on-foot listener, where diffraction around
 /// corners and open doors matters. The tablet listener is physically at camera height, so trace the actual
 /// 3D line instead of incorrectly applying a ground-level field to an elevated listener.
@@ -980,9 +985,10 @@ impl Viewer {
         // battlefield while the commander moves independently. The ears must follow the
         // controlled soldier, otherwise his own muzzle appears to move left/right with WASD.
         if self.scene == Scene::Ground && self.assault.is_some() && self.intro.is_none() && self.cine.is_none() {
-            let eye = match self.gun.stance { 1 => 1.05, 2 => 0.35, _ => 1.55 };
-            let ground = self.height_at(self.cmd.0 as f32, self.cmd.1 as f32);
-            return (self.cmd.0 as f32, self.cmd.1 as f32, ground + eye);
+            // Auralis models source and listener heights relative to local ground. Adding the
+            // terrain's absolute elevation here turns altitude into fake sound distance/delay.
+            let eye = commander_ear_height(self.gun.stance);
+            return (self.cmd.0 as f32, self.cmd.1 as f32, eye);
         }
         let (target, _, view_h) = self.last_cam;
         let (x, y) = (target.x as f64 + self.origin.0, target.y as f64 + self.origin.1);
@@ -4432,6 +4438,13 @@ fn commander_soldier(a: &mut crate::assault::Assault, at_mm: (i64, i64)) -> usiz
 mod audio_spatial_tests {
     use super::*;
     use scalia_core::nav::{Prop, PropKind};
+
+    #[test]
+    fn commander_listener_height_stays_relative_to_ground_elevation() {
+        assert_eq!(commander_ear_height(0), 1.55);
+        assert_eq!(commander_ear_height(1), 1.05);
+        assert_eq!(commander_ear_height(2), 0.35);
+    }
 
     #[test]
     fn tablet_listener_height_is_used_for_occlusion() {
