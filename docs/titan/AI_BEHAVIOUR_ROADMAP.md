@@ -202,3 +202,42 @@ These findings are preliminary. Complete the source-linked ownership and conflic
 4. Separate tactical intent selection from GOAP feasibility and action execution; keep current Battle executor as the adapter during transition.
 5. Integrate Titan command/task/intelligence incrementally behind compatibility adapters, with serialization/replay tests at each step.
 6. Only then add richer squad coordination and personality variation.
+
+
+### AI-00 — Write-site inventory and regression coverage (2026-11-16)
+
+#### Authoritative write sites
+
+| State | Primary write sites | Notes |
+|---|---|---|
+| Squad task / movement goal | `leader.rs`: `lead_move` (470+), `withdraw` (762+), `care` / `give_aid` (821+ / 1072+), `lead_hold` (1219+), `fall_back` (1281+), `ensure_open` (1337+), `lead_capture` (1498+) | Numerous direct `Task::Move` / `Task::Hold` assignments; `Battle::order` (battle.rs:685) is the external/test entry point. |
+| Position / path / movement execution | `battle.rs`: `destination` (690+), path/goal assignment (around 799–865), `move_soldiers` (799+) | Leader writes intent; Battle resolves destinations, pathing, spacing, movement and gait. |
+| Stance | `battle.rs`: `wounds` (736+), `move_soldiers` (799+), player placement (around 1670+) | Leader sets `posture`; movement execution derives actual stance from gait, cover and posture. |
+| Target | `battle.rs`: target clear/acquire (around 1424–1453); casualty drag clears target (`leader.rs`:1114) | Target is independently reacquired by Battle from current visible enemies. |
+| Fire permission | `battle.rs`: `think` (972–1081); combat fire gate (around 1470+) | `may_fire` and `may_suppress` are mind outputs, but close-range fire has a separate override. |
+| Cover | `battle.rs`: `think` (1054–1079); `leader.rs` tactical crossing/cover (around 1019+) and `fall_back` (1325) | Soldier mind and squad leader both write cover ownership. |
+| Aid / drag / busy state | `leader.rs`: `care` / `give_aid` / `start_aid` (821–1157); `battle.rs`: `wounds` / `drag_along` | Aid state lives outside the generic task lifecycle; helper task is overwritten. |
+| Reload / weapon action | `battle.rs`: `think` calls `reload` (1067), reload timer in combat step (around 1291+) | GOAP initiates reload; Battle owns timer and completion. |
+
+#### Execution ordering and interrupt behaviour
+
+- `Battle::step` owns the fixed-step simulation. It runs wound processing, movement, perception/think scheduling, leader scheduling and combat resolution in a fixed order; the exact order must remain unchanged unless replay tests prove compatibility.
+- `Battle::lead` ordering is explicit: leader succession, casualty care, loss counting, broken-squad withdrawal, current order execution, sandbag completion and grenade resolution.
+- A soldier going down forcibly becomes prone and loses task, target, cover, action, posture, path, aid and drag state (`battle.rs:736–755`). This is a hard incapacitation transition, not a resumable interrupt.
+- Dead soldiers are forced to `Task::Idle` during movement execution (`battle.rs:807–815`).
+- A casualty helper may abandon aid when the route becomes threatened and receives a stationary Hold task (`leader.rs:1081–1087`); this does not restore the task previously held.
+- `Battle::think` runs on the staggered perception cadence; leader planning runs on `LEAD_MS`. Movement and combat continue between those decision passes.
+
+#### Regression coverage observed (static source inspection only)
+
+- `mind.rs` has five tests covering survival/cover/reload/fire priorities, close-range engagement, no-cover fallback and suppression.
+- `intelligence.rs` has four tests covering report recency/confidence arbitration, decay/future reports, team isolation and expiry.
+- `titan.rs` has three command hierarchy/ownership/succession tests.
+- `titan_tasks.rs` has five task lifecycle, interrupt/resume, reassignment, invalid transition and terminal-state tests.
+- `battle.rs` has one 200,000-case deterministic view-cone equivalence test.
+- `leader.rs`, `goap.rs` and `save.rs` contain no inline `#[test]` blocks in the inspected files. No direct regression test currently covers task restoration after casualty response, contact-source propagation into live Battle contacts, inconsistent contact freshness across consumers, target/fire-gate interaction, or Battle save/replay determinism under AI transitions.
+- The GitHub connector permits source inspection but does not provide a shell/Cargo test runner or workflow-dispatch action in this session. Therefore no test execution result is claimed. A real CI run is required before any runtime patch is considered validated.
+
+#### AI-00 exit status
+
+Decision ownership, primary write sites, major interrupt paths, contact data flow, Titan integration gap and visible regression-test coverage are now mapped. The audit is **substantially complete**, but its final gate remains a reproducible CI/test baseline and a final cross-check against all current branch changes. Do not mark AI-00 complete until those are available.
