@@ -801,9 +801,9 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     // Recoil pressure, carried in the pose id's fraction.
     let kick = fract(b.w);
     if (kick > 0.0) {
-      pp.rifle = pp.rifle + 0.024 * kick * kick;
-      pp.sh = pp.sh - vec2f(0.09 * kick);
-      pp.lean = pp.lean - 0.02 * kick;
+      pp.rifle = pp.rifle + 0.0288 * kick * kick;
+      pp.sh = pp.sh - vec2f(0.108 * kick);
+      pp.lean = pp.lean - 0.024 * kick;
     }
     // Flinch, carried in the previous pose id's fraction.
     let fl = fract(d.x);
