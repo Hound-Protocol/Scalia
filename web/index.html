@@ -24,8 +24,15 @@
   #perf .legend { display: flex; gap: 10px; color: #9aa4b2; margin: 2px 0 4px 40px; }
   #perf .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; vertical-align: middle; }
   #perf canvas { width: 100%; height: 34px; display: block; margin-top: 4px; background: #0b0e12; border: 1px solid #2a313c; image-rendering: pixelated; }
-  #perf .top { display: flex; justify-content: space-between; color: #d8dde6; margin-bottom: 2px; }
+  #perf[hidden] { display: none !important; }
+  #perf .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #d8dde6; margin-bottom: 2px; }
   #perf .top b { font-size: 14px; }
+  #perf .actions { display: flex; gap: 5px; }
+  #perf .actions button { border: 1px solid #465365; background: #151b22; color: #cbd5e1; padding: 2px 5px; font: 10px ui-monospace, monospace; cursor: pointer; }
+  #perf .actions button:hover, #perf .actions button:focus-visible { border-color: #e0a526; color: #fff; }
+  #perf .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; color: #9aa4b2; font-size: 10px; margin: 4px 0; }
+  #perf .stats b { color: #d8dde6; font-weight: 500; font-variant-numeric: tabular-nums; }
+  #perf .unavailable { color: #687382; font-size: 10px; line-height: 1.3; margin-top: 3px; }
   #perf .warn { color: #ff8a65; margin-top: 4px; }
   #error { inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; }
   a { color: #9cc4ff; }
@@ -638,13 +645,18 @@
 <div id="interactionHints" aria-hidden="true" hidden></div>
 <div id="labMarks" hidden></div>
 <div id="hud" class="panel" hidden></div>
-<div id="perf" class="panel">
-  <div class="top"><span><b id="pFps">--</b> fps</span><span id="pInfo"></span></div>
+<div id="perf" class="panel" aria-label="Performance diagnostics">
+  <div class="top">
+    <span><b id="pFps">--</b> fps <span id="pInfo"></span></span>
+    <span class="actions"><button id="pCopy" type="button">COPY REPORT</button><button id="pToggle" type="button">HIDE</button></span>
+  </div>
   <div class="row"><span class="label">CPU</span><div class="track" id="tCpu"><div class="seg" id="sCpu"></div><div class="budget"></div></div><span class="val" id="vCpu">--</span></div>
   <div class="row"><span class="label">GPU</span><div class="track" id="tGpu"><div class="seg" id="sSh"></div><div class="seg" id="sSc"></div><div class="seg" id="sUp"></div><div class="budget"></div></div><span class="val" id="vGpu">--</span></div>
   <div class="legend"><span><i style="background:#5b8fd9"></i>shadow</span><span><i style="background:#7fb069"></i>scene</span><span><i style="background:#c08bd9"></i>upscale</span></div>
+  <div class="stats"><span>FRAME <b id="pFrame">warming up</b></span><span>UNITS <b id="pUnits">n/a</b></span><span>JS HEAP <b id="pHeap">n/a</b></span></div>
   <canvas id="pGraph" width="300" height="34" title="Frame time, last 300 frames; the line is 16.7 ms (60 fps)"></canvas>
-  <div class="legend" style="margin-left:0">bars: share of each second used; hover for ms per frame; line at 80%</div>
+  <div class="legend" style="margin-left:0">frame time · 300-frame history · 16.7 ms reference</div>
+  <div class="unavailable">Draw calls, triangles, effects, lights and CPU subsystem timings: not exposed by the current engine.</div>
   <div class="warn" id="pWarn" hidden></div>
 </div>
 <div id="error" class="panel"></div>
