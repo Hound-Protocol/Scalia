@@ -99,6 +99,8 @@ export class AudioEngine {
     this.env = { enclosure: 0, size: 30, rt60: 0.25, corridor: 0, pda: 0 };
     this.peak = PEAK_FLOOR_DB; this.peakAt = 0;
     this.hdr = 'wartapes'; this.windowDb = HDR.wartapes;
+    // AI Lab world voices share the simulation clock; UI and ambience remain real-time.
+    this.worldTimeScale = 1;
   }
 
   _pruneActive() {
@@ -191,6 +193,18 @@ export class AudioEngine {
     this.tails = this.tails.filter((item) => item !== voice);
     this.voices.delete(voice);
     this.voiceMetrics.cleaned++;
+  }
+
+  setWorldTimeScale(scale) {
+    const next = Number.isFinite(scale) ? Math.max(0, Math.min(4, scale)) : 1;
+    this.worldTimeScale = next;
+    const now = this.ctx?.currentTime;
+    if (now === undefined) return;
+    for (const voice of this.voices) {
+      if (voice.timeScaled && !voice.done) {
+        voice.src.playbackRate.setValueAtTime(voice.baseRate * next, now);
+      }
+    }
   }
 
   voiceStats() {
@@ -562,7 +576,10 @@ export class AudioEngine {
     const close = Math.max(0, Math.min(1, 1 - o.dist / 30));
     const nodes = [];
     const own = (node) => { nodes.push(node); return node; };
-    const src = own(c.createBufferSource()); src.buffer = buf; src.playbackRate.value = o.rate || 1;
+    const src = own(c.createBufferSource()); src.buffer = buf;
+    const timeScaled = o.timeScaled === true;
+    const baseRate = o.rate || 1;
+    src.playbackRate.value = baseRate * (timeScaled ? this.worldTimeScale : 1);
     const g = own(c.createGain()); g.gain.value = o.gain * (1 + 0.6 * inside);
     const body = own(c.createWaveShaper());
     const drive = inside * close * (1 - o.far);
@@ -697,6 +714,8 @@ export class AudioEngine {
     const voice = this._registerVoice(src, nodes, {
       category: o.kind || 'world', priority: pri, gain: o.gain, tailSeconds, out,
     });
+    voice.timeScaled = timeScaled;
+    voice.baseRate = baseRate;
     try {
       src.start(c.currentTime + Math.max(0, o.delay || 0));
       voice.state = 'playing';
