@@ -247,3 +247,115 @@ Decision ownership, primary write sites, major interrupt paths, contact data flo
 
 - **AI-01 issue:** https://github.com/Hound-Protocol/Scalia/issues/49 — source-aware live contacts, recency/confidence arbitration, centralized freshness policies and save/load regression tests.
 - AI-01 is intentionally blocked on the AI-00 CI/test baseline. The GitHub connector cannot run Cargo tests in this session; do not claim validation until a Rust CI run completes.
+
+
+---
+
+## Handoff checkpoint — 2026-11-16 (authoritative continuation notes)
+
+This section is the current handoff point for the next AI contributor. Read it before changing code. It consolidates the audit state, unresolved gates, implementation boundaries and exact next actions.
+
+### Repository and work tracking
+
+- Repository: `Hound-Protocol/Scalia`.
+- Documentation branch: `work/AI-behaviour-roadmap-2026-11-16`.
+- Roadmap PR: [#48 — docs(ai): establish Titan behaviour roadmap and audit](https://github.com/Hound-Protocol/Scalia/pull/48). It is a documentation-only draft PR; it has not been merged.
+- Audit issue: [#47 — AI-00: Audit live NPC behaviour and decision pipeline](https://github.com/Hound-Protocol/Scalia/issues/47).
+- Next implementation issue: [#49 — AI-01: Add source-aware contact intelligence and consistent freshness](https://github.com/Hound-Protocol/Scalia/issues/49).
+- Latest default-branch commit observed during this checkpoint: `0c701462e1dd7db199ecc30aba80749e90750cc7` (2026-11-16, merge of PR #46). Re-check the default branch and PR #48 base before starting; this observation is a checkpoint, not a permanent base guarantee.
+- Keep the roadmap branch documentation-only. Start implementation work on a fresh branch from the then-current default branch.
+
+### Current completion state
+
+**AI-00 is substantially audited, not closed.** The live decision path, ownership/write-site inventory, key interrupts, contact data flow, Titan integration gap and static test inventory are documented above. Two gates remain:
+
+1. Obtain a reproducible Rust test/CI baseline. No Cargo tests have been executed by the GitHub connector in this work session; do not report tests as passing.
+2. Re-check the audit against the latest default branch and relevant open/merged PRs. In particular, verify whether any newer branch changed the inspected call sites or save format.
+
+Do not close AI-00 or mark the audit complete until both gates have evidence recorded in this document and issue #47.
+
+### Exact AI-01 starting point
+
+Before editing, inspect these live paths on the fresh implementation branch:
+
+1. `crates/scalia-ai/src/battle.rs`
+   - Find the live `Contact` definition and its derives/serde attributes.
+   - Find every `report` call, not only the currently known ones:
+     - `report_pub` → `report` (around 1113–1118).
+     - Visual sighting from `perceive` (around 1213; `CONF_SEEN`).
+     - Incoming-fire/miss/shot-at paths (around 1338 and 1627; `CONF_SHOT_AT`).
+     - Heard gunfire (around 1643; `CONF_HEARD`).
+   - Confirm whether `report_pub` or any other public/manual report path needs a distinct source. Add an external/manual source only if an actual caller requires it.
+   - Inventory every consumer of the live contact vector and record its current age/confidence rule before centralizing policy.
+   - Re-check `Battle::step` ordering and the combat target/fire path. AI-01 must not change target acquisition, permission overrides or firing behaviour.
+2. `crates/scalia-ai/src/intelligence.rs`
+   - Compare the existing Titan source/provenance and recency/confidence arbitration types. Reuse concepts where suitable, but do not wholesale wire TitanIntelligence into Battle.
+3. `crates/scalia-ai/src/save.rs` and all Battle serialization/version definitions
+   - Trace the actual save envelope/version and migration/refusal behaviour before changing serialized Contact fields.
+   - Do not assume adding a serde field is backward-compatible. Decide explicitly whether a default/migration is safe or a save-version increment is required.
+4. Search the entire repository for `Contact`, `report(`, contact serialization and save/load/hash tests. The call-site list above is an audit lead, not a substitute for a fresh exhaustive search.
+
+### AI-01 implementation contract
+
+- Retain provenance on each live contact: visual, incoming fire and audio/heard; add another source only when a real call site justifies it.
+- Keep personal visibility distinct from squad-shared contact reports.
+- Store observation recency independently from confidence. A newer weaker report may refresh last-known position/time, but must not inherit or inflate the previous report's certainty.
+- An older report must never rewind a newer observation.
+- Define deterministic equal-time arbitration, including a stable source/identity tie-break.
+- Centralize named freshness/confidence policies for tactical consumers. Select policy names and thresholds only after inventorying current call sites; document intended semantics. Never let a stale report become a confirmed target.
+- Preserve the current target acquisition, fire gating, close-range override, simulation step order and combat execution semantics.
+- Keep the patch scoped to `scalia-ai` unless a proven save-format dependency requires a narrowly justified change.
+- Do not integrate Titan Command, TitanTaskBoard or TitanIntelligence wholesale as part of AI-01.
+- No unrelated rendering, animation, audio, UI, weapon-balancing or general simulation changes.
+
+### Required AI-01 regression tests
+
+Add focused tests for:
+
+- Newer low-confidence report refreshes position/time while retaining lower certainty.
+- Older report cannot rewind a newer observation.
+- Equal-time reports resolve deterministically, independent of incidental iteration/hash order.
+- Visual, incoming-fire and audio provenance remains correct through squad sharing and save/load.
+- Fresh, stale, expired and future-dated observations follow each named policy consistently.
+- Personal visibility is not accidentally promoted to squad/global certainty.
+- Repeat-run determinism and Battle save/load/hash behaviour across contact updates.
+- Existing behaviour around target acquisition and firing remains unchanged (regression test or before/after invariant where practical).
+
+### Test and validation gate
+
+Run from the repository root using the project's supported toolchain:
+
+```sh
+cargo test --workspace
+```
+
+Also run the relevant CI checks used by the repository and any focused `scalia-ai` tests. Record the exact commands, commit SHA, pass/fail result and any environment limitations in the implementation PR and update this roadmap. If workspace tests cannot run locally, use the repository's actual CI workflow and record its run URL; do not substitute static inspection for execution.
+
+Before merge:
+- Review save compatibility and replay determinism explicitly.
+- Inspect the full diff for scope creep.
+- Confirm no target/fire behaviour change slipped into AI-01.
+- Require CI and gameplay validation where observable behaviour changes.
+- Update issue #49 and this document with implementation/test results.
+
+### Handoff sequence
+
+1. Revalidate default branch, PR #48 and open AI work items.
+2. Complete AI-00 CI/test baseline and cross-branch comparison; update issue #47 and this document with evidence.
+3. Create a fresh AI-01 branch from the current default branch.
+4. Perform the exact source/save/call-site inspection above before coding.
+5. Implement provenance + arbitration + named freshness policies as one isolated change set.
+6. Add the required regression tests, run workspace/CI checks, review save/replay compatibility.
+7. Update this roadmap and issue #49 with commit, test evidence and any follow-on defects.
+8. Only after AI-01 is validated, proceed to AI-02 persistent soldier intent and safe interruption/resumption.
+
+### Known follow-on defects — do not silently fold into AI-01
+
+- Casualty aid overwrites a helper's prior task without a durable resume record.
+- Soldier mind, squad leader and Battle combat loop have overlapping decision authority.
+- Cover ownership is written by both soldier mind and squad leader.
+- `SAFE` currently conflates “no better cover option exists” with genuinely low danger in part of the GOAP facts.
+- Close-range combat can override the normal `may_fire` gate.
+- Titan command/task/intelligence foundations are not live Battle execution authorities.
+
+Track these for AI-02/AI-03/AI-04 or separate narrowly scoped issues. Do not expand AI-01 to absorb them.
