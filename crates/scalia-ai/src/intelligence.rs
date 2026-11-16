@@ -17,6 +17,8 @@ pub enum IntelSource {
     Visual,
     IncomingFire,
     Audio,
+    /// A contact injected by an explicit in-process/manual reporting hook.
+    External,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

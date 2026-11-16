@@ -5,6 +5,7 @@
 
 use crate::sight::{isqrt, Point, SightGrid};
 use crate::grid::SoldierGrid;
+use crate::intelligence::IntelSource;
 use crate::leader::{Brain, LEAD_MS};
 use crate::save::{decode, encode, frame, unframe, Command, MapSpec};
 use crate::tactics::{Building, CoverMap, Height};
@@ -255,6 +256,31 @@ const CONF_SHOT_AT: i32 = 700;
 pub(crate) const CONF_HEARD: i32 = 300;
 const CONF_FADE_S: i32 = 100;
 const CONF_FLOOR: i32 = 100;
+
+/// A contact may inform a decision only while it is recent enough and sufficiently credible for that use.
+/// Age is measured from the observation timestamp, not from the last confidence-decay tick.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ContactPolicy {
+    max_age_ms: i64,
+    min_confidence: i32,
+}
+
+impl ContactPolicy {
+    const fn new(max_age_ms: i64, min_confidence: i32) -> Self {
+        Self { max_age_ms, min_confidence }
+    }
+}
+
+/// Immediate defensive reactions: a report older than three seconds cannot establish a flank.
+pub(crate) const CONTACT_FLANK_POLICY: ContactPolicy = ContactPolicy::new(3_000, CONF_HEARD);
+/// Current combat decisions, including suppression, cover choice and casualty exposure.
+pub(crate) const CONTACT_COMBAT_POLICY: ContactPolicy = ContactPolicy::new(4_000, CONF_HEARD);
+/// Tactical orientation and movement planning may use a slightly older uncertain report.
+pub(crate) const CONTACT_TACTICAL_POLICY: ContactPolicy = ContactPolicy::new(20_000, CONF_HEARD);
+/// A squad is quiet only when it has no usable recent contact.
+pub(crate) const CONTACT_RECENT_POLICY: ContactPolicy = ContactPolicy::new(10_000, CONF_HEARD);
+/// Building clearance and room occupancy can use longer-lived, explicitly uncertain intelligence.
+pub(crate) const CONTACT_BUILDING_POLICY: ContactPolicy = ContactPolicy::new(30_000, CONF_HEARD);
 /// Turning speed: 4 rad/s, as the cosine and sine (per mille) of the turn in one 50 ms step.
 const TURN_COS: i64 = 980;
 const TURN_SIN: i64 = 199;
@@ -266,8 +292,30 @@ pub struct Contact {
     /// Last known position (where he was when last seen, shot from or heard).
     pub pos: (i64, i64),
     pub seen_ms: i64,
-    /// 1000 seen right now .. CONF_FLOOR long lost.
+    /// 1000 at observation .. CONF_FLOOR after confidence decay.
     pub confidence: i32,
+    /// How this report entered the squad's shared intelligence.
+    pub source: IntelSource,
+}
+
+impl Contact {
+    /// Whether this report is recent and credible enough for a named tactical use.
+    /// Future-dated reports are rejected rather than treated as fresh.
+    pub(crate) fn usable_at(&self, now_ms: i64, policy: ContactPolicy) -> bool {
+        now_ms.checked_sub(self.seen_ms).is_some_and(|age| {
+            age >= 0 && age <= policy.max_age_ms && self.confidence >= policy.min_confidence
+        })
+    }
+}
+
+/// Stable tie-break priority for reports with the same observation time and confidence.
+fn contact_source_rank(source: IntelSource) -> u8 {
+    match source {
+        IntelSource::Visual => 4,
+        IntelSource::IncomingFire => 3,
+        IntelSource::Audio => 2,
+        IntelSource::External => 1,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -995,7 +1043,7 @@ impl Battle {
             let mut flanked = false;
             if in_cover && s.suppression >= UNDER_FIRE {
                 if let (Some(c), Some(map)) = (s.cover, self.cover.as_ref()) {
-                    let nearest = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD && now - c.seen_ms <= 3_000).min_by_key(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.enemy)).map(|c| c.pos);
+                    let nearest = self.contacts[s.squad as usize].iter().filter(|c| c.usable_at(now, CONTACT_FLANK_POLICY)).min_by_key(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.enemy)).map(|c| c.pos);
                     if nearest.is_some_and(|t| map.protection(&map.spots[c], t, &self.sight) < 2) {
                         in_cover = false;
                         flanked = true;
@@ -1010,7 +1058,7 @@ impl Battle {
                 true
             } else if under_fire && !indoors && !target_close {
                 if let Some(map) = self.cover.as_ref() {
-                    let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.confidence >= CONF_HEARD).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();
+                    let mut threats: Vec<(i64, i64, i64)> = self.contacts[s.squad as usize].iter().filter(|c| c.usable_at(now, CONTACT_COMBAT_POLICY)).map(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.pos.0, c.pos.1)).collect();
                     threats.sort_unstable();
                     let threats: Vec<(i64, i64)> = threats.iter().take(4).map(|t| (t.1, t.2)).collect();
                     if !threats.is_empty() {
@@ -1022,7 +1070,7 @@ impl Battle {
                 false
             };
             let safe = in_cover || !under_fire || target_close || indoors || !cover_near;
-            let contact = self.contacts[s.squad as usize].iter().any(|c| now - c.seen_ms <= 4_000 && c.confidence >= CONF_HEARD && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
+            let contact = self.contacts[s.squad as usize].iter().any(|c| c.usable_at(now, CONTACT_COMBAT_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
             let bits = [
                 (fact::TARGET, s.target.is_some()),
                 (fact::IN_COVER, in_cover),
@@ -1037,7 +1085,7 @@ impl Battle {
             // Holding his ground with the enemy known but out of sight: he gets down on a knee rather than stand
             // tall in the open (refreshed while it lasts).
             // (Outdoors only: posted at a window he must stand to see out.)
-            let known = contact || self.contacts[s.squad as usize].iter().any(|c| self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
+            let known = contact || self.contacts[s.squad as usize].iter().any(|c| c.usable_at(now, CONTACT_TACTICAL_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
             let hold_low = known && !indoors && s.target.is_none() && matches!(s.task, Task::Hold { .. }) && !s.moving && s.cover.is_none() && !busy;
             let sit = Situation { facts, suppression: s.suppression, target_close, mag_empty: s.ammo <= 0, aim: s.aim, aiding: busy };
             let mind = think(&sit);
@@ -1111,22 +1159,33 @@ impl Battle {
     }
 
     pub(crate) fn report_pub(&mut self, squad: usize, enemy: usize, pos: (i64, i64), confidence: i32) {
-        self.report(squad, enemy, pos, confidence);
+        self.report(squad, enemy, pos, confidence, IntelSource::External);
     }
 
-    /// Records (or refreshes) a squad's contact; a weaker report never overwrites a stronger, fresher one.
-    fn report(&mut self, squad: usize, enemy: usize, pos: (i64, i64), confidence: i32) {
+    /// Records a squad-shared observation. Recency wins over confidence: a newer weak report refreshes
+    /// the position and timestamp while retaining its own lower confidence. Equal-time reports use a
+    /// stable confidence/source/position tie-break so arrival order cannot change the saved state.
+    fn report(&mut self, squad: usize, enemy: usize, pos: (i64, i64), confidence: i32, source: IntelSource) {
         let now = self.time_ms;
+        let incoming = Contact { enemy, pos, seen_ms: now, confidence: confidence.clamp(0, 1_000), source };
         let list = &mut self.contacts[squad];
         // Kept sorted by enemy: a big fight has hundreds of contacts per squad.
         match list.binary_search_by_key(&enemy, |c| c.enemy) {
             Ok(k) => {
-                let c = &mut list[k];
-                if confidence >= c.confidence {
-                    *c = Contact { enemy, pos, seen_ms: now, confidence };
+                let old = &list[k];
+                let newer = now > old.seen_ms;
+                let equal_time_wins = now == old.seen_ms && (
+                    incoming.confidence > old.confidence
+                    || (incoming.confidence == old.confidence && (
+                        contact_source_rank(source) > contact_source_rank(old.source)
+                        || (source == old.source && pos < old.pos)
+                    ))
+                );
+                if newer || equal_time_wins {
+                    list[k] = incoming;
                 }
             }
-            Err(k) => list.insert(k, Contact { enemy, pos, seen_ms: now, confidence }),
+            Err(k) => list.insert(k, incoming),
         }
     }
 
@@ -1210,7 +1269,7 @@ impl Battle {
             let sq = self.soldiers[i].squad as usize;
             for &j in &seen {
                 let pos = self.soldiers[j as usize].pos;
-                self.report(sq, j as usize, pos, CONF_SEEN);
+                self.report(sq, j as usize, pos, CONF_SEEN, IntelSource::Visual);
             }
             self.visible[i] = seen;
         }
@@ -1308,7 +1367,7 @@ impl Battle {
             return;
         }
         let now = self.time_ms;
-        let Some(c) = self.contacts[s.squad as usize].iter().filter(|c| now - c.seen_ms <= 4_000 && c.confidence >= CONF_HEARD && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down()).filter(|c| near(c.pos, s.pos, BURST_MM) && !near(c.pos, s.pos, 3_000)).max_by_key(|c| (c.seen_ms, c.confidence)).cloned() else { return };
+        let Some(c) = self.contacts[s.squad as usize].iter().filter(|c| c.usable_at(now, CONTACT_COMBAT_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down()).filter(|c| near(c.pos, s.pos, BURST_MM) && !near(c.pos, s.pos, 3_000)).max_by_key(|c| (c.seen_ms, c.confidence)).cloned() else { return };
         // Only toward where he can put rounds (a clear line to the spot), and not every lull.
         let aim_at = Point { x: c.pos.0, y: c.pos.1, z: 1_200 };
         if !self.sight.clear(s.eye(), aim_at) {
@@ -1335,7 +1394,7 @@ impl Battle {
             e.suppression = (e.suppression + SUPPRESS_MISS * n as i32 / 2).min(1_000);
         }
         let (tsq, spos) = (self.soldiers[c.enemy].squad as usize, self.soldiers[i].pos);
-        self.report(tsq, i, spos, CONF_SHOT_AT);
+        self.report(tsq, i, spos, CONF_SHOT_AT, IntelSource::IncomingFire);
         self.rolls += 1;
         self.soldiers[i].cooldown_ms = 1_200 + (self.roll(i, self.rolls) * 1_600 / 1_000) as i32;
     }
@@ -1457,7 +1516,7 @@ impl Battle {
             let look = match self.soldiers[i].target {
                 Some(j) => Some(self.soldiers[j].pos),
                 None if shooter.is_some() => shooter,
-                None => self.contacts[self.soldiers[i].squad as usize].iter().filter(|c| self.time_ms - c.seen_ms <= 3_000 && c.confidence >= CONF_HEARD).max_by_key(|c| (c.confidence, c.seen_ms)).map(|c| c.pos),
+                None => self.contacts[self.soldiers[i].squad as usize].iter().filter(|c| c.usable_at(self.time_ms, CONTACT_FLANK_POLICY)).max_by_key(|c| (c.confidence, c.seen_ms)).map(|c| c.pos),
             };
             let me = &mut self.soldiers[i];
             if let Some(p) = look {
@@ -1640,7 +1699,7 @@ impl Battle {
                     if o.team == shooter_team {
                         self.heard[sq] = Some((shooter_pos, self.time_ms));
                     } else {
-                        self.report(sq, i, shooter_pos, CONF_HEARD);
+                        self.report(sq, i, shooter_pos, CONF_HEARD, IntelSource::Audio);
                     }
                 }
                 self.scratch = near;
@@ -1868,4 +1927,93 @@ pub fn seg_closest(a: (i64, i64), b: (i64, i64), p: (i64, i64)) -> (i128, (i64, 
     let t = (ap.0 * ab.0 + ap.1 * ab.1).clamp(0, len2.max(1));
     let (cx, cy) = (if len2 == 0 { 0 } else { ab.0 * t / len2 }, if len2 == 0 { 0 } else { ab.1 * t / len2 });
     ((ap.0 - cx) * (ap.0 - cx) + (ap.1 - cy) * (ap.1 - cy), (a.0 + cx as i64, a.1 + cy as i64))
+}
+
+#[cfg(test)]
+mod contact_tests {
+    use super::*;
+
+    fn battle() -> Battle {
+        let soldiers = vec![
+            Soldier::new(0, 0, (1_000, 1_000), Stance::Stand),
+            Soldier::new(1, 1, (2_000, 1_000), Stance::Stand),
+            Soldier::new(0, 0, (1_500, 1_000), Stance::Stand),
+        ];
+        Battle::on_map(MapSpec::new(0, 0, 10_000, 10_000, &[]), soldiers, 7)
+    }
+
+    #[test]
+    fn newer_low_confidence_report_refreshes_position_and_time_without_inheriting_confidence() {
+        let mut b = battle();
+        b.time_ms = 10_000;
+        b.report(0, 1, (10_000, 10_000), CONF_SEEN, IntelSource::Visual);
+        b.time_ms = 12_000;
+        b.report(0, 1, (30_000, 40_000), CONF_HEARD, IntelSource::Audio);
+        let c = b.contact(0, 1).unwrap();
+        assert_eq!(c.pos, (30_000, 40_000));
+        assert_eq!(c.seen_ms, 12_000);
+        assert_eq!(c.confidence, CONF_HEARD);
+        assert_eq!(c.source, IntelSource::Audio);
+    }
+
+    #[test]
+    fn older_report_cannot_rewind_newer_observation() {
+        let mut b = battle();
+        b.time_ms = 10_000;
+        b.report(0, 1, (10_000, 10_000), CONF_SEEN, IntelSource::Visual);
+        b.time_ms = 11_000;
+        b.report(0, 1, (30_000, 40_000), CONF_HEARD, IntelSource::Audio);
+        b.time_ms = 10_500;
+        b.report(0, 1, (90_000, 90_000), CONF_SEEN, IntelSource::Visual);
+        let c = b.contact(0, 1).unwrap();
+        assert_eq!(c.pos, (30_000, 40_000));
+        assert_eq!(c.seen_ms, 11_000);
+        assert_eq!(c.source, IntelSource::Audio);
+    }
+
+    #[test]
+    fn equal_time_arbitration_is_independent_of_arrival_order() {
+        let mut audio_first = battle();
+        let mut visual_first = battle();
+        audio_first.time_ms = 5_000;
+        visual_first.time_ms = 5_000;
+        audio_first.report(0, 1, (20_000, 20_000), CONF_HEARD, IntelSource::Audio);
+        audio_first.report(0, 1, (10_000, 10_000), CONF_HEARD, IntelSource::Visual);
+        visual_first.report(0, 1, (10_000, 10_000), CONF_HEARD, IntelSource::Visual);
+        visual_first.report(0, 1, (20_000, 20_000), CONF_HEARD, IntelSource::Audio);
+        assert_eq!(audio_first.contact(0, 1), visual_first.contact(0, 1));
+        assert_eq!(audio_first.contact(0, 1).unwrap().source, IntelSource::Visual);
+    }
+
+    #[test]
+    fn contact_policies_reject_stale_weak_and_future_reports() {
+        let c = Contact {
+            enemy: 1, pos: (0, 0), seen_ms: 1_000, confidence: CONF_HEARD, source: IntelSource::Audio,
+        };
+        assert!(c.usable_at(5_000, CONTACT_COMBAT_POLICY));
+        assert!(!c.usable_at(5_001, CONTACT_COMBAT_POLICY));
+        assert!(!c.usable_at(999, CONTACT_COMBAT_POLICY));
+        let weak = Contact { confidence: CONF_HEARD - 1, ..c };
+        assert!(!weak.usable_at(2_000, CONTACT_COMBAT_POLICY));
+    }
+
+    #[test]
+    fn squad_reports_stay_shared_within_the_squad_not_globally() {
+        let mut b = battle();
+        b.time_ms = 1_000;
+        b.report(0, 1, (2_000, 2_000), CONF_SEEN, IntelSource::Visual);
+        assert!(b.contact(0, 1).is_some());
+        assert!(b.contact(2, 1).is_some());
+        assert!(b.contact(1, 1).is_none());
+    }
+
+    #[test]
+    fn contact_source_survives_battle_save_and_load() {
+        let mut b = battle();
+        b.time_ms = 1_000;
+        b.report(0, 1, (2_000, 2_000), CONF_HEARD, IntelSource::Audio);
+        let restored = Battle::load(&b.save()).unwrap();
+        assert_eq!(restored.contact(0, 1).unwrap().source, IntelSource::Audio);
+        assert_eq!(restored.hash(), b.hash());
+    }
 }

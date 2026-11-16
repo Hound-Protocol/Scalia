@@ -141,7 +141,7 @@ impl From<PropSpec> for Prop {
 
 /// "SCAB" (Scalia battle) and the format version: a save from another version is refused, not misread.
 const MAGIC: [u8; 4] = *b"SCAB";
-pub const SAVE_VERSION: u32 = 11;
+pub const SAVE_VERSION: u32 = 12;
 
 /// Frames a state as magic, version, payload and a checksum over the payload.
 pub(crate) fn frame(payload: &[u8]) -> Vec<u8> {
@@ -178,6 +178,23 @@ pub fn checksum(bytes: &[u8]) -> u64 {
         h = mix64(h ^ u64::from_le_bytes(w));
     }
     h
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn current_save_version_round_trips_and_previous_version_is_refused() {
+        let current = frame(b"contact-provenance");
+        assert_eq!(unframe(&current).unwrap(), b"contact-provenance");
+        let mut previous = current;
+        previous[4..8].copy_from_slice(&(SAVE_VERSION - 1).to_le_bytes());
+        assert_eq!(
+            unframe(&previous).unwrap_err(),
+            format!("save format {}, this build reads {}", SAVE_VERSION - 1, SAVE_VERSION)
+        );
+    }
 }
 
 pub(crate) fn encode<T: Serialize>(v: &T) -> Vec<u8> {
