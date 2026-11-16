@@ -271,7 +271,7 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
 const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.987349, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.987349, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
 
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
