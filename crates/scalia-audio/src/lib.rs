@@ -230,8 +230,12 @@ pub struct Field {
     cost: Vec<f32>,
     wall_db: Vec<f32>,
     len_m: Vec<f32>,
-    /// Material occupancy used to distinguish a genuinely clear ray from a route around an obstruction.
+    /// Coarse material classes used by the propagation flood (0 air, 1 wall, 2 shut door).
     kind: Vec<u8>,
+    /// Sight-grid occupancy at its native 250 mm resolution, for accurate direct-ray checks.
+    ray_origin: (f32, f32),
+    ray_n: usize,
+    ray_solid: Vec<bool>,
 }
 
 /// What reaching the ears from a spot costs: loss through material (dB), the extra the way round adds
@@ -280,6 +284,21 @@ impl Field {
                     .iter()
                     .any(|(a, b)| sight.solid_at(((x + a) * 1000.0) as i64, ((y + b) * 1000.0) as i64, PATH_MM));
                 kind[j * n + i] = solid as u8;
+            }
+        }
+        // Keep a native-resolution occupancy map for direct rays. The 500 mm propagation cells
+        // deliberately include partial wall coverage, which is correct for pathfinding but too coarse
+        // to decide whether a ray passes cleanly through a doorway.
+        let ray_cell = FIELD_CELL_M * 0.5;
+        let ray_origin = ((origin.0 / ray_cell).floor() * ray_cell, (origin.1 / ray_cell).floor() * ray_cell);
+        let ray_n = (((origin.0 + n as f32 * FIELD_CELL_M - ray_origin.0) / ray_cell).ceil() as usize + 1)
+            .max(((origin.1 + n as f32 * FIELD_CELL_M - ray_origin.1) / ray_cell).ceil() as usize + 1);
+        let mut ray_solid = vec![false; ray_n * ray_n];
+        for j in 0..ray_n {
+            for i in 0..ray_n {
+                let x = ray_origin.0 + (i as f32 + 0.5) * ray_cell;
+                let y = ray_origin.1 + (j as f32 + 0.5) * ray_cell;
+                ray_solid[j * ray_n + i] = sight.solid_at((x * 1000.0) as i64, (y * 1000.0) as i64, PATH_MM);
             }
         }
         for d in sight.doors.iter().filter(|d| d.shut()) {
@@ -335,7 +354,7 @@ impl Field {
                 }
             }
         }
-        Field { ear, origin, n, cost, wall_db, len_m, kind }
+        Field { ear, origin, n, cost, wall_db, len_m, kind, ray_origin, ray_n, ray_solid }
     }
 
     /// How a sound at `at` (m) reaches the ears, if it lies inside the field.
@@ -351,15 +370,20 @@ impl Field {
         let straight = ((at.0 - self.ear.0).powi(2) + (at.1 - self.ear.1).powi(2)).sqrt();
         // The propagation grid's shortest-path length can be inflated by cell quantisation even when
         // the direct ray is unobstructed. Check the actual ray before applying diffraction loss.
-        let steps = (straight / (FIELD_CELL_M * 0.5)).ceil().max(1.0) as usize;
+        let ray_cell = FIELD_CELL_M * 0.5;
+        let steps = (straight / (ray_cell * 0.5)).ceil().max(1.0) as usize;
         let direct_clear = (0..=steps).all(|step| {
             let t = step as f32 / steps as f32;
             let x = self.ear.0 + (at.0 - self.ear.0) * t;
             let y = self.ear.1 + (at.1 - self.ear.1) * t;
-            let i = ((x - self.origin.0) / FIELD_CELL_M).floor() as isize;
-            let j = ((y - self.origin.1) / FIELD_CELL_M).floor() as isize;
-            i >= 0 && j >= 0 && (i as usize) < self.n && (j as usize) < self.n
-                && self.kind[j as usize * self.n + i as usize] == 0
+            let ri = ((x - self.ray_origin.0) / ray_cell).floor() as isize;
+            let rj = ((y - self.ray_origin.1) / ray_cell).floor() as isize;
+            let ci = ((x - self.origin.0) / FIELD_CELL_M).floor() as isize;
+            let cj = ((y - self.origin.1) / FIELD_CELL_M).floor() as isize;
+            ri >= 0 && rj >= 0 && (ri as usize) < self.ray_n && (rj as usize) < self.ray_n
+                && ci >= 0 && cj >= 0 && (ci as usize) < self.n && (cj as usize) < self.n
+                && !self.ray_solid[rj as usize * self.ray_n + ri as usize]
+                && self.kind[cj as usize * self.n + ci as usize] != 2
         });
         // The grid's own staircase makes even a straight way a little longer: only a real way round counts.
         let detour_m = if direct_clear { 0.0 } else { (self.len_m[k] - straight * 1.08 - FIELD_CELL_M).max(0.0) };
