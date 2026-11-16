@@ -902,8 +902,12 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             let lateral = dir.sin();
             let draw = [s.max(0.0), (-s).max(0.0)];
             p.prone = 1.0;
-            p.shoulder = [2.75 - 0.3 * s, 2.75 + 0.3 * s];
-            p.elbow = [1.4 + 0.3 * s, 1.4 - 0.3 * s];
+            // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
+            // The left support arm is solved by grip() rather than swinging away from the handguard.
+            p.shoulder = [1.965, 0.559];
+            p.elbow = [0.905, 1.791];
+            p.reach = [0.07, 0.522];
+            p.abduct = [-0.015, 0.45];
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
             p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
@@ -917,10 +921,12 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
         Pose::Prone => {
-            // Preserve the authored neutral prone body pose; grip() solves the support arm independently.
+            // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
             p.prone = 1.0;
-            p.shoulder = [2.8, 2.8];
-            p.elbow = [1.3, 1.35];
+            p.shoulder = [1.965, 0.559];
+            p.elbow = [0.905, 1.791];
+            p.reach = [0.07, 0.522];
+            p.abduct = [-0.015, 0.45];
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 1.0;
         }
