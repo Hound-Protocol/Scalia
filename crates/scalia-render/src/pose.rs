@@ -290,7 +290,7 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
     let excess = (target.distance(Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z)) - GRIP_REACH).max(0.0);
     let damp = GRIP_DAMP + 2.0 * excess;
     // Unknowns: left shoulder, elbow and reach.
-    let apply = |q: &PoseParams, x: [f32; 3]| {
+    let apply = |q: &PoseParams, x: [f32; 4]| {
         let mut t = *q;
         t.shoulder[0] += x[0];
         t.elbow[0] += x[1];
