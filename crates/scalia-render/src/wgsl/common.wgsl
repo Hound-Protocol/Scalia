@@ -682,7 +682,8 @@ fn grip(p_in: PP, w_in: f32) -> PP {
 fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
   if (w <= 0.0) { return p; }
   let excess = max(distance(goal, vec3f(-0.238, 0.0, 1.40)) - 0.595, 0.0);
-  let damp = 0.05 + 2.0 * excess;
+  // Ease out reach damping as the torso lowers; prone support needs the arm's full extension.
+  let damp = 0.05 + 2.0 * excess * (1.0 - clamp(p.prone, 0.0, 1.0));
   var q = p;
   for (var it = 0; it < 16; it = it + 1) {
     let r = goal - hand_l(q);
