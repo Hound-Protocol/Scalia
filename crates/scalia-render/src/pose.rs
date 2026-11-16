@@ -288,7 +288,8 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
     // Out of reach even after the tilt (going prone, say): damp harder the further it is, so the arm only
     // stretches towards it instead of flailing.
     let excess = (target.distance(Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z)) - GRIP_REACH).max(0.0);
-    let damp = GRIP_DAMP + 2.0 * excess;
+    // As the torso lowers, let the support arm use its full reach instead of damping away the correction.
+    let damp = GRIP_DAMP + 2.0 * excess * (1.0 - p.prone.clamp(0.0, 1.0));
     // Unknowns: left shoulder, elbow and reach.
     let apply = |q: &PoseParams, x: [f32; 4]| {
         let mut t = *q;
