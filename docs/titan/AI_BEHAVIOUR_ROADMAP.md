@@ -412,3 +412,10 @@ Confirmed live contact shape remains:
 ### AI-01 readiness
 
 The code-level starting points have been revalidated on `main`. AI-01 remains blocked only by the AI-00 test/CI baseline. Do not implement or merge a serialized Contact shape change without first resolving that gate and the save-version strategy.
+
+
+### AI-01 branch preparation
+
+- Created `work/AI-01-contact-intelligence-2026-11-16` from current `main` after PR #48 merged and post-merge source inspection.
+- No runtime changes have been committed to this branch.
+- Branch is intentionally staged pending the AI-00 Rust test/CI baseline. Do not begin the Contact serialization change until the baseline result and save-version plan are recorded.
