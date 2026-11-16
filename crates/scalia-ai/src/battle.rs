@@ -260,7 +260,7 @@ const CONF_FLOOR: i32 = 100;
 /// A contact may inform a decision only while it is recent enough and sufficiently credible for that use.
 /// Age is measured from the observation timestamp, not from the last confidence-decay tick.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ContactPolicy {
+pub(crate) struct ContactPolicy {
     max_age_ms: i64,
     min_confidence: i32,
 }
@@ -278,7 +278,7 @@ pub(crate) const CONTACT_COMBAT_POLICY: ContactPolicy = ContactPolicy::new(4_000
 /// Tactical orientation and movement planning may use a slightly older uncertain report.
 pub(crate) const CONTACT_TACTICAL_POLICY: ContactPolicy = ContactPolicy::new(20_000, CONF_HEARD);
 /// A squad is quiet only when it has no usable recent contact.
-pub(crate) const CONTACT_RECENT_POLICY: ContactPolicy = ContactPolicy::new(10_000, CONF_HEARD);
+pub(crate) const CONTACT_RECENT_POLICY: ContactPolicy = ContactPolicy::new(10_000, CONF_FLOOR);
 /// Building clearance and room occupancy can use longer-lived, explicitly uncertain intelligence.
 pub(crate) const CONTACT_BUILDING_POLICY: ContactPolicy = ContactPolicy::new(30_000, CONF_HEARD);
 /// Turning speed: 4 rad/s, as the cosine and sine (per mille) of the turn in one 50 ms step.
@@ -1683,7 +1683,7 @@ impl Battle {
                 let (shooter_pos, shooter_team) = (self.soldiers[i].pos, self.soldiers[i].team);
                 if let Some(j) = target {
                     let tsq = self.soldiers[j].squad as usize;
-                    self.report(tsq, i, shooter_pos, CONF_SHOT_AT);
+                    self.report(tsq, i, shooter_pos, CONF_SHOT_AT, IntelSource::IncomingFire);
                 }
                 let mut near = std::mem::take(&mut self.scratch);
                 self.grid.near(shooter_pos, HEAR_MM, &mut near);
@@ -1986,15 +1986,27 @@ mod contact_tests {
     }
 
     #[test]
-    fn contact_policies_reject_stale_weak_and_future_reports() {
+    fn every_named_policy_has_a_strict_age_boundary_and_rejects_future_reports() {
         let c = Contact {
             enemy: 1, pos: (0, 0), seen_ms: 1_000, confidence: CONF_HEARD, source: IntelSource::Audio,
         };
-        assert!(c.usable_at(5_000, CONTACT_COMBAT_POLICY));
-        assert!(!c.usable_at(5_001, CONTACT_COMBAT_POLICY));
+        for (policy, max_age) in [
+            (CONTACT_FLANK_POLICY, 3_000),
+            (CONTACT_COMBAT_POLICY, 4_000),
+            (CONTACT_RECENT_POLICY, 10_000),
+            (CONTACT_TACTICAL_POLICY, 20_000),
+            (CONTACT_BUILDING_POLICY, 30_000),
+        ] {
+            assert!(c.usable_at(1_000 + max_age, policy), "age {max_age} should be included");
+            assert!(!c.usable_at(1_001 + max_age, policy), "age {max_age} + 1 should be stale");
+        }
         assert!(!c.usable_at(999, CONTACT_COMBAT_POLICY));
         let weak = Contact { confidence: CONF_HEARD - 1, ..c };
         assert!(!weak.usable_at(2_000, CONTACT_COMBAT_POLICY));
+        // Quietness is age-bounded independently of confidence decay to the uncertainty floor.
+        let fading = Contact { confidence: CONF_FLOOR, ..c };
+        assert!(fading.usable_at(10_000, CONTACT_RECENT_POLICY));
+        assert!(!fading.usable_at(10_001, CONTACT_RECENT_POLICY));
     }
 
     #[test]
@@ -2008,12 +2020,29 @@ mod contact_tests {
     }
 
     #[test]
-    fn contact_source_survives_battle_save_and_load() {
-        let mut b = battle();
-        b.time_ms = 1_000;
-        b.report(0, 1, (2_000, 2_000), CONF_HEARD, IntelSource::Audio);
-        let restored = Battle::load(&b.save()).unwrap();
-        assert_eq!(restored.contact(0, 1).unwrap().source, IntelSource::Audio);
-        assert_eq!(restored.hash(), b.hash());
+    fn visual_audio_incoming_fire_and_external_sources_survive_sharing_and_save_load() {
+        for source in [IntelSource::Visual, IntelSource::Audio, IntelSource::IncomingFire, IntelSource::External] {
+            let mut b = battle();
+            b.time_ms = 1_000;
+            b.report(0, 1, (2_000, 2_000), CONF_HEARD, source);
+            assert_eq!(b.contact(2, 1).unwrap().source, source, "source lost inside squad");
+            let restored = Battle::load(&b.save()).unwrap();
+            assert_eq!(restored.contact(0, 1).unwrap().source, source);
+            assert_eq!(restored.contact(2, 1).unwrap().source, source);
+            assert_eq!(restored.hash(), b.hash());
+        }
+    }
+
+    #[test]
+    fn equal_confidence_same_source_position_tie_break_is_order_independent() {
+        let mut first = battle();
+        let mut second = battle();
+        first.time_ms = 5_000;
+        second.time_ms = 5_000;
+        first.report(0, 1, (20_000, 20_000), CONF_HEARD, IntelSource::Audio);
+        first.report(0, 1, (10_000, 10_000), CONF_HEARD, IntelSource::Audio);
+        second.report(0, 1, (10_000, 10_000), CONF_HEARD, IntelSource::Audio);
+        second.report(0, 1, (20_000, 20_000), CONF_HEARD, IntelSource::Audio);
+        assert_eq!(first.contact(0, 1), second.contact(0, 1));
     }
 }
