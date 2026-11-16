@@ -314,10 +314,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   } else if (pose == 5u) {
     // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
     p.prone = 1.0;
-    p.sh = vec2f(2.8, 1.243);
-    p.el = vec2f(1.3, 1.791);
-    p.reach = vec2f(0.0, 0.513);
-    p.abd = vec2f(0.0, 0.423);
+    p.sh = vec2f(2.8, 1.571);
+    p.el = vec2f(1.3, 2.084);
+    p.reach = vec2f(0.0, 0.401);
+    p.abd = vec2f(0.0, 0.604);
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
@@ -546,10 +546,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.prone = 1.0;
     // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
     // The left support arm is solved by grip() rather than swinging away from the handguard.
-    p.sh = vec2f(2.8, 1.243);
-    p.el = vec2f(1.3, 1.791);
-    p.reach = vec2f(0.0, 0.513);
-    p.abd = vec2f(0.0, 0.423);
+    p.sh = vec2f(2.8, 1.571);
+    p.el = vec2f(1.3, 2.084);
+    p.reach = vec2f(0.0, 0.401);
+    p.abd = vec2f(0.0, 0.604);
     p.ryaw = 0.55;
     p.hip = vec2f(0.1) + 0.3 * draw;
     p.knee = vec2f(0.35) + 1.2 * draw;
