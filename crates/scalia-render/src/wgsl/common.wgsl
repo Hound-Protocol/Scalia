@@ -326,11 +326,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   } else if (pose == 36u) {
     // Solved blend of prone support and the two-handed aim rig.
     p.prone = 1.0;
-    p.sh = vec2f(2.8, 0.559);
-    p.el = vec2f(1.3, 1.791);
-    p.reach = vec2f(0.0, 0.522);
-    p.abd = vec2f(0.0, 0.45);
-    p.ryaw = 0.55;
+    p.sh = vec2f(1.965, 0.559);
+    p.el = vec2f(0.905, 1.791);
+    p.reach = vec2f(0.07, 0.522);
+    p.abd = vec2f(-0.015, 0.45);
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
@@ -546,14 +545,14 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.prone = 1.0;
     // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
     // The left support arm is solved by grip() rather than swinging away from the handguard.
-    p.sh = vec2f(1.965, 0.559);
-    p.el = vec2f(0.905, 1.791);
-    p.reach = vec2f(0.07, 0.522);
-    p.abd = vec2f(-0.015, 0.45);
+    p.sh = vec2f(2.8, 0.559);
+    p.el = vec2f(1.3, 1.791);
+    p.reach = vec2f(0.0, 0.522);
+    p.abd = vec2f(0.0, 0.45);
+    p.ryaw = 0.55;
     p.hip = vec2f(0.1) + 0.3 * draw;
     p.knee = vec2f(0.35) + 1.2 * draw;
     p.side = vec2f(-0.12 - 0.55 * draw.x - 0.16 * lateral, 0.12 + 0.55 * draw.y + 0.16 * lateral);
-    p.abd = vec2f(0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral);
     p.twist = 0.06 * s + 0.08 * lateral;
     p.tilt = 0.05 * s + 0.04 * lateral;
     p.rifle = 1.5707963;
