@@ -228,9 +228,10 @@ mod tests {
         fx.shot(1_020.0, [5.0, 0.0, 1.4], [5.0, 30.0, 1.0], None, true, false);
         fx.blast(1_010.0, [10.0, 10.0, 0.0]);
         let l = fx.lights(1_030.0, (0.0, 0.0));
-        assert_eq!(l.len(), 3);
+        // The first flash (30 ms old) has expired; the blast and newest 10 ms flash remain.
+        assert_eq!(l.len(), 2);
         assert_eq!(l[0].radius, 16.0, "the blast");
-        assert_eq!(l[1].pos[0], 5.0, "then the newer flash");
+        assert_eq!(l[1].pos[0], 5.0, "then the still-live newer flash");
     }
 
     #[test]
