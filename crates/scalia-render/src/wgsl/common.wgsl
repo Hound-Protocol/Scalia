@@ -610,8 +610,8 @@ fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >=
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
   let hb = two_handed(b);
-  var w = clamp((w0 - 0.15) / 0.85, 0.0, 1.0);
-  if (ha > hb) { w = clamp(w0 / 0.85, 0.0, 1.0); }
+  var w = clamp((w0 - 0.4) / 0.6, 0.0, 1.0);
+  if (ha > hb) { w = clamp(w0 / 0.6, 0.0, 1.0); }
   w = w * w * (3.0 - 2.0 * w);
   return mix(ha, hb, w);
 }
