@@ -964,7 +964,7 @@ try {
       panel.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) === speed));
       panel.querySelector('[data-l]').classList.toggle('on', labels);
     };
-    const setSpeed = (x) => { speed = x; v.lab_set_speed(x); paint(); };
+    const setSpeed = (x) => { speed = x; v.lab_set_speed(x); audio.setWorldTimeScale(x); paint(); };
     const start = (k) => {
       cur = k; feed.textContent = '';
       panel.querySelector('.note').textContent = v.lab_start(k);
@@ -991,6 +991,7 @@ try {
     return {
       start: (k) => { started = true; start(k); },
       setSpeed: (x) => setSpeed(x),
+      getSpeed: () => speed,
       toggleLabels: () => { labels = !labels; paint(); return labels; },
       draw() {
         if (!started) { started = true; start(cur); setSpeed(1); }
@@ -1692,11 +1693,12 @@ try {
       const echoes = [0, 1, 2, 3].map((k) => s.subarray(i + 14 + k * 3, i + 17 + k * 3));
       const at = { lowpass, rx, ry, below, dist, delay, space, echoes, far: s[i + 26],
         lowDb: s[i + 27], midDb: s[i + 28], highDb: s[i + 29] };
-      if (kind === 3) audio.play(concreteTake(), { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16 });
-      else if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2 });
-      else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, rate: 0.45 });
-      else if (kind === 0 || kind === 4) audio.play(GUN[kind], { ...at, kind: 'shot', db: 130, gain: Math.min(3, gain * 4), room, rate: 0.95 + Math.random() * 0.1 });
-      else if (GUN[kind]) audio.play(GUN[kind], { ...at, kind: 'step', db: 62, gain: Math.min(2, gain * 1.4), room: room * 0.5, echoes: [], rate: 0.96 + Math.random() * 0.08 });
+      const timeScaled = !!lab;
+      if (kind === 3) audio.play(concreteTake(), { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.92 + Math.random() * 0.16, timeScaled });
+      else if (kind === 2) audio.play(STEPS, { ...at, kind: 'step', db: 52 + 16 * loud, gain: gain * (0.5 + 0.7 * loud), room: room * 0.6, echoes: [], rate: 0.9 + Math.random() * 0.2, timeScaled });
+      else if (kind === 1) audio.play(SHOT, { ...at, kind: 'blast', db: 155, gain: Math.min(5, gain * 10), room, rate: 0.45, timeScaled });
+      else if (kind === 0 || kind === 4) audio.play(GUN[kind], { ...at, kind: 'shot', db: 130, gain: Math.min(3, gain * 4), room, rate: 0.95 + Math.random() * 0.1, timeScaled });
+      else if (GUN[kind]) audio.play(GUN[kind], { ...at, kind: 'step', db: 62, gain: Math.min(2, gain * 1.4), room: room * 0.5, echoes: [], rate: 0.96 + Math.random() * 0.08, timeScaled });
     }
     } catch (e) { console.warn('audio', e); }
   };
