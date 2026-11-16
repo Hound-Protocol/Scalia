@@ -598,7 +598,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 32u || pose == 36u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
