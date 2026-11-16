@@ -287,7 +287,7 @@ pub struct Viewer {
     assault: Option<crate::assault::Assault>,
     /// The K training assault is running on the field.
     demo: bool,
-    /// The AI lab's clock: battle time runs at `lab_speed` (0 paused, 0.25 slow motion, 1 real time).
+    /// The AI lab's world clock: AI, soldier animation and effects run at `lab_speed` (0 paused, 1 real time, 4 max).
     lab_speed: f64,
     lab_t: f64,
     lab_prev: f64,
