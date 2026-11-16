@@ -416,6 +416,6 @@ The code-level starting points have been revalidated on `main`. AI-01 remains bl
 
 ### AI-01 branch preparation
 
-- Created `work/AI-01-contact-intelligence-2026-11-16` from current `main` after PR #48 merged and post-merge source inspection.
+- Created `work/AI-01-contact-intelligence-2026-11-16` from current `main` after PR #48 merged and post-merge source inspection. Its head is `17973c1539148c41dfcb1b14a4c7fd9225fae01f`, identical to `main` at the time of revalidation.
 - No runtime changes have been committed to this branch.
 - Branch is intentionally staged pending the AI-00 Rust test/CI baseline. Do not begin the Contact serialization change until the baseline result and save-version plan are recorded.
