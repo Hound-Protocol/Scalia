@@ -314,19 +314,23 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   } else if (pose == 5u) {
     // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
     p.prone = 1.0;
-    p.sh = vec2f(1.965, 0.559);
-    p.el = vec2f(0.905, 1.791);
-    p.reach = vec2f(0.07, 0.522);
-    p.abd = vec2f(-0.015, 0.45);
+    p.sh = vec2f(2.8, 0.559);
+    p.el = vec2f(1.3, 1.791);
+    p.reach = vec2f(0.0, 0.522);
+    p.abd = vec2f(0.0, 0.45);
     p.rifle = 1.5707963;
+    p.ryaw = 0.55;
+    p.twist = -0.55;
+    p.look = 0.55;
     p.head = 1.0;
   } else if (pose == 36u) {
     // Solved blend of prone support and the two-handed aim rig.
     p.prone = 1.0;
-    p.sh = vec2f(1.965, 0.559);
-    p.el = vec2f(0.905, 1.791);
-    p.reach = vec2f(0.07, 0.522);
-    p.abd = vec2f(-0.015, 0.45);
+    p.sh = vec2f(2.8, 0.559);
+    p.el = vec2f(1.3, 1.791);
+    p.reach = vec2f(0.0, 0.522);
+    p.abd = vec2f(0.0, 0.45);
+    p.ryaw = 0.55;
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
