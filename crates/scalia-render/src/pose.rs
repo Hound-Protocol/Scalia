@@ -930,6 +930,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.rifle_yaw = 0.55;
             p.twist = -0.55;
+            p.lean = -0.1;
             p.look = 0.55;
             p.head = 1.0;
         }
