@@ -684,7 +684,7 @@ fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
   let excess = max(distance(goal, vec3f(-0.238, 0.0, 1.40)) - 0.595, 0.0);
   let damp = 0.05 + 2.0 * excess;
   var q = p;
-  for (var it = 0; it < 12; it = it + 1) {
+  for (var it = 0; it < 16; it = it + 1) {
     let r = goal - hand_l(q);
     if (dot(r, r) < 1e-6) { break; }
     let d = 0.01;
