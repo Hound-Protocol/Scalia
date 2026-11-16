@@ -904,10 +904,10 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.prone = 1.0;
             // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
             // The left support arm is solved by grip() rather than swinging away from the handguard.
-            p.shoulder = [2.8, 1.243];
-            p.elbow = [1.3, 1.791];
-            p.reach = [0.0, 0.513];
-            p.abduct = [0.0, 0.423];
+            p.shoulder = [2.8, 1.571];
+            p.elbow = [1.3, 2.084];
+            p.reach = [0.0, 0.401];
+            p.abduct = [0.0, 0.604];
             p.rifle_yaw = 0.55;
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
@@ -923,10 +923,10 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::Prone => {
             // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
             p.prone = 1.0;
-            p.shoulder = [2.8, 1.243];
-            p.elbow = [1.3, 1.791];
-            p.reach = [0.0, 0.513];
-            p.abduct = [0.0, 0.423];
+            p.shoulder = [2.8, 1.571];
+            p.elbow = [1.3, 2.084];
+            p.reach = [0.0, 0.401];
+            p.abduct = [0.0, 0.604];
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.rifle_yaw = 0.55;
             p.twist = -0.55;
