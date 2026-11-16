@@ -951,7 +951,7 @@ try {
   // pause), + faster, Backspace restart.
   const lab = new URLSearchParams(location.search).has('lab') ? (() => {
     const SCEN = [['clear', 'Clear house'], ['contact', 'Contact'], ['wounded', 'Casualty'], ['standoff', 'Standoff']];
-    const SPEEDS = [0, 0.25, 0.5, 1, 2];
+    const SPEEDS = [0, 0.25, 0.5, 1, 2, 4];
     let cur = new URLSearchParams(location.search).get('lab') || 'clear', speed = 1, labels = true;
     const panel = document.createElement('div'); panel.id = 'labPanel';
     panel.innerHTML = `<h5>AI LAB</h5><div class="scen">${SCEN.map(([k, n]) => `<button data-s="${k}">${n}</button>`).join('')}</div>
