@@ -1,4 +1,5 @@
 use scalia_ai::battle::{Battle, Event, Soldier, Stance};
+use scalia_ai::intelligence::IntelSource;
 use scalia_ai::sight::SightGrid;
 use scalia_core::nav::{Prop, PropKind};
 
@@ -296,7 +297,7 @@ fn a_man_shot_at_turns_on_the_shooter_not_the_squads_other_contact() {
     for _ in 0..80 {
         let now = b.time_ms;
         b.contacts[0].retain(|c| c.enemy != 2);
-        b.contacts[0].push(Contact { enemy: 2, pos: (50_000, 80_000), seen_ms: now, confidence: 1_000 });
+        b.contacts[0].push(Contact { enemy: 2, pos: (50_000, 80_000), seen_ms: now, confidence: 1_000, source: IntelSource::Visual });
         b.step(50);
         if b.soldiers[0].down() {
             break;
