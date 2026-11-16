@@ -259,10 +259,10 @@ This section is the current handoff point for the next AI contributor. Read it b
 
 - Repository: `Hound-Protocol/Scalia`.
 - Documentation branch: `work/AI-behaviour-roadmap-2026-11-16`.
-- Roadmap PR: [#48 — docs(ai): establish Titan behaviour roadmap and audit](https://github.com/Hound-Protocol/Scalia/pull/48). It is a documentation-only draft PR; it has not been merged.
+- Roadmap PR: [#48 — docs(ai): establish Titan behaviour roadmap and audit](https://github.com/Hound-Protocol/Scalia/pull/48). **Merged** into `main` at `d24916fa0e936b9012fc0f1e57256112117cddb1` on 2026-11-16.
 - Audit issue: [#47 — AI-00: Audit live NPC behaviour and decision pipeline](https://github.com/Hound-Protocol/Scalia/issues/47).
 - Next implementation issue: [#49 — AI-01: Add source-aware contact intelligence and consistent freshness](https://github.com/Hound-Protocol/Scalia/issues/49).
-- Latest default-branch commit observed during this checkpoint: `0c701462e1dd7db199ecc30aba80749e90750cc7` (2026-11-16, merge of PR #46). Re-check the default branch and PR #48 base before starting; this observation is a checkpoint, not a permanent base guarantee.
+- Merge commit for the roadmap: `d24916fa0e936b9012fc0f1e57256112117cddb1`. At revalidation, `main` contains this merge and the documentation branch is exactly one merge commit behind `main` (no ahead-only commits). Re-check `main` immediately before implementation branching.
 - Keep the roadmap branch documentation-only. Start implementation work on a fresh branch from the then-current default branch.
 
 ### Current completion state
@@ -359,3 +359,56 @@ Before merge:
 - Titan command/task/intelligence foundations are not live Battle execution authorities.
 
 Track these for AI-02/AI-03/AI-04 or separate narrowly scoped issues. Do not expand AI-01 to absorb them.
+
+
+---
+
+## Post-merge revalidation — 2026-11-16
+
+### Merge confirmation
+
+- PR #48 is merged and closed: https://github.com/Hound-Protocol/Scalia/pull/48
+- Merge commit: `d24916fa0e936b9012fc0f1e57256112117cddb1`.
+- The merged roadmap commit is present on `main`.
+- Comparing `main` against `work/AI-behaviour-roadmap-2026-11-16` reports the documentation branch behind by one merge commit and zero commits ahead. No extra documentation-branch-only work remains to port.
+
+### Current source re-check on main
+
+Files re-opened after the merge:
+- `crates/scalia-ai/src/battle.rs`
+- `crates/scalia-ai/src/intelligence.rs`
+- `crates/scalia-ai/src/save.rs`
+- `crates/scalia-ai/Cargo.toml`
+- workspace `Cargo.toml`
+
+Confirmed live contact shape remains:
+- `Contact { enemy, pos, seen_ms, confidence }`; no source provenance field.
+- `Battle::report` still replaces an existing report only when incoming confidence is greater than or equal to current confidence.
+- Full-file call-site scan on current `main` found report writes at:
+  - `report_pub` forwarding to `report` (battle.rs:1113–1114).
+  - Visual perception (battle.rs:1213, `CONF_SEEN`).
+  - Lull/covering-fire feedback to the enemy squad (battle.rs:1338, `CONF_SHOT_AT`).
+  - Incoming-fire report to the target squad (battle.rs:1627, `CONF_SHOT_AT`).
+  - Heard gunfire report (battle.rs:1643, `CONF_HEARD`).
+- Current contact consumers and inconsistent rules:
+  - Nearest contact for soldier thinking: confidence threshold + 3 s age (battle.rs:998).
+  - Cover threat candidates: confidence threshold, no age filter (battle.rs:1013).
+  - Tactical contact boolean: confidence + 4 s (battle.rs:1025).
+  - Broad `known` fallback: alive/non-down contact only, no confidence/age filter (battle.rs:1040).
+  - Lull suppression target: confidence + 4 s (battle.rs:1311).
+  - Target/position fallback: confidence + 3 s (battle.rs:1460).
+  - Squad contacts are stored in `Battle.contacts`, indexed by squad, and included in serialized `State` (battle.rs:420–450, 623–655).
+- `TitanIntelligence` still has `IntelSource::{Visual, IncomingFire, Audio}`, but remains a separate additive system. Its current equal-time arbitration only accepts strictly higher confidence; AI-01 must define its own deterministic tie-break consistent with the work order rather than inheriting an underspecified policy.
+- Save format is currently `SAVE_VERSION = 11` (save.rs). `unframe` rejects every version other than the current version. Battle state is serialized with Postcard. Adding a serialized field to `Contact` is therefore a format change: AI-01 must deliberately increment the save version and test the documented refusal/migration behaviour, unless a compatible representation is proven and tested.
+- Workspace is a Cargo workspace with `crates/*`; `scalia-ai` depends on serde and Postcard.
+
+### CI baseline status
+
+- Queried workflow runs associated with the PR #48 merge commit: none were returned.
+- Queried combined commit statuses for the merge commit: no statuses were returned.
+- This is **not** evidence of a passing or failing Rust test suite. No Cargo command has been executed in this session.
+- AI-00 remains open until a reproducible `cargo test --workspace` result and final current-branch audit confirmation are recorded.
+
+### AI-01 readiness
+
+The code-level starting points have been revalidated on `main`. AI-01 remains blocked only by the AI-00 test/CI baseline. Do not implement or merge a serialized Contact shape change without first resolving that gate and the save-version strategy.
