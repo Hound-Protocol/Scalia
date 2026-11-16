@@ -912,7 +912,6 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
             p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
-            p.abduct = [0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral];
             p.twist = 0.06 * s + 0.08 * lateral;
             p.tilt = 0.05 * s + 0.04 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
