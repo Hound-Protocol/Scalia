@@ -5,7 +5,7 @@
 //!
 //! Not part of the deterministic simulation: plain floating point.
 
-use scalia_ai::sight::SightGrid;
+use scalia_ai::sight::{Point, SightGrid};
 
 /// Ear height (mm) the rays are cast at.
 const EAR_MM: i64 = 1_600;
@@ -206,6 +206,24 @@ pub fn air_lowpass_hz(d_m: f32) -> f32 {
     (6.0 / (1.2e-9 * d_m.max(1.0))).sqrt().clamp(250.0, 20_000.0)
 }
 
+/// Direct sound visibility against exact prop footprints, not the deliberately conservative sight raster.
+fn direct_ray_clear(sight: &SightGrid, from: Point, to: Point) -> bool {
+    if sight.doors.iter().any(|door| door.blocks(from, to)) {
+        return false;
+    }
+    let (dx, dy, dz) = (to.x - from.x, to.y - from.y, to.z - from.z);
+    let steps = (dx.abs().max(dy.abs()).max(dz.abs()) / 100).max(1);
+    for k in 1..steps {
+        let x = from.x + dx * k / steps;
+        let y = from.y + dy * k / steps;
+        let z = from.z + dz * k / steps;
+        if sight.solid_geometry_at(x, y, z) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Cell of the propagation field (m).
 const FIELD_CELL_M: f32 = 0.5;
 /// Sound entering a wall from the air: what a plain masonry wall stops (dB, transmission loss).
@@ -230,26 +248,40 @@ pub struct Field {
     cost: Vec<f32>,
     wall_db: Vec<f32>,
     len_m: Vec<f32>,
+    /// Coarse material classes used by the propagation flood (0 air, 1 wall, 2 shut door).
+    kind: Vec<u8>,
+    /// Exact sight-grid direct visibility to each propagation cell (door-aware).
+    direct_clear: Vec<bool>,
 }
 
 /// What reaching the ears from a spot costs: loss through material (dB), the extra the way round adds
 /// (diffraction, dB), and how much the best way bends round things (m longer than straight).
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Occlusion {
+    /// Nominal mid-band material loss, retained for room/diagnostic calculations.
     pub wall_db: f32,
     pub bend_db: f32,
     pub detour_m: f32,
+    /// Transmission loss by band. The overall gain follows the low band; higher bands are filtered separately.
+    pub low_db: f32,
+    pub mid_db: f32,
+    pub high_db: f32,
 }
 
 impl Occlusion {
-    pub const NONE: Occlusion = Occlusion { wall_db: 0.0, bend_db: 0.0, detour_m: 0.0 };
+    pub const NONE: Occlusion = Occlusion {
+        wall_db: 0.0, bend_db: 0.0, detour_m: 0.0,
+        low_db: 0.0, mid_db: 0.0, high_db: 0.0,
+    };
     pub fn gain(&self) -> f32 {
-        10f32.powf(-(self.wall_db + self.bend_db) / 20.0)
+        10f32.powf(-self.low_db / 20.0)
     }
-    /// Walls let the lows through and stop the highs (a thump through masonry, a dull voice through a door);
-    /// sound bent round a corner loses some top too.
+    /// Residual attenuation relative to the bass band, applied as separate mid/high EQ cuts.
+    pub fn mid_cut_db(&self) -> f32 { (self.mid_db - self.low_db).max(0.0) }
+    pub fn high_cut_db(&self) -> f32 { (self.high_db - self.low_db).max(0.0) }
+    /// Diffraction/air summary cutoff. Material losses are applied separately by the three-band EQ.
     pub fn lowpass_hz(&self) -> f32 {
-        (18_000.0 * 10f32.powf(-self.wall_db / 35.0) / (1.0 + self.detour_m / 4.0)).clamp(180.0, 20_000.0)
+        (18_000.0 / (1.0 + self.detour_m / 4.0)).clamp(180.0, 20_000.0)
     }
 }
 
@@ -268,6 +300,21 @@ impl Field {
                     .iter()
                     .any(|(a, b)| sight.solid_at(((x + a) * 1000.0) as i64, ((y + b) * 1000.0) as i64, PATH_MM));
                 kind[j * n + i] = solid as u8;
+            }
+        }
+        // Precompute exact, door-aware direct visibility at each propagation cell. The flood grid
+        // intentionally marks partially occupied 500 mm cells as solid; that is too conservative for
+        // deciding whether a sound ray passes through a clear doorway.
+        let from = Point { x: (ear.0 * 1000.0) as i64, y: (ear.1 * 1000.0) as i64, z: PATH_MM };
+        let mut direct_clear = vec![false; n * n];
+        for j in 0..n {
+            for i in 0..n {
+                let to = Point {
+                    x: ((origin.0 + i as f32 * FIELD_CELL_M) * 1000.0) as i64,
+                    y: ((origin.1 + j as f32 * FIELD_CELL_M) * 1000.0) as i64,
+                    z: PATH_MM,
+                };
+                direct_clear[j * n + i] = direct_ray_clear(sight, from, to);
             }
         }
         for d in sight.doors.iter().filter(|d| d.shut()) {
@@ -323,7 +370,7 @@ impl Field {
                 }
             }
         }
-        Field { ear, origin, n, cost, wall_db, len_m }
+        Field { ear, origin, n, cost, wall_db, len_m, kind, direct_clear }
     }
 
     /// How a sound at `at` (m) reaches the ears, if it lies inside the field.
@@ -337,11 +384,24 @@ impl Field {
             return None;
         }
         let straight = ((at.0 - self.ear.0).powi(2) + (at.1 - self.ear.1).powi(2)).sqrt();
+        // The propagation grid's shortest-path length can be inflated by cell quantisation even when
+        // the direct ray is unobstructed. Check the actual ray before applying diffraction loss.
+        let direct_clear = self.direct_clear[k];
         // The grid's own staircase makes even a straight way a little longer: only a real way round counts.
-        let detour_m = (self.len_m[k] - straight * 1.08 - FIELD_CELL_M).max(0.0);
+        let detour_m = if direct_clear { 0.0 } else { (self.len_m[k] - straight * 1.08 - FIELD_CELL_M).max(0.0) };
         // Bent round an edge: a few dB at once, more the further round (diffraction, roughly).
         let bend_db = if detour_m > 0.3 { (4.0 + 4.0 * (1.0 + detour_m).log2()).min(22.0) } else { 0.0 };
-        Some(Occlusion { wall_db: self.wall_db[k], bend_db, detour_m })
+        let wall_db = self.wall_db[k];
+        // The propagation field currently distinguishes solid masonry from open air. Use a conservative
+        // masonry spectrum until individual wall materials are represented in map data.
+        Some(Occlusion {
+            wall_db, bend_db, detour_m,
+            // Diffraction remains broadband: preserve the previous total loss in the bass band.
+            // Material transmission then removes additional mid/high energy above that baseline.
+            low_db: wall_db * 0.70 + bend_db,
+            mid_db: wall_db + bend_db,
+            high_db: wall_db * 1.30 + bend_db * 1.40,
+        })
     }
 }
 
@@ -462,6 +522,24 @@ mod tests {
         let shut = Field::build(&room_with_door(DoorState::Closed), ear, 30.0);
         let e2 = shut.at((65.0, 50.5)).unwrap();
         assert!(e2.wall_db >= DOOR_DB && e2.wall_db < WALL_ENTER_DB && e2.gain() < east.gain() * 0.3, "{e2:?}");
+    }
+
+    #[test]
+    fn material_transmission_keeps_more_bass_than_high_frequencies() {
+        let wood_door = Occlusion {
+            wall_db: 18.0, bend_db: 0.0, detour_m: 0.0,
+            low_db: 8.0, mid_db: 18.0, high_db: 30.0,
+        };
+        let concrete = Occlusion {
+            wall_db: 40.0, bend_db: 0.0, detour_m: 0.0,
+            low_db: 28.0, mid_db: 40.0, high_db: 52.0,
+        };
+        assert!(wood_door.gain() > 0.3, "{wood_door:?}");
+        assert!(wood_door.high_cut_db() > wood_door.mid_cut_db());
+        assert!(concrete.gain() < wood_door.gain() * 0.2, "{concrete:?} vs {wood_door:?}");
+        assert!(concrete.high_cut_db() > wood_door.high_cut_db());
+        assert_eq!(Occlusion::NONE.gain(), 1.0);
+        assert_eq!(Occlusion::NONE.high_cut_db(), 0.0);
     }
 
     #[test]

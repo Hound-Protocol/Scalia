@@ -24,6 +24,8 @@ pub struct SightGrid {
     pub w: usize,
     pub h: usize,
     bands: Vec<u32>,
+    /// Original prop footprints retained for exact point queries (audio line-of-sight).
+    props: Vec<Prop>,
     /// Per block of BLOCK×BLOCK cells (4 m): any band filled anywhere in it. Rays cross empty blocks in one jump.
     coarse: Vec<u32>,
     bw: usize,
@@ -72,7 +74,7 @@ pub fn bands_of(p: &Prop) -> u32 {
 impl SightGrid {
     pub fn build(x_mm: i64, y_mm: i64, w: usize, h: usize, props: &[Prop]) -> SightGrid {
         let bw = w.div_ceil(BLOCK);
-        let mut g = SightGrid { x_mm, y_mm, w, h, bands: vec![0; w * h], coarse: vec![0; bw * h.div_ceil(BLOCK)], bw, doors: Vec::new() };
+        let mut g = SightGrid { x_mm, y_mm, w, h, bands: vec![0; w * h], props: Vec::new(), coarse: vec![0; bw * h.div_ceil(BLOCK)], bw, doors: Vec::new() };
         for p in props {
             g.stamp(p);
         }
@@ -81,6 +83,7 @@ impl SightGrid {
 
     /// Marks a prop's cells (at build, or a prop placed during a battle: sandbags).
     pub fn stamp(&mut self, p: &Prop) {
+        self.props.push(*p);
         let (w, h) = (self.w, self.h);
         let hc = CELL_MM / 2;
         let b = bands_of(p);
@@ -112,6 +115,12 @@ impl SightGrid {
             return 0;
         }
         self.bands[j as usize * self.w + i as usize]
+    }
+
+    /// Exact geometric occupancy at a point, before the conservative cell raster expands thin props.
+    pub fn solid_geometry_at(&self, x: i64, y: i64, z: i64) -> bool {
+        let band = (z / BAND_MM).clamp(0, 31) as u32;
+        self.props.iter().any(|p| bands_of(p) & (1 << band) != 0 && p.covers(x, y))
     }
 
     /// Whether a point is inside something solid (at height `z` mm).

@@ -4,6 +4,13 @@ import { AudioEngine, spatialPosition } from '../audio.js';
 
 const connectedElements = new WeakSet();
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
+const connectedTo = (nodes, destination) => nodes.find((node) => node.connections?.includes(destination));
+const reachesWithin = (start, destination, maxDepth, seen = new Set()) => {
+  if (start === destination) return true;
+  if (maxDepth === 0 || seen.has(start)) return false;
+  seen.add(start);
+  return (start.connections || []).some((next) => reachesWithin(next, destination, maxDepth - 1, seen));
+};
 let sourceCreations = 0;
 
 class FakeNode {
@@ -37,12 +44,12 @@ class FakeAudioContext {
     connectedElements.add(element);
     return this.track(new FakeNode());
   }
-  createGain() { return this.track(new FakeNode()); }
-  createBiquadFilter() { return this.track(new FakeNode()); }
-  createPanner() { return this.track(new FakeNode()); }
-  createStereoPanner() { return this.track(new FakeNode()); }
-  createWaveShaper() { return this.track(new FakeNode()); }
-  createDelay() { return this.track(new FakeNode()); }
+  createGain() { return this.track(Object.assign(new FakeNode(), { nodeType: 'gain' })); }
+  createBiquadFilter() { return this.track(Object.assign(new FakeNode(), { nodeType: 'biquad' })); }
+  createPanner() { return this.track(Object.assign(new FakeNode(), { nodeType: 'panner' })); }
+  createStereoPanner() { return this.track(Object.assign(new FakeNode(), { nodeType: 'stereo-panner' })); }
+  createWaveShaper() { return this.track(Object.assign(new FakeNode(), { nodeType: 'waveshaper' })); }
+  createDelay() { return this.track(Object.assign(new FakeNode(), { nodeType: 'delay' })); }
   createBufferSource() {
     const source = this.track(new FakeNode());
     source.start = (...args) => { source.startArgs = args; };
@@ -347,14 +354,31 @@ test('spatial one-shots keep a full-strength dry signal when room processing is 
   const audio = playbackEngine();
   const handle = audio.play('room-shot', {
     kind: 'shot', db: 130, gain: 1, room: 1, rx: 0, ry: 1,
-    below: 0, dist: 2, lowpass: 20000, space: [1, 4, 0],
+    below: 0, dist: 2, lowpass: 20000, lowDb: 8, midDb: 18, highDb: 30, space: [1, 4, 0],
     echoes: [[0.2, 1, 0]],
   });
   assert.ok(handle);
   const voice = [...audio.voices][0];
-  assert.equal(voice.nodes[7].gain.value, 1, 'dry path must not be attenuated by room wetness');
-  assert.ok(voice.nodes[11].gain.value > 0.18 && voice.nodes[11].gain.value <= 0.45, 'room reverb must remain audible without overwhelming dry signal');
-  assert.ok(voice.nodes[13].gain.value > 0.25 && voice.nodes[13].gain.value <= 0.5, 'geometric echo must remain audible but bounded');
+  const dry = connectedTo(voice.nodes, audio.mix);
+  assert.ok(dry, 'gunfire dry node must connect to the main mix');
+  near(dry.gain.value, 1);
+  const transmissionMid = voice.nodes.find((node) => node.frequency?.value === 1500);
+  const transmissionHigh = voice.nodes.find((node) => node.frequency?.value === 5000);
+  assert.ok(transmissionMid && transmissionHigh, 'material transmission filters must be present');
+  near(transmissionMid.gain.value, -10);
+  near(transmissionHigh.gain.value, -22);
+  const reverbSends = voice.nodes.filter((node) =>
+    [audio.rev.small, audio.rev.large, audio.rev.corridor].some((bus) => node.connections?.includes(bus)));
+  assert.ok(reverbSends.some((send) => send.gain.value > 0.18), 'room reverb must remain audible');
+  for (const send of reverbSends) assert.ok(send.gain.value <= 0.45, 'room reverb must remain bounded');
+  // Identify the echo branch's gain by its graph role: echo gain -> low-pass filter -> stereo panner -> mix.
+  // A panner also exposes gain in this fake Web Audio graph, so a generic .gain search can select the wrong node.
+  const echoGain = voice.nodes.find((node) =>
+    node.nodeType === 'gain' && node.gain.value > 0.25 && node.gain.value <= 0.5 &&
+    node.connections?.some((next) => next.nodeType === 'biquad') &&
+    reachesWithin(node, audio.mix, 3));
+  assert.ok(echoGain, 'geometric echo gain node must route to the mix through its filter/panner chain');
+  assert.ok(echoGain.gain.value > 0.25 && echoGain.gain.value <= 0.5, 'geometric echo must remain audible but bounded');
   audio.stopAll();
 });
 
@@ -366,9 +390,18 @@ test('persistent streams keep a full-strength dry signal and restrained reverb s
   audio.rev = { small: new FakeNode(), large: new FakeNode(), corridor: new FakeNode() };
   const voice = audio.stream({});
   assert.ok(voice);
-  voice.place([0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 4, 0]);
-  assert.equal(context.createdNodes[9].gain.value, 1);
-  const sends = context.createdNodes.slice(10).filter((send) => send.gain);
+  const record = [0, 0, 1, 1, 20000, 1, 0, 0, 0, 2, 0, 1, 4, 0, ...Array(12).fill(0), 1, 8, 18, 30];
+  voice.place(record);
+  const dry = connectedTo(context.createdNodes, audio.world);
+  assert.ok(dry, 'persistent stream dry node must connect to the world bus');
+  near(dry.gain.value, 1);
+  const transmissionMid = context.createdNodes.find((node) => node.frequency?.value === 1500);
+  const transmissionHigh = context.createdNodes.find((node) => node.frequency?.value === 5000);
+  assert.ok(transmissionMid && transmissionHigh, 'stream material transmission filters must be present');
+  near(transmissionMid.gain.value, -10);
+  near(transmissionHigh.gain.value, -22);
+  const sends = context.createdNodes.filter((node) =>
+    [audio.rev.small, audio.rev.large, audio.rev.corridor].some((bus) => node.connections?.includes(bus)));
   assert.ok(sends.some((send) => send.gain.value > 0.1), 'persistent media must carry audible room reverb');
   for (const send of sends) assert.ok(send.gain.value <= 0.35, 'persistent media reverb stays bounded');
 });

@@ -489,10 +489,12 @@ export class AudioEngine {
     const eq = (type, f, q) => { const b = c.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q) b.Q.value = q; return b; };
     const bass = eq('lowshelf', 120), treble = eq('peaking', 2500, 0.8), highs = eq('highshelf', 8000);
     const g = c.createGain(); g.gain.value = 0;
+    const transmissionMid = eq('peaking', 1500, 0.65);
+    const transmissionHigh = eq('highshelf', 5000);
     const hpf = eq('highpass', 30, 0.6), lp = eq('lowpass', 20000, 0.5);
     const p = c.createPanner(); p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0;
     const dry = c.createGain();
-    src.connect(vol).connect(bass).connect(treble).connect(highs).connect(g).connect(hpf).connect(lp).connect(p).connect(dry).connect(this.world);
+    src.connect(vol).connect(bass).connect(treble).connect(highs).connect(g).connect(transmissionMid).connect(transmissionHigh).connect(hpf).connect(lp).connect(p).connect(dry).connect(this.world);
     const sends = [this.rev.small, this.rev.large, this.rev.corridor].map((bus) => { const s = c.createGain(); s.gain.value = 0; p.connect(s).connect(bus); return s; });
     const num = (x, d) => (Number.isFinite(x) ? x : d);
     const glide = (param, v) => param.setTargetAtTime(v, c.currentTime, 0.08);
@@ -504,7 +506,10 @@ export class AudioEngine {
       place(r) {
         if (!r || r.length < 14) return;
         const [gain, lowpass, room, rx, ry, below, dist, enc, size, cor] = [r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[11], r[12], r[13]].map((x) => num(x, 0));
+        const lowDb = num(r[27], 0), midDb = num(r[28], lowDb), highDb = num(r[29], midDb);
         glide(g.gain, Math.max(0, Math.min(4, gain)));
+        glide(transmissionMid.gain, -Math.min(36, Math.max(0, midDb - lowDb)));
+        glide(transmissionHigh.gain, -Math.min(48, Math.max(0, highDb - lowDb)));
         glide(lp.frequency, Math.max(200, Math.min(20000, lowpass || 20000)));
         glide(hpf.frequency, Math.min(90, 30 + dist * 0.3));
         const [x, y, z] = spatialPosition(rx, ry, below);
@@ -522,7 +527,7 @@ export class AudioEngine {
     const c = this.ensure(); if (!c) return;
     // Anything odd coming in (a missing or non-finite number) is made safe here: audio never stops the game.
     const num = (x, d, lo, hi) => (Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d);
-    o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), room: num(o.room, 0, 0, 1), dist: num(o.dist, 0, 0, 1e5),
+    o = { ...o, gain: num(o.gain, 0, 0, 8), lowpass: num(o.lowpass, 20000, 200, 20000), lowDb: num(o.lowDb, 0, 0, 120), midDb: num(o.midDb, 0, 0, 120), highDb: num(o.highDb, 0, 0, 120), room: num(o.room, 0, 0, 1), dist: num(o.dist, 0, 0, 1e5),
       far: num(o.far, 0, 0, 1), rx: num(o.rx, 0, -1e6, 1e6), ry: num(o.ry, 1, -1e6, 1e6), below: num(o.below, 0, 0, 1e4), delay: num(o.delay, 0, 0, 30), rate: num(o.rate, 1, 0.1, 4) };
     const sp = o.space || [0, 30, 0];
     const enc = num(sp[0], 0, 0, 1), size = num(sp[1], 30, 0, 100), cor = num(sp[2], 0, 0, 1) * enc;
@@ -562,8 +567,12 @@ export class AudioEngine {
     const body = own(c.createWaveShaper());
     const drive = inside * close * (1 - o.far);
     if (drive > 0.05) { body.curve = this.crunch; body.oversample = '4x'; }
+    const transmissionMid = own(c.createBiquadFilter()); transmissionMid.type = 'peaking'; transmissionMid.frequency.value = 1500; transmissionMid.Q.value = 0.65;
+    transmissionMid.gain.value = -Math.min(36, Math.max(0, o.midDb - o.lowDb));
+    const transmissionHigh = own(c.createBiquadFilter()); transmissionHigh.type = 'highshelf'; transmissionHigh.frequency.value = 5000;
+    transmissionHigh.gain.value = -Math.min(48, Math.max(0, o.highDb - o.lowDb));
     const lp = own(c.createBiquadFilter()); lp.type = 'lowpass'; lp.frequency.value = Math.max(200, Math.min(20000, o.lowpass)); lp.Q.value = 0.5;
-    // The lows carry furthest (the air takes the highs, see the low-pass): only a little rumble is trimmed.
+    // The lows carry further; material transmission removes progressively more mid and high energy.
     const hpf = own(c.createBiquadFilter()); hpf.type = 'highpass'; hpf.frequency.value = Math.min(90, 30 + o.dist * 0.3); hpf.Q.value = 0.6;
     // Distant fire is a boom more than a crack: the low end comes up as the top goes.
     const boom = own(c.createBiquadFilter()); boom.type = 'lowshelf'; boom.frequency.value = 160; boom.gain.value = gun ? 7 * o.far : 0;
@@ -579,7 +588,7 @@ export class AudioEngine {
     // Driven into the curve by how close and how enclosed; brought back down after it.
     const pre = own(c.createGain()); pre.gain.value = 1 + 2.5 * drive;
     const post = own(c.createGain()); post.gain.value = 1 / (1 + 1.2 * drive);
-    src.connect(g).connect(pre).connect(body).connect(post).connect(out).connect(hpf).connect(boom).connect(lp).connect(p);
+    src.connect(g).connect(pre).connect(body).connect(post).connect(out).connect(transmissionMid).connect(transmissionHigh).connect(hpf).connect(boom).connect(lp).connect(p);
     p.connect(dry).connect(gun ? this.mix : this.world);
     // A room it is made in rings: small or large by size, or a corridor's flutter. Open ground: no ring.
     const roomy = Math.max(0, Math.min(1, (9 - size) / 5));

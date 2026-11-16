@@ -44,17 +44,30 @@ fn sound_occlusion(
         // Doors are stored separately from the static sight grid. A shut/locked leaf
         // attenuates sound, but less than masonry; open/breached doors add no loss.
         let doors = sight.doors.iter().filter(|door| door.blocks(from, to)).count();
+        let masonry = walls as f32;
+        let wood = doors as f32;
         return scalia_audio::Occlusion {
-            wall_db: walls as f32 * 40.0 + doors as f32 * 18.0,
+            wall_db: masonry * 40.0 + wood * 18.0,
             bend_db: 0.0,
             detour_m: 0.0,
+            // Approximate transmission-loss profiles: concrete blocks the whole spectrum;
+            // a closed wooden leaf attenuates speech/highs more than low-frequency energy.
+            low_db: masonry * 28.0 + wood * 8.0,
+            mid_db: masonry * 40.0 + wood * 18.0,
+            high_db: masonry * 52.0 + wood * 30.0,
         };
     }
     if let Some(occlusion) = field.and_then(|field| field.at(source)) {
         return occlusion;
     }
     let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
-    scalia_audio::Occlusion { wall_db: walls as f32 * 40.0, bend_db: 0.0, detour_m: 0.0 }
+    let wall_db = walls as f32 * 40.0;
+    scalia_audio::Occlusion {
+        wall_db, bend_db: 0.0, detour_m: 0.0,
+        low_db: walls as f32 * 28.0,
+        mid_db: wall_db,
+        high_db: walls as f32 * 52.0,
+    }
 }
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
@@ -1090,7 +1103,7 @@ impl Viewer {
         // His own steps come from the middle (the camera follows him, so any offset only says where the camera
         // sits): no left, right or behind. Loudness, dullness and the room's ring still follow the camera's
         // distance, so zooming out quietens them.
-        if out.len() >= 10 {
+        if out.len() >= 30 {
             out[2] = 0.0; // no travel delay
             // Walls between him and the point under the camera are not between him and the ears: distance only.
             let d = out[9];
@@ -1099,6 +1112,10 @@ impl Viewer {
             out[6] = 0.0; // right
             out[7] = 0.0; // ahead
             out[8] = 0.0; // below
+            // His own footsteps are not transmitted through the barrier between him and the camera.
+            out[27] = 0.0;
+            out[28] = 0.0;
+            out[29] = 0.0;
         }
         out
     }
@@ -1150,6 +1167,8 @@ impl Viewer {
             }
         }
         out.push(far);
+        // Three transmission-loss bands, appended to the stable 27-float sound record.
+        out.extend_from_slice(&[occ.low_db, occ.mid_db, occ.high_db]);
     }
     /// Benchmark scene: `squads` squads of 12 around the commander (see `bench_army`). Returns the soldier count.
     pub fn bench_army(&mut self, squads: u32) -> u32 {
@@ -4514,7 +4533,7 @@ mod audio_spatial_tests {
 
         let shut = sound_occlusion(&sight, None, (40.0, 50.0), (60.0, 50.0), 19.2, true);
         assert_eq!(shut.wall_db, 18.0, "{shut:?}");
-        assert!(shut.lowpass_hz() < 6_000.0, "{shut:?}");
+        assert!(shut.high_cut_db() >= 22.0, "{shut:?}");
     }
 
     #[test]
