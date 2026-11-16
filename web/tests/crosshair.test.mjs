@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { CrosshairController } from '../crosshair.js';
 
 const style = () => ({ values: {}, setProperty(key, value) { this.values[key] = value; } });
+const svgLine = (group) => ({ hidden: true, attrs: {}, setAttribute(key, value) { this.attrs[key] = value; }, querySelector: () => group, ownerDocument: { createElementNS: () => element() } });
 const element = () => ({
   hidden: true, style: style(), attrs: {}, children: [], dataset: {},
   setAttribute(key, value) { this.attrs[key] = value; },
@@ -28,7 +29,7 @@ test('tracks the pointer reference and the character muzzle aim point in canvas 
 
 test('renders penetration states with the specified line semantics', () => {
   const canvas = { clientWidth: 800, clientHeight: 600, style: {} };
-  const group = element(), line = { hidden: true, querySelector: () => group, ownerDocument: { createElementNS: () => element() } };
+  const group = element(), line = svgLine(group);
   const crosshair = new CrosshairController({ canvas, line, referenceDot: element(), aimDot: element() });
   crosshair.update({ state: { trajectory: { segments: [
     { line: [0, 0, 0.25, 0.25], status: 'clear' },
