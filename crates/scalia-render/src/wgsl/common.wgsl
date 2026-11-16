@@ -673,7 +673,7 @@ fn grip(p_in: PP, w_in: f32) -> PP {
   var p = p_in;
   p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
   // Prone support reaches farther across the body than the standing carry.
-  let cap = select(0.7, 4.0, p.prone > 0.5);
+  let cap = mix(0.7, 4.0, clamp(p.prone, 0.0, 1.0));
   return reach_left(p, guard(p), w, cap);
 }
 
