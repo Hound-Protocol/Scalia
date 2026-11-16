@@ -65,8 +65,8 @@ Personality/traits may influence risk tolerance and reactions later, but must ne
 
 ## Work packages and progress
 
-- [ ] **AI-00 — Behaviour audit (IN PROGRESS):** map the live decision path from perception through execution; inventory all decision owners, priorities, facts, timers, task transitions and interrupts; identify duplicated/conflicting logic, dead paths and missing feedback.
-- [ ] **AI-01 — Perception and belief:** source-aware observations, confidence, freshness, uncertainty and personal-vs-shared knowledge.
+- [x] **AI-00 — Behaviour audit (COMPLETE):** live decision path, ownership/write-site inventory, interrupts, contact data flow, Titan integration gap and regression coverage are documented; current-main verification baseline is recorded.
+- [ ] **AI-01 — Perception and belief (IMPLEMENTATION IN REVIEW, PR #51):** source-aware live contacts, recency/confidence arbitration, named freshness policies, and save/load compatibility.
 - [ ] **AI-02 — Soldier decision core:** persistent intent, tactical risk assessment, priorities, interruptions and safe resumption.
 - [ ] **AI-03 — Squad tactical brain:** role assignment, support, movement, engagement, casualty response and withdrawal.
 - [ ] **AI-04 — Coordination:** command/task integration and inter-squad support without omniscient shared state.
@@ -236,17 +236,17 @@ These findings are preliminary. Complete the source-linked ownership and conflic
 - `titan_tasks.rs` has five task lifecycle, interrupt/resume, reassignment, invalid transition and terminal-state tests.
 - `battle.rs` has one 200,000-case deterministic view-cone equivalence test.
 - `leader.rs`, `goap.rs` and `save.rs` contain no inline `#[test]` blocks in the inspected files. No direct regression test currently covers task restoration after casualty response, contact-source propagation into live Battle contacts, inconsistent contact freshness across consumers, target/fire-gate interaction, or Battle save/replay determinism under AI transitions.
-- The GitHub connector permits source inspection but does not provide a shell/Cargo test runner or workflow-dispatch action in this session. Therefore no test execution result is claimed. A real CI run is required before any runtime patch is considered validated.
+- Baseline is now verified: Verify run #357 passed on `main` commit `0e8625b5be58dc81318e700a7dfe073ba4f01b0f`. It ran `bash scripts/check.sh`, including browser tests, debug/release workspace tests, animation audit, simulation and battle benchmarks, WASM build and native/WASM checks.
 
 #### AI-00 exit status
 
-Decision ownership, primary write sites, major interrupt paths, contact data flow, Titan integration gap and visible regression-test coverage are now mapped. The audit is **substantially complete**, but its final gate remains a reproducible CI/test baseline and a final cross-check against all current branch changes. Do not mark AI-00 complete until those are available.
+Decision ownership, primary write sites, major interrupt paths, contact data flow, Titan integration gap and visible regression-test coverage are mapped and revalidated on current `main`. The reproducible verification baseline is green in Verify run #357. **AI-00 is complete and issue #47 is closed.**
 
 
 ### Next implementation work order
 
 - **AI-01 issue:** https://github.com/Hound-Protocol/Scalia/issues/49 — source-aware live contacts, recency/confidence arbitration, centralized freshness policies and save/load regression tests.
-- AI-01 is intentionally blocked on the AI-00 CI/test baseline. The GitHub connector cannot run Cargo tests in this session; do not claim validation until a Rust CI run completes.
+- AI-01 implementation is on `work/AI-01-contact-intelligence-2026-11-16`; draft PR #51 is open. Exact-head push Verify #362 passed; PR-triggered Verify #363 is being checked independently.
 
 
 ---
@@ -267,12 +267,7 @@ This section is the current handoff point for the next AI contributor. Read it b
 
 ### Current completion state
 
-**AI-00 is substantially audited, not closed.** The live decision path, ownership/write-site inventory, key interrupts, contact data flow, Titan integration gap and static test inventory are documented above. Two gates remain:
-
-1. Obtain a reproducible Rust test/CI baseline. No Cargo tests have been executed by the GitHub connector in this work session; do not report tests as passing.
-2. Re-check the audit against the latest default branch and relevant open/merged PRs. In particular, verify whether any newer branch changed the inspected call sites or save format.
-
-Do not close AI-00 or mark the audit complete until both gates have evidence recorded in this document and issue #47.
+**AI-00 is complete and closed.** The audit was revalidated against current `main`, and Verify #357 passed on the exact main commit. The run executed the full `scripts/check.sh` suite. This satisfies the AI-00 closeout gate; AI-01 may proceed with explicit save-version handling.
 
 ### Exact AI-01 starting point
 
@@ -398,8 +393,8 @@ Confirmed live contact shape remains:
   - Lull suppression target: confidence + 4 s (battle.rs:1311).
   - Target/position fallback: confidence + 3 s (battle.rs:1460).
   - Squad contacts are stored in `Battle.contacts`, indexed by squad, and included in serialized `State` (battle.rs:420–450, 623–655).
-- `TitanIntelligence` still has `IntelSource::{Visual, IncomingFire, Audio}`, but remains a separate additive system. Its current equal-time arbitration only accepts strictly higher confidence; AI-01 must define its own deterministic tie-break consistent with the work order rather than inheriting an underspecified policy.
-- Save format is currently `SAVE_VERSION = 11` (save.rs). `unframe` rejects every version other than the current version. Battle state is serialized with Postcard. Adding a serialized field to `Contact` is therefore a format change: AI-01 must deliberately increment the save version and test the documented refusal/migration behaviour, unless a compatible representation is proven and tested.
+- `TitanIntelligence` provides the shared `IntelSource::{Visual, IncomingFire, Audio, External}` vocabulary. Live `Battle::Contact` now stores provenance using this enum; `TitanIntelligence` itself remains a separate additive system. Live contact arbitration is recency-first, then deterministic confidence/source/position tie-breaking for equal timestamps.
+- Save format is now `SAVE_VERSION = 12` (save.rs). `Contact.source` is serialized with Postcard. Version 11 saves are deliberately refused by `unframe`; tests pin current-version round-trip and previous-version refusal.
 - Workspace is a Cargo workspace with `crates/*`; `scalia-ai` depends on serde and Postcard.
 
 ### CI baseline status
@@ -407,15 +402,31 @@ Confirmed live contact shape remains:
 - Queried workflow runs associated with the PR #48 merge commit: none were returned.
 - Queried combined commit statuses for the merge commit: no statuses were returned.
 - This is **not** evidence of a passing or failing Rust test suite. No Cargo command has been executed in this session.
-- AI-00 remains open until a reproducible `cargo test --workspace` result and final current-branch audit confirmation are recorded.
+- AI-00 is closed: Verify #357 passed on current `main` and the audit was revalidated.
 
 ### AI-01 readiness
 
-The code-level starting points have been revalidated on `main`. AI-01 remains blocked only by the AI-00 test/CI baseline. Do not implement or merge a serialized Contact shape change without first resolving that gate and the save-version strategy.
+The code-level starting points were revalidated on `main`; the AI-00 gate is satisfied. AI-01 is implemented in PR #51. Push Verify #362 passed on commit `37f0a2e724897ee38c8e988a63896f468987a372`; PR Verify #363 is the remaining automated gate. In-game tactical validation is still required before merge.
 
 
 ### AI-01 branch preparation
 
-- Created `work/AI-01-contact-intelligence-2026-11-16` from current `main` after PR #48 merged and post-merge source inspection. Its head is `17973c1539148c41dfcb1b14a4c7fd9225fae01f`, identical to `main` at the time of revalidation.
-- No runtime changes have been committed to this branch.
-- Branch is intentionally staged pending the AI-00 Rust test/CI baseline. Do not begin the Contact serialization change until the baseline result and save-version plan are recorded.
+- Branch `work/AI-01-contact-intelligence-2026-11-16` was fast-forwarded to current `main` after PR #45 merged, then used for AI-01 implementation.
+- Draft PR #51: https://github.com/Hound-Protocol/Scalia/pull/51. Current implementation head: `37f0a2e724897ee38c8e988a63896f468987a372`.
+- Exact-head push Verify #362 passed. PR Verify #363 was started by opening the draft PR and must also pass before marking the PR ready.
+- Runtime changes remain isolated to `crates/scalia-ai`; target acquisition and firing behaviour were not rewritten.
+
+
+### AI-01 implementation checkpoint — 2026-11-16
+
+**Implemented on** `work/AI-01-contact-intelligence-2026-11-16`; **draft PR #51**.
+
+- `Battle::Contact` now stores `IntelSource` provenance: Visual, IncomingFire, Audio, and External for the explicit in-process reporting hook.
+- Newer reports always refresh observation position/time even when confidence is lower; incoming confidence is retained as-is (clamped to 0..=1000). Older reports cannot rewind the observation.
+- Equal-time arbitration is deterministic: confidence, then source priority, then lexicographically stable position.
+- Named freshness/confidence policies now gate flank response, combat/cover/suppression, tactical orientation, quiet-state checks, casualty threat/drag, building fallback and room-clear decisions. Future-dated contacts are rejected.
+- Per-soldier `visible` lists remain separate from squad-indexed `Battle::contacts`; squad sharing remains limited to the soldier's squad.
+- Save format incremented to 12. Version 11 saves are refused, not silently decoded with a changed Postcard shape.
+- Regression coverage includes weaker-newer refresh, older-report rejection, equal-time order independence, policy boundaries, future/weak/stale contacts, source retention through squad sharing and save/load, and battle hash stability.
+- Exact-head push Verify #362 passed on `37f0a2e724897ee38c8e988a63896f468987a372`. PR Verify #363 is the independent pull-request run.
+- **Merge gates:** PR Verify #363 green, source review, and in-game tactical validation. Do not merge on unit tests alone.
