@@ -387,7 +387,7 @@ pub fn grip_weight(a: Pose, b: Pose, w0: f32) -> f32 {
     ha + (hb - ha) * w
 }
 /// Share of a blend over which the hand lets go of or grabs the handguard.
-pub const GRIP_SWAP: f32 = 0.85;
+pub const GRIP_SWAP: f32 = 0.6;
 
 /// Where the left hand is going during a reload at `t` (0..1): handguard, magazine well, chest pouch, and back.
 pub fn reload_target(p: &PoseParams, t: f32) -> Vec3 {
