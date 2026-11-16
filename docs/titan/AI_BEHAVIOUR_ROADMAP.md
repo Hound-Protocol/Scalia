@@ -241,3 +241,9 @@ These findings are preliminary. Complete the source-linked ownership and conflic
 #### AI-00 exit status
 
 Decision ownership, primary write sites, major interrupt paths, contact data flow, Titan integration gap and visible regression-test coverage are now mapped. The audit is **substantially complete**, but its final gate remains a reproducible CI/test baseline and a final cross-check against all current branch changes. Do not mark AI-00 complete until those are available.
+
+
+### Next implementation work order
+
+- **AI-01 issue:** https://github.com/Hound-Protocol/Scalia/issues/49 — source-aware live contacts, recency/confidence arbitration, centralized freshness policies and save/load regression tests.
+- AI-01 is intentionally blocked on the AI-00 CI/test baseline. The GitHub connector cannot run Cargo tests in this session; do not claim validation until a Rust CI run completes.
