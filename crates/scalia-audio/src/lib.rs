@@ -396,7 +396,9 @@ impl Field {
         // masonry spectrum until individual wall materials are represented in map data.
         Some(Occlusion {
             wall_db, bend_db, detour_m,
-            low_db: wall_db * 0.70 + bend_db * 0.40,
+            // Diffraction remains broadband: preserve the previous total loss in the bass band.
+            // Material transmission then removes additional mid/high energy above that baseline.
+            low_db: wall_db * 0.70 + bend_db,
             mid_db: wall_db + bend_db,
             high_db: wall_db * 1.30 + bend_db * 1.40,
         })
