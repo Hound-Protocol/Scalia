@@ -991,7 +991,6 @@ try {
     return {
       start: (k) => { started = true; start(k); },
       setSpeed: (x) => setSpeed(x),
-      getSpeed: () => speed,
       toggleLabels: () => { labels = !labels; paint(); return labels; },
       draw() {
         if (!started) { started = true; start(cur); setSpeed(1); }
