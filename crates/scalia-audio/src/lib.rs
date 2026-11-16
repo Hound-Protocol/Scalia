@@ -206,6 +206,35 @@ pub fn air_lowpass_hz(d_m: f32) -> f32 {
     (6.0 / (1.2e-9 * d_m.max(1.0))).sqrt().clamp(250.0, 20_000.0)
 }
 
+/// Direct sound visibility sampled against the same 250 mm occupancy grid as the field.
+/// SightGrid::clear uses coarse-block jumps; this bounded sampler avoids skipping thin doorway gaps
+/// when the ray crosses a block boundary. Shut doors are checked geometrically first.
+fn direct_ray_clear(sight: &SightGrid, from: Point, to: Point) -> bool {
+    if sight.doors.iter().any(|door| door.blocks(from, to)) {
+        return false;
+    }
+    let (dx, dy, dz) = (to.x - from.x, to.y - from.y, to.z - from.z);
+    let len_sq = dx * dx + dy * dy + dz * dz;
+    let len = (len_sq as f64).sqrt() as i64;
+    if len < 400 {
+        return true;
+    }
+    let steps = (dx.abs().max(dy.abs()).max(dz.abs()) / 100 + 1).max(1);
+    for k in 1..steps {
+        let along = len * k / steps;
+        if along <= 200 || along >= len - 200 {
+            continue;
+        }
+        let x = from.x + dx * k / steps;
+        let y = from.y + dy * k / steps;
+        let z = from.z + dz * k / steps;
+        if sight.solid_at(x, y, z) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Cell of the propagation field (m).
 const FIELD_CELL_M: f32 = 0.5;
 /// Sound entering a wall from the air: what a plain masonry wall stops (dB, transmission loss).
@@ -296,7 +325,7 @@ impl Field {
                     y: ((origin.1 + j as f32 * FIELD_CELL_M) * 1000.0) as i64,
                     z: PATH_MM,
                 };
-                direct_clear[j * n + i] = sight.clear(from, to);
+                direct_clear[j * n + i] = direct_ray_clear(sight, from, to);
             }
         }
         for d in sight.doors.iter().filter(|d| d.shut()) {
