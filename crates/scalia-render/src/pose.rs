@@ -905,11 +905,9 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.reach = [0.07, 0.522];
             p.abduct = [-0.015, 0.45];
             p.rifle_yaw = 0.55;
-            p.twist = -0.55;
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
             p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
-            p.abduct = [0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral];
             p.twist = 0.06 * s + 0.08 * lateral;
             p.tilt = 0.05 * s + 0.04 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
@@ -919,11 +917,16 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
         Pose::Prone => {
-            // Keep the neutral prone body geometry; the support hand is acquired through the blended grip IK.
+            // Prone is a supported firing posture: place both elbows under the chest and
+            // pre-position the support arm so grip IK only has to correct blend error.
             p.prone = 1.0;
-            p.shoulder = [2.8, 2.8];
-            p.elbow = [1.3, 1.35];
+            p.shoulder = [1.965, 0.559];
+            p.elbow = [0.905, 1.791];
+            p.reach = [0.07, 0.522];
+            p.abduct = [-0.015, 0.45];
             p.rifle = std::f32::consts::FRAC_PI_2;
+            p.rifle_yaw = 0.55;
+            p.twist = -0.55;
             p.head = 1.0;
         }
         Pose::ProneAim => {
