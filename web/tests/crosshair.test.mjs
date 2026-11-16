@@ -13,7 +13,7 @@ const element = () => ({
 });
 test('tracks the pointer reference and the character muzzle aim point in canvas coordinates', () => {
   const canvas = { clientWidth: 1000, clientHeight: 500, style: {} };
-  const group = element(), line = { hidden: true, attrs: {}, setAttribute(key, value) { this.attrs[key] = value; }, querySelector: () => group, ownerDocument: { createElementNS: () => element() } };
+  const group = element(), line = svgLine(group);
   const referenceDot = element(), aimDot = element();
   const crosshair = new CrosshairController({ canvas, line, referenceDot, aimDot });
   crosshair.update({ state: { line: [0.2, 0.4, 0.7, 0.6], recoil: 0.04 }, pointer: { x: 125, y: 210 } });
@@ -43,7 +43,7 @@ test('renders penetration states with the specified line semantics', () => {
 
 test('custom hooks adapt to a changed weapon-state schema', () => {
   const canvas = { clientWidth: 800, clientHeight: 600, style: {} };
-  const group = element(), line = { hidden: true, querySelector: () => group, ownerDocument: { createElementNS: () => element() } };
+  const group = element(), line = svgLine(group);
   const crosshair = new CrosshairController({
     canvas, line, referenceDot: element(), aimDot: element(),
     hooks: { trajectory: (state) => state.axis, recoil: (state) => state.kick },
