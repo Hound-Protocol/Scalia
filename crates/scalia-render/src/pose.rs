@@ -1136,7 +1136,10 @@ pub fn drop_keys(t: f32) -> (Pose, Pose, f32) {
 fn drop_plant() -> PoseParams {
     let (kneel, flat) = (params(Pose::Crouch, 0.0), params(Pose::Prone, 0.0));
     let mut plant = blend(&kneel, &flat, 0.65);
-    plant.lean += 0.9;
+    // The prone rifle-support rig adds a torso twist for aiming; the drop plant is a separate hand-braced
+    // transition and must stay square to the planted palm.
+    plant.lean = 0.9;
+    plant.twist = 0.0;
     // On both knees under him (search: knees about 20 cm up as drawn, boots on the ground), not floating.
     plant.hip = [0.9, 0.9];
     plant.knee = [1.35, 1.35];
