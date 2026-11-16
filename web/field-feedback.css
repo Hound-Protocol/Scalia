@@ -6,7 +6,6 @@
 .field-controls small { margin-top:3px; font-size:8px; letter-spacing:.12em; opacity:.65; }
 .field-vignette { position:absolute; inset:0; }
 .field-vignette--hurt { background:radial-gradient(ellipse at center, transparent 48%, rgba(120,0,0,calc(var(--hurt, .2) * .34)) 100%); animation:field-hurt-pulse .8s ease-in-out infinite alternate; }
-.field-vignette--stamina { background:radial-gradient(ellipse at center, transparent 45%, rgba(255,255,255,var(--fatigue, 0)) 100%); }
 .field-selfcheck { position:absolute; left:50%; top:calc(50% - 20px); transform:translate(-50%,-50%); width:min(230px,45vw); display:grid; gap:6px; text-align:center; color:rgba(255,255,255,.9); font-size:9px; letter-spacing:.2em; text-shadow:0 1px 4px #000; }
 .field-selfcheck i { height:2px; background:rgba(255,255,255,.18); }
 .field-selfcheck b { display:block; width:0; height:100%; background:#fff; box-shadow:0 0 8px #fff; }

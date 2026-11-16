@@ -32,14 +32,12 @@ export class FieldFeedback {
         <small>U · TOGGLE CONTROLS</small>
       </aside>
       <div class="field-vignette field-vignette--hurt"></div>
-      <div class="field-vignette field-vignette--stamina"></div>
       <div class="field-selfcheck" hidden><span>SELF CHECK</span><i><b></b></i></div>
       <div class="field-report" hidden></div>
       <div class="field-stance" hidden></div>`;
     root.append(this.el);
     this.controls = this.el.querySelector('.field-controls');
     this.hurt = this.el.querySelector('.field-vignette--hurt');
-    this.fatigue = this.el.querySelector('.field-vignette--stamina');
     this.progress = this.el.querySelector('.field-selfcheck');
     this.progressBar = this.progress.querySelector('b');
     this.report = this.el.querySelector('.field-report');
@@ -82,7 +80,7 @@ export class FieldFeedback {
   update(now, dt, weapon, sprinting, jogging) {
     const on = this.active();
     this.controls.hidden = !on || !this.controlsVisible;
-    if (!on) { this.cancelHealthCheck(now); this.rStarted = 0; this.hurt.hidden = true; this.fatigue.hidden = true; return; }
+    if (!on) { this.cancelHealthCheck(now); this.rStarted = 0; this.hurt.hidden = true; return; }
 
     const health = Number.isFinite(weapon.health) ? weapon.health : 100;
     // A real shot removes multiple health points; the downed bleed tick removes only one.
@@ -101,8 +99,6 @@ export class FieldFeedback {
       this.sprintLoad = Math.max(0, this.sprintLoad - dt * regen);
     }
     this.stamina = 1 - Math.max(0, this.sprintLoad - 30) / 10;
-    this.fatigue.hidden = this.sprintLoad <= 30;
-    this.fatigue.style.setProperty('--fatigue', String(Math.max(0, this.sprintLoad - 30) / 10 * 0.78));
 
     if (this.checkPhase) {
       const elapsed = now - this.checkPhaseAt;

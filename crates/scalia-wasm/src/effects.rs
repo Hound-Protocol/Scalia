@@ -4,9 +4,9 @@
 use scalia_render::gpu::PointLight;
 use scalia_render::mesh::{code, MeshBuilder, Part};
 
-/// How long each effect lasts (ms).
-const FLASH_MS: f64 = 55.0;
-const FLASH_LIGHT_MS: f64 = 70.0;
+/// One 60 Hz frame: a brief, non-fading muzzle flash.
+const FLASH_MS: f64 = 16.7;
+const FLASH_LIGHT_MS: f64 = 16.7;
 const PUFF_MS: f64 = 450.0;
 const BLAST_MS: f64 = 180.0;
 const BLAST_LIGHT_MS: f64 = 300.0;
@@ -106,8 +106,7 @@ impl Effects {
         for s in &self.shots {
             let age = now - s.at;
             if (0.0..FLASH_LIGHT_MS).contains(&age) {
-                let k = 1.0 - age / FLASH_LIGHT_MS;
-                out.push((s.at, PointLight { pos: rel(s.muzzle), radius: 7.0, color: [1.0, 0.78, 0.45], intensity: (1.8 * k) as f32 }));
+                out.push((s.at, PointLight { pos: rel(s.muzzle), radius: 7.0, color: [1.0, 0.78, 0.45], intensity: 1.8 }));
             }
         }
         // Blasts first, then the newest flashes.
@@ -127,14 +126,13 @@ impl Effects {
             let path = sub(s.impact, s.muzzle);
             let dist = len(path).max(0.01);
             if age < FLASH_MS {
-                // Fire out of the end of the barrel, along the barrel (not towards wherever the round lands): a small
-                // bright core just past the muzzle and a short tongue thrown forward, both shrinking as it dies.
-                let k = (1.0 - age / FLASH_MS) as f32;
+                // Fire out of the end of the barrel, along the barrel (not towards wherever the round lands): a fixed
+                // bright core and short tongue, both present for one brief pulse and then gone.
                 let bore = s.bore.and_then(|b| { let l = len(b); (l > 1e-6).then(|| [b[0] / l, b[1] / l, b[2] / l]) })
                     .unwrap_or([path[0] / dist, path[1] / dist, path[2] / dist]);
                 let out = |d: f64| [s.muzzle[0] + bore[0] * d, s.muzzle[1] + bore[1] * d, s.muzzle[2] + bore[2] * d];
-                m.diamond(rel(out(0.04)), 0.05 * k + 0.035, code(FLASH_GLOW, Part::Glow));
-                m.prism(rel(out(0.02)), [0.05 * k + 0.01, 0.05 * k + 0.01], rel(out(0.22 + 0.25 * k as f64)), [0.008, 0.008], 5, code(FLASH_GLOW, Part::Glow));
+                m.diamond(rel(out(0.04)), 0.085, code(FLASH_GLOW, Part::Glow));
+                m.prism(rel(out(0.02)), [0.06, 0.06], rel(out(0.47)), [0.008, 0.008], 5, code(FLASH_GLOW, Part::Glow));
             }
             let flight = dist / ROUND_M_PER_MS;
             if s.tracer && age < flight {
@@ -196,6 +194,7 @@ impl Effects {
         }
         m
     }
+
 }
 
 #[cfg(test)]
@@ -229,9 +228,10 @@ mod tests {
         fx.shot(1_020.0, [5.0, 0.0, 1.4], [5.0, 30.0, 1.0], None, true, false);
         fx.blast(1_010.0, [10.0, 10.0, 0.0]);
         let l = fx.lights(1_030.0, (0.0, 0.0));
-        assert_eq!(l.len(), 3);
+        // The first flash (30 ms old) has expired; the blast and newest 10 ms flash remain.
+        assert_eq!(l.len(), 2);
         assert_eq!(l[0].radius, 16.0, "the blast");
-        assert_eq!(l[1].pos[0], 5.0, "then the newer flash");
+        assert_eq!(l[1].pos[0], 5.0, "then the still-live newer flash");
     }
 
     #[test]
@@ -246,5 +246,21 @@ mod tests {
             assert!(v.pos[1] > -0.12 && v.pos[1] < 0.6, "flash is a short tongue out of the muzzle: {:?}", v.pos);
             assert!((v.pos[2] - 1.4).abs() < 0.12, "{:?}", v.pos);
         }
+    }
+    #[test]
+    fn muzzle_flash_is_a_single_static_pulse() {
+        let mut effects = Effects::default();
+        effects.shot(0.0, [0.0, 0.0, 0.0], [100.0, 0.0, 0.0], Some([1.0, 0.0, 0.0]), false, false);
+
+        let first = effects.mesh(0.0, (0.0, 0.0));
+        let middle = effects.mesh(8.0, (0.0, 0.0));
+        assert_eq!(first.vertices, middle.vertices, "flash geometry must remain identical throughout the pulse");
+        assert!(!first.vertices.is_empty());
+        assert!(effects.mesh(FLASH_MS, (0.0, 0.0)).vertices.is_empty(), "flash must be gone after one frame");
+
+        let light = effects.lights(8.0, (0.0, 0.0));
+        assert_eq!(light.len(), 1);
+        assert_eq!(light[0].intensity, 1.8, "flash light must not fade");
+        assert!(effects.lights(FLASH_LIGHT_MS, (0.0, 0.0)).is_empty());
     }
 }
