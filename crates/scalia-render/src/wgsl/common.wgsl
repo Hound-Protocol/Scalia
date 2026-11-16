@@ -312,15 +312,11 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     carry(&p, 4u);
     p.head = -0.25;
   } else if (pose == 5u) {
-    // Prone is a supported firing posture; keep the shader rig in parity with pose.rs.
+    // Preserve the authored neutral prone body pose; grip() solves the support arm independently.
     p.prone = 1.0;
-    p.sh = vec2f(1.965, 0.559);
-    p.el = vec2f(0.905, 1.791);
-    p.reach = vec2f(0.07, 0.522);
-    p.abd = vec2f(-0.015, 0.45);
+    p.sh = vec2f(2.8);
+    p.el = vec2f(1.3, 1.35);
     p.rifle = 1.5707963;
-    p.ryaw = 0.55;
-    p.twist = -0.55;
     p.head = 1.0;
   } else if (pose == 36u) {
     // Solved blend of prone support and the two-handed aim rig.
@@ -542,15 +538,12 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let lateral = sin(dir);
     let draw = vec2f(max(s, 0.0), max(-s, 0.0));
     p.prone = 1.0;
-    // Stable solved prone support-arm geometry; the legs retain their directional crawl cycle.
-    p.sh = vec2f(1.965, 0.559);
-    p.el = vec2f(0.905, 1.791);
-    p.reach = vec2f(0.07, 0.522);
-    p.abd = vec2f(-0.015, 0.45);
-    p.ryaw = 0.55;
+    p.sh = vec2f(2.75 - 0.3 * s, 2.75 + 0.3 * s);
+    p.el = vec2f(1.4 + 0.3 * s, 1.4 - 0.3 * s);
     p.hip = vec2f(0.1) + 0.3 * draw;
     p.knee = vec2f(0.35) + 1.2 * draw;
     p.side = vec2f(-0.12 - 0.55 * draw.x - 0.16 * lateral, 0.12 + 0.55 * draw.y + 0.16 * lateral);
+    p.abd = vec2f(0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral);
     p.twist = 0.06 * s + 0.08 * lateral;
     p.tilt = 0.05 * s + 0.04 * lateral;
     p.rifle = 1.5707963;
@@ -611,8 +604,8 @@ fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >=
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
   let hb = two_handed(b);
-  var w = clamp((w0 - 0.4) / 0.6, 0.0, 1.0);
-  if (ha > hb) { w = clamp(w0 / 0.6, 0.0, 1.0); }
+  var w = clamp((w0 - 0.15) / 0.85, 0.0, 1.0);
+  if (ha > hb) { w = clamp(w0 / 0.85, 0.0, 1.0); }
   w = w * w * (3.0 - 2.0 * w);
   return mix(ha, hb, w);
 }
@@ -669,7 +662,7 @@ fn reload_target(p: PP, t: f32) -> vec3f {
 }
 fn grip_try(p: PP, x: vec4f) -> PP {
   var t = p;
-  t.sh.x = t.sh.x + x.x; t.el.x = t.el.x + x.y; t.reach.x = t.reach.x + x.z; t.rifle = t.rifle + x.w;
+  t.sh.x = t.sh.x + x.x; t.el.x = t.el.x + x.y; t.reach.x = t.reach.x + x.z; t.abd.x = t.abd.x + x.w;
   return t;
 }
 // Port of pose.rs `grip`: puts the left palm back on the handguard (GRIP_TILT 0.6, GRIP_DAMP 0.05,
@@ -698,21 +691,24 @@ fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
     let j0 = (goal - hand_l(grip_try(q, vec4f(d, 0.0, 0.0, 0.0))) - r) / d;
     let j1 = (goal - hand_l(grip_try(q, vec4f(0.0, d, 0.0, 0.0))) - r) / d;
     let j2 = (goal - hand_l(grip_try(q, vec4f(0.0, 0.0, d, 0.0))) - r) / d;
+    let j3 = (goal - hand_l(grip_try(q, vec4f(0.0, 0.0, 0.0, d))) - r) / d;
     let jm = mat3x3f(j0, j1, j2);
-    let m = jm * transpose(jm) + mat3x3f(damp * damp, 0.0, 0.0, 0.0, damp * damp, 0.0, 0.0, 0.0, damp * damp);
+    let m = jm * transpose(jm) + mat3x3f(j3 * j3.x, j3 * j3.y, j3 * j3.z)
+      + mat3x3f(damp * damp, 0.0, 0.0, 0.0, damp * damp, 0.0, 0.0, 0.0, damp * damp);
     let det = determinant(m);
     if (abs(det) < 1e-9) { break; }
     // Inverse by cofactors (columns of m are c0, c1, c2).
     let c0 = m[0]; let c1 = m[1]; let c2 = m[2];
     let inv = transpose(mat3x3f(cross(c1, c2), cross(c2, c0), cross(c0, c1))) * (1.0 / det);
     let y = inv * r;
-    let x = clamp(-vec3f(dot(j0, y), dot(j1, y), dot(j2, y)), vec3f(-0.5), vec3f(0.5));
-    q = grip_try(q, vec4f(x, 0.0));
+    let x = clamp(vec4f(-dot(j0, y), -dot(j1, y), -dot(j2, y), -dot(j3, y)), vec4f(-0.5), vec4f(0.5));
+    q = grip_try(q, x);
   }
   var out = p;
   out.sh.x = out.sh.x + cap * tanh((q.sh.x - p.sh.x) / cap) * w;
   out.el.x = out.el.x + cap * tanh((q.el.x - p.el.x) / cap) * w;
   out.reach.x = out.reach.x + cap * tanh((q.reach.x - p.reach.x) / cap) * w;
+  out.abd.x = out.abd.x + cap * tanh((q.abd.x - p.abd.x) / cap) * w;
   return out;
 }
 
