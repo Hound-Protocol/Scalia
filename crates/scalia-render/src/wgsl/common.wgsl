@@ -321,6 +321,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
+    p.lean = -0.1;
     p.look = 0.55;
     p.head = 1.0;
   } else if (pose == 36u) {
