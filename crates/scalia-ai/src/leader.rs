@@ -7,7 +7,10 @@
 //! what happens next. Each step is a drill that hands the soldiers their tasks; the soldiers' own survival
 //! (cover when pinned, fighting what they see) runs underneath it.
 
-use crate::battle::{Act, Battle, Cue, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM};
+use crate::battle::{
+    Act, Battle, Cue, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM,
+    CONTACT_BUILDING_POLICY, CONTACT_COMBAT_POLICY, CONTACT_RECENT_POLICY, CONTACT_TACTICAL_POLICY,
+};
 use crate::goap::{self, Action, Goal, Limits, State};
 use crate::sight::{isqrt, Point};
 use crate::tactics::{Building, Height, STACK_GAP_MM};
@@ -463,7 +466,7 @@ impl Battle {
     fn contact_bearing(&self, squad: usize, ms: &[usize]) -> Option<(i64, i64)> {
         let n = ms.len().max(1) as i64;
         let c = ms.iter().fold((0, 0), |a, &i| (a.0 + self.soldiers[i].pos.0 / n, a.1 + self.soldiers[i].pos.1 / n));
-        let near = self.contacts.get(squad)?.iter().filter(|k| self.soldiers[k.enemy].alive()).min_by_key(|k| dist(k.pos, c))?;
+        let near = self.contacts.get(squad)?.iter().filter(|k| k.usable_at(self.time_ms, CONTACT_TACTICAL_POLICY) && self.soldiers[k.enemy].alive()).min_by_key(|k| dist(k.pos, c))?;
         Some((near.pos.0 - c.0, near.pos.1 - c.1))
     }
 
@@ -693,7 +696,7 @@ impl Battle {
     fn situation(&self, squad: usize) -> Situation {
         let (k, plan) = self.building.as_ref().expect("a building");
         let brain = &self.brains[squad];
-        let inside: Vec<(i64, i64)> = self.contacts[squad].iter().filter(|c| c.confidence >= 300 && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && k.room_at(c.pos.0, c.pos.1).is_some()).map(|c| c.pos).collect();
+        let inside: Vec<(i64, i64)> = self.contacts[squad].iter().filter(|c| c.usable_at(self.time_ms, CONTACT_BUILDING_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && k.room_at(c.pos.0, c.pos.1).is_some()).map(|c| c.pos).collect();
         let entry_room = brain.entry.map(|e| plan.clear_order(plan.entries[e].door)[0]);
         Situation {
             intel: brain.drone_done || !inside.is_empty(),
@@ -710,7 +713,7 @@ impl Battle {
     fn quiet(&self, squad: usize) -> bool {
         let now = self.time_ms;
         self.members(squad).iter().all(|&i| self.soldiers[i].suppression == 0 && self.soldiers[i].target.is_none())
-            && self.contacts[squad].iter().all(|c| now - c.seen_ms > 10_000 || !self.soldiers[c.enemy].alive() || self.soldiers[c.enemy].down())
+            && self.contacts[squad].iter().all(|c| !c.usable_at(now, CONTACT_RECENT_POLICY) || !self.soldiers[c.enemy].alive() || self.soldiers[c.enemy].down())
     }
 
     /// The squad's leader: kept while he can lead, otherwise the next man takes command (and says so).
@@ -1002,7 +1005,7 @@ impl Battle {
                 let order = self.brains[squad].stack_order.clone();
                 // What the pie showed: known enemies past the gap. Then each man sprints through and makes for
                 // cover against them on the far side (not an open spot), while the men still waiting cover him.
-                let threats: Vec<(i64, i64)> = self.contacts[squad].iter().filter(|c| c.confidence >= crate::battle::CONF_HEARD && now - c.seen_ms <= 20_000 && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && dist(c.pos, ch.at) <= 45_000).map(|c| c.pos).take(4).collect();
+                let threats: Vec<(i64, i64)> = self.contacts[squad].iter().filter(|c| c.usable_at(now, CONTACT_TACTICAL_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && dist(c.pos, ch.at) <= 45_000).map(|c| c.pos).take(4).collect();
                 let hot = !threats.is_empty();
                 let mut taken: Vec<usize> = self.soldiers.iter().filter_map(|o| o.cover).collect();
                 let mut all_through = true;
@@ -1059,12 +1062,12 @@ impl Battle {
         let now = self.time_ms;
         let live = |e: usize| self.soldiers[e].alive() && !self.soldiers[e].down() && self.soldiers[e].team != team;
         let sees = self.contacts[squad].iter().any(|c| {
-            live(c.enemy) && c.confidence >= crate::battle::CONF_HEARD && now - c.seen_ms <= 4_000 && dist(c.pos, wp) <= 60_000
+            live(c.enemy) && c.usable_at(now, CONTACT_COMBAT_POLICY) && dist(c.pos, wp) <= 60_000
                 && self.soldiers[c.enemy].suppression < 400
                 && self.sight.clear(crate::sight::Point { x: c.pos.0, y: c.pos.1, z: 1_500 }, crate::sight::Point { x: wp.0, y: wp.1, z: 300 })
         });
         let room_hot = self.building.as_ref().is_some_and(|(k, _)| {
-            k.room_at(wp.0, wp.1).is_some_and(|r| self.contacts[squad].iter().any(|c| live(c.enemy) && c.confidence >= crate::battle::CONF_HEARD && k.room_at(c.pos.0, c.pos.1) == Some(r)))
+            k.room_at(wp.0, wp.1).is_some_and(|r| self.contacts[squad].iter().any(|c| live(c.enemy) && c.usable_at(now, CONTACT_COMBAT_POLICY) && k.room_at(c.pos.0, c.pos.1) == Some(r)))
         });
         sees || room_hot
     }
@@ -1090,7 +1093,7 @@ impl Battle {
             0 => {
                 // Is he in the enemy's sight? Then he comes out of it first: dragged behind cover.
                 let squad = self.soldiers[w].squad as usize;
-                let threat = self.contacts[squad].iter().filter(|c| c.confidence >= crate::battle::CONF_HEARD && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && dist(c.pos, wp) <= DRAG_THREAT_MM).min_by_key(|c| (dist(c.pos, wp), c.enemy)).map(|c| c.pos);
+                let threat = self.contacts[squad].iter().filter(|c| c.usable_at(self.time_ms, CONTACT_COMBAT_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down() && dist(c.pos, wp) <= DRAG_THREAT_MM).min_by_key(|c| (dist(c.pos, wp), c.enemy)).map(|c| c.pos);
                 let exposed = threat.is_some_and(|t| self.sight.clear(crate::sight::Point { x: t.0, y: t.1, z: 1_500 }, crate::sight::Point { x: wp.0, y: wp.1, z: 300 }));
                 let spot = if exposed { threat.and_then(|t| self.drag_cover(wp, t)) } else { None };
                 match spot {
@@ -1280,7 +1283,7 @@ impl Battle {
     /// holds just inside it, rifle on the door he came through.
     fn fall_back(&mut self, squad: usize, ms: &[usize]) {
         let Some((k, _)) = self.building.as_ref() else { return };
-        let foes_in = |b: &Battle, r: usize| b.contacts[squad].iter().filter(|c| b.soldiers[c.enemy].alive() && !b.soldiers[c.enemy].down() && k.room_at(c.pos.0, c.pos.1) == Some(r)).count();
+        let foes_in = |b: &Battle, r: usize| b.contacts[squad].iter().filter(|c| c.usable_at(b.time_ms, CONTACT_BUILDING_POLICY) && b.soldiers[c.enemy].alive() && !b.soldiers[c.enemy].down() && k.room_at(c.pos.0, c.pos.1) == Some(r)).count();
         let friends_in = |b: &Battle, r: usize| ms.iter().filter(|&&j| k.room_at(b.soldiers[j].pos.0, b.soldiers[j].pos.1) == Some(r)).count();
         let mut moves = Vec::new();
         for &i in ms {
@@ -1880,7 +1883,7 @@ impl Battle {
                 let now = self.time_ms;
                 if let Some(dd) = inner {
                     // (or somewhere in the rooms still to clear, when nothing is known of this one: it may be him).
-                    let live = |c: &&crate::battle::Contact| now - c.seen_ms <= 30_000 && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down();
+                    let live = |c: &&crate::battle::Contact| c.usable_at(now, CONTACT_BUILDING_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down();
                     let here = self.contacts[squad].iter().filter(live).any(|c| k.room_at(c.pos.0, c.pos.1) == Some(room));
                     let beyond = self.contacts[squad].iter().filter(live).any(|c| k.room_at(c.pos.0, c.pos.1).is_some_and(|x| rooms[r..].contains(&x)));
                     let known = here || beyond;
