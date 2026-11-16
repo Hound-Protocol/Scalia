@@ -1935,6 +1935,7 @@ try {
       ? `avg ${summary.averageMs.toFixed(1)} · p95 ${summary.p95Ms.toFixed(1)} · max ${summary.worstMs.toFixed(1)} ms`
       : 'warming up';
     P('pUnits').textContent = cachedUnits == null ? 'n/a' : cachedUnits.toLocaleString('en-GB');
+    P('pErrors').textContent = errors.recent.length.toLocaleString('en-GB');
     const heap = readJsHeap();
     P('pHeap').textContent = heap ? `${(heap.usedBytes / 1048576).toFixed(1)} / ${heap.totalBytes == null ? 'n/a' : (heap.totalBytes / 1048576).toFixed(1)} MiB` : 'n/a';
     const c = graph.canvas, W = c.width, H = c.height;
