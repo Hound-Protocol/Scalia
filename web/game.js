@@ -8,6 +8,7 @@ import { createJukebox } from './jukebox.js';
 import { HintManager } from './hints.js';
 import { FieldFeedback } from './field-feedback.js';
 import { CrosshairController } from './crosshair.js';
+import { createDiagnosticSnapshot, readJsHeap, summarizeFrameTimes } from './diagnostics.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), hud = $('hud');
@@ -1786,6 +1787,7 @@ try {
   addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
+    if (e.key === 'F3') { e.preventDefault(); if (!e.repeat) togglePerf(); return; }
     held.add(k);
     // Alt walks: keep the browser from taking it for its menu.
     if (k === 'alt') { e.preventDefault(); return; }
@@ -1843,19 +1845,63 @@ try {
   });
   addEventListener('blur', () => { held.clear(); fieldFeedback.cancelHealthCheck(performance.now()); fieldFeedback.rStarted = 0; });
 
-  // Performance panel: CPU and GPU bars against the frame budget, and a frame-time graph.
+  // Performance panel: measured frame and GPU pass timings, plus explicitly sourced diagnostics.
   const P = (id) => document.getElementById(id);
   const graph = P('pGraph').getContext('2d');
   const frameTimes = [];
-  let lastFrameAt = 0, panelAt = 0;
+  let lastFrameAt = 0, panelAt = 0, lastUnitAt = 0, cachedUnits = null;
   const level = (f) => (f < 0.5 ? '#7fb069' : f < 0.8 ? '#e9c46a' : '#e76f51');
+  const panel = P('perf');
+  const togglePerf = (visible = panel.hidden) => {
+    panel.hidden = !visible;
+    P('pToggle').textContent = visible ? 'HIDE' : 'SHOW';
+  };
+  P('pToggle').addEventListener('click', () => togglePerf());
+  P('pCopy').addEventListener('click', async () => {
+    const snapshot = makeDiagnosticSnapshot();
+    const text = JSON.stringify(snapshot, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      P('pCopy').textContent = 'COPIED';
+    } catch (_) {
+      P('pCopy').textContent = 'COPY BLOCKED';
+    }
+    setTimeout(() => { P('pCopy').textContent = 'COPY REPORT'; }, 1800);
+  });
   if (gpuNote.includes('SOFTWARE')) { P('pWarn').hidden = false; P('pWarn').textContent = 'Software rendering: the CPU is drawing. Enable Vulkan in Chrome.'; }
+  function makeDiagnosticSnapshot() {
+    const summary = summarizeFrameTimes(frameTimes);
+    const perf = v.perf();
+    const heap = readJsHeap();
+    return createDiagnosticSnapshot({
+      build: VERSION_LINE,
+      userAgent: navigator.userAgent,
+      screen: `${innerWidth}x${innerHeight}`,
+      devicePixelRatio: dpr(),
+      scene,
+      tablet: tabletUp,
+      gpu: gpuNote || (navigator.gpu ? 'WebGPU adapter details unavailable' : 'WebGPU unavailable'),
+      fps: perf[0],
+      internalResolution: `${perf[1]}x${perf[2]}`,
+      cpuFrameMs: cpuMs,
+      frameTimes: summary,
+      gpuPassMs: perf[3] >= 0 ? { shadow: perf[3], scene: perf[4], upscale: perf[5] } : null,
+      jsHeap: heap,
+      soldiers: cachedUnits,
+      recentErrors: errors.recent.slice(-30),
+      log: errors.logText(),
+    });
+  }
+  window.scaliaDiagnostics = makeDiagnosticSnapshot;
   function perfPanel(p, cpu, now, cap) {
     if (lastFrameAt) { frameTimes.push(now - lastFrameAt); if (frameTimes.length > 300) frameTimes.shift(); }
     lastFrameAt = now;
-    if (now - panelAt < 200) return; // numbers 5 times a second, so they can be read
+    if (now - panelAt < 200) return;
     panelAt = now;
-    // Utilisation: the share of each second spent on the game = ms per frame x frames per second / 1000.
+    if (now - lastUnitAt >= 1000) {
+      lastUnitAt = now;
+      cachedUnits = errors.guard('perf unit count', () => soldierCount());
+    }
     const [fps, iw, ih, sh, sc, up] = p;
     const perSecond = (ms) => (ms * fps) / 1000;
     for (const b of document.querySelectorAll('#perf .budget')) b.style.left = '80%';
@@ -1867,9 +1913,9 @@ try {
     P('tCpu').title = `${cpu.toFixed(2)} ms per frame`;
     if (sh >= 0) {
       let x = 0;
-      for (const [id, ms, col] of [['sSh', sh, '#5b8fd9'], ['sSc', sc, '#7fb069'], ['sUp', up, '#c08bd9']]) {
+      for (const [id, ms] of [['sSh', sh], ['sSc', sc], ['sUp', up]]) {
         const w = Math.min(100 - x, perSecond(ms) * 100);
-        P(id).style.left = `${x}%`; P(id).style.width = `${w}%`; P(id).style.background = col;
+        P(id).style.left = `${x}%`; P(id).style.width = `${w}%`;
         x += w;
       }
       const g = perSecond(sh + sc + up);
@@ -1878,12 +1924,19 @@ try {
       P('tGpu').title = `${(sh + sc + up).toFixed(2)} ms per frame (shadow ${sh.toFixed(2)}, scene ${sc.toFixed(2)}, upscale ${up.toFixed(2)})`;
     } else {
       P('vGpu').textContent = 'n/a';
+      P('tGpu').title = 'GPU timestamp queries unavailable on this device';
     }
     P('pFps').textContent = fps.toFixed(0);
     const target = cap || 60;
     P('pFps').style.color = fps >= target * 0.95 ? '#7fb069' : fps >= target * 0.75 ? '#e9c46a' : '#e76f51';
-    P('pInfo').textContent = `${iw}x${ih}${cap ? ` | cap ${cap}` : ''}${gpuNote && !gpuNote.includes('SOFTWARE') ? gpuNote : ''}`;
-    // Graph: frame interval, 0-40 ms tall; the line marks 16.7 ms.
+    P('pInfo').textContent = `${iw}x${ih} | ${cap ? `cap ${cap}` : 'uncapped'}${gpuNote && !gpuNote.includes('SOFTWARE') ? gpuNote : ''}`;
+    const summary = summarizeFrameTimes(frameTimes);
+    P('pFrame').textContent = summary
+      ? `avg ${summary.averageMs.toFixed(1)} · p95 ${summary.p95Ms.toFixed(1)} · max ${summary.worstMs.toFixed(1)} ms`
+      : 'warming up';
+    P('pUnits').textContent = cachedUnits == null ? 'n/a' : cachedUnits.toLocaleString('en-GB');
+    const heap = readJsHeap();
+    P('pHeap').textContent = heap ? `${(heap.usedBytes / 1048576).toFixed(1)} / ${heap.totalBytes == null ? 'n/a' : (heap.totalBytes / 1048576).toFixed(1)} MiB` : 'n/a';
     const c = graph.canvas, W = c.width, H = c.height;
     graph.clearRect(0, 0, W, H);
     const y = (ms) => H - Math.min(H, (ms / 40) * H);
