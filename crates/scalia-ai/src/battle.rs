@@ -2005,8 +2005,8 @@ mod contact_tests {
         assert!(!weak.usable_at(2_000, CONTACT_COMBAT_POLICY));
         // Quietness is age-bounded independently of confidence decay to the uncertainty floor.
         let fading = Contact { confidence: CONF_FLOOR, ..c };
-        assert!(fading.usable_at(10_000, CONTACT_RECENT_POLICY));
-        assert!(!fading.usable_at(10_001, CONTACT_RECENT_POLICY));
+        assert!(fading.usable_at(11_000, CONTACT_RECENT_POLICY));
+        assert!(!fading.usable_at(11_001, CONTACT_RECENT_POLICY));
     }
 
     #[test]
