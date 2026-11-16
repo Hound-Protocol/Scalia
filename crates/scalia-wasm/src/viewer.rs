@@ -287,7 +287,7 @@ pub struct Viewer {
     assault: Option<crate::assault::Assault>,
     /// The K training assault is running on the field.
     demo: bool,
-    /// The AI lab's clock: battle time runs at `lab_speed` (0 paused, 0.25 slow motion, 1 real time).
+    /// The AI lab's world clock: AI, soldier animation and effects run at `lab_speed` (0 paused, 1 real time, 4 max).
     lab_speed: f64,
     lab_t: f64,
     lab_prev: f64,
@@ -819,11 +819,6 @@ impl Viewer {
         map.live = Some(range_live_mm());
         crate::assault::Assault::field(map, killhouse_mm(), 7, self.lab_t)
     }
-    /// Battle (lab clock) time to viewer time: what happens later in the battle happens later on screen, slower
-    /// in slow motion.
-    fn lab_real(&self, at: f64) -> f64 {
-        if self.lab_speed <= 0.0 { self.frame_ms } else { self.frame_ms + (at - self.lab_t) / self.lab_speed }
-    }
     /// Console: list the doors, or set one ("door 3 open|close|lock|breach").
     pub fn door_cmd(&mut self, which: i32, state: &str) -> String {
         use scalia_ai::doors::DoorState;
@@ -846,6 +841,7 @@ impl Viewer {
     }
     /// AI lab: how fast battle time runs (0 pauses).
     pub fn lab_set_speed(&mut self, speed: f64) {
+        self.lab_prev = self.frame_ms;
         self.lab_speed = speed.clamp(0.0, 4.0);
     }
     /// AI lab: clears the testing ground and sets up a scenario; the commander is placed to watch it. Returns
@@ -885,6 +881,8 @@ impl Viewer {
             map.killhouse_seed = Some(c.seed);
             map.live = Some(c.live);
         }
+        self.lab_prev = self.frame_ms;
+        self.fx = crate::effects::Effects::default();
         let mut a = crate::assault::Assault::field_with(map, killhouse_mm(), 7, self.lab_t, house && deploy);
         // Which of the battle's doors are steel (by place: the compound's door list differs from the world's).
         let steel: Vec<(i64, i64)> = battle_doors().iter().zip(crate::ground::door_steel()).filter(|(_, s)| *s).map(|(d, _)| d.at).collect();
@@ -2943,7 +2941,7 @@ impl Viewer {
                 let m = base_mesh(&self.base_props, self.base_h);
                 self.gpu.upload("base", m.bytes());
             }
-            let ts = ((t / 1000.0) % 86_400.0) as f32;
+            let ts = ((self.lab_t / 1000.0) % 86_400.0) as f32;
             let origin = self.origin;
             // Our squads keep their roster colours: selected, captain, or plain.
             let colours: Vec<(u16, f32)> = (0..self.world.groups.len() as u32).map(|g| (g as u16, if self.chain.is_captain(GroupId(g)) { 4.0 } else { 6.0 })).collect();
@@ -2968,18 +2966,18 @@ impl Viewer {
                 };
                 let (from, to) = (ground(self, f.from), ground(self, f.to));
                 if f.blast {
-                    self.fx.blast(self.lab_real(f.at), from);
+                    self.fx.blast(f.at, from);
                 } else {
-                    self.fx.shot(self.lab_real(f.at), from, to, f.bore.map(|b| [b[0] as f64, b[1] as f64, b[2] as f64]), f.hit, f.tracer);
+                    self.fx.shot(f.at, from, to, f.bore.map(|b| [b[0] as f64, b[1] as f64, b[2] as f64]), f.hit, f.tracer);
                 }
             }
             self.assault = Some(a);
         }
         // Flashes, tracers and blasts: glowing geometry (no shadow) and this frame's point lights.
-        self.fx.prune(self.frame_ms);
-        self.fx_lights = self.fx.lights(self.frame_ms, self.origin);
+        self.fx.prune(self.lab_t);
+        self.fx_lights = self.fx.lights(self.lab_t, self.origin);
         if !self.fx.is_empty() {
-            self.gpu.upload("fx", self.fx.mesh(self.frame_ms, self.origin).bytes());
+            self.gpu.upload("fx", self.fx.mesh(self.lab_t, self.origin).bytes());
             self.gpu.upload_instances("fx_at", bytes(&[0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]));
             decor.push(("fx".into(), "fx_at".into()));
         }
