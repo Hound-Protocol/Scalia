@@ -65,7 +65,7 @@ Personality/traits may influence risk tolerance and reactions later, but must ne
 
 ## Work packages and progress
 
-- [ ] **AI-00 — Behaviour audit (START HERE):** map the live decision path from perception through execution; inventory all decision owners, priorities, facts, timers, task transitions and interrupts; identify duplicated/conflicting logic, dead paths and missing feedback.
+- [ ] **AI-00 — Behaviour audit (IN PROGRESS):** map the live decision path from perception through execution; inventory all decision owners, priorities, facts, timers, task transitions and interrupts; identify duplicated/conflicting logic, dead paths and missing feedback.
 - [ ] **AI-01 — Perception and belief:** source-aware observations, confidence, freshness, uncertainty and personal-vs-shared knowledge.
 - [ ] **AI-02 — Soldier decision core:** persistent intent, tactical risk assessment, priorities, interruptions and safe resumption.
 - [ ] **AI-03 — Squad tactical brain:** role assignment, support, movement, engagement, casualty response and withdrawal.
@@ -95,12 +95,49 @@ Personality/traits may influence risk tolerance and reactions later, but must ne
 - Tests must cover decision outcomes, interrupts, re-planning, stale/lost contacts and deterministic repeatability.
 - No implementation is complete on unit tests alone where in-game behaviour is observable; gameplay validation is required.
 
-## Current progress
+## AI-00 — Initial live-code findings
 
-**AI-00 is in progress.** Initial source review confirms:
-- `mind.rs` currently scores six soldier wants (Survive, Engage, Reload, Order, Aid, Idle) and plans over a small fixed action library.
-- `leader.rs` contains substantial squad/building planning and execution logic, with a 250 ms leader think interval.
-- `intelligence.rs`, `titan.rs` and `titan_tasks.rs` provide supporting foundations, but their complete integration into the live decision path remains to be verified.
-- The squad GOAP domain was previously identified as a placeholder; verify current call sites and runtime use during the audit.
+**Audit is underway; these are verified observations, not final design conclusions.**
 
-These are initial observations, not final audit conclusions. Update this document as each work package is audited, implemented and verified.
+### Runtime cadence and orchestration
+
+- `crates/scalia-ai/src/battle.rs` owns the live `Battle::step` loop.
+- Simulation time advances in fixed caller-supplied steps; perception is staggered per soldier and scheduled around `PERCEIVE_MS = 250` ms.
+- Squad leaders are advanced on `LEAD_MS = 250` ms.
+- Movement and combat execution continue between these decision passes.
+- Battle save state includes soldier minds, squad brains, contacts, visible lists, clocks, command queue and replay history. Any redesign must preserve or deliberately version these semantics.
+
+### Soldier decision path
+
+- `crates/scalia-ai/src/mind.rs` scores six wants: Survive, Engage, Reload, Order, Aid and Idle.
+- The current soldier GOAP library has six actions: TakeCover, Reload, ReloadExposed, ReturnFire, Suppress and FollowOrder.
+- Facts are predominantly boolean; threat confidence, source, freshness, exposure and tactical alternatives are not represented in the GOAP state.
+- `Battle::think` builds these facts and calls `mind::think`; the result controls `may_fire`, `may_suppress`, cover selection and reload initiation.
+- Combat target selection and firing are separately executed in `Battle::step`. Each soldier selects the nearest currently visible living enemy; this target selection is not itself a GOAP action.
+- This creates two decision authorities: the mind gates some combat behaviour, while the simulation loop independently acquires targets and executes engagement. Audit exact interactions and edge cases before proposing consolidation.
+
+### Perception and shared contacts
+
+- `Battle::perceive` performs line-of-sight checks and reports sightings into a squad-indexed contact list.
+- Contact records currently contain enemy ID, last known position, timestamp and confidence, but no explicit source or report provenance.
+- Sight, incoming fire and heard gunfire are represented with different confidence constants in battle logic, but the source distinction is not retained in the contact record.
+- Contact confidence decays to a nonzero floor; the last known contact can therefore persist indefinitely during a battle.
+- `Battle::report` prevents a weaker report from replacing a stronger contact, but freshness/source arbitration needs deeper review.
+- A squad contact list is shared by its soldiers. The audit must verify exactly which observations each soldier can act on and whether any stale contact is treated as current.
+
+### Squad and Titan foundations
+
+- `crates/scalia-ai/src/leader.rs` contains substantial live squad/building planning and task execution. Leader decisions run at 250 ms.
+- `crates/scalia-ai/src/squad.rs` explicitly describes its GOAP facts/actions as placeholders; do not mistake it for the live squad planner.
+- `crates/scalia-ai/src/titan.rs`, `intelligence.rs` and `titan_tasks.rs` provide command, intelligence and task-lifecycle foundations. Integration into `Battle` remains to be verified; task lifecycle documentation previously states the existing command queue and `Brain` remain execution authority.
+- `crates/scalia-ai/src/goap.rs` is a deterministic bounded forward planner with integer costs and stable insertion-order tie-breaking.
+
+### Immediate audit questions
+
+1. Trace the full `Battle::think` and `Battle::lead` paths, including every write to `Task`, `may_fire`, `may_suppress`, `target`, `stance` and `cover`.
+2. Verify whether a soldier's target selection can bypass intended mind restrictions, and under which conditions.
+3. Determine whether contact data is genuinely per-soldier, squad-shared or globally visible at each decision point.
+4. Trace casualty aid, drag, retreat/rally and order interruption/resumption paths.
+5. Verify Titan task/command/intelligence runtime integration and save/replay implications.
+
+These findings are preliminary. Complete the source-linked ownership and conflict map before proposing code changes.
