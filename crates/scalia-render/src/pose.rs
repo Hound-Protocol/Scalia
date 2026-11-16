@@ -919,17 +919,11 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
         Pose::Prone => {
+            // Keep the neutral prone body geometry; the support hand is acquired through the blended grip IK.
             p.prone = 1.0;
-            // Solved prone support-arm geometry, shared with ProneAim.
-            p.shoulder = [1.965, 0.559];
-            p.elbow = [0.905, 1.791];
-            p.reach = [0.07, 0.522];
-            p.abduct = [-0.015, 0.45];
+            p.shoulder = [2.8, 2.8];
+            p.elbow = [1.3, 1.35];
             p.rifle = std::f32::consts::FRAC_PI_2;
-            p.rifle_yaw = 0.55;
-            p.twist = -0.55;
-            p.look = 0.55;
-            p.lean = -0.1;
             p.head = 1.0;
         }
         Pose::ProneAim => {
@@ -1469,10 +1463,10 @@ pub fn recoil(p: &mut PoseParams, k: f32) {
     if k <= 0.0 {
         return;
     }
-    p.rifle += 0.024 * k * k;
-    p.shoulder[0] -= 0.09 * k;
-    p.shoulder[1] -= 0.09 * k;
-    p.lean -= 0.02 * k;
+    p.rifle += 0.0288 * k * k;
+    p.shoulder[0] -= 0.108 * k;
+    p.shoulder[1] -= 0.108 * k;
+    p.lean -= 0.024 * k;
 }
 
 /// A flinch from a round close by or a hit that does not put him down (`k` 0 to 1, easing off): he ducks his
