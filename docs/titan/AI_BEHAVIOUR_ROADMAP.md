@@ -141,3 +141,64 @@ Personality/traits may influence risk tolerance and reactions later, but must ne
 5. Verify Titan task/command/intelligence runtime integration and save/replay implications.
 
 These findings are preliminary. Complete the source-linked ownership and conflict map before proposing code changes.
+
+
+### AI-00 — Verified decision ownership and conflict findings (2026-11-16)
+
+#### Soldier decisions (battle.rs, mind.rs)
+
+- Battle::think runs at the perception cadence and rebuilds boolean facts before calling mind::think.
+- Want priority is currently: Aid (980), empty-magazine Reload (960), close-target Engage (950), Survive (900 + suppression/10), ordinary visible-target Engage (700), known-contact suppression Engage (300), then Order (200). This is a fixed priority ordering, not a unified risk/benefit assessment.
+- GOAP actions are TakeCover, Reload, ReloadExposed, ReturnFire, Suppress and FollowOrder. FollowOrder only marks an abstract ORDER_DONE fact; actual squad task execution remains in leader::Brain.
+- Battle::think executes only cover selection, reload initiation and fire/suppress permission from the first planned action. Other planned actions are not a complete execution contract.
+- Battle::step independently selects the nearest visible living enemy and executes combat. A soldier can continue firing while moving on a non-sprint task if aimed and not otherwise stopped; movement and engagement are not coordinated by a single action executor.
+- may_fire defaults to true. TakeCover normally gates fire, but close-range contact overrides that gate in the combat loop. may_suppress is enabled only for Act::Suppress.
+- known used for low-stance holding is broader than the validated contact fact: it accepts any living, non-down enemy in the squad contact list without confidence or age checks.
+- Cover candidate threat selection filters confidence but not age. This can make old reports influence cover choice.
+- Battle::think computes safe partly as !cover_near; absence of a reachable cover option is therefore treated as safe even while under fire. This is a deliberate fallback in current GOAP semantics, but should be explicitly represented as “no better option” rather than conflated with safety in a future design.
+
+#### Squad decisions and interrupts (leader.rs)
+
+- Battle::lead runs every LEAD_MS and executes keep_leader, casualty care, loss assessment, withdrawal, then the current order (Hold, Move, Capture).
+- leader::Brain is the live squad execution authority. Its plan and done state drive building-capture methods; replan recomputes the plan when a phase is finished or situation changes through explicit calls.
+- Order::Move loss handling counts able personnel. A reduction below half of initial strength sets a rally point and withdraw redirects available members. Lesser losses reset the movement line for regrouping.
+- Casualty care assigns the nearest fit squadmate only when casualty_threatened is false. Care can be abandoned if the route becomes threatened; a helper is replaced if incapacitated. Dragging and treatment are explicit phases.
+- Care is a separate leader-level process, not a persistent task object. The helper's previous squad task is overwritten during aid and is not explicitly saved as a resumable task. This is a concrete mission-intent preservation gap to address in a later work package.
+- fall_back inside buildings counts all live contact records in rooms without confidence or freshness filtering. Stale reports can therefore cause a defender to abandon a room.
+- casualty_threatened uses freshness for the direct line-of-sight test (4 s), but its room_hot branch does not apply confidence or age filtering.
+- Building clear logic uses a 30 s contact-age bound for some grenade/room decisions, while other room assessments use different or no freshness bounds. Contact semantics are inconsistent across consumers.
+- keep_leader succession is deterministic by soldier index among living, non-down squad members.
+
+#### Information and Titan integration
+
+- Contact in battle.rs stores enemy ID, last-known position, timestamp and confidence only. The source distinction (Visual, IncomingFire, Audio) exists in the separate TitanIntelligence type but is not retained by the live Battle contact record.
+- report replaces an existing contact only when the new confidence is at least as strong; a weaker but newer observation cannot refresh the position/time. This can preserve an older location despite a newer lower-confidence report.
+- Contact confidence decays to CONF_FLOOR = 100; the record is not automatically expired. Consumers must apply their own freshness/confidence policy.
+- TitanIntelligence, TitanCommand and TitanTaskBoard are additive foundations, not integrated live decision authorities. Battle continues to use contacts, Brain, its command queue and replay history. No live call sites were found in the inspected Battle/leader decision path.
+- titan_tasks.rs models interrupt/resume and progress, but current casualty care and squad task execution do not use it.
+
+#### Determinism and persistence observations
+
+- Battle state serializes soldier minds, squad brains, contacts, visible lists, clocks, command queue, command history and RNG roll count. Any change to these structures requires explicit save compatibility review.
+- Mind::plan_for uses a thread-local HashMap cache keyed by facts and want. The cache is an optimization only; deterministic output depends on the planner and stable action ordering, not hash iteration.
+- GOAP action order is fixed and planner tie-breaking is stable. Leader and soldier loops process indexed collections in deterministic order.
+- Existing combat randomness is derived from the battle seed, simulation time, soldier index and roll counter. Do not introduce nondeterministic random sources into decision logic.
+
+#### Defects and migration implications (audit findings, not implementation authorization)
+
+1. Split execution authority: mind, leader and combat loop can independently influence the same soldier's engagement/movement state. Define explicit decision ownership before expanding behaviour.
+2. Inconsistent contact freshness: stale reports influence low stance, cover selection, room fallback and casualty threat differently. Centralize contact validity policy while preserving uncertainty and provenance.
+3. Source provenance loss: live contacts cannot distinguish visual confirmation from sound/incoming fire after publication.
+4. Weak-report refresh limitation: a lower-confidence newer report cannot refresh a stale location. Future arbitration should separate confidence from observation recency.
+5. Task resumption gap: casualty aid overwrites a helper's prior task without a durable resume record.
+6. Safety semantics overloaded: SAFE can mean “no better cover exists,” not necessarily low danger.
+7. Titan runtime gap: command/intelligence/task contracts are not wired into the live Battle path; do not integrate them wholesale until save/replay and authority boundaries are designed.
+
+#### Recommended minimal migration order
+
+1. Complete remaining write-site and test inventory; establish a baseline with existing save/replay tests.
+2. Define one source-aware contact validity API and migrate consumers without changing tactical outcomes initially.
+3. Add explicit soldier task/intent interruption snapshots so casualty and survival work can resume valid orders.
+4. Separate tactical intent selection from GOAP feasibility and action execution; keep current Battle executor as the adapter during transition.
+5. Integrate Titan command/task/intelligence incrementally behind compatibility adapters, with serialization/replay tests at each step.
+6. Only then add richer squad coordination and personality variation.
