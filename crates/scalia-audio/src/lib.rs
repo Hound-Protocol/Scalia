@@ -210,6 +210,7 @@ pub fn air_lowpass_hz(d_m: f32) -> f32 {
 /// SightGrid::clear uses coarse-block jumps; this bounded sampler avoids skipping thin doorway gaps
 /// when the ray crosses a block boundary. Shut doors are checked geometrically first.
 fn direct_ray_clear(sight: &SightGrid, from: Point, to: Point) -> bool {
+    use scalia_ai::doors::DoorState;
     if sight.doors.iter().any(|door| door.blocks(from, to)) {
         return false;
     }
@@ -219,10 +220,35 @@ fn direct_ray_clear(sight: &SightGrid, from: Point, to: Point) -> bool {
     if len < 400 {
         return true;
     }
+
+    // SightGrid rasterizes 250 mm cells and deliberately expands thin props to occupied cells.
+    // An open doorway is authoritative geometry: ignore raster spill immediately around its aperture,
+    // but continue testing the rest of the ray for unrelated obstructions.
+    let open_crossings: Vec<f64> = sight.doors.iter().filter_map(|door| {
+        if door.state != DoorState::Open {
+            return None;
+        }
+        let (t, across) = if door.along_x {
+            if dy == 0 { return None; }
+            let t = (door.at.1 - from.y) as f64 / dy as f64;
+            (t, from.x as f64 + dx as f64 * t)
+        } else {
+            if dx == 0 { return None; }
+            let t = (door.at.0 - from.x) as f64 / dx as f64;
+            (t, from.y as f64 + dy as f64 * t)
+        };
+        (t > 0.0 && t < 1.0 && (across - if door.along_x { door.at.0 as f64 } else { door.at.1 as f64 }).abs() <= door.width_mm as f64 * 0.5)
+            .then_some(t)
+    }).collect();
+
     let steps = (dx.abs().max(dy.abs()).max(dz.abs()) / 100 + 1).max(1);
     for k in 1..steps {
         let along = len * k / steps;
         if along <= 200 || along >= len - 200 {
+            continue;
+        }
+        let t = k as f64 / steps as f64;
+        if open_crossings.iter().any(|crossing| ((t - crossing) * len as f64).abs() <= 450.0) {
             continue;
         }
         let x = from.x + dx * k / steps;
