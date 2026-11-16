@@ -295,6 +295,7 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
         t.shoulder[0] += x[0];
         t.elbow[0] += x[1];
         t.reach[0] += x[2];
+        t.abduct[0] += x[3];
         t
     };
     let res = |q: &PoseParams| target - hand(q, Side::Left);
@@ -305,8 +306,8 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
             break; // within 1 mm: most frames stop after a step or two
         }
         let d = 0.01;
-        let j: [Vec3; 3] = std::array::from_fn(|k| {
-            let mut x = [0.0; 3];
+        let j: [Vec3; 4] = std::array::from_fn(|k| {
+            let mut x = [0.0; 4];
             x[k] = d;
             (res(&apply(&q, x)) - r) / d
         });
@@ -319,7 +320,7 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
             break;
         }
         let y = m.inverse() * r;
-        let x: [f32; 3] = std::array::from_fn(|k| (-j[k].dot(y)).clamp(-0.5, 0.5));
+        let x: [f32; 4] = std::array::from_fn(|k| (-j[k].dot(y)).clamp(-0.5, 0.5));
         q = apply(&q, x);
     }
     // Soft cap on each joint's total correction.
@@ -328,9 +329,10 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
     out.shoulder[0] += cap(q.shoulder[0] - p.shoulder[0]);
     out.elbow[0] += cap(q.elbow[0] - p.elbow[0]);
     out.reach[0] += cap(q.reach[0] - p.reach[0]);
+    out.abduct[0] += cap(q.abduct[0] - p.abduct[0]);
     out
 }
-const GRIP_STEPS: usize = 12;
+const GRIP_STEPS: usize = 16;
 /// Correction cap for reaching to points other than the handguard (actions move the arm a long way).
 const REACH_MAX: f32 = 2.0;
 pub const GRIP_DAMP: f32 = 0.05;
@@ -383,7 +385,7 @@ pub fn grip_weight(a: Pose, b: Pose, w0: f32) -> f32 {
     ha + (hb - ha) * w
 }
 /// Share of a blend over which the hand lets go of or grabs the handguard.
-pub const GRIP_SWAP: f32 = 0.6;
+pub const GRIP_SWAP: f32 = 0.85;
 
 /// Where the left hand is going during a reload at `t` (0..1): handguard, magazine well, chest pouch, and back.
 pub fn reload_target(p: &PoseParams, t: f32) -> Vec3 {
@@ -898,16 +900,12 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             let lateral = dir.sin();
             let draw = [s.max(0.0), (-s).max(0.0)];
             p.prone = 1.0;
-            // Keep the rifle-support geometry stable while the legs perform the crawl cycle.
-            // These are the solved prone support-arm values; the IK now only corrects small pose variation.
-            p.shoulder = [1.965, 0.559];
-            p.elbow = [0.905, 1.791];
-            p.reach = [0.07, 0.522];
-            p.abduct = [-0.015, 0.45];
-            p.rifle_yaw = 0.55;
+            p.shoulder = [2.75 - 0.3 * s, 2.75 + 0.3 * s];
+            p.elbow = [1.4 + 0.3 * s, 1.4 - 0.3 * s];
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
             p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
+            p.abduct = [0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral];
             p.twist = 0.06 * s + 0.08 * lateral;
             p.tilt = 0.05 * s + 0.04 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
@@ -917,16 +915,11 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
         Pose::Prone => {
-            // Prone is a supported firing posture: place both elbows under the chest and
-            // pre-position the support arm so grip IK only has to correct blend error.
+            // Preserve the authored neutral prone body pose; grip() solves the support arm independently.
             p.prone = 1.0;
-            p.shoulder = [1.965, 0.559];
-            p.elbow = [0.905, 1.791];
-            p.reach = [0.07, 0.522];
-            p.abduct = [-0.015, 0.45];
+            p.shoulder = [2.8, 2.8];
+            p.elbow = [1.3, 1.35];
             p.rifle = std::f32::consts::FRAC_PI_2;
-            p.rifle_yaw = 0.55;
-            p.twist = -0.55;
             p.head = 1.0;
         }
         Pose::ProneAim => {
