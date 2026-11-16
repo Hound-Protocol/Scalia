@@ -271,7 +271,7 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
 const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(0.933810, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.985742), vec2f(0.500000, 1.510598), 0.600000, 0.987349, 0.718250, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 0.208495, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.987349, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
 
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
@@ -312,10 +312,17 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     carry(&p, 4u);
     p.head = -0.25;
   } else if (pose == 5u) {
+    // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
     p.prone = 1.0;
-    p.sh = vec2f(2.8);
-    p.el = vec2f(1.3, 1.35);
+    p.sh = vec2f(2.8, 1.571);
+    p.el = vec2f(1.3, 2.084);
+    p.reach = vec2f(0.0, 0.401);
+    p.abd = vec2f(0.0, 0.604);
     p.rifle = 1.5707963;
+    p.ryaw = 0.55;
+    p.twist = -0.55;
+    p.lean = -0.1;
+    p.look = 0.55;
     p.head = 1.0;
   } else if (pose == 36u) {
     // Solved blend of prone support and the two-handed aim rig.
@@ -537,12 +544,16 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let lateral = sin(dir);
     let draw = vec2f(max(s, 0.0), max(-s, 0.0));
     p.prone = 1.0;
-    p.sh = vec2f(2.75 - 0.3 * s, 2.75 + 0.3 * s);
-    p.el = vec2f(1.4 + 0.3 * s, 1.4 - 0.3 * s);
+    // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
+    // The left support arm is solved by grip() rather than swinging away from the handguard.
+    p.sh = vec2f(2.8, 1.571);
+    p.el = vec2f(1.3, 2.084);
+    p.reach = vec2f(0.0, 0.401);
+    p.abd = vec2f(0.0, 0.604);
+    p.ryaw = 0.55;
     p.hip = vec2f(0.1) + 0.3 * draw;
     p.knee = vec2f(0.35) + 1.2 * draw;
     p.side = vec2f(-0.12 - 0.55 * draw.x - 0.16 * lateral, 0.12 + 0.55 * draw.y + 0.16 * lateral);
-    p.abd = vec2f(0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral);
     p.twist = 0.06 * s + 0.08 * lateral;
     p.tilt = 0.05 * s + 0.04 * lateral;
     p.rifle = 1.5707963;
@@ -598,7 +609,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 4u || pose == 6u || pose == 7u || pose == 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 32u || pose == 36u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -661,7 +672,7 @@ fn reload_target(p: PP, t: f32) -> vec3f {
 }
 fn grip_try(p: PP, x: vec4f) -> PP {
   var t = p;
-  t.sh.x = t.sh.x + x.x; t.el.x = t.el.x + x.y; t.reach.x = t.reach.x + x.z; t.rifle = t.rifle + x.w;
+  t.sh.x = t.sh.x + x.x; t.el.x = t.el.x + x.y; t.reach.x = t.reach.x + x.z; t.abd.x = t.abd.x + x.w;
   return t;
 }
 // Port of pose.rs `grip`: puts the left palm back on the handguard (GRIP_TILT 0.6, GRIP_DAMP 0.05,
@@ -672,7 +683,7 @@ fn grip(p_in: PP, w_in: f32) -> PP {
   var p = p_in;
   p.rifle = p.rifle + reach_pitch(p_in) * 0.6 * w;
   // Prone support reaches farther across the body than the standing carry.
-  let cap = select(0.7, 4.0, p.prone > 0.5);
+  let cap = mix(0.7, 4.0, clamp(p.prone, 0.0, 1.0));
   return reach_left(p, guard(p), w, cap);
 }
 
@@ -681,30 +692,34 @@ fn grip(p_in: PP, w_in: f32) -> PP {
 fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
   if (w <= 0.0) { return p; }
   let excess = max(distance(goal, vec3f(-0.238, 0.0, 1.40)) - 0.595, 0.0);
-  let damp = 0.05 + 2.0 * excess;
+  // Ease out reach damping as the torso lowers; prone support needs the arm's full extension.
+  let damp = 0.05 + 2.0 * excess * (1.0 - clamp(p.prone, 0.0, 1.0));
   var q = p;
-  for (var it = 0; it < 12; it = it + 1) {
+  for (var it = 0; it < 16; it = it + 1) {
     let r = goal - hand_l(q);
     if (dot(r, r) < 1e-6) { break; }
     let d = 0.01;
     let j0 = (goal - hand_l(grip_try(q, vec4f(d, 0.0, 0.0, 0.0))) - r) / d;
     let j1 = (goal - hand_l(grip_try(q, vec4f(0.0, d, 0.0, 0.0))) - r) / d;
     let j2 = (goal - hand_l(grip_try(q, vec4f(0.0, 0.0, d, 0.0))) - r) / d;
+    let j3 = (goal - hand_l(grip_try(q, vec4f(0.0, 0.0, 0.0, d))) - r) / d;
     let jm = mat3x3f(j0, j1, j2);
-    let m = jm * transpose(jm) + mat3x3f(damp * damp, 0.0, 0.0, 0.0, damp * damp, 0.0, 0.0, 0.0, damp * damp);
+    let m = jm * transpose(jm) + mat3x3f(j3 * j3.x, j3 * j3.y, j3 * j3.z)
+      + mat3x3f(damp * damp, 0.0, 0.0, 0.0, damp * damp, 0.0, 0.0, 0.0, damp * damp);
     let det = determinant(m);
     if (abs(det) < 1e-9) { break; }
     // Inverse by cofactors (columns of m are c0, c1, c2).
     let c0 = m[0]; let c1 = m[1]; let c2 = m[2];
     let inv = transpose(mat3x3f(cross(c1, c2), cross(c2, c0), cross(c0, c1))) * (1.0 / det);
     let y = inv * r;
-    let x = clamp(-vec3f(dot(j0, y), dot(j1, y), dot(j2, y)), vec3f(-0.5), vec3f(0.5));
-    q = grip_try(q, vec4f(x, 0.0));
+    let x = clamp(vec4f(-dot(j0, y), -dot(j1, y), -dot(j2, y), -dot(j3, y)), vec4f(-0.5), vec4f(0.5));
+    q = grip_try(q, x);
   }
   var out = p;
   out.sh.x = out.sh.x + cap * tanh((q.sh.x - p.sh.x) / cap) * w;
   out.el.x = out.el.x + cap * tanh((q.el.x - p.el.x) / cap) * w;
   out.reach.x = out.reach.x + cap * tanh((q.reach.x - p.reach.x) / cap) * w;
+  out.abd.x = out.abd.x + cap * tanh((q.abd.x - p.abd.x) / cap) * w;
   return out;
 }
 
@@ -789,9 +804,9 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     // Recoil pressure, carried in the pose id's fraction.
     let kick = fract(b.w);
     if (kick > 0.0) {
-      pp.rifle = pp.rifle + 0.024 * kick * kick;
-      pp.sh = pp.sh - vec2f(0.09 * kick);
-      pp.lean = pp.lean - 0.02 * kick;
+      pp.rifle = pp.rifle + 0.0288 * kick * kick;
+      pp.sh = pp.sh - vec2f(0.108 * kick);
+      pp.lean = pp.lean - 0.024 * kick;
     }
     // Flinch, carried in the previous pose id's fraction.
     let fl = fract(d.x);

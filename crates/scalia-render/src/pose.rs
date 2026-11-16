@@ -269,7 +269,8 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
     // Prone support reaches farther across the body than the standing carry; allow the arm to extend fully.
-    let max = if p.prone > 0.5 { PRONE_GRIP_MAX } else { GRIP_MAX };
+    let prone = p.prone.clamp(0.0, 1.0);
+    let max = GRIP_MAX + (PRONE_GRIP_MAX - GRIP_MAX) * prone;
     reach_left_capped(p, held(RIFLE_GUARD, p), w, max)
 }
 
@@ -288,13 +289,15 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
     // Out of reach even after the tilt (going prone, say): damp harder the further it is, so the arm only
     // stretches towards it instead of flailing.
     let excess = (target.distance(Vec3::new(-SHOULDER_X, 0.0, SHOULDER_Z)) - GRIP_REACH).max(0.0);
-    let damp = GRIP_DAMP + 2.0 * excess;
+    // As the torso lowers, let the support arm use its full reach instead of damping away the correction.
+    let damp = GRIP_DAMP + 2.0 * excess * (1.0 - p.prone.clamp(0.0, 1.0));
     // Unknowns: left shoulder, elbow and reach.
-    let apply = |q: &PoseParams, x: [f32; 3]| {
+    let apply = |q: &PoseParams, x: [f32; 4]| {
         let mut t = *q;
         t.shoulder[0] += x[0];
         t.elbow[0] += x[1];
         t.reach[0] += x[2];
+        t.abduct[0] += x[3];
         t
     };
     let res = |q: &PoseParams| target - hand(q, Side::Left);
@@ -305,8 +308,8 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
             break; // within 1 mm: most frames stop after a step or two
         }
         let d = 0.01;
-        let j: [Vec3; 3] = std::array::from_fn(|k| {
-            let mut x = [0.0; 3];
+        let j: [Vec3; 4] = std::array::from_fn(|k| {
+            let mut x = [0.0; 4];
             x[k] = d;
             (res(&apply(&q, x)) - r) / d
         });
@@ -319,7 +322,7 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
             break;
         }
         let y = m.inverse() * r;
-        let x: [f32; 3] = std::array::from_fn(|k| (-j[k].dot(y)).clamp(-0.5, 0.5));
+        let x: [f32; 4] = std::array::from_fn(|k| (-j[k].dot(y)).clamp(-0.5, 0.5));
         q = apply(&q, x);
     }
     // Soft cap on each joint's total correction.
@@ -328,9 +331,10 @@ fn reach_left_capped(p: &PoseParams, target: Vec3, w: f32, max: f32) -> PosePara
     out.shoulder[0] += cap(q.shoulder[0] - p.shoulder[0]);
     out.elbow[0] += cap(q.elbow[0] - p.elbow[0]);
     out.reach[0] += cap(q.reach[0] - p.reach[0]);
+    out.abduct[0] += cap(q.abduct[0] - p.abduct[0]);
     out
 }
-const GRIP_STEPS: usize = 12;
+const GRIP_STEPS: usize = 16;
 /// Correction cap for reaching to points other than the handguard (actions move the arm a long way).
 const REACH_MAX: f32 = 2.0;
 pub const GRIP_DAMP: f32 = 0.05;
@@ -418,7 +422,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::ProneAim => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::Prone | Pose::Crawl | Pose::ProneAim => 1.0,
         _ => 0.0,
     }
 }
@@ -898,12 +902,16 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             let lateral = dir.sin();
             let draw = [s.max(0.0), (-s).max(0.0)];
             p.prone = 1.0;
-            p.shoulder = [2.75 - 0.3 * s, 2.75 + 0.3 * s];
-            p.elbow = [1.4 + 0.3 * s, 1.4 - 0.3 * s];
+            // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
+            // The left support arm is solved by grip() rather than swinging away from the handguard.
+            p.shoulder = [2.8, 1.571];
+            p.elbow = [1.3, 2.084];
+            p.reach = [0.0, 0.401];
+            p.abduct = [0.0, 0.604];
+            p.rifle_yaw = 0.55;
             p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
             p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
             p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
-            p.abduct = [0.08 - 0.12 * lateral, 0.08 + 0.12 * lateral];
             p.twist = 0.06 * s + 0.08 * lateral;
             p.tilt = 0.05 * s + 0.04 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
@@ -913,10 +921,17 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
         Pose::Prone => {
+            // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
             p.prone = 1.0;
-            p.shoulder = [2.8, 2.8];
-            p.elbow = [1.3, 1.35];
+            p.shoulder = [2.8, 1.571];
+            p.elbow = [1.3, 2.084];
+            p.reach = [0.0, 0.401];
+            p.abduct = [0.0, 0.604];
             p.rifle = std::f32::consts::FRAC_PI_2;
+            p.rifle_yaw = 0.55;
+            p.twist = -0.55;
+            p.lean = -0.1;
+            p.look = 0.55;
             p.head = 1.0;
         }
         Pose::ProneAim => {
@@ -1123,7 +1138,10 @@ pub fn drop_keys(t: f32) -> (Pose, Pose, f32) {
 fn drop_plant() -> PoseParams {
     let (kneel, flat) = (params(Pose::Crouch, 0.0), params(Pose::Prone, 0.0));
     let mut plant = blend(&kneel, &flat, 0.65);
-    plant.lean += 0.9;
+    // The prone rifle-support rig adds a torso twist for aiming; the drop plant is a separate hand-braced
+    // transition and must stay square to the planted palm.
+    plant.lean = 0.9;
+    plant.twist = 0.0;
     // On both knees under him (search: knees about 20 cm up as drawn, boots on the ground), not floating.
     plant.hip = [0.9, 0.9];
     plant.knee = [1.35, 1.35];
@@ -1453,10 +1471,10 @@ pub fn recoil(p: &mut PoseParams, k: f32) {
     if k <= 0.0 {
         return;
     }
-    p.rifle += 0.024 * k * k;
-    p.shoulder[0] -= 0.09 * k;
-    p.shoulder[1] -= 0.09 * k;
-    p.lean -= 0.02 * k;
+    p.rifle += 0.0288 * k * k;
+    p.shoulder[0] -= 0.108 * k;
+    p.shoulder[1] -= 0.108 * k;
+    p.lean -= 0.024 * k;
 }
 
 /// A flinch from a round close by or a hit that does not put him down (`k` 0 to 1, easing off): he ducks his
