@@ -144,6 +144,23 @@ fn prone_soldier_lifts_his_head_rests_on_his_elbows_and_shoulders_the_rifle() {
 }
 
 #[test]
+fn prone_and_crawl_keep_the_rifle_in_both_hands() {
+    use scalia_render::pose::params_dir;
+    let dirs = [0.0, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
+    for pose in [Pose::Prone, Pose::Crawl] {
+        assert_eq!(two_handed(pose), 1.0, "{pose:?} must use the support-hand IK");
+        for &dir in &dirs {
+            for phase in [0.0, 0.25, 0.5, 0.75] {
+                let base = params_dir(pose, phase, dir);
+                let held_pose = grip(&base, two_handed(pose));
+                let miss = hand(&held_pose, Side::Left).distance(held(RIFLE_GUARD, &held_pose));
+                assert!(miss < 0.05, "{pose:?} dir={dir:.2} phase={phase:.2}: support hand misses handguard by {miss:.3} m");
+            }
+        }
+    }
+}
+
+#[test]
 fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
     let base = params(Pose::ProneAim, 0.0);
     assert_eq!(base.prone, 1.0);
