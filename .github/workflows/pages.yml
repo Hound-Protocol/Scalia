@@ -50,7 +50,7 @@ jobs:
           area=$(git log -1 --format='%(trailers:key=Update,valueonly)' | head -1 | xargs)
           if [ -z "$area" ]; then
             area=Build
-            count=$(git log --format='%H%x1f%(trailers:key=Update,valueonly)' | python3 -c 'import sys; print(sum(not line.split(chr(31), 1)[1].strip() for line in sys.stdin))')
+            count=$(git log --format='%H%x1f%(trailers:key=Update,valueonly)' | python3 -c 'import sys; sep=chr(31); print(sum(not line.split(sep, 1)[1].strip() for line in sys.stdin if sep in line))')
           else
             count=$(git log --format='%(trailers:key=Update,valueonly)' | xargs -L1 | grep -cxF "$area")
           fi
