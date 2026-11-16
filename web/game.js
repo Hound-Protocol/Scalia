@@ -641,7 +641,7 @@ try {
     box.querySelector('em').textContent = ['STANDING', 'CROUCHED', 'PRONE'][w.stance] || '';
     box.classList.toggle('low', !w.slung && w.ammo <= 5);
     // The trajectory and aim point come from the same weapon state used by the battle simulation.
-    crosshair.update({ state: w, active: on });
+    crosshair.update({ state: w, pointer: { x: gun.x, y: gun.y }, active: on });
   };
   const footsteps = () => {
     const ph = v.scene_name() === 'ground' ? v.commander_phase() : -1;

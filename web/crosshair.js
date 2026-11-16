@@ -33,7 +33,7 @@ export class CrosshairController {
     if (this.aimDot) this.aimDot.hidden = true;
   }
 
-  update({ state, active = true }) {
+  update({ state, pointer, active = true }) {
     const segments = active ? this.hooks.trajectory(state) : null;
     if (!Array.isArray(segments) || segments.length === 0 || !segments.every((segment) => {
       const points = Array.isArray(segment) ? segment.slice(0, 4) : segment?.line;
@@ -46,6 +46,10 @@ export class CrosshairController {
 
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
+    if (!(width > 0 && height > 0)) { this.hide(); return; }
+    // SVG coordinates are emitted in canvas CSS pixels; match its user space to those dimensions.
+    this.line?.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    this.line?.setAttribute('preserveAspectRatio', 'none');
     while (this.group?.firstChild) this.group.removeChild(this.group.firstChild);
     for (const segment of segments) {
       const points = Array.isArray(segment) ? segment.slice(0, 4) : segment.line;
@@ -64,8 +68,15 @@ export class CrosshairController {
     }
     if (this.line) this.line.hidden = false;
 
-    // Stable screen-centre reference; the translucent point follows the character's actual muzzle/aim ray.
-    if (this.referenceDot) this.referenceDot.hidden = false;
+    // The opaque reference follows the user's pointer; the translucent point follows the simulated weapon ray.
+    if (this.referenceDot) {
+      if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
+        this.referenceDot.style.transform = `translate(${pointer.x.toFixed(1)}px, ${pointer.y.toFixed(1)}px)`;
+        this.referenceDot.hidden = false;
+      } else {
+        this.referenceDot.hidden = true;
+      }
+    }
     const last = segments[segments.length - 1];
     const endpoint = Array.isArray(last) ? last.slice(2, 4) : last.line.slice(2, 4);
     if (this.aimDot) {
