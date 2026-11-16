@@ -269,7 +269,8 @@ pub fn grip(p: &PoseParams, w: f32) -> PoseParams {
     p0.rifle += reach_pitch(p) * GRIP_TILT * w;
     let p = &p0;
     // Prone support reaches farther across the body than the standing carry; allow the arm to extend fully.
-    let max = if p.prone > 0.5 { PRONE_GRIP_MAX } else { GRIP_MAX };
+    let prone = p.prone.clamp(0.0, 1.0);
+    let max = GRIP_MAX + (PRONE_GRIP_MAX - GRIP_MAX) * prone;
     reach_left_capped(p, held(RIFLE_GUARD, p), w, max)
 }
 
