@@ -7,7 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.release_metadata import build_metadata, stamp, validate_pr_update
+from scripts.release_metadata import (
+    build_metadata,
+    stamp,
+    validate_pr_head,
+    validate_pr_update,
+)
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -89,6 +94,13 @@ class ReleaseMetadataTests(unittest.TestCase):
             validate_pr_update("Update: AI", "Implement mission planning\n\nUpdate: Animation")
         with self.assertRaisesRegex(ValueError, "specific update area"):
             validate_pr_update("Update: Build", "Add code\n\nUpdate: Build")
+
+    def test_pr_validation_uses_the_explicit_head_not_the_checked_out_commit(self):
+        self.commit("Implement mission planning\n\nUpdate: AI")
+        pr_head = self.git("rev-parse", "HEAD")
+        self.commit("Add an unrelated follow-up without a release trailer")
+
+        self.assertEqual(validate_pr_head(self.repo, "Update: AI", pr_head), "AI")
 
     def test_latest_untagged_commit_does_not_fall_back_to_build(self):
         with self.assertRaisesRegex(ValueError, "needs an `Update: <Area>`"):

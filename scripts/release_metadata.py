@@ -53,6 +53,16 @@ def commit_message(repo, ref):
     return git(repo, "show", "-s", "--format=%B", ref)
 
 
+def validate_pr_head(repo, body, pr_head):
+    head = pr_head
+    if not head:
+        try:
+            head = git(repo, "rev-parse", "HEAD^2")
+        except subprocess.CalledProcessError:
+            head = "HEAD"
+    return validate_pr_update(body, commit_message(repo, head))
+
+
 def message_body(message):
     _, separator, body = message.partition("\n\n")
     if not separator:
@@ -166,13 +176,9 @@ def main():
     if args.command == "stamp":
         stamp()
         return
-    head = os.environ.get("PR_HEAD_SHA")
-    if not head:
-        try:
-            head = git(ROOT, "rev-parse", "HEAD^2")
-        except subprocess.CalledProcessError:
-            head = "HEAD"
-    area = validate_pr_update(os.environ.get("PR_BODY", ""), commit_message(ROOT, head))
+    area = validate_pr_head(
+        ROOT, os.environ.get("PR_BODY", ""), os.environ.get("PR_HEAD_SHA")
+    )
     print(f"PR release identity: {area}")
 
 
