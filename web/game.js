@@ -225,9 +225,10 @@ try {
   setScene('ground');
 
   // Toggles and actions.
-  // Full resolution for now (the chunky pixel look is switched off; R brings it back).
-  let fullres = true, outline = false;
-  v.set_full(true);
+  // Start at the adaptive internal resolution selected by resize() (~300 rows).
+  // Full resolution remains an explicit opt-in via F2 for capable hardware.
+  let fullres = false, outline = false;
+  v.set_full(false);
 
   // Mouse: wheel zooms, drag pans.
   // One mouse-wheel notch (about 100 px) is one zoom step; trackpads send many small deltas, summed into steps.
