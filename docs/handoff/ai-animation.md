@@ -107,3 +107,9 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
 - Directional prone crawl now reverses diagonal timing when backing up and changes support width when moving sideways; cadence uses direction-adjusted stride length.
 - Rust pose reference and WGSL mirror updated together; parity, directional-cycle and audit checks added.
 - Prone aiming/firing remains unfinished and requires a separate rig-tuned pose pass. Visual browser review remains outstanding.
+
+## AI behaviour rewrite (17 Nov)
+- AI-01 and AI-02 are merged, but AI-02 is a migration base, not the finished dynamic decision system.
+- The target is order-aware, situation-driven behaviour shared by allies and hostiles: orders define objectives, while soldiers reassess risk, terrain, contact and squad needs.
+- First execution slice: keep ordered movers progressing while firing, search for protective cover within a bounded 30 m ground radius, reject cover reached by materially closing on a known threat, and use prone posture when exposed without usable cover and stationary.
+- The staged plan and acceptance criteria are in [the Titan AI behaviour roadmap](../titan/AI_BEHAVIOUR_ROADMAP.md). Validate the Standoff lab against that plan; deterministic seeded scenarios and combat-log evidence are merge gates.

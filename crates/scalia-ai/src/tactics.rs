@@ -29,6 +29,7 @@ pub struct Cover {
 const SPACING_MM: i64 = 1_000;
 const STANDOFF_MM: i64 = 550;
 const CORNER_MM: i64 = 800;
+const MAX_CLOSER_TO_THREAT_MM: i64 = 5_000;
 const THREAT_EYE_MM: i64 = 1_600;
 /// Eye height firing over low cover from a crouched aim.
 const OVER_LOW_EYE_MM: i64 = 1_350;
@@ -157,6 +158,13 @@ impl CoverMap {
             let (dx, dy) = (c.pos.0 - me.0, c.pos.1 - me.1);
             let d = isqrt(dx * dx + dy * dy);
             if d > max_mm {
+                continue;
+            }
+            if threats.iter().any(|&t| {
+                let from_me = isqrt((t.0 - me.0).pow(2) + (t.1 - me.1).pow(2));
+                let from_cover = isqrt((t.0 - c.pos.0).pow(2) + (t.1 - c.pos.1).pow(2));
+                from_me - from_cover > MAX_CLOSER_TO_THREAT_MM
+            }) {
                 continue;
             }
             let prot = threats.iter().map(|&t| self.protection(c, t, sight)).min().unwrap_or(3);

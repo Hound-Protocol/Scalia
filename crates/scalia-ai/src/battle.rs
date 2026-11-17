@@ -125,7 +125,8 @@ const OPEN_FIGHT_MM: i64 = 20_000;
 const UNDER_FIRE: i32 = 100;
 /// An enemy this close is fought where he stands: no running for cover with him that near.
 const CLOSE_FIGHT_MM: i64 = 10_000;
-const COVER_REACH_MM: i64 = 12_000;
+/// Conservative ground-distance cap for cover visible at the widest on-foot field-view step.
+const COVER_REACH_MM: i64 = 30_000;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Stance {
@@ -960,9 +961,15 @@ impl Battle {
             if matches!(self.soldiers[i].act, Some((Act::Open, _))) {
                 dest = None;
             }
-            // Rifle up and an enemy in sight: stop and shoot, then carry on (not when running for cover).
+            // A visible target does not cancel an ordered move: moving fire is less accurate and lets the
+            // advance keep making progress. Hold orders still stop to fight from their assigned position.
             let s = &self.soldiers[i];
-            if s.aim && s.target.is_some() && s.cover.is_none() && dest.is_some_and(|d| d.1 != Gait::Sprint) {
+            if s.aim
+                && s.target.is_some()
+                && s.cover.is_none()
+                && !matches!(s.task, Task::Move { .. })
+                && dest.is_some_and(|d| d.1 != Gait::Sprint)
+            {
                 dest = None;
             }
             let mut step = (0i64, 0i64);
@@ -1081,19 +1088,33 @@ impl Battle {
             }
             // Low behind low cover and when moving crouched; standing otherwise.
             let low_cover = s.cover.zip(self.cover.as_ref()).is_some_and(|(c, m)| m.spots[c].height == Height::Low);
-            // (Without a task or cover he keeps the stance he was given.)
+            // Task and cover choose the default stance; a temporary posture can override it while stationary.
             if s.task != Task::Idle || s.cover.is_some() {
                 s.stance = if s.gait == Gait::Crouch && s.moving || low_cover && !s.moving { Stance::Crouch } else { Stance::Stand };
-                if !s.moving && s.cover.is_none() {
-                    if let Some(p) = s.posture {
-                        s.stance = p;
-                    }
+            }
+            if !s.moving && s.cover.is_none() {
+                if let Some(p) = s.posture {
+                    s.stance = p;
                 }
             }
             // Told to get down out of a friend's line of fire: on a knee while he holds his ground.
             s.kneel_ms = (s.kneel_ms - dt_ms).max(0);
             if s.kneel_ms > 0 && !s.moving && s.stance == Stance::Stand {
                 s.stance = Stance::Crouch;
+            }
+        }
+    }
+
+    fn lower_exposed_soldiers(&mut self) {
+        for s in &mut self.soldiers {
+            if !s.player
+                && s.alive()
+                && !s.down()
+                && !s.moving
+                && s.cover.is_none()
+                && s.mind.want == crate::mind::Want::Survive
+            {
+                s.posture = Some(Stance::Prone);
             }
         }
     }
@@ -1601,6 +1622,7 @@ impl Battle {
             self.lead_ms -= LEAD_MS;
             self.lead();
         }
+        self.lower_exposed_soldiers();
         let now = self.time_ms;
         let mut opened = Vec::new();
         for (i, s) in self.soldiers.iter_mut().enumerate() {
