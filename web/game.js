@@ -1953,7 +1953,11 @@ try {
 
   // Frame pacing: optional cap (60 or 30); everything moves by time, so a lower rate only drops frames.
   const CAPS = [0, 60, 30];
-  let capIndex = Number(store.get('scalia.cap') || 0) % CAPS.length;
+  // New installs start at 60 FPS. Uncapped rendering is an opt-in performance mode,
+  // not a safe default for laptops or integrated/software WebGPU adapters.
+  const savedCap = store.get('scalia.cap');
+  let capIndex = savedCap == null ? 1 : Number(savedCap) % CAPS.length;
+  if (!Number.isInteger(capIndex) || capIndex < 0) capIndex = 1;
   let cpuMs = 0, last = performance.now(), lastDraw = 0;
 
   // Benchmark: ~1,000 soldiers around the commander, the camera turns one full circle in 20 s
