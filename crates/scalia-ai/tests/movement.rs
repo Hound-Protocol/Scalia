@@ -1,4 +1,5 @@
 use scalia_ai::battle::{Battle, Gait, Soldier, Stance, Task};
+use scalia_ai::leader::Order;
 use scalia_ai::sight::SightGrid;
 use scalia_ai::tactics::CoverMap;
 use scalia_core::nav::{NavGrid, Prop, PropKind};
@@ -61,6 +62,76 @@ fn pinned_in_the_open_he_runs_to_cover_that_hides_him() {
     assert!(me.cover.is_some(), "took cover");
     assert!(me.pos.1 < 52_000, "on the safe side: {:?}", me.pos);
     assert!(b.exposure(1, 0) < 3, "the bags hide at least part of him");
+}
+
+#[test]
+fn under_fire_he_searches_for_protective_cover_beyond_twelve_metres() {
+    let rock = Prop { kind: PropKind::Rock { radius_mm: 1_200 }, x_mm: 60_000, y_mm: 20_000, quarter_turns: 0 };
+    let mut b = battle(&[rock], vec![man(0, 0, 50_000, 40_000), man(1, 1, 50_000, 80_000)], 12);
+    b.soldiers[0].health = i32::MAX;
+    b.soldiers[1].health = i32::MAX;
+    b.soldiers[1].passive = true;
+    b.order(0, Task::Hold { at: (50_000, 40_000), face: (50_000, 80_000) });
+
+    for _ in 0..100 {
+        b.soldiers[0].suppression = 500;
+        b.step(50);
+        if b.soldiers[0].cover.is_some() {
+            break;
+        }
+    }
+
+    let cover = b.soldiers[0].cover.expect("finds cover visible within the field-view range");
+    let spot = b.cover.as_ref().unwrap().spots[cover].pos;
+    assert!(dist((50_000, 40_000), spot) > 12_000, "cover is beyond the old reach: {spot:?}");
+    assert!(dist((50_000, 40_000), spot) <= 30_000, "cover remains within the bounded search range: {spot:?}");
+}
+
+#[test]
+fn exposed_stationary_soldiers_on_both_sides_go_prone_and_keep_their_orders() {
+    let mut b = battle(&[], vec![man(0, 0, 50_000, 40_000), man(1, 1, 50_000, 60_000)], 13);
+    let orders = [
+        Task::Hold { at: (50_000, 40_000), face: (50_000, 60_000) },
+        Task::Hold { at: (50_000, 60_000), face: (50_000, 40_000) },
+    ];
+    for (i, order) in orders.into_iter().enumerate() {
+        b.soldiers[i].health = i32::MAX;
+        b.order(i, order);
+        b.command(i, Order::Hold);
+    }
+
+    for _ in 0..10 {
+        for soldier in &mut b.soldiers {
+            soldier.suppression = 500;
+        }
+        b.step(50);
+    }
+
+    for (soldier, order) in b.soldiers.iter().zip(orders) {
+        assert_eq!(soldier.stance, Stance::Prone);
+        assert_eq!(soldier.task, order, "survival posture must not erase the order");
+    }
+}
+
+#[test]
+fn ordered_soldiers_keep_moving_and_firing_after_contact() {
+    let mut b = battle(&[], vec![man(0, 0, 50_000, 20_000), man(1, 1, 50_000, 80_000)], 14);
+    for (i, to) in [(50_000, 90_000), (50_000, 10_000)].into_iter().enumerate() {
+        b.soldiers[i].health = i32::MAX;
+        b.soldiers[i].aim = true;
+        b.order(i, Task::Move { to, gait: Gait::Run });
+    }
+    let start = [b.soldiers[0].pos, b.soldiers[1].pos];
+    let mut saw_contact_while_moving = false;
+    for _ in 0..160 {
+        b.step(50);
+        saw_contact_while_moving |= b.soldiers.iter().all(|s| s.target.is_some() && s.moving);
+    }
+
+    assert!(saw_contact_while_moving, "a visible target must not cancel an ordered advance");
+    assert!(b.log.iter().any(|e| matches!(e, scalia_ai::battle::Event::Shot { .. })), "they still engage while moving");
+    assert!(b.soldiers[0].pos.1 > start[0].1);
+    assert!(b.soldiers[1].pos.1 < start[1].1);
 }
 
 #[test]

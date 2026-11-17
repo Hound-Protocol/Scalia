@@ -47,6 +47,15 @@ fn best_cover_is_near_and_actually_protects() {
 }
 
 #[test]
+fn distant_cover_is_not_selected_if_reaching_it_moves_toward_the_threat() {
+    let (_, sight, c) = maps(&[bags()]);
+    assert_eq!(
+        c.best((50_000, 20_000), &[(50_000, 80_000)], 50_000, &sight, &[]),
+        None
+    );
+}
+
+#[test]
 fn panel_ends_are_corners_to_lean_out_of() {
     let wall = Prop { kind: PropKind::Panel { length_mm: 4_000, window: false }, x_mm: 50_000, y_mm: 50_000, quarter_turns: 0 };
     let (_, _, c) = maps(&[wall]);

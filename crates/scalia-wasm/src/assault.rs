@@ -690,8 +690,12 @@ mod tests {
 
     #[test]
     fn a_settled_man_keeps_still_legs() {
-        // Once arrived he stops moving in the battle; his drawn legs must come to a stand and stay there.
+        // Keep this animation check free of combat reactions: it tests a defender holding a post, not incoming fire.
         let mut a = Assault::new((80_000, 62_000), 21, 0.0);
+        for s in &mut a.battle.soldiers {
+            s.passive = true;
+            s.health = i32::MAX;
+        }
         let mut t = 0.0;
         let mut poses = Vec::new();
         let mut post = None;

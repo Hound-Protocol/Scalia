@@ -30,6 +30,41 @@ Build NPCs that behave like cautious, natural, tactically competent soldiers. Th
 7. **Execution** — perform the selected action through existing simulation systems.
 8. **Evaluation** — measure outcome, update beliefs and task state, then replan when justified.
 
+## Dynamic AI rewrite — execution plan (2026-11-17)
+
+The order expresses the commander's objective and constraints; it is not a fixed movement script. Soldiers must keep
+reassessing their local situation and may interrupt or adapt execution to survive, use terrain, support teammates,
+or recover from a failed action. Hostile and allied NPCs use the same perception and tactical decision pipeline;
+orders and team context, not separate combat rules, produce their different behaviour.
+
+### Delivery stages
+
+1. **Open-ground contact (in progress):** stop visible contact from freezing every ordered mover; widen the bounded
+   cover search to a conservative 30 m ground radius within the widest on-foot field view; if an exposed soldier has no usable cover and is
+   stationary, get prone while retaining the current order. Verify with two-sided contact tests and the Standoff lab.
+2. **Perception and local options:** use each soldier's own line of sight, sound, incoming fire and local terrain to
+   build candidate actions. Reject unreachable or ineffective cover, and cover that is reached by moving materially
+   closer to a known threat; prefer protection, route safety, nearby support and reasonable cost over nearest-point-only
+   movement. Keep distant contacts uncertain and stale contacts useful only for search.
+3. **Order-aware soldier decisions:** treat orders as goals with priorities and constraints. Score alternatives such
+   as hold, bound, move to cover, suppress, disengage, aid and regroup from current facts; explain why an option won.
+   Survival can interrupt an order but must resume it if it is still valid.
+4. **Adaptive squad coordination:** offer roles and movement bounds as situational options, not unconditional
+   choreography. Coordinate who moves, covers, observes and aids; reassign roles as threats, casualties and force
+   balance change. Preserve the same rules for either team.
+5. **Recovery and evaluation:** detect blocked/failed actions, reassess when contact is lost or the objective changes,
+   and validate with deterministic seeded lab scenarios, battle-log reasons, replay/save tests and measured runtime.
+
+### First-stage acceptance
+
+- Both sides in an open-ground fight continue their assigned movement while firing when appropriate; one visible
+  target does not globally turn a move order into a hold.
+- Under fire, a soldier considers protective cover out to 30 m (initial cap within the widest on-foot tactical view). If none is
+  usable, a stationary soldier adopts a prone posture; moving soldiers keep their movement commitment.
+- The reaction preserves the current task and does not create omniscient enemy knowledge.
+- Tests cover distant cover, no-cover posture, movement under contact for both sides, order preservation and
+  deterministic replay. In the Standoff lab, `bound` events and real movement should continue after contact.
+
 ## Ownership boundaries
 
 - **Titan Command:** command authority, player intent and task assignment.
@@ -66,8 +101,8 @@ Personality/traits may influence risk tolerance and reactions later, but must ne
 ## Work packages and progress
 
 - [x] **AI-00 — Behaviour audit (COMPLETE):** live decision path, ownership/write-site inventory, interrupts, contact data flow, Titan integration gap and regression coverage are documented; current-main verification baseline is recorded.
-- [ ] **AI-01 — Perception and belief (IMPLEMENTATION IN REVIEW, PR #51):** source-aware live contacts, recency/confidence arbitration, named freshness policies, and save/load compatibility.
-- [ ] **AI-02 — Soldier decision core:** persistent intent, tactical risk assessment, priorities, interruptions and safe resumption.
+- [x] **AI-01 — Perception and belief (MERGED, PR #51):** source-aware live contacts, recency/confidence arbitration, named freshness policies, and save/load compatibility.
+- [x] **AI-02 — Soldier decision core (MERGED, PR #55):** deterministic intent scoring, GOAP feasibility, persistent intent, interruptions and safe resumption. This is a migration base, not the finished dynamic AI.
 - [ ] **AI-03 — Squad tactical brain:** role assignment, support, movement, engagement, casualty response and withdrawal.
 - [ ] **AI-04 — Coordination:** command/task integration and inter-squad support without omniscient shared state.
 - [ ] **AI-05 — Adaptation and evaluation:** outcome feedback, failed-plan recovery, contact loss and task reassessment.
