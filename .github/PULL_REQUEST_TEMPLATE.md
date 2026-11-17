@@ -18,4 +18,9 @@
 <!-- Logs, screenshots, A/B notes, reproduction steps, or test output. -->
 
 ## Release notes
-<!-- Player-facing summary. Include the intended Update: area trailer in commit metadata. -->
+<!-- Player-facing summary. This appears in the in-game changelog. -->
+
+## In-game release identity (required)
+<!-- Add one standalone `Update: <Area>` line here and to the final commit message,
+using the same specific area (for example AI, Animation, or UI). It becomes the
+game's update version; do not use Build. -->

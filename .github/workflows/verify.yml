@@ -26,6 +26,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Validate in-game release identity
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+        run: python3 scripts/release_metadata.py validate-pr
+
       - name: Install Rust stable and WASM target
         uses: dtolnay/rust-toolchain@stable
         with:
