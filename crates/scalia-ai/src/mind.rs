@@ -1,12 +1,10 @@
-//! A soldier's mind, as in F.E.A.R.: what he knows (facts), what he wants most right now (goals with live
-//! priorities) and how he gets it (a short plan from a library of actions, by the GOAP planner). Every
-//! perception tick he rebuilds his facts, re-scores his goals and keeps or replaces his plan; a grenade, a flank
-//! or an empty magazine changes the facts and with them the plan. Nothing here moves or shoots: the plan's
-//! current action sets controls (where to take cover, whether he may fire, whether to reload, whether to put
-//! covering fire down) that movement and fire obey.
+//! A soldier's mind: two-stage deterministic decision core.
 //!
-//! Adding a behaviour is adding an action (preconditions, effects, cost) and, if it is a new want, a goal.
-//! Deterministic: integer priorities and costs, the planner's fixed tie-breaks.
+//! Stage 1 (`score_intents`) uses integer tactical scoring (permille utilities over exposure, suppression,
+//! injuries, ammo, contact confidence and aid status) to choose *what* the soldier should pursue right now.
+//! Stage 2 (GOAP) plans *how* to achieve that intent from the action library with bounded deterministic
+//! search. Nothing here moves or shoots directly: the plan's current action sets explicit controls (cover,
+//! break-contact, reload, fire and suppression permissions) that `Battle` obeys.
 
 use crate::goap::{self, Action, Goal, Limits, State};
 
@@ -19,9 +17,8 @@ pub mod fact {
     pub const COVER_NEAR: u32 = 2;
     /// Rounds are coming his way.
     pub const UNDER_FIRE: u32 = 3;
-    /// He can afford to stand and fight here: in cover, not under fire, the enemy right on top of him, in an
-    /// assault (the leader's bounding is the answer to fire), inside a building, or no cover in reach (nothing
-    /// better to do).
+    /// Genuine protection or low danger: in cover, indoors, close-quarters engagement, or not under fire.
+    /// Absence of cover under fire sets `EXPOSED`, never `SAFE`.
     pub const SAFE: u32 = 4;
     /// Enough rounds in the magazine to fight with.
     pub const MAG_OK: u32 = 5;
@@ -31,6 +28,8 @@ pub mod fact {
     /// Goal facts: fighting the enemy, the order carried on.
     pub const ENGAGED: u32 = 8;
     pub const ORDER_DONE: u32 = 9;
+    /// Under fire in the open with no reachable cover nearby.
+    pub const EXPOSED: u32 = 10;
 }
 
 /// What a soldier can want.
@@ -53,7 +52,7 @@ pub enum Want {
 /// The action library.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Act {
-    /// Sprint to the best cover in reach, holding fire on the way.
+    /// Sprint to the best cover in reach, holding fire on the way (except point-blank self-defense).
     TakeCover,
     /// A fresh magazine (where it is safe to).
     Reload,
@@ -63,6 +62,8 @@ pub enum Act {
     ReturnFire,
     /// Covering fire on where the squad knows an enemy is.
     Suppress,
+    /// Under fire with no cover nearby: return/suppress fire while breaking out toward cover or an exit.
+    BreakContact,
     /// Do what the squad leader has him doing.
     FollowOrder,
 }
@@ -75,6 +76,7 @@ impl Act {
             Act::ReloadExposed => "reload in the open",
             Act::ReturnFire => "return fire",
             Act::Suppress => "suppress",
+            Act::BreakContact => "break contact",
             Act::FollowOrder => "follow order",
         }
     }
@@ -91,9 +93,28 @@ impl Want {
             Want::Idle => "IDLE",
         }
     }
+
+    fn rank(self) -> u8 {
+        match self {
+            Want::Aid => 0,
+            Want::Reload => 1,
+            Want::Survive => 2,
+            Want::Engage => 3,
+            Want::Order => 4,
+            Want::Idle => 5,
+        }
+    }
 }
 
-const ACTS: [Act; 6] = [Act::TakeCover, Act::Reload, Act::ReloadExposed, Act::ReturnFire, Act::Suppress, Act::FollowOrder];
+const ACTS: [Act; 7] = [
+    Act::TakeCover,
+    Act::Reload,
+    Act::ReloadExposed,
+    Act::ReturnFire,
+    Act::Suppress,
+    Act::BreakContact,
+    Act::FollowOrder,
+];
 
 fn library() -> Vec<Action> {
     use fact::*;
@@ -103,6 +124,7 @@ fn library() -> Vec<Action> {
         Action::new("reload in the open", 6).needs(SPARE_MAGS, true).needs(MAG_OK, false).sets(MAG_OK, true),
         Action::new("return fire", 1).needs(TARGET, true).needs(MAG_OK, true).needs(SAFE, true).sets(ENGAGED, true),
         Action::new("suppress", 3).needs(CONTACT, true).needs(TARGET, false).needs(MAG_OK, true).needs(SAFE, true).sets(ENGAGED, true),
+        Action::new("break contact", 4).needs(EXPOSED, true).sets(SAFE, true).sets(ENGAGED, true),
         Action::new("follow order", 1).needs(SAFE, true).sets(ORDER_DONE, true),
     ]
 }
@@ -121,20 +143,21 @@ impl Default for Mind {
 }
 
 impl Mind {
-    /// "SURVIVE: take cover → reload → return fire".
+    /// "SURVIVE: take cover -> reload -> return fire".
     pub fn describe(&self) -> String {
         if self.plan.is_empty() {
             return self.want.name().into();
         }
         format!("{}: {}", self.want.name(), self.plan.iter().map(|a| a.name()).collect::<Vec<_>>().join(" → "))
     }
+
     /// The action being done now.
     pub fn doing(&self) -> Option<Act> {
         self.plan.first().copied()
     }
 }
 
-/// What feeds a soldier's goals besides the facts.
+/// What feeds a soldier's tactical scoring and GOAP assessment.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Situation {
     pub facts: u64,
@@ -148,20 +171,35 @@ pub struct Situation {
     pub aim: bool,
     /// Busy with a casualty.
     pub aiding: bool,
+    /// Best usable contact confidence (0..1000) informing engagement/suppression urgency.
+    pub threat_confidence: i32,
+    /// Injury severity (0 uninjured .. 1000 near-incapacitated).
+    pub injury_permille: i32,
 }
 
-/// How much he wants each thing now (‰), highest first; wants with nothing behind them score 0.
-fn wants(s: &Situation) -> Vec<(i32, Want)> {
+/// Deterministic integer tactical scoring (permille), highest first; wants scoring <= 0 are inactive.
+pub fn score_intents(s: &Situation) -> Vec<(i32, Want)> {
     use fact::*;
     let f = |b: u32| s.facts >> b & 1 == 1;
+    let sup = s.suppression.clamp(0, 1_000);
+    let injury = s.injury_permille.clamp(0, 1_000);
+    let conf = s.threat_confidence.clamp(0, 1_000);
+    let survive = if f(UNDER_FIRE) && !f(SAFE) { 900 + sup / 10 + injury / 20 } else { 0 };
+    let engage = if f(TARGET) {
+        if s.target_close { 950 } else { 700 + conf / 20 }
+    } else if f(CONTACT) && s.aim {
+        300 + conf / 10
+    } else {
+        0
+    };
     let mut w = vec![
         (if s.aiding { 980 } else { 0 }, Want::Aid),
-        (if f(UNDER_FIRE) && !f(SAFE) { 900 + s.suppression / 10 } else { 0 }, Want::Survive),
+        (survive, Want::Survive),
         (if s.mag_empty && f(SPARE_MAGS) { 960 } else { 0 }, Want::Reload),
-        (if f(TARGET) { if s.target_close { 950 } else { 700 } } else if f(CONTACT) && s.aim { 300 } else { 0 }, Want::Engage),
+        (engage, Want::Engage),
         (200, Want::Order),
     ];
-    w.sort_by(|a, b| b.0.cmp(&a.0));
+    w.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.rank().cmp(&b.1.rank())));
     w
 }
 
@@ -200,10 +238,10 @@ fn plan_for(facts: u64, want: Want, goal: Goal) -> Option<Vec<Act>> {
     p
 }
 
-/// Thinks: the most wanted thing he can make a plan for, and that plan. Wants with no plan possible (no
-/// cover, no magazines) fall through to the next.
+/// Thinks: integer scoring picks the winning want, and GOAP plans how to fulfill it.
+/// Wants with no feasible plan fall through deterministically to the next want.
 pub fn think(s: &Situation) -> Mind {
-    for (score, want) in wants(s) {
+    for (score, want) in score_intents(s) {
         if score <= 0 {
             continue;
         }
@@ -265,18 +303,41 @@ mod tests {
     }
 
     #[test]
-    fn no_cover_in_reach_he_fights_from_where_he_is() {
-        // Nothing to run for counts as safe (it is the best he can do): he fights.
-        let s = Situation { facts: facts(&[TARGET, UNDER_FIRE, SAFE, MAG_OK, SPARE_MAGS]), suppression: 400, ..Default::default() };
+    fn exposed_under_fire_with_no_cover_he_breaks_contact_rather_than_faking_safe() {
+        // No cover in reach is honest exposure (`!SAFE` and `EXPOSED`), never falsely `SAFE`.
+        let s = Situation { facts: facts(&[TARGET, UNDER_FIRE, EXPOSED, MAG_OK, SPARE_MAGS]), suppression: 400, ..Default::default() };
         let m = think(&s);
-        assert_eq!((m.want, m.plan), (Want::Engage, vec![Act::ReturnFire]));
+        assert_eq!((m.want, m.plan), (Want::Survive, vec![Act::BreakContact]));
+
+        // When protected (e.g. indoors or in cover), SAFE holds and he fights directly.
+        let safe_s = Situation { facts: facts(&[TARGET, UNDER_FIRE, SAFE, MAG_OK, SPARE_MAGS]), suppression: 400, ..Default::default() };
+        assert_eq!((think(&safe_s).want, think(&safe_s).plan), (Want::Engage, vec![Act::ReturnFire]));
+    }
+
+    #[test]
+    fn exposed_and_empty_under_heavy_suppression_prioritizes_survival_over_open_reload() {
+        let low_sup = Situation { facts: facts(&[UNDER_FIRE, EXPOSED, SPARE_MAGS]), mag_empty: true, suppression: 200, ..Default::default() };
+        assert_eq!((think(&low_sup).want, think(&low_sup).plan), (Want::Reload, vec![Act::ReloadExposed]));
+
+        let pinned = Situation { facts: facts(&[UNDER_FIRE, EXPOSED, SPARE_MAGS]), mag_empty: true, suppression: 700, ..Default::default() };
+        assert_eq!((think(&pinned).want, think(&pinned).plan), (Want::Survive, vec![Act::BreakContact]));
     }
 
     #[test]
     fn quiet_and_watching_he_puts_covering_fire_on_a_known_contact() {
-        let s = Situation { facts: facts(&[CONTACT, SAFE, MAG_OK, SPARE_MAGS]), aim: true, ..Default::default() };
+        let s = Situation { facts: facts(&[CONTACT, SAFE, MAG_OK, SPARE_MAGS]), aim: true, threat_confidence: 800, ..Default::default() };
         let m = think(&s);
         assert_eq!((m.want, m.plan), (Want::Engage, vec![Act::Suppress]));
         assert_eq!(think(&Situation { aim: false, ..s }).want, Want::Order);
+    }
+
+    #[test]
+    fn integer_scoring_breaks_ties_deterministically() {
+        let s = Situation { facts: facts(&[UNDER_FIRE, EXPOSED, SPARE_MAGS]), mag_empty: true, suppression: 600, injury_permille: 0, ..Default::default() };
+        // Both Reload (960) and Survive (900 + 60 = 960) tie at 960; Reload rank wins deterministically.
+        assert_eq!(score_intents(&s)[0], (960, Want::Reload));
+        // Any injury breaks the tie cleanly toward survival.
+        let hurt = Situation { injury_permille: 200, ..s };
+        assert_eq!(score_intents(&hurt)[0], (970, Want::Survive));
     }
 }

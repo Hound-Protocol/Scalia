@@ -267,6 +267,10 @@ pub struct Brain {
     under_fire: bool,
     #[serde(default)]
     broken: Option<(i64, i64)>,
+    /// Monotonic order generation incremented on each new squad command or abandon, preventing stale
+    /// saved intents from resuming after a command change.
+    #[serde(default)]
+    pub(crate) order_seq: u64,
 }
 
 /// A narrow gap on the squad's way (a passage between walls, a gateway): where it is, which way the squad
@@ -283,7 +287,7 @@ pub struct Choke {
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, line: None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new(), strength: 0, left: 0, origin: (0, 0), under_fire: false, broken: None }
+        Brain { order: Order::None, line: None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new(), strength: 0, left: 0, origin: (0, 0), under_fire: false, broken: None, order_seq: 0 }
     }
 }
 
@@ -377,9 +381,19 @@ impl Battle {
         while self.brains.len() <= squad {
             self.brains.push(Brain::new());
         }
-        // The sandbags they carry stay with them whatever the order.
+        // The sandbags they carry stay with them whatever the order; a new order epoch invalidates any
+        // preserved pre-order soldier intents for this squad.
         let (kit, aid) = (self.brains[squad].kit, std::mem::take(&mut self.brains[squad].aid));
-        self.brains[squad] = Brain { order, kit, aid, ..Brain::new() };
+        let order_seq = self.brains[squad].order_seq.saturating_add(1);
+        self.brains[squad] = Brain { order, kit, aid, order_seq, ..Brain::new() };
+        for s in &mut self.soldiers {
+            if s.squad as usize == squad {
+                s.saved_intent = None;
+                if s.interrupt != Some(crate::battle::InterruptKind::Aid) {
+                    s.interrupt = None;
+                }
+            }
+        }
     }
 
     /// The squad has done what it was told (the building taken and held, or arrived and secured).
@@ -749,6 +763,15 @@ impl Battle {
             let away = self.contact_bearing(squad, &ms).map(|v| { let l = isqrt(v.0 * v.0 + v.1 * v.1).max(1); (-v.0 * RALLY_BACK_MM / l, -v.1 * RALLY_BACK_MM / l) }).unwrap_or((0, 0));
             let b = &mut self.brains[squad];
             b.broken = Some((b.origin.0 + away.0, b.origin.1 + away.1));
+            b.order_seq = b.order_seq.saturating_add(1);
+            for s in &mut self.soldiers {
+                if s.squad as usize == squad {
+                    s.saved_intent = None;
+                    if s.interrupt != Some(crate::battle::InterruptKind::Aid) {
+                        s.interrupt = None;
+                    }
+                }
+            }
             self.log.push(Event::Order { squad, step: "abandon" });
         } else {
             // On the move the line is laid again round those left (a room-clearing plan keeps its legs).
@@ -828,16 +851,28 @@ impl Battle {
             while self.brains.len() <= squad {
                 self.brains.push(Brain::new());
             }
-            // Drop care whose helper can no longer give it.
+            // Drop care whose helper can no longer give it (or whose casualty died).
+            let mut dropped = Vec::new();
             let soldiers = &mut self.soldiers;
             self.brains[squad].aid.retain(|a| {
                 let ok = soldiers[a.1].alive() && !soldiers[a.1].down() && soldiers[a.0].alive();
                 if !ok && soldiers[a.1].aiding == Some(a.0) {
                     soldiers[a.1].aiding = None;
                     soldiers[a.1].dragging = None;
+                    dropped.push(a.1);
                 }
                 ok
             });
+            for h in dropped {
+                if self.soldiers[h].alive() && !self.soldiers[h].down() {
+                    if !self.finish_interrupt(h, crate::battle::InterruptKind::Aid) {
+                        self.soldiers[h].task = Task::Idle;
+                    }
+                } else {
+                    self.soldiers[h].saved_intent = None;
+                    self.soldiers[h].interrupt = None;
+                }
+            }
             if self.brains[squad].aid.iter().any(|a| a.0 == w) {
                 continue;
             }
@@ -855,6 +890,9 @@ impl Battle {
                 .min_by_key(|(j, o)| (dist(o.pos, wp), *j))
                 .map(|(j, _)| j);
             if let Some(h) = helper {
+                self.begin_interrupt(h, crate::battle::InterruptKind::Aid);
+                self.soldiers[h].cover = None;
+                self.soldiers[h].calm_ms = 0;
                 self.soldiers[h].aiding = Some(w);
                 self.brains[squad].aid.push((w, h, 0, 0, wp));
                 self.log.push(Event::Order { squad, step: "casualty" });
@@ -1078,15 +1116,29 @@ impl Battle {
         if !self.soldiers[w].alive() || !self.soldiers[h].alive() || self.soldiers[h].down() {
             self.soldiers[h].aiding = None;
             self.soldiers[h].dragging = None;
+            if self.soldiers[h].alive() && !self.soldiers[h].down() {
+                if !self.finish_interrupt(h, crate::battle::InterruptKind::Aid) {
+                    self.soldiers[h].task = Task::Idle;
+                }
+            } else {
+                self.soldiers[h].saved_intent = None;
+                self.soldiers[h].interrupt = None;
+            }
             return false;
         }
         let wp = self.soldiers[w].pos;
-        // On his way and it turns hot: he stays out of it (back to the fight) until it is safe to go again.
+        // On his way and it turns hot: he stays out of it (back to his mission / the fight) until safe.
         if a.2 == 0 && self.casualty_threatened(w) {
-            let s = &mut self.soldiers[h];
-            s.aiding = None;
-            s.dragging = None;
-            s.task = Task::Hold { at: s.pos, face: wp };
+            self.soldiers[h].aiding = None;
+            self.soldiers[h].dragging = None;
+            let squad = self.soldiers[h].squad as usize;
+            let had_saved = self.soldiers[h].saved_intent.is_some();
+            if !self.finish_interrupt(h, crate::battle::InterruptKind::Aid) {
+                let s = &mut self.soldiers[h];
+                if !had_saved || self.brains.get(squad).is_none_or(|b| matches!(b.order, Order::None)) {
+                    s.task = Task::Hold { at: s.pos, face: wp };
+                }
+            }
             return false;
         }
         match a.2 {
@@ -1138,9 +1190,11 @@ impl Battle {
             _ => {
                 if self.time_ms >= a.3 {
                     self.soldiers[w].stable = true;
-                    let s = &mut self.soldiers[h];
-                    s.aiding = None;
-                    s.task = Task::Idle;
+                    self.soldiers[h].aiding = None;
+                    self.soldiers[h].dragging = None;
+                    if !self.finish_interrupt(h, crate::battle::InterruptKind::Aid) {
+                        self.soldiers[h].task = Task::Idle;
+                    }
                     return false;
                 }
                 true
@@ -1177,6 +1231,14 @@ impl Battle {
             self.keep_leader(squad);
         }
         self.care();
+        let track_sync = self.soldiers.iter().any(|s| {
+            s.interrupt.is_some() && s.interrupt != Some(crate::battle::InterruptKind::Aid)
+        });
+        let before_lead: Vec<(Task, Option<Stance>, Option<(i64, i64)>)> = if track_sync {
+            self.soldiers.iter().map(|s| (s.task, s.posture, s.watch)).collect()
+        } else {
+            Vec::new()
+        };
         for squad in 0..self.brains.len() {
             self.count_losses(squad);
             if let Some(rally) = self.brains[squad].broken {
@@ -1191,6 +1253,24 @@ impl Battle {
                     if self.building.is_some() && !self.members(squad).is_empty() {
                         self.lead_capture(squad);
                     }
+                }
+            }
+        }
+        // If the squad leader updated a soldier's squad assignment while he was only temporarily
+        // interrupted for cover/reload/contact, keep his preserved intent synced to the squad's progress.
+        for (i, &(prev_task, prev_posture, prev_watch)) in before_lead.iter().enumerate() {
+            let seq = self.squad_order_seq(self.soldiers[i].squad);
+            let s = &mut self.soldiers[i];
+            if s.interrupt.is_some()
+                && s.interrupt != Some(crate::battle::InterruptKind::Aid)
+                && (s.task, s.posture, s.watch) != (prev_task, prev_posture, prev_watch)
+            {
+                if let Some(si) = s.saved_intent.as_mut() {
+                    si.task = s.task;
+                    si.posture = s.posture;
+                    si.watch = s.watch;
+                    si.goal = s.goal;
+                    si.order_seq = seq;
                 }
             }
         }

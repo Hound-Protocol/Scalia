@@ -112,3 +112,27 @@ fn soldiers_joining_later_are_part_of_the_replay() {
     let saved = a.save();
     assert_eq!(Battle::load(&saved).unwrap().hash(), a.hash());
 }
+
+#[test]
+fn battle_save_version_13_round_trips_soldier_intents_and_refuses_v12() {
+    use scalia_ai::battle::InterruptKind;
+    use scalia_ai::save::SAVE_VERSION;
+
+    assert_eq!(SAVE_VERSION, 13);
+    let mut a = killhouse(9);
+    script(&mut a);
+    run(&mut a, 12_000);
+    a.soldiers[0].interrupt = Some(InterruptKind::TakeCover);
+    let saved = a.save();
+    let loaded = Battle::load(&saved).expect("version 13 save loads");
+    assert_eq!(loaded.hash(), a.hash());
+    assert_eq!(loaded.soldiers[0].interrupt, Some(InterruptKind::TakeCover));
+
+    let mut v12 = saved;
+    v12[4..8].copy_from_slice(&12u32.to_le_bytes());
+    let err = match Battle::load(&v12) {
+        Ok(_) => panic!("version 12 save must be rejected"),
+        Err(err) => err,
+    };
+    assert!(err.contains("12") && err.contains("13"), "unexpected error: {err}");
+}

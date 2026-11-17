@@ -1,4 +1,4 @@
-use scalia_ai::battle::{Battle, Event, Soldier, Stance};
+use scalia_ai::battle::{Battle, Event, Soldier, Stance, Task};
 use scalia_ai::intelligence::IntelSource;
 use scalia_ai::sight::SightGrid;
 use scalia_core::nav::{Prop, PropKind};
@@ -34,24 +34,17 @@ fn nobody_shoots_through_a_wall() {
     assert!(b.log.iter().all(|e| !matches!(e, Event::Shot { .. })), "no line of sight, no shots");
 }
 
-/// Hits landed on an unkillable target over 60 s of fire.
-fn hits_on(target: Soldier, props: &[Prop]) -> usize {
-    let mut b = Battle::new(field(props), vec![man(0, 50_000, 20_000, Stance::Stand), target], 11);
-    b.soldiers[1].health = i32::MAX;
-    b.soldiers[1].passive = true;
-    b.soldiers[0].mags = 99;
-    for _ in 0..1200 {
-        b.step(50);
-    }
-    b.log.iter().filter(|e| matches!(e, Event::Shot { hit: true, .. })).count()
+fn hit_chance(target: Soldier, props: &[Prop]) -> i64 {
+    let b = Battle::new(field(props), vec![man(0, 50_000, 20_000, Stance::Stand), target], 11);
+    b.hit_permille(0, 1)
 }
 
 #[test]
 fn cover_and_stance_make_a_man_harder_to_hit() {
     let bags = Prop { kind: PropKind::Wall { length_mm: 6_000, thickness_mm: 700 }, x_mm: 50_000, y_mm: 59_000, quarter_turns: 0 };
-    let open = hits_on(man(1, 50_000, 60_000, Stance::Stand), &[]);
-    let behind_bags = hits_on(man(1, 50_000, 60_000, Stance::Stand), &[bags]);
-    let crouched_behind = hits_on(man(1, 50_000, 60_000, Stance::Crouch), &[bags]);
+    let open = hit_chance(man(1, 50_000, 60_000, Stance::Stand), &[]);
+    let behind_bags = hit_chance(man(1, 50_000, 60_000, Stance::Stand), &[bags]);
+    let crouched_behind = hit_chance(man(1, 50_000, 60_000, Stance::Crouch), &[bags]);
     assert!(open > behind_bags, "legs behind the bags: {open} vs {behind_bags}");
     assert!(behind_bags > crouched_behind, "crouched behind the bags: {behind_bags} vs {crouched_behind}");
 }
@@ -305,4 +298,87 @@ fn a_man_shot_at_turns_on_the_shooter_not_the_squads_other_contact() {
         faced_south |= b.soldiers[0].facing.1 < -500;
     }
     assert!(faced_south, "he turned on the man shooting him: {:?}", b.soldiers[0].facing);
+}
+
+#[test]
+fn nested_survival_interrupts_preserve_original_mission_and_resume_when_calm() {
+    use scalia_ai::battle::InterruptKind;
+    let rock = Prop { kind: PropKind::Rock { radius_mm: 1_200 }, x_mm: 56_000, y_mm: 20_000, quarter_turns: 0 };
+    let mut b = battle_with(&[rock], vec![man(0, 50_000, 20_000, Stance::Stand), Soldier::new(1, 1, (50_000, 70_000), Stance::Stand)], 17);
+    b.soldiers[0].health = i32::MAX;
+    b.soldiers[1].health = i32::MAX;
+    let mission = Task::Hold { at: (50_000, 20_000), face: (50_000, 70_000) };
+    b.order(0, mission);
+
+    let mut took_cover = false;
+    for _ in 0..160 {
+        b.step(50);
+        if b.soldiers[0].interrupt == Some(InterruptKind::TakeCover) && b.soldiers[0].cover.is_some() {
+            took_cover = true;
+            break;
+        }
+    }
+    assert!(took_cover, "soldier entered TakeCover interrupt");
+    assert_eq!(b.soldiers[0].saved_intent.map(|s| s.task), Some(mission));
+
+    // Running empty in cover reloads without overwriting the original saved mission intent.
+    b.soldiers[0].ammo = 0;
+    let mut reloaded = false;
+    for _ in 0..140 {
+        b.step(50);
+        if b.soldiers[0].reloading_ms > 0 {
+            reloaded = true;
+            assert_eq!(b.soldiers[0].saved_intent.map(|s| s.task), Some(mission));
+        }
+    }
+    assert!(reloaded, "soldier reloaded while under TakeCover interrupt");
+
+    // Once threat disappears and calm settles, cover releases and original mission resumes.
+    b.soldiers[1].health = 0;
+    for _ in 0..320 {
+        b.step(50);
+        if b.soldiers[0].cover.is_none() && b.soldiers[0].interrupt.is_none() {
+            break;
+        }
+    }
+    assert_eq!(b.soldiers[0].cover, None);
+    assert_eq!(b.soldiers[0].interrupt, None);
+    assert_eq!(b.soldiers[0].task, mission);
+}
+
+#[test]
+fn exposed_under_fire_with_no_cover_honestly_breaks_contact_and_resumes_when_calm() {
+    use scalia_ai::battle::InterruptKind;
+    use scalia_ai::mind::{Act as MindAct, Want};
+
+    let mut b = Battle::new(field(&[]), vec![man(0, 50_000, 50_000, Stance::Stand), Soldier::new(1, 1, (50_000, 80_000), Stance::Stand)], 19);
+    b.soldiers[0].health = i32::MAX;
+    b.soldiers[1].health = i32::MAX;
+    let mission = Task::Hold { at: (50_000, 50_000), face: (50_000, 80_000) };
+    b.order(0, mission);
+
+    let mut broke_contact = false;
+    for _ in 0..60 {
+        b.soldiers[0].suppression = 500;
+        b.step(50);
+        if b.soldiers[0].mind.want == Want::Survive && b.soldiers[0].mind.doing() == Some(MindAct::BreakContact) {
+            broke_contact = true;
+            assert!(b.soldiers[0].may_fire);
+            assert!(b.soldiers[0].may_suppress);
+            assert_eq!(b.soldiers[0].interrupt, Some(InterruptKind::BreakContact));
+            assert_eq!(b.soldiers[0].saved_intent.map(|s| s.task), Some(mission));
+            break;
+        }
+    }
+    assert!(broke_contact, "exposed under fire with no cover selects BreakContact, never fake SAFE");
+
+    b.soldiers[1].health = 0;
+    for _ in 0..120 {
+        b.step(50);
+        if b.soldiers[0].interrupt.is_none() {
+            break;
+        }
+    }
+    assert_eq!(b.soldiers[0].interrupt, None);
+    assert_eq!(b.soldiers[0].task, mission);
 }
