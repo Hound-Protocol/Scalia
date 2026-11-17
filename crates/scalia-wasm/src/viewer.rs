@@ -170,7 +170,8 @@ const COMMANDER_MAGS: i32 = 5;
 const CMD_WALK: f32 = 1.7;
 const CMD_AIM_WALK: f32 = 1.2;
 const CMD_CROUCH: f32 = 1.4;
-const CMD_CRAWL: f32 = 0.5;
+const CMD_CRAWL: f32 = 0.55;
+const CMD_CRAWL_FAST: f32 = 1.05;
 const CMD_SPRINT: f32 = 4.6;
 /// His usual pace on foot (WASD): a jog. Alt held walks (CMD_WALK), Shift sprints.
 const CMD_JOG: f32 = 3.0;
@@ -3263,10 +3264,11 @@ impl Viewer {
         // steps to brake (GTA-style). Changing direction keeps most of the pace. Low he goes slower; on his
         // belly he crawls; with the rifle up he walks, never sprints.
         // Shift from a crouch or kneel: he gets up and drives off into a sprint (building up, not at once).
-        if sprint && wants && self.gun.stance != 0 && !ready {
+        if sprint && wants && self.gun.stance == 1 && !ready {
             self.gun.stance = 0;
         }
         let pace = match self.gun.stance {
+            2 if sprint && !ready => CMD_CRAWL_FAST,
             2 => CMD_CRAWL,
             1 => CMD_CROUCH,
             _ if self.gun.aim && ready => CMD_AIM_WALK,

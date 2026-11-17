@@ -318,6 +318,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.el = vec2f(1.3, 2.084);
     p.reach = vec2f(0.0, 0.401);
     p.abd = vec2f(0.0, 0.604);
+    p.hip = vec2f(0.14, 0.10);
+    p.knee = vec2f(0.26, 0.18);
+    p.side = vec2f(0.0, 0.0);
+    p.tilt = 0.0;
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
@@ -538,27 +542,32 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.lean = -0.12;
     p.head = 0.12;
   } else if (pose == 32u) {
-    // Direction-aware low crawl (pose.rs `Pose::Crawl`): reverse the diagonal pull when backing up and
-    // change the support width for either side-crawl.
-    let s = sin(phase * 6.2831853 + dir);
+    let fwd = cos(dir);
     let lateral = sin(dir);
-    let draw = vec2f(max(s, 0.0), max(-s, 0.0));
+    let lat_abs = abs(lateral);
+    let s = sin(phase * 6.2831853 + dir);
+    let c = cos(phase * 6.2831853 + dir);
+    let draw = vec2f(0.5 - 0.5 * c, 0.5 + 0.5 * c);
     p.prone = 1.0;
-    // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
-    // The left support arm is solved by grip() rather than swinging away from the handguard.
-    p.sh = vec2f(2.8, 1.571);
-    p.el = vec2f(1.3, 2.084);
-    p.reach = vec2f(0.0, 0.401);
-    p.abd = vec2f(0.0, 0.604);
-    p.ryaw = 0.55;
-    p.hip = vec2f(0.1) + 0.3 * draw;
-    p.knee = vec2f(0.35) + 1.2 * draw;
-    p.side = vec2f(-0.12 - 0.55 * draw.x - 0.16 * lateral, 0.12 + 0.55 * draw.y + 0.16 * lateral);
-    p.twist = 0.06 * s + 0.08 * lateral;
-    p.tilt = 0.05 * s + 0.04 * lateral;
+    p.sh = vec2f(2.8, 1.571 + 0.14 * s * (1.0 - 0.35 * lat_abs));
+    p.el = vec2f(1.3, 2.084 - 0.16 * s * (1.0 - 0.35 * lat_abs));
+    p.reach = vec2f(0.0, 0.401 + 0.05 * c);
+    p.abd = vec2f(0.0, 0.604 + 0.12 * lat_abs + 0.08 * abs(s));
+    p.ryaw = 0.55 - 0.06 * lateral;
+    p.hip = vec2f(0.08) + (0.34 - 0.10 * lat_abs) * draw;
+    p.knee = vec2f(0.28) + (1.28 - 0.36 * lat_abs) * draw;
+    let lead_l = max(-lateral, 0.0);
+    let lead_r = max(lateral, 0.0);
+    p.side = vec2f(-0.14 - (0.52 + 0.24 * lat_abs) * draw.x - 0.22 * lead_l + 0.08 * lead_r,
+                   0.14 + (0.52 + 0.24 * lat_abs) * draw.y + 0.22 * lead_r - 0.08 * lead_l);
+    p.twist = -0.22 + (0.14 + 0.06 * fwd) * s + 0.18 * lateral;
+    p.tilt = 0.0;
+    p.lean = -0.08;
+    p.look = 0.22 - 0.12 * s - 0.18 * lateral;
     p.rifle = 1.5707963;
-    p.head = 1.0;
-  } else if (pose == 28u) {
+    p.head = 0.94 + 0.06 * max(fwd, 0.0);
+  }
+ else if (pose == 28u) {
     p.sh = vec2f(0.08);
     p.el = vec2f(0.3);
     p.sling = 1.0;
