@@ -146,6 +146,28 @@ Personality/traits may influence risk tolerance and reactions later, but must ne
 - [ ] **AI-05 — Adaptation and evaluation:** outcome feedback, failed-plan recovery, contact loss and task reassessment.
 - [ ] **AI-06 — Personality and variation:** controlled individual differences after core tactical behaviour is reliable.
 
+### AI-03-S02 — Modular building-assault decisions
+
+- Work item: AI-03-S02 — Modular building-assault decisions
+- Work-order revision: v1.0
+- Status: Active
+- As of: 2026-11-17
+- Canonical source: `docs/titan/AI_BEHAVIOUR_ROADMAP.md`
+- Implementation: `work/AI-03-building-decision-options-2026-11-17` / PR #62 / commit `99372c7296f0b37543b354e46acb06ab967e2f60`
+- Verification: `bash scripts/check.sh` — all 9 steps passed; `hash_battle` repeated twice with `594771974983721861` (intentional building-entry behavior change). Initial PR release-identity check failed because the description omitted the required standalone `Update: AI-03-S02` line. The PR description now includes it; fresh push and PR checks passed, including release-identity validation and the complete verification suite.
+- Next action: Await review and merge PR #62.
+
+Keep the existing Battle executor as an adapter while moving building-plan choices into deterministic, composable option providers. Add a first situation-driven choice by selecting a reachable entrance using route cost and currently valid, confidence-weighted contacts in the entry room.
+
+Acceptance:
+- Existing plan execution remains deterministic; adding an option provider does not require changing the generic GOAP search.
+- Entry selection excludes unreachable approaches when an alternative is reachable; among candidates, it prefers lower reported threat, then lower route cost, then stable entry order.
+- Contacts affect entry choice only when valid under the existing building contact policy; confidence is retained as a weight rather than treating every source as visual confirmation.
+- Existing building behavior, save/load, and replay checks remain green.
+- Tests cover option selection and route/contact-driven entry decisions; scenario fixtures assert outcomes rather than dictate the planner's choices.
+
+Out of scope: inventing a drone sensing/coverage model, integrating Titan task-board state into Battle, and rewriting the existing movement/room-clearing executor.
+
 ## AI-00 audit deliverables
 
 1. Current end-to-end decision pipeline with concrete source paths and entry points.

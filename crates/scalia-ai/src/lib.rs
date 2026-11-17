@@ -1,4 +1,5 @@
 pub mod battle;
+mod building_plan;
 pub mod doors;
 pub mod goap;
 pub mod grid;
