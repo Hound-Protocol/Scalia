@@ -182,7 +182,9 @@ fn a_new_squad_order_while_aiding_prevents_resuming_the_stale_pre_order_task() {
     use scalia_ai::leader::{Mode, Order};
     use scalia_ai::save::Command;
 
-    let men = vec![man(0, 0, 50_000, 40_000), man(0, 0, 54_000, 40_000)];
+    let mut reserve = man(0, 0, 70_000, 40_000);
+    reserve.passive = true;
+    let men = vec![man(0, 0, 50_000, 40_000), man(0, 0, 54_000, 40_000), reserve];
     let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), men, 13);
     let old_dest = (50_000, 85_000);
     b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: old_dest, mode: Mode::Plain } });
