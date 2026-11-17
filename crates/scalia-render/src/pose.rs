@@ -914,14 +914,14 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle_yaw = 0.52 - 0.10 * surge - 0.08 * lateral;
             // Keep hip pitch near zero so knees never plunge underground, while swinging side outward (~65 deg)
             // in proportion to knee bend so the bent shin and boot stay flat on the ground rather than rising.
-            p.hip = [-0.04 * draw[0], -0.04 * draw[1]];
-            p.knee = [0.14 + (1.02 - 0.28 * lat_abs) * draw[0], 0.14 + (1.02 - 0.28 * lat_abs) * draw[1]];
+            p.hip = [0.18 + 0.20 * draw[0], 0.18 + 0.20 * draw[1]];
+            p.knee = [0.05 + (0.85 - 0.22 * lat_abs) * draw[0], 0.05 + (0.85 - 0.22 * lat_abs) * draw[1]];
             let (lead_l, lead_r) = ((-lateral).max(0.0), lateral.max(0.0));
             p.side = [
-                -0.12 - (0.98 - 0.16 * lat_abs) * draw[0] - 0.24 * lead_l + 0.08 * lead_r,
-                0.12 + (0.98 - 0.16 * lat_abs) * draw[1] + 0.24 * lead_r - 0.08 * lead_l,
+                -0.14 - (1.08 - 0.18 * lat_abs) * draw[0] - 0.24 * lead_l + 0.08 * lead_r,
+                0.14 + (1.08 - 0.18 * lat_abs) * draw[1] + 0.24 * lead_r - 0.08 * lead_l,
             ];
-            p.bob = 0.035 * c.abs() * (1.0 - 0.3 * lat_abs);
+            p.bob = 0.0;
             p.twist = -0.24 + (0.20 + 0.06 * fwd) * s + 0.18 * lateral;
             p.tilt = 0.0;
             p.lean = -0.08;
@@ -938,8 +938,8 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.elbow = [1.3, 2.084];
             p.reach = [0.0, 0.401];
             p.abduct = [0.0, 0.604];
-            p.hip = [0.14, 0.10];
-            p.knee = [0.26, 0.18];
+            p.hip = [0.18, 0.16];
+            p.knee = [0.06, 0.04];
             p.side = [0.0, 0.0];
             p.tilt = 0.0;
             p.rifle = std::f32::consts::FRAC_PI_2;

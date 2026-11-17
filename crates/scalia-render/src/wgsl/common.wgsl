@@ -318,8 +318,8 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.el = vec2f(1.3, 2.084);
     p.reach = vec2f(0.0, 0.401);
     p.abd = vec2f(0.0, 0.604);
-    p.hip = vec2f(0.14, 0.10);
-    p.knee = vec2f(0.26, 0.18);
+    p.hip = vec2f(0.18, 0.16);
+    p.knee = vec2f(0.06, 0.04);
     p.side = vec2f(0.0, 0.0);
     p.tilt = 0.0;
     p.rifle = 1.5707963;
@@ -555,13 +555,13 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.reach = vec2f(0.0, 0.42 + 0.12 * c * (1.0 - 0.3 * lat_abs));
     p.abd = vec2f(0.0, 0.62 + 0.16 * lat_abs + 0.12 * abs(surge));
     p.ryaw = 0.52 - 0.10 * surge - 0.08 * lateral;
-    p.hip = vec2f(-0.04) * draw;
-    p.knee = vec2f(0.14) + (1.02 - 0.28 * lat_abs) * draw;
+    p.hip = vec2f(0.18) + 0.20 * draw;
+    p.knee = vec2f(0.05) + (0.85 - 0.22 * lat_abs) * draw;
     let lead_l = max(-lateral, 0.0);
     let lead_r = max(lateral, 0.0);
-    p.side = vec2f(-0.12 - (0.98 - 0.16 * lat_abs) * draw.x - 0.24 * lead_l + 0.08 * lead_r,
-                   0.12 + (0.98 - 0.16 * lat_abs) * draw.y + 0.24 * lead_r - 0.08 * lead_l);
-    p.bob = 0.035 * abs(c) * (1.0 - 0.3 * lat_abs);
+    p.side = vec2f(-0.14 - (1.08 - 0.18 * lat_abs) * draw.x - 0.24 * lead_l + 0.08 * lead_r,
+                   0.14 + (1.08 - 0.18 * lat_abs) * draw.y + 0.24 * lead_r - 0.08 * lead_l);
+    p.bob = 0.0;
     p.twist = -0.24 + (0.20 + 0.06 * fwd) * s + 0.18 * lateral;
     p.tilt = 0.0;
     p.lean = -0.08;
