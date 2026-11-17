@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "== browser audio routing and crosshair regression tests"
-node --test web/tests/audio.test.mjs web/tests/crosshair.test.mjs web/tests/diagnostics.test.mjs
+node --test web/tests/audio.test.mjs web/tests/crosshair.test.mjs web/tests/diagnostics.test.mjs web/tests/errors.test.mjs
 
 echo "== cargo test --workspace (debug)"
 cargo test --workspace -q

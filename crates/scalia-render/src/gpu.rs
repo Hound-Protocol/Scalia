@@ -100,6 +100,8 @@ pub struct Gpu {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    fatal_error: Arc<Mutex<Option<String>>>,
+    pending_error: Arc<Mutex<Option<String>>>,
     scene_pipe: wgpu::RenderPipeline,
     shadow_pipe: wgpu::RenderPipeline,
     blit_pipe: wgpu::RenderPipeline,
@@ -160,6 +162,26 @@ impl Gpu {
             })
             .await
             .map_err(|e| format!("device: {e}"))?;
+        let fatal_error = Arc::new(Mutex::new(None));
+        let lost_error = fatal_error.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            let mut error = lost_error.lock().expect("GPU error lock");
+            if error.is_none() {
+                *error = Some(format!("device lost ({reason:?}): {message}"));
+            }
+        });
+        let pending_error = Arc::new(Mutex::new(None));
+        let fatal = fatal_error.clone();
+        let pending = pending_error.clone();
+        device.on_uncaptured_error(Arc::new(move |error| {
+            let is_fatal = matches!(&error, wgpu::Error::OutOfMemory { .. });
+            let message = error.to_string();
+            let target = if is_fatal { &fatal } else { &pending };
+            let mut slot = target.lock().expect("GPU error lock");
+            if slot.is_none() {
+                *slot = Some(message);
+            }
+        }));
         let mut config = surface
             .get_default_config(&adapter, width.max(1), height.max(1))
             .ok_or("surface not supported by adapter")?;
@@ -301,7 +323,7 @@ impl Gpu {
 
         Ok(Gpu {
             timing,
-            device, queue, surface, config, scene_pipe, shadow_pipe, blit_pipe, uni, b_uni, scene_bind, shadow_bind,
+            device, queue, surface, config, fatal_error, pending_error, scene_pipe, shadow_pipe, blit_pipe, uni, b_uni, scene_bind, shadow_bind,
             shadow_view, one_instance, targets: None, buffers: HashMap::new(), adapter_name, software, instance, second: None,
         })
     }
@@ -452,6 +474,12 @@ impl Gpu {
     }
 
     pub fn frame(&mut self, f: &FrameDesc) -> Result<(), String> {
+        if let Some(error) = self.fatal_error.lock().expect("GPU error lock").as_ref() {
+            return Err(format!("GPU_FATAL: {error}"));
+        }
+        if let Some(error) = self.pending_error.lock().expect("GPU error lock").take() {
+            return Err(format!("GPU_ERROR: {error}"));
+        }
         let (w, h) = f.internal;
         self.ensure_targets(w, h);
         let snap = snap_target_at(f.target, f.yaw, f.elev, f.view_height / h as f32);
@@ -495,12 +523,14 @@ impl Gpu {
         ];
         self.queue.write_buffer(&self.b_uni, 0, f32_bytes(&b));
 
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            _ => {
+        let (frame, reconfigure_after_present) = match classify_surface_texture(self.surface.get_current_texture()) {
+            SurfaceFrame::Render { texture, reconfigure_after_present } => (texture, reconfigure_after_present),
+            SurfaceFrame::Skip => return Ok(()),
+            SurfaceFrame::Reconfigure => {
                 self.surface.configure(&self.device, &self.config);
-                return Ok(()); // skip this frame
+                return Ok(());
             }
+            SurfaceFrame::Error(message) => return Err(format!("GPU_ERROR: {message}")),
         };
         let screen = frame.texture.create_view(&Default::default());
         let measure = self.poll_timing();
@@ -614,6 +644,9 @@ impl Gpu {
         }
         self.queue.submit([enc.finish()]);
         self.queue.present(frame);
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.config);
+        }
         if let Some(tm) = self.timing.as_ref().filter(|_| measure) {
             *tm.state.lock().expect("timing lock") = 1;
             let state = tm.state.clone();
@@ -622,5 +655,65 @@ impl Gpu {
             });
         }
         Ok(())
+    }
+}
+
+enum SurfaceFrame {
+    Render { texture: wgpu::SurfaceTexture, reconfigure_after_present: bool },
+    Skip,
+    Reconfigure,
+    Error(&'static str),
+}
+
+fn classify_surface_texture(texture: wgpu::CurrentSurfaceTexture) -> SurfaceFrame {
+    match texture {
+        wgpu::CurrentSurfaceTexture::Success(texture) => SurfaceFrame::Render {
+            texture,
+            reconfigure_after_present: false,
+        },
+        wgpu::CurrentSurfaceTexture::Suboptimal(texture) => SurfaceFrame::Render {
+            texture,
+            reconfigure_after_present: true,
+        },
+        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => SurfaceFrame::Skip,
+        wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => SurfaceFrame::Reconfigure,
+        wgpu::CurrentSurfaceTexture::Validation => SurfaceFrame::Error("surface validation failed"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_surface_texture, SurfaceFrame};
+
+    #[test]
+    fn surface_timeouts_and_occlusion_skip_without_reconfiguration() {
+        assert!(matches!(
+            classify_surface_texture(wgpu::CurrentSurfaceTexture::Timeout),
+            SurfaceFrame::Skip
+        ));
+        assert!(matches!(
+            classify_surface_texture(wgpu::CurrentSurfaceTexture::Occluded),
+            SurfaceFrame::Skip
+        ));
+    }
+
+    #[test]
+    fn outdated_and_lost_surfaces_request_reconfiguration() {
+        assert!(matches!(
+            classify_surface_texture(wgpu::CurrentSurfaceTexture::Outdated),
+            SurfaceFrame::Reconfigure
+        ));
+        assert!(matches!(
+            classify_surface_texture(wgpu::CurrentSurfaceTexture::Lost),
+            SurfaceFrame::Reconfigure
+        ));
+    }
+
+    #[test]
+    fn surface_validation_is_reported() {
+        assert!(matches!(
+            classify_surface_texture(wgpu::CurrentSurfaceTexture::Validation),
+            SurfaceFrame::Error("surface validation failed")
+        ));
     }
 }

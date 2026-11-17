@@ -2141,7 +2141,7 @@ impl Viewer {
     }
 
     /// Draws one frame and returns the status line.
-    pub fn frame(&mut self, now_ms: f64) -> String {
+    pub fn frame(&mut self, now_ms: f64) -> Result<String, JsError> {
         self.frames += 1;
         if now_ms - self.fps_t > 500.0 {
             self.fps = (self.frames as f64 * 1000.0 / (now_ms - self.fps_t)) as f32;
@@ -2150,21 +2150,22 @@ impl Viewer {
         }
         self.frame_ms = now_ms;
         self.use_map(false);
-        let line = self.render(now_ms, false);
+        let line = self.render(now_ms, false).map_err(|error| JsError::new(&error))?;
         // Picture in picture: the tablet's map, drawn with its own camera onto its own canvas.
         if self.tablet && self.gpu.has_second() {
             self.use_map(true);
             self.map_pass = true;
-            let _ = self.render(now_ms, true);
+            let map_result = self.render(now_ms, true);
             self.map_pass = false;
             self.use_map(false);
+            map_result.map_err(|error| JsError::new(&error))?;
         }
-        line
+        Ok(line)
     }
 }
 
 impl Viewer {
-    fn render(&mut self, now_ms: f64, second: bool) -> String {
+    fn render(&mut self, now_ms: f64, second: bool) -> Result<String, String> {
         let t = self.sim_ms(now_ms);
         let ps = if self.full { 1 } else { self.pixel_scale };
         let internal = ((self.size.0 / ps).max(1), (self.size.1 / ps).max(1));
@@ -2229,12 +2230,10 @@ impl Viewer {
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
         let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev, lights: &self.fx_lights };
         let drawn = if second { self.gpu.frame_second(&desc) } else { self.gpu.frame(&desc) };
-        if let Err(e) = drawn {
-            return format!("Render error: {e}");
-        }
+        drawn?;
         self.last_internal = internal;
         let time = if self.scene == Scene::System { String::new() } else { format!(" | {}", clock(tod)) };
-        format!("{text}{time}")
+        Ok(format!("{text}{time}"))
     }
 }
 
