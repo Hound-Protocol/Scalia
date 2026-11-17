@@ -170,3 +170,4 @@ Scalia renders thousands of soldiers across galactic, orbital, and planetary eng
 ## Design References
 
 - **Building the AI of F.E.A.R. with Goal Oriented Action Planning | AI 101** (`https://www.youtube.com/watch?v=PaOLBOuyswI`) — Reference for decoupling tactical AI planning (preconditions, effects, and dynamic replanning when world state changes) from a compact execution layer (`Goto`, `Animate`, and `UseSmartObject` smart-object interactions).
+- **Three States and a Plan: The A.I. of F.E.A.R.** — Jeff Orkin, GDC 2006 (`https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf`): Canonical paper on pairing a three-state execution FSM (`Goto`, `Animate`, `UseSmartObject`) with cost-weighted A* GOAP, shared working memory across postures/smart objects, procedural preconditions/effects, and emergent squad behaviors.
