@@ -318,6 +318,26 @@ fn contact_source_rank(source: IntelSource) -> u8 {
     }
 }
 
+/// Why a soldier's current squad or mission intent was temporarily interrupted.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum InterruptKind {
+    Aid,
+    TakeCover,
+    Reload,
+    BreakContact,
+}
+
+/// Mission assignment preserved while a soldier handles a temporary interrupt.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SavedIntent {
+    pub task: Task,
+    pub posture: Option<Stance>,
+    pub watch: Option<(i64, i64)>,
+    pub goal: Option<(i64, i64)>,
+    /// Squad order generation when captured; stale epochs are never resumed.
+    pub order_seq: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Soldier {
     pub team: u8,
@@ -362,7 +382,7 @@ pub struct Soldier {
     path: Vec<(i64, i64)>,
     path_to: Option<(i64, i64)>,
     /// Where he is really going: the ordered spot, moved aside if another man already has it.
-    goal: Option<(i64, i64)>,
+    pub(crate) goal: Option<(i64, i64)>,
     /// Arrived at his goal: he stands still until his goal changes or he is pushed well off it.
     pub(crate) settled: bool,
     /// The stance his leader set for holding a position (low on a perimeter, low behind low cover).
@@ -377,7 +397,7 @@ pub struct Soldier {
     pub(crate) dragging: Option<usize>,
     /// Current speed (mm/s): it winds up towards the gait's pace and brakes into the stop.
     speed: i64,
-    calm_ms: i32,
+    pub(crate) calm_ms: i32,
     /// A friend behind him needs to fire past: he stays down on a knee for this long (ms), unless he moves.
     kneel_ms: i32,
     /// How he is to be drawn for what the leader has him doing.
@@ -395,11 +415,17 @@ pub struct Soldier {
     sighted: Option<usize>,
     /// Marksmanship (‰, SKILL_ROOKIE to SKILL_MAX): grows with veterancy.
     pub skill: i32,
+    /// Preserved mission assignment while handling a temporary interrupt.
+    #[serde(default)]
+    pub saved_intent: Option<SavedIntent>,
+    /// Active temporary interrupt reason, if any.
+    #[serde(default)]
+    pub interrupt: Option<InterruptKind>,
 }
 
 impl Soldier {
     pub fn new(team: u8, squad: u16, pos: (i64, i64), stance: Stance) -> Soldier {
-        Soldier { team, squad, pos, stance, moving: false, health: 100, injuries: Vec::new(), ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, kneel_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None }
+        Soldier { team, squad, pos, stance, moving: false, health: 100, injuries: Vec::new(), ammo: MAG, mags: MAGS, suppression: 0, cooldown_ms: 0, reloading_ms: 0, target: None, passive: false, player: false, facing: (0, 1_000), task: Task::Idle, gait: Gait::Walk, cover: None, vel: (0, 0), aim: false, act: None, burst_left: 0, burst_fired: 0, path: Vec::new(), path_to: None, goal: None, settled: false, posture: None, watch: None, stable: false, bleed_ms: 0, aiding: None, dragging: None, speed: 0, calm_ms: 0, kneel_ms: 0, skill: SKILL_REGULAR, sighted: None, mind: crate::mind::Mind::default(), may_fire: true, may_suppress: true, cue: Cue::None, shot_by: None, opening: None, saved_intent: None, interrupt: None }
     }
     /// His own pace (mm/s): winding up and braking, not counting being nudged aside.
     pub fn pace(&self) -> i64 {
@@ -422,6 +448,11 @@ impl Soldier {
     /// Down and treated: no longer bleeding.
     pub fn stable(&self) -> bool {
         self.stable
+    }
+
+    /// The wounded man he is aiding, if any.
+    pub fn aiding(&self) -> Option<usize> {
+        self.aiding
     }
 
     /// The wounded man he is dragging, if any.
@@ -733,6 +764,57 @@ impl Battle {
     /// Gives soldier `i` a task (his squad leader's job; also the tests').
     pub fn order(&mut self, i: usize, task: Task) {
         self.soldiers[i].task = task;
+        self.soldiers[i].saved_intent = None;
+        self.soldiers[i].interrupt = None;
+    }
+
+    pub(crate) fn squad_order_seq(&self, squad: u16) -> u64 {
+        self.brains.get(squad as usize).map_or(0, |b| b.order_seq)
+    }
+
+    /// Captures the soldier's mission intent once when entering a temporary interrupt so nested
+    /// interrupts (e.g. taking cover then reloading) never overwrite the original assignment.
+    pub(crate) fn begin_interrupt(&mut self, i: usize, kind: InterruptKind) {
+        let seq = self.squad_order_seq(self.soldiers[i].squad);
+        let s = &mut self.soldiers[i];
+        if s.saved_intent.is_none() && s.interrupt.is_none() {
+            s.saved_intent = Some(SavedIntent {
+                task: s.task,
+                posture: s.posture,
+                watch: s.watch,
+                goal: s.goal,
+                order_seq: seq,
+            });
+        }
+        s.interrupt = Some(kind);
+    }
+
+    /// Ends `kind` and restores the preserved mission intent if its squad order epoch is still
+    /// current; returns `true` when a non-idle saved task was restored.
+    pub(crate) fn finish_interrupt(&mut self, i: usize, kind: InterruptKind) -> bool {
+        if self.soldiers[i].interrupt != Some(kind) {
+            return false;
+        }
+        let current_seq = self.squad_order_seq(self.soldiers[i].squad);
+        let s = &mut self.soldiers[i];
+        s.interrupt = None;
+        let Some(saved) = s.saved_intent.take() else {
+            return false;
+        };
+        if saved.order_seq != current_seq {
+            s.task = Task::Idle;
+            s.posture = None;
+            s.watch = None;
+            s.goal = None;
+            s.settled = false;
+            return false;
+        }
+        s.task = saved.task;
+        s.posture = saved.posture;
+        s.watch = saved.watch;
+        s.goal = saved.goal;
+        s.settled = false;
+        saved.task != Task::Idle
     }
 
     /// Where he is going now and how: to his cover if he has taken one, else his task.
@@ -801,6 +883,8 @@ impl Battle {
                 s.path_to = None;
                 s.aiding = None;
                 s.dragging = None;
+                s.saved_intent = None;
+                s.interrupt = None;
                 let (sq, team, p) = (s.squad, s.team, s.pos);
                 let shout = self.soldiers.iter().enumerate().filter(|(j, o)| *j != i && o.squad == sq && o.team == team && o.alive() && !o.down()).min_by_key(|(j, o)| ((o.pos.0 - p.0).pow(2) + (o.pos.1 - p.1).pow(2), *j)).map(|(j, _)| j);
                 if let Some(j) = shout {
@@ -1069,8 +1153,16 @@ impl Battle {
             } else {
                 false
             };
-            let safe = in_cover || !under_fire || target_close || indoors || !cover_near;
-            let contact = self.contacts[s.squad as usize].iter().any(|c| c.usable_at(now, CONTACT_COMBAT_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
+            let safe = in_cover || !under_fire || target_close || indoors;
+            let exposed = under_fire && !safe && !cover_near;
+            let threat_confidence = self.contacts[s.squad as usize]
+                .iter()
+                .filter(|c| c.usable_at(now, CONTACT_COMBAT_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down())
+                .map(|c| c.confidence)
+                .max()
+                .unwrap_or(0);
+            let contact = threat_confidence > 0;
+            let injury_permille = ((100 - s.health.clamp(0, 100)) * 1_000 / (100 - DOWN_HP).max(1)).clamp(0, 1_000);
             let bits = [
                 (fact::TARGET, s.target.is_some()),
                 (fact::IN_COVER, in_cover),
@@ -1080,6 +1172,7 @@ impl Battle {
                 (fact::MAG_OK, s.ammo > 0),
                 (fact::SPARE_MAGS, s.mags > 0),
                 (fact::CONTACT, contact),
+                (fact::EXPOSED, exposed),
             ];
             let facts = bits.iter().fold(0u64, |a, &(b, on)| if on { a | 1 << b } else { a });
             // Holding his ground with the enemy known but out of sight: he gets down on a knee rather than stand
@@ -1087,43 +1180,110 @@ impl Battle {
             // (Outdoors only: posted at a window he must stand to see out.)
             let known = contact || self.contacts[s.squad as usize].iter().any(|c| c.usable_at(now, CONTACT_TACTICAL_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down());
             let hold_low = known && !indoors && s.target.is_none() && matches!(s.task, Task::Hold { .. }) && !s.moving && s.cover.is_none() && !busy;
-            let sit = Situation { facts, suppression: s.suppression, target_close, mag_empty: s.ammo <= 0, aim: s.aim, aiding: busy };
+            let unattached = self.brains.get(s.squad as usize).is_none_or(|b| matches!(b.order, crate::leader::Order::None));
+            let sit = Situation {
+                facts,
+                suppression: s.suppression,
+                target_close,
+                mag_empty: s.ammo <= 0,
+                aim: s.aim,
+                aiding: busy,
+                threat_confidence,
+                injury_permille,
+            };
             let mind = think(&sit);
             let doing = mind.doing();
-            let me = &mut self.soldiers[i];
-            if hold_low {
-                me.kneel_ms = me.kneel_ms.max(PERCEIVE_MS * 3);
+            let nearest_threat = self.contacts[s.squad as usize]
+                .iter()
+                .filter(|c| c.usable_at(now, CONTACT_COMBAT_POLICY) && self.soldiers[c.enemy].alive() && !self.soldiers[c.enemy].down())
+                .min_by_key(|c| ((c.pos.0 - s.pos.0).pow(2) + (c.pos.1 - s.pos.1).pow(2), c.enemy))
+                .map(|c| c.pos)
+                .or_else(|| s.shot_by.filter(|&(_, at)| now - at <= 2_000).map(|(k, _)| self.soldiers[k as usize].pos));
+            {
+                let me = &mut self.soldiers[i];
+                if hold_low {
+                    me.kneel_ms = me.kneel_ms.max(PERCEIVE_MS * 3);
+                }
+                me.may_fire = !busy && match doing {
+                    Some(Act::TakeCover) => target_close,
+                    _ => true,
+                };
+                me.may_suppress = !busy && matches!(doing, Some(Act::Suppress | Act::BreakContact));
             }
-            me.may_fire = !busy && match doing {
-                Some(Act::TakeCover) => target_close,
-                _ => true,
-            };
-            me.may_suppress = doing == Some(Act::Suppress);
-            match doing {
-                Some(Act::TakeCover) => {
-                    if flanked && candidate.is_some() {
-                        me.cover = None;
-                    }
-                    if me.cover.is_none() {
-                        if let Some(c) = candidate {
-                            me.cover = Some(c);
-                            me.calm_ms = 0;
-                            self.log.push(Event::Bark { soldier: i, bark: Bark::TakingCover });
+            if !busy {
+                match doing {
+                    Some(Act::TakeCover) => {
+                        self.begin_interrupt(i, InterruptKind::TakeCover);
+                        let me = &mut self.soldiers[i];
+                        if flanked && candidate.is_some() {
+                            me.cover = None;
+                        }
+                        if me.cover.is_none() {
+                            if let Some(c) = candidate {
+                                me.cover = Some(c);
+                                me.calm_ms = 0;
+                                self.log.push(Event::Bark { soldier: i, bark: Bark::TakingCover });
+                            }
                         }
                     }
+                    Some(Act::BreakContact) => {
+                        self.begin_interrupt(i, InterruptKind::BreakContact);
+                        let (moving, has_cover, task, pos) = {
+                            let me = &mut self.soldiers[i];
+                            if !me.moving && me.cover.is_none() {
+                                me.kneel_ms = me.kneel_ms.max(PERCEIVE_MS * 3);
+                            }
+                            (me.moving, me.cover.is_some(), me.task, me.pos)
+                        };
+                        // An unattached/idle soldier caught in the open with no cover nearby breaks
+                        // away from the incoming threat toward safer ground while suppressing/returning fire.
+                        if !moving && !has_cover && (unattached || task == Task::Idle) && matches!(task, Task::Hold { .. } | Task::Idle) {
+                            if let Some(tpos) = nearest_threat {
+                                let (dx, dy) = (pos.0 - tpos.0, pos.1 - tpos.1);
+                                let d = isqrt(dx * dx + dy * dy).max(1);
+                                let raw = (pos.0 + dx * 6_000 / d, pos.1 + dy * 6_000 / d);
+                                let spot = self.free_spot(i, raw);
+                                if spot != pos {
+                                    self.soldiers[i].task = Task::Move { to: spot, gait: Gait::Run };
+                                    self.soldiers[i].aim = true;
+                                }
+                            }
+                        }
+                    }
+                    Some(Act::Reload) | Some(Act::ReloadExposed) => {
+                        if matches!(doing, Some(Act::ReloadExposed)) {
+                            self.begin_interrupt(i, InterruptKind::Reload);
+                        }
+                        self.reload(i);
+                    }
+                    _ => {}
                 }
-                Some(Act::Reload) | Some(Act::ReloadExposed) => self.reload(i),
-                _ => {}
             }
             // Out of cover once it is calm again: no rounds coming in and nothing to shoot for a while.
-            let me = &mut self.soldiers[i];
-            if me.cover.is_some() && mind.want != Want::Survive {
-                // The calm counts from when he is behind it (or stopped short of it, held up), not from when he
-                // set off for it.
-                let calm = (in_cover || !me.moving) && me.suppression < LEAVE_COVER && me.target.is_none();
-                me.calm_ms = if calm { me.calm_ms + PERCEIVE_MS } else { 0 };
-                if me.calm_ms >= CALM_MS {
-                    me.cover = None;
+            {
+                let me = &mut self.soldiers[i];
+                if me.cover.is_some() && mind.want != Want::Survive {
+                    // The calm counts from when he is behind it (or stopped short of it, held up), not from when he
+                    // set off for it.
+                    let calm = (in_cover || !me.moving) && me.suppression < LEAVE_COVER && me.target.is_none();
+                    me.calm_ms = if calm { me.calm_ms + PERCEIVE_MS } else { 0 };
+                    if me.calm_ms >= CALM_MS {
+                        me.cover = None;
+                    }
+                }
+            }
+            if !busy {
+                match self.soldiers[i].interrupt {
+                    Some(InterruptKind::Reload) if self.soldiers[i].reloading_ms <= 0 && !matches!(doing, Some(Act::Reload | Act::ReloadExposed)) => {
+                        self.finish_interrupt(i, InterruptKind::Reload);
+                    }
+                    Some(InterruptKind::TakeCover) if self.soldiers[i].cover.is_none() && mind.want != Want::Survive => {
+                        self.finish_interrupt(i, InterruptKind::TakeCover);
+                    }
+                    Some(InterruptKind::BreakContact) if mind.want != Want::Survive => {
+                        self.finish_interrupt(i, InterruptKind::BreakContact);
+                    }
+                    _ => {}
                 }
             }
             self.soldiers[i].mind = mind;
@@ -1528,8 +1688,9 @@ impl Battle {
             } else if let Task::Hold { face, .. } = me.task {
                 me.facing = turn_toward(me.facing, (face.0 - me.pos.0, face.1 - me.pos.1));
             }
-            // His mind holds his fire (running for cover, say), unless the enemy is right on top of him.
-            if !self.soldiers[i].may_fire && self.soldiers[i].target.is_none_or(|t| !near(self.soldiers[t].pos, self.soldiers[i].pos, CLOSE_FIGHT_MM)) {
+            // Fire permission comes exclusively from the soldier mind's selected action (`TakeCover` allows
+            // close-quarters self-defense when `target_close`).
+            if !self.soldiers[i].may_fire {
                 self.soldiers[i].burst_left = 0;
                 self.soldiers[i].sighted = None;
                 continue;

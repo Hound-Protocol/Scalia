@@ -1,6 +1,6 @@
 //! Wounded soldiers: hit twice they go down (no moving, no firing) and bleed; enemies stop shooting at them;
 //! a squadmate comes, drags them to cover if the enemy is near, and treats them, which stops the bleeding.
-use scalia_ai::battle::{Act, Battle, Event, Soldier, Stance, Task, DAMAGE};
+use scalia_ai::battle::{Act, Battle, Event, Gait, InterruptKind, Soldier, Stance, Task, DAMAGE};
 use scalia_ai::save::MapSpec;
 use scalia_core::nav::{Prop, PropKind};
 
@@ -111,4 +111,109 @@ fn nobody_runs_out_to_a_casualty_while_an_enemy_who_is_not_pinned_covers_him() {
         reached |= dist(b.soldiers[1].pos, b.soldiers[0].pos) < 2_000;
     }
     assert!(reached, "once it is safe, he goes to him");
+}
+
+#[test]
+fn a_helper_resumes_his_prior_task_after_aid_and_after_threat_abort() {
+    let dest = (75_000, 50_000);
+    let men = vec![man(0, 0, 52_000, 50_000), man(0, 0, 55_000, 50_000)];
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), men, 11);
+    b.order(1, Task::Move { to: dest, gait: Gait::Walk });
+    b.soldiers[0].health = 100 - 2 * DAMAGE;
+
+    let mut interrupted = false;
+    for _ in 0..(25_000 / 50) {
+        b.step(50);
+        if b.soldiers[1].interrupt == Some(InterruptKind::Aid) {
+            interrupted = true;
+            assert!(b.soldiers[1].saved_intent.is_some());
+        }
+        if interrupted && b.soldiers[0].stable() && b.soldiers[1].aiding().is_none() {
+            break;
+        }
+    }
+    assert!(interrupted, "helper entered Aid interrupt");
+    assert!(b.soldiers[0].stable(), "wounded soldier was treated");
+    assert_eq!(b.soldiers[1].interrupt, None);
+    assert_eq!(b.soldiers[1].saved_intent, None);
+    assert_eq!(b.soldiers[1].task, Task::Move { to: dest, gait: Gait::Walk });
+
+    // Threat abort while en route also restores the helper's preserved Hold assignment.
+    let hold = Task::Hold { at: (46_000, 48_000), face: (50_000, 80_000) };
+    let mut men2 = vec![
+        man(0, 0, 50_000, 50_000),
+        man(0, 0, 62_000, 50_000),
+        man(1, 1, 50_000, 95_000),
+    ];
+    men2[2].passive = true;
+    men2[2].health = 0; // initially dead so care dispatches helper 1
+    let mut b2 = Battle::on_map(MapSpec::new(0, 0, 100_000, 120_000, &[]), men2, 12);
+    b2.order(1, hold);
+    b2.soldiers[0].health = 100 - 2 * DAMAGE;
+
+    let mut started = false;
+    for _ in 0..(4_000 / 50) {
+        b2.step(50);
+        if b2.soldiers[1].aiding() == Some(0) {
+            started = true;
+            break;
+        }
+    }
+    assert!(started, "helper started heading to wounded teammate");
+    // Now an unsuppressed enemy enters line of sight on the casualty before arrival.
+    b2.soldiers[2].health = 100;
+    b2.soldiers[2].suppression = 0;
+    b2.soldiers[2].facing = (0, -1_000);
+    b2.contacts[0].push(scalia_ai::battle::Contact {
+        enemy: 2,
+        pos: b2.soldiers[2].pos,
+        seen_ms: b2.time_ms,
+        confidence: 1_000,
+        source: scalia_ai::battle::IntelSource::Visual,
+    });
+    run(&mut b2, 1_500);
+    assert_eq!(b2.soldiers[1].aiding(), None, "aid aborted under casualty threat");
+    assert_eq!(b2.soldiers[1].interrupt, None);
+    assert_eq!(b2.soldiers[1].task, hold, "original Hold assignment resumed after threat abort");
+}
+
+#[test]
+fn a_new_squad_order_while_aiding_prevents_resuming_the_stale_pre_order_task() {
+    use scalia_ai::leader::{Mode, Order};
+    use scalia_ai::save::Command;
+
+    let men = vec![man(0, 0, 50_000, 40_000), man(0, 0, 54_000, 40_000)];
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), men, 13);
+    let old_dest = (50_000, 85_000);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: old_dest, mode: Mode::Plain } });
+    run(&mut b, 500);
+    assert!(matches!(b.soldiers[1].task, Task::Move { .. }));
+
+    b.soldiers[0].health = 100 - 2 * DAMAGE;
+    let mut aiding = false;
+    for _ in 0..(5_000 / 50) {
+        b.step(50);
+        if b.soldiers[1].aiding() == Some(0) {
+            aiding = true;
+            break;
+        }
+    }
+    assert!(aiding, "helper began casualty aid during Move");
+    assert!(b.soldiers[1].saved_intent.is_some());
+
+    // Commander replaces Move with Hold while helper is still busy aiding.
+    b.submit(b.time_ms, Command::Squad { squad: 0, order: Order::Hold });
+    b.step(50);
+    assert_eq!(b.soldiers[1].interrupt, Some(InterruptKind::Aid));
+    assert_eq!(b.soldiers[1].saved_intent, None, "new squad order invalidated stale saved intent");
+
+    for _ in 0..(20_000 / 50) {
+        b.step(50);
+        if b.soldiers[0].stable() && b.soldiers[1].aiding().is_none() {
+            break;
+        }
+    }
+    assert!(b.soldiers[0].stable());
+    assert_eq!(b.soldiers[1].interrupt, None);
+    assert!(!matches!(b.soldiers[1].task, Task::Move { to, .. } if to == old_dest), "must not resume stale pre-order Move");
 }

@@ -430,3 +430,20 @@ The code-level starting points were revalidated on `main`; the AI-00 gate is sat
 - Regression coverage includes weaker-newer refresh, older-report rejection, equal-time order independence, policy boundaries, future/weak/stale contacts, source retention through squad sharing and save/load, and battle hash stability.
 - Exact-head push Verify #362 passed on `37f0a2e724897ee38c8e988a63896f468987a372`. PR Verify #363 is the independent pull-request run.
 - **Merge gates:** PR Verify #363 green, source review, and in-game tactical validation. Do not merge on unit tests alone.
+
+
+---
+
+### AI-02 implementation checkpoint — 2026-11-17
+
+**Implemented on** `work/AI-02-soldier-decision-core`.
+
+- **Two-stage soldier decision core (`mind.rs`):** `score_intents` scores candidate intents (`Aid`, `Reload`, `Survive`, `Engage`, `Order`) using deterministic integer permille scores over suppression, injury severity, threat confidence, target proximity, ammo state, and aid state with fixed `Want::rank()` tie-breaking; GOAP plans the bounded action sequence for the winning feasible intent.
+- **Honest exposure fallback (`mind.rs`, `battle.rs`):** Removed the false `SAFE = true` assumption when under fire with no cover nearby. Added `fact::EXPOSED` and `Act::BreakContact`, allowing an exposed soldier under fire to return/suppress fire (`may_fire`, `may_suppress`) and break away toward safer ground when stationary/unattached without disturbing coordinated squad bounding.
+- **Full mission-intent stack & epoch invalidation (`battle.rs`, `leader.rs`):**
+  - `Soldier` tracks `saved_intent: Option<SavedIntent>` and `interrupt: Option<InterruptKind>` (`Aid | TakeCover | Reload | BreakContact`) managed via `begin_interrupt` / `finish_interrupt` with nested-interrupt protection (inner survival or reload interrupts never overwrite the outer preserved mission task).
+  - Squad `Brain` tracks monotonic `order_seq: u64`, incremented on `Battle::command` and squad `abandon` (`count_losses`), preventing interrupted soldiers from resuming stale pre-order tasks.
+  - `care` and `give_aid` save and restore a helper's prior mission task on completion, death/down exit, and casualty-threat abort; `Battle::lead` keeps non-`Aid` `saved_intent` synced when squad movement legs advance.
+- **Authoritative fire gating (`battle.rs`):** `Battle` obeys `Soldier::may_fire` directly without silent close-range overrides outside `Battle::think` (`TakeCover` grants self-defense fire explicitly when `target_close`).
+- **Save compatibility (`save.rs`):** Incremented `SAVE_VERSION` from `12` to `13`; added explicit version 13 round-trip and version 12 refusal regression coverage alongside casualty-aid resumption, stale-order invalidation, nested survival interrupts, and exposed `BreakContact` tests.
+- **Verification status & limitation:** This environment lacks `cargo`/`rustc`, so Rust compilation and workspace tests could **not** execute locally (`node --test web/tests/*.mjs` passed 27/27 prior to Rust edits). Run `cargo test --workspace` and `bash scripts/check.sh` on a local Rust toolchain or GitHub Actions `Verify` before merge.
