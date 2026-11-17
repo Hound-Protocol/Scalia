@@ -188,7 +188,7 @@ fn a_new_squad_order_while_aiding_prevents_resuming_the_stale_pre_order_task() {
     let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), men, 13);
     let old_dest = (50_000, 85_000);
     b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: old_dest, mode: Mode::Plain } });
-    run(&mut b, 500);
+    run(&mut b, 8_000);
     assert!(matches!(b.soldiers[1].task, Task::Move { .. }));
 
     b.soldiers[0].health = 100 - 2 * DAMAGE;

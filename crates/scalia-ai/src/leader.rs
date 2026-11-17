@@ -78,6 +78,22 @@ fn sector(pos: (i64, i64), to: (i64, i64), rank: usize, time_ms: i64) -> (i64, i
     DIRS_24[(base + OFFSETS[rank % OFFSETS.len()] + sweep).rem_euclid(24) as usize]
 }
 
+fn move_role(mode: Mode, rank: usize) -> &'static str {
+    match mode {
+        Mode::Confirmed => {
+            if rank % 2 == 0 { "bound team one" } else { "bound team two" }
+        }
+        Mode::Garrison => "garrison formation",
+        Mode::Plain | Mode::Caution => match rank {
+            0 => "point",
+            1 => "left flank",
+            2 => "right flank",
+            3 => "rear security",
+            _ => "route security",
+        },
+    }
+}
+
 /// Around the spot they were sent to: cover within this reach is taken on arrival.
 pub const SECURE_MM: i64 = 10_000;
 /// Close enough to the spot to count as there when he cannot get onto it (it is taken or blocked).
@@ -148,6 +164,8 @@ const PIED: u32 = 7;
 /// The squad has been briefed.
 const BRIEFED: u32 = 8;
 const QUIET: u32 = 9;
+const BRIEF_GATHER_MS: i64 = 4_000;
+const BRIEF_PER_MAN_MS: i64 = 1_800;
 
 /// The steps from `start` (facts already true) to holding the building, cheapest first.
 fn plan_from(s: &Situation, start: State) -> Vec<Method> {
@@ -271,6 +289,9 @@ pub struct Brain {
     /// saved intents from resuming after a command change.
     #[serde(default)]
     pub(crate) order_seq: u64,
+    /// A quiet relocation gets one briefing before movement; contact waives it rather than delaying the order.
+    #[serde(default)]
+    move_briefed: bool,
 }
 
 /// A narrow gap on the squad's way (a passage between walls, a gateway): where it is, which way the squad
@@ -287,7 +308,7 @@ pub struct Choke {
 
 impl Brain {
     pub fn new() -> Brain {
-        Brain { order: Order::None, line: None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new(), strength: 0, left: 0, origin: (0, 0), under_fire: false, broken: None, order_seq: 0 }
+        Brain { order: Order::None, line: None, plan: Vec::new(), done: 0, phase_ms: 0, entry: None, legs: Vec::new(), leg: 0, leg_ms: 0, rooms: Vec::new(), room: 0, room_ms: 0, drone_done: false, grenade_used: false, blast_at: None, holding: false, secured: false, kit: SANDBAG_KIT, builds: Vec::new(), aid: Vec::new(), stack_order: Vec::new(), choke: None, leader: None, choke_leg: None, smokes: SMOKES, smoke_ready: 0, frags: FRAGS, wait: None, blind_entry: false, fragged: None, pair: Vec::new(), strength: 0, left: 0, origin: (0, 0), under_fire: false, broken: None, order_seq: 0, move_briefed: false }
     }
 }
 
@@ -431,6 +452,7 @@ impl Battle {
                 if !matches!(s.task, Task::Move { to: t, .. } if t == goal) {
                     s.task = Task::Move { to: goal, gait: Gait::Run };
                     s.posture = None;
+                    s.settled = false;
                 }
                 let there = s.settled || dist(s.pos, goal) <= ARRIVE_NEAR_MM && !s.moving;
                 // At the end of his bound he gets down and covers.
@@ -489,6 +511,22 @@ impl Battle {
         if ms.is_empty() || self.brains[squad].secured {
             return;
         }
+        if !self.brains[squad].move_briefed {
+            if mode == Mode::Confirmed || !self.quiet(squad) {
+                let was_briefing = self.brains[squad].phase_ms > 0;
+                self.brains[squad].move_briefed = true;
+                self.brains[squad].phase_ms = 0;
+                if was_briefing {
+                    for &i in &ms {
+                        self.soldiers[i].cue = Cue::None;
+                        self.soldiers[i].posture = None;
+                    }
+                }
+                self.log.push(Event::Order { squad, step: "brief waived" });
+            } else if self.brief_move(squad, &ms, to, mode) {
+                return;
+            }
+        }
         let far = ms.iter().map(|&i| dist(self.soldiers[i].pos, to)).max().unwrap_or(0);
         // React to fire: shot at on the way, the squad gets down and goes on by fire and movement (two teams
         // bounding, one always down and firing), however it was told to move.
@@ -537,6 +575,7 @@ impl Battle {
                 s.task = Task::Move { to: mine, gait };
                 s.posture = None;
                 s.aim = mode != Mode::Plain;
+                s.settled = false;
             }
             // With caution each man watches his own sector (front, flanks, rear), sweeping it slowly.
             s.watch = if mode == Mode::Caution { Some(sector(s.pos, to, rank, t)) } else { None };
@@ -618,6 +657,78 @@ impl Battle {
         }
     }
 
+    /// Brief a quiet relocation on the spot, then let the existing move order execute. A new order resets this
+    /// state; contact or a confirmed-threat order never waits for a briefing.
+    fn brief_move(&mut self, squad: usize, ms: &[usize], objective: (i64, i64), mode: Mode) -> bool {
+        let Some(leader) = self.leader_of(squad) else {
+            self.brains[squad].move_briefed = true;
+            return false;
+        };
+        let leader_pos = self.soldiers[leader].pos;
+        let men: Vec<usize> = ms.iter().copied().filter(|&i| i != leader).collect();
+        if men.is_empty() {
+            self.brains[squad].move_briefed = true;
+            return false;
+        }
+        let to_objective = (objective.0 - leader_pos.0, objective.1 - leader_pos.1);
+        let len = isqrt(to_objective.0 * to_objective.0 + to_objective.1 * to_objective.1).max(1);
+        let facing = (to_objective.0 * 1_000 / len, to_objective.1 * 1_000 / len);
+        let phase_ms = self.brains[squad].phase_ms + LEAD_MS;
+        self.brains[squad].phase_ms = phase_ms;
+
+        if phase_ms == LEAD_MS {
+            self.log.push(Event::Order { squad, step: "briefing" });
+        }
+        let count = men.len().max(1) as i64;
+        for (rank, &i) in men.iter().enumerate() {
+            let angle = (24 + 6 + ((rank as i64 * 12 + 6) / count) as i32) % 24;
+            let (c, s) = DIRS_24[angle as usize];
+            let offset = (
+                (facing.0 * c - facing.1 * s) / 1_000,
+                (facing.1 * c + facing.0 * s) / 1_000,
+            );
+            let at = (leader_pos.0 + offset.0 * 3_000 / 1_000, leader_pos.1 + offset.1 * 3_000 / 1_000);
+            let soldier = &mut self.soldiers[i];
+            soldier.task = Task::Hold { at, face: leader_pos };
+            soldier.posture = Some(Stance::Crouch);
+            soldier.aim = false;
+            soldier.cue = Cue::Kneel;
+        }
+        {
+            let soldier = &mut self.soldiers[leader];
+            soldier.task = Task::Hold {
+                at: leader_pos,
+                face: (leader_pos.0 + facing.0 * 3, leader_pos.1 + facing.1 * 3),
+            };
+            soldier.posture = None;
+            soldier.aim = false;
+            soldier.cue = if phase_ms >= BRIEF_GATHER_MS { Cue::Brief } else { Cue::None };
+        }
+
+        let turn = (phase_ms - BRIEF_GATHER_MS) / BRIEF_PER_MAN_MS;
+        let turn_began = phase_ms >= BRIEF_GATHER_MS
+            && phase_ms - BRIEF_GATHER_MS - turn * BRIEF_PER_MAN_MS < LEAD_MS;
+        if turn_began && turn < men.len() as i64 {
+            let soldier = men[turn as usize];
+            let rank = ms.iter().position(|&i| i == soldier).unwrap_or(0);
+            let role = move_role(mode, rank);
+            self.log.push(Event::MissionBriefed { leader, soldier, objective, mode, role });
+        }
+
+        let complete_at = BRIEF_GATHER_MS + BRIEF_PER_MAN_MS * men.len() as i64;
+        if phase_ms >= complete_at {
+            for &i in ms {
+                self.soldiers[i].cue = Cue::None;
+                self.soldiers[i].posture = None;
+            }
+            self.brains[squad].phase_ms = 0;
+            self.brains[squad].move_briefed = true;
+            false
+        } else {
+            true
+        }
+    }
+
     /// Garrison in the open: men on the ring without cover lay a sandbag wall just outside their spot, across
     /// their sector, while the kit lasts.
     fn fortify(&mut self, squad: usize, ring: &[(usize, (i64, i64), (i64, i64))]) {
@@ -692,7 +803,13 @@ impl Battle {
 
     /// The step the squad is on (for labels and tests).
     pub fn squad_phase(&self, squad: usize) -> &'static str {
-        self.brains.get(squad).and_then(|b| b.plan.first()).map_or("", |m| m.name())
+        self.brains.get(squad).map_or("", |b| {
+            if matches!(b.order, Order::Move { .. }) && !b.move_briefed && b.phase_ms > 0 {
+                "briefing"
+            } else {
+                b.plan.first().map_or("", |m| m.name())
+            }
+        })
     }
 
     fn members(&self, squad: usize) -> Vec<usize> {
@@ -1760,9 +1877,8 @@ impl Battle {
                 let f = (to_house.0 * 1_000 / len, to_house.1 * 1_000 / len);
                 let men: Vec<usize> = ms.iter().copied().filter(|&i| i != lead).collect();
                 let n = men.len().max(1) as i64;
-                // Gathering for 4 s, then a couple of seconds for each man.
-                let per_man = 1_800;
-                let talking_to = ((phase_ms - 4_000) / per_man).max(-1);
+                // Gathering first, then a short individual role assignment.
+                let talking_to = ((phase_ms - BRIEF_GATHER_MS) / BRIEF_PER_MAN_MS).max(-1);
                 for (k, &i) in men.iter().enumerate() {
                     // Spread over the half circle facing him (from his left to his right).
                     let idx = (24 + 6 + ((k as i64 * 12 + 6) / n) as i32) % 24;
@@ -1784,8 +1900,8 @@ impl Battle {
                 s.aim = false;
                 s.cue = if phase_ms >= 4_000 { Cue::Brief } else { Cue::None };
                 // Each man's turn, once: the first tick at or after it starts.
-                let turn = (phase_ms - 4_000) / per_man;
-                let turn_began = phase_ms >= 4_000 && phase_ms - 4_000 - turn * per_man < LEAD_MS;
+                let turn = (phase_ms - BRIEF_GATHER_MS) / BRIEF_PER_MAN_MS;
+                let turn_began = phase_ms >= BRIEF_GATHER_MS && phase_ms - BRIEF_GATHER_MS - turn * BRIEF_PER_MAN_MS < LEAD_MS;
                 if turn_began && turn < men.len() as i64 {
                     let who = men[turn as usize];
                     let role = match turn as usize {
@@ -1797,7 +1913,7 @@ impl Battle {
                     };
                     self.log.push(Event::Briefed { leader: lead, soldier: who, role });
                 }
-                if phase_ms >= 4_000 + per_man * men.len() as i64 {
+                if phase_ms >= BRIEF_GATHER_MS + BRIEF_PER_MAN_MS * men.len() as i64 {
                     for &i in &ms {
                         self.soldiers[i].posture = None;
                         self.soldiers[i].cue = Cue::None;
