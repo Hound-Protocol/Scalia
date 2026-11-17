@@ -50,6 +50,16 @@ PACK is a focused engine for Scalia, not a general-purpose engine. Work should c
 
 **Acceptance:** Each stage has behavior tests, reproducible lab evidence, replay/save coverage, and unchanged hashes unless combat behavior is intentionally changed.
 
+### P2 — Share world geometry across systems
+
+**Goal:** Keep sight and acoustics on one prop-occupancy contract, then preserve material and object state as world data flows into runtime systems.
+
+- The initial slice moves prop height bands and raster occupancy into `scalia-core`; tactical sight wraps that grid and Auralis queries it directly.
+- Keep dynamic battle doors separate from static prop occupancy and pass their current state explicitly to acoustic queries.
+- Follow up by carrying material and stable object identity through battle-map construction and persistence before adding material-specific sound or rendering behavior.
+
+**Acceptance:** Sight and acoustic occupancy agree for windows, walls, furniture, and placed props; door state remains dynamic; battle hashes and save compatibility stay unchanged unless an explicit versioned migration is approved.
+
 ### P2 — Improve content authoring
 
 **Goal:** Reduce iteration friction without committing prematurely to a full editor.

@@ -46,7 +46,7 @@ The Rust crate computes acoustic properties; it does not play audio. The browser
 
 **Target:** migrate world ambience and all other world sounds into Auralis, then remove the parallel graph once parity is verified. Do not simply silence routing errors or remove existing ambience.
 
-The Rust acoustic model also uses the AI sight grid as its geometry source. This coupling should be reviewed as world geometry evolves, without duplicating the working occlusion model.
+The tactical sight grid and Auralis now share the core prop-geometry raster and height-band rules. Auralis receives the shared grid plus battle door state; material-specific transmission and material preservation through battle map saves remain future work.
 
 ## Development roadmap
 

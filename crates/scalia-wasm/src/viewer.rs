@@ -41,7 +41,7 @@ fn sound_occlusion(
             y: (source.1 * 1000.0) as i64,
             z: 1_400,
         };
-        let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
+        let walls = scalia_audio::walls_between(sight.geometry(), (ear.0, ear.1, height), (source.0, source.1, 1.4));
         // Doors are stored separately from the static sight grid. A shut/locked leaf
         // attenuates sound, but less than masonry; open/breached doors add no loss.
         let doors = sight.doors.iter().filter(|door| door.blocks(from, to)).count();
@@ -57,12 +57,12 @@ fn sound_occlusion(
             mid_db: masonry * 40.0 + wood * 18.0,
             high_db: masonry * 52.0 + wood * 30.0,
         };
-        return scalia_audio::with_acoustic_routes(sight, roofs, ear, source, direct);
+        return scalia_audio::with_acoustic_routes(sight.geometry(), &sight.doors, roofs, ear, source, direct);
     }
     if let Some(occlusion) = field.and_then(|field| field.at(source)) {
-        return scalia_audio::with_acoustic_routes(sight, roofs, ear, source, occlusion);
+        return scalia_audio::with_acoustic_routes(sight.geometry(), &sight.doors, roofs, ear, source, occlusion);
     }
-    let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
+    let walls = scalia_audio::walls_between(sight.geometry(), (ear.0, ear.1, height), (source.0, source.1, 1.4));
     let wall_db = walls as f32 * 40.0;
     let direct = scalia_audio::Occlusion {
         wall_db, bend_db: 0.0, detour_m: 0.0,
@@ -70,7 +70,7 @@ fn sound_occlusion(
         mid_db: wall_db,
         high_db: walls as f32 * 52.0,
     };
-    scalia_audio::with_acoustic_routes(sight, roofs, ear, source, direct)
+    scalia_audio::with_acoustic_routes(sight.geometry(), &sight.doors, roofs, ear, source, direct)
 }
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
@@ -1037,7 +1037,7 @@ impl Viewer {
         if let Some(r) = self.audio_reflectors.get(&key) {
             return r.clone();
         }
-        let r = self.assault.as_ref().map_or(Vec::new(), |a| scalia_audio::reflectors(&a.battle.sight, (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
+        let r = self.assault.as_ref().map_or(Vec::new(), |a| scalia_audio::reflectors(a.battle.sight.geometry(), (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
         if self.audio_reflectors.len() > 20_000 {
             self.audio_reflectors.clear();
         }
@@ -1056,7 +1056,7 @@ impl Viewer {
         if let Some(e) = self.audio_spaces.get(&key) {
             return *e;
         }
-        let env = self.assault.as_ref().map_or(open, |a| scalia_audio::listener_env(&a.battle.sight, (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
+        let env = self.assault.as_ref().map_or(open, |a| scalia_audio::listener_env(a.battle.sight.geometry(), (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
         if self.audio_spaces.len() > 20_000 {
             self.audio_spaces.clear();
         }

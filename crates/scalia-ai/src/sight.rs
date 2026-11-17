@@ -3,9 +3,9 @@
 //! filled band, so windows (open between sill and header), sandbags (low) and walls (high) all work the same way.
 //! Integer millimetres, endpoints ordered before sampling: deterministic and symmetric.
 
-use scalia_core::nav::{Prop, PropKind};
+use scalia_core::nav::{prop_height_bands, Prop, PropGrid};
 
-pub const CELL_MM: i64 = 250;
+pub const CELL_MM: i64 = scalia_core::nav::GEOMETRY_CELL_MM;
 const BAND_MM: i64 = 100;
 const SAMPLE_MM: i64 = 100;
 /// Samples this close to either end are skipped: a man standing against a wall still sees past it.
@@ -23,12 +23,7 @@ pub struct SightGrid {
     pub y_mm: i64,
     pub w: usize,
     pub h: usize,
-    bands: Vec<u32>,
-    /// Original prop footprints retained for exact point queries (audio line-of-sight).
-    props: Vec<Prop>,
-    /// Per block of BLOCK×BLOCK cells (4 m): any band filled anywhere in it. Rays cross empty blocks in one jump.
-    coarse: Vec<u32>,
-    bw: usize,
+    geometry: PropGrid,
     /// The battle's doors (a shut one blocks sight up to its top).
     pub doors: Vec<crate::doors::Door>,
 }
@@ -36,97 +31,39 @@ pub struct SightGrid {
 /// Cells per coarse block side.
 const BLOCK: usize = 16;
 
-/// How far a prop can reach from its centre in any direction (mm), turned or not.
-fn reach(p: &Prop) -> i64 {
-    match p.kind {
-        PropKind::Rock { radius_mm } => radius_mm,
-        PropKind::Wall { length_mm, thickness_mm } => length_mm / 2 + thickness_mm,
-        PropKind::Crate { size_mm } => size_mm,
-        PropKind::Panel { length_mm, .. } => length_mm / 2 + PropKind::PANEL_MM,
-        PropKind::Furniture { width_mm, depth_mm, .. } => width_mm.max(depth_mm),
-    }
-}
-
-/// Bands 0..top filled (top in millimetres).
-fn up_to(top_mm: i64) -> u32 {
-    let n = (top_mm / BAND_MM).clamp(0, 32) as u32;
-    if n >= 32 { u32::MAX } else { (1u32 << n) - 1 }
-}
-
-/// Which height bands a prop fills (the same shapes base_mesh draws).
+/// Compatibility wrapper; shared occupancy semantics live with the core prop geometry.
 pub fn bands_of(p: &Prop) -> u32 {
-    match p.kind {
-        PropKind::Panel { window: false, .. } => up_to(2_400),
-        PropKind::Panel { window: true, .. } => up_to(1_000) | (up_to(2_400) & !up_to(2_000)),
-        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 650 => up_to(2_750),
-        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 800 => up_to(1_000),
-        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 3_000 => up_to(2_600),
-        PropKind::Wall { .. } => u32::MAX,
-        // Guard towers stand on open legs; the platform is above the bands.
-        PropKind::Crate { size_mm } if size_mm >= 2_500 => 0,
-        PropKind::Crate { size_mm } => up_to(size_mm),
-        PropKind::Rock { radius_mm } => up_to(radius_mm * 9 / 10),
-        // Bunks and lockers hide a man; tables and benches only his legs.
-        PropKind::Furniture { item, .. } => up_to(item.height_mm()),
-    }
+    prop_height_bands(p)
 }
 
 impl SightGrid {
     pub fn build(x_mm: i64, y_mm: i64, w: usize, h: usize, props: &[Prop]) -> SightGrid {
-        let bw = w.div_ceil(BLOCK);
-        let mut g = SightGrid { x_mm, y_mm, w, h, bands: vec![0; w * h], props: Vec::new(), coarse: vec![0; bw * h.div_ceil(BLOCK)], bw, doors: Vec::new() };
-        for p in props {
-            g.stamp(p);
-        }
-        g
+        SightGrid { x_mm, y_mm, w, h, geometry: PropGrid::build(x_mm, y_mm, w, h, props), doors: Vec::new() }
     }
 
     /// Marks a prop's cells (at build, or a prop placed during a battle: sandbags).
     pub fn stamp(&mut self, p: &Prop) {
-        self.props.push(*p);
-        let (w, h) = (self.w, self.h);
-        let hc = CELL_MM / 2;
-        let b = bands_of(p);
-        if b == 0 {
-            return;
-        }
-        // Only the cells around the prop (one cell of margin).
-        let r = reach(p) + CELL_MM;
-        let span = |lo: i64, origin: i64, n: usize| (lo - origin).div_euclid(CELL_MM).clamp(0, n as i64) as usize;
-        let (i0, i1) = (span(p.x_mm - r, self.x_mm, w), (span(p.x_mm + r, self.x_mm, w) + 1).min(w));
-        let (j0, j1) = (span(p.y_mm - r, self.y_mm, h), (span(p.y_mm + r, self.y_mm, h) + 1).min(h));
-        for j in j0..j1 {
-            for i in i0..i1 {
-                let (cx, cy) = (self.x_mm + i as i64 * CELL_MM + hc, self.y_mm + j as i64 * CELL_MM + hc);
-                // A cell is filled if the prop covers its centre or any corner (thin panels too).
-                let hit = [(0, 0), (-hc, -hc), (hc, -hc), (-hc, hc), (hc, hc)].iter().any(|&(dx, dy)| p.covers(cx + dx, cy + dy));
-                if hit {
-                    self.bands[j * w + i] |= b;
-                    self.coarse[(j / BLOCK) * self.bw + i / BLOCK] |= b;
-                }
-            }
-        }
+        self.geometry.stamp(p);
+    }
+
+    /// The shared prop-geometry grid used by sight and acoustics.
+    pub fn geometry(&self) -> &PropGrid {
+        &self.geometry
     }
 
     /// The filled bands at a point (0 outside the grid).
     pub fn bands_at(&self, x: i64, y: i64) -> u32 {
-        let (i, j) = ((x - self.x_mm).div_euclid(CELL_MM), (y - self.y_mm).div_euclid(CELL_MM));
-        if i < 0 || j < 0 || i as usize >= self.w || j as usize >= self.h {
-            return 0;
-        }
-        self.bands[j as usize * self.w + i as usize]
+        self.geometry.bands_at(x, y)
     }
 
     /// Exact geometric occupancy at a point, before the conservative cell raster expands thin props.
     pub fn solid_geometry_at(&self, x: i64, y: i64, z: i64) -> bool {
-        let band = (z / BAND_MM).clamp(0, 31) as u32;
-        self.props.iter().any(|p| bands_of(p) & (1 << band) != 0 && p.covers(x, y))
+        self.geometry.solid_geometry_at(x, y, z)
     }
 
     /// Whether a point is inside something solid (at height `z` mm).
     pub fn solid_at(&self, x: i64, y: i64, z: i64) -> bool {
-        let band = (z / BAND_MM).clamp(0, 31) as u32;
-        self.bands_at(x, y) & (1 << band) != 0
+        self.geometry.solid_at(x, y, z)
     }
 
     /// Whether nothing solid lies between two points. Samples every SAMPLE_MM along the line (skipping
@@ -189,7 +126,7 @@ impl SightGrid {
             let (x, y) = (at(&ax), at(&ay));
             let (i, j) = ((x - self.x_mm).div_euclid(CELL_MM), (y - self.y_mm).div_euclid(CELL_MM));
             let inside = i >= 0 && j >= 0 && (i as usize) < self.w && (j as usize) < self.h;
-            let empty = !inside || self.coarse[(j as usize / BLOCK) * self.bw + i as usize / BLOCK] == 0;
+            let empty = !inside || self.geometry.coarse_empty_at(x, y);
             if empty {
                 // Jump to the first sample past this block's edge (in the ray's direction).
                 let leave = |p: i64, d: i64, origin: i64| -> i64 {
@@ -214,7 +151,7 @@ impl SightGrid {
                 return false; // into the ground
             }
             let band = z / BAND_MM;
-            if band < 32 && self.bands[j as usize * self.w + i as usize] & (1u32 << band) != 0 {
+            if band < 32 && self.geometry.bands_at(x, y) & (1u32 << band) != 0 {
                 return false;
             }
             k += 1;

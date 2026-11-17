@@ -118,6 +118,141 @@ impl Prop {
     }
 }
 
+/// Cell edge of the shared sight/acoustic geometry grid.
+pub const GEOMETRY_CELL_MM: i64 = 250;
+const HEIGHT_BAND_MM: i64 = 100;
+const COARSE_BLOCK_CELLS: usize = 16;
+
+/// Rasterised height-band occupancy shared by tactical sight and acoustic queries.
+pub struct PropGrid {
+    pub x_mm: i64,
+    pub y_mm: i64,
+    pub w: usize,
+    pub h: usize,
+    bands: Vec<u32>,
+    props: Vec<Prop>,
+    coarse: Vec<u32>,
+    coarse_w: usize,
+}
+
+fn prop_reach(p: &Prop) -> i64 {
+    match p.kind {
+        PropKind::Rock { radius_mm } => radius_mm,
+        PropKind::Wall { length_mm, thickness_mm } => length_mm / 2 + thickness_mm,
+        PropKind::Crate { size_mm } => size_mm,
+        PropKind::Panel { length_mm, .. } => length_mm / 2 + PropKind::PANEL_MM,
+        PropKind::Furniture { width_mm, depth_mm, .. } => width_mm.max(depth_mm),
+    }
+}
+
+fn bands_up_to(top_mm: i64) -> u32 {
+    let n = (top_mm / HEIGHT_BAND_MM).clamp(0, 32) as u32;
+    if n >= 32 { u32::MAX } else { (1u32 << n) - 1 }
+}
+
+/// Height bands occupied by a prop, shared by tactical visibility and acoustic obstruction.
+pub fn prop_height_bands(p: &Prop) -> u32 {
+    match p.kind {
+        PropKind::Panel { window: false, .. } => bands_up_to(2_400),
+        PropKind::Panel { window: true, .. } => bands_up_to(1_000) | (bands_up_to(2_400) & !bands_up_to(2_000)),
+        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 650 => bands_up_to(2_750),
+        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 800 => bands_up_to(1_000),
+        PropKind::Wall { thickness_mm, .. } if thickness_mm <= 3_000 => bands_up_to(2_600),
+        PropKind::Wall { .. } => u32::MAX,
+        PropKind::Crate { size_mm } if size_mm >= 2_500 => 0, // Guard towers stand on open legs.
+        PropKind::Crate { size_mm } => bands_up_to(size_mm),
+        PropKind::Rock { radius_mm } => bands_up_to(radius_mm * 9 / 10),
+        PropKind::Furniture { item, .. } => bands_up_to(item.height_mm()), // Furniture tops hide only their actual height.
+    }
+}
+
+impl PropGrid {
+    pub fn build(x_mm: i64, y_mm: i64, w: usize, h: usize, props: &[Prop]) -> PropGrid {
+        let coarse_w = w.div_ceil(COARSE_BLOCK_CELLS);
+        let mut grid = PropGrid {
+            x_mm,
+            y_mm,
+            w,
+            h,
+            bands: vec![0; w * h],
+            props: Vec::new(),
+            coarse: vec![0; coarse_w * h.div_ceil(COARSE_BLOCK_CELLS)],
+            coarse_w,
+        };
+        for prop in props {
+            grid.stamp(prop);
+        }
+        grid
+    }
+
+    /// Adds a prop to the exact geometry and conservative cell raster.
+    pub fn stamp(&mut self, p: &Prop) {
+        self.props.push(*p);
+        let b = prop_height_bands(p);
+        if b == 0 {
+            return;
+        }
+        let hc = GEOMETRY_CELL_MM / 2;
+        let r = prop_reach(p) + GEOMETRY_CELL_MM;
+        let span = |lo: i64, origin: i64, n: usize| {
+            (lo - origin).div_euclid(GEOMETRY_CELL_MM).clamp(0, n as i64) as usize
+        };
+        let (i0, i1) = (
+            span(p.x_mm - r, self.x_mm, self.w),
+            (span(p.x_mm + r, self.x_mm, self.w) + 1).min(self.w),
+        );
+        let (j0, j1) = (
+            span(p.y_mm - r, self.y_mm, self.h),
+            (span(p.y_mm + r, self.y_mm, self.h) + 1).min(self.h),
+        );
+        for j in j0..j1 {
+            for i in i0..i1 {
+                let (cx, cy) = (
+                    self.x_mm + i as i64 * GEOMETRY_CELL_MM + hc,
+                    self.y_mm + j as i64 * GEOMETRY_CELL_MM + hc,
+                );
+                let hit = [(0, 0), (-hc, -hc), (hc, -hc), (-hc, hc), (hc, hc)]
+                    .iter()
+                    .any(|&(dx, dy)| p.covers(cx + dx, cy + dy));
+                if hit {
+                    self.bands[j * self.w + i] |= b;
+                    self.coarse[(j / COARSE_BLOCK_CELLS) * self.coarse_w + i / COARSE_BLOCK_CELLS] |= b;
+                }
+            }
+        }
+    }
+
+    /// Filled height bands at a point; returns zero outside the grid.
+    pub fn bands_at(&self, x: i64, y: i64) -> u32 {
+        let (i, j) = ((x - self.x_mm).div_euclid(GEOMETRY_CELL_MM), (y - self.y_mm).div_euclid(GEOMETRY_CELL_MM));
+        if i < 0 || j < 0 || i as usize >= self.w || j as usize >= self.h {
+            return 0;
+        }
+        self.bands[j as usize * self.w + i as usize]
+    }
+
+    /// Exact point occupancy before the conservative cell raster expands thin props.
+    pub fn solid_geometry_at(&self, x: i64, y: i64, z: i64) -> bool {
+        let band = (z / HEIGHT_BAND_MM).clamp(0, 31) as u32;
+        self.props.iter().any(|p| prop_height_bands(p) & (1 << band) != 0 && p.covers(x, y))
+    }
+
+    /// Whether a point is solid at height `z` using the conservative cell raster.
+    pub fn solid_at(&self, x: i64, y: i64, z: i64) -> bool {
+        let band = (z / HEIGHT_BAND_MM).clamp(0, 31) as u32;
+        self.bands_at(x, y) & (1 << band) != 0
+    }
+
+    /// Whether the coarse block containing a point has no occupied bands.
+    pub fn coarse_empty_at(&self, x: i64, y: i64) -> bool {
+        let (i, j) = ((x - self.x_mm).div_euclid(GEOMETRY_CELL_MM), (y - self.y_mm).div_euclid(GEOMETRY_CELL_MM));
+        if i < 0 || j < 0 || i as usize >= self.w || j as usize >= self.h {
+            return true;
+        }
+        self.coarse[(j as usize / COARSE_BLOCK_CELLS) * self.coarse_w + i as usize / COARSE_BLOCK_CELLS] == 0
+    }
+}
+
 /// A rectangle of cells with its south-west corner at (x_mm, y_mm).
 pub struct NavGrid {
     pub x_mm: i64,
@@ -395,6 +530,45 @@ pub fn find_path(grid: &NavGrid, from: (i64, i64), to: (i64, i64), radius_mm: i6
         k = next;
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+
+    #[test]
+    fn prop_grid_preserves_window_bands_and_exact_footprints() {
+        let panel = Prop {
+            kind: PropKind::Panel { length_mm: 2_000, window: true },
+            x_mm: 0,
+            y_mm: 0,
+            quarter_turns: 0,
+        };
+        let grid = PropGrid::build(-1_000, -1_000, 8, 8, &[panel]);
+
+        assert!(grid.solid_at(0, 0, 900));
+        assert!(!grid.solid_at(0, 0, 1_500));
+        assert!(grid.solid_at(0, 0, 2_100));
+        assert!(grid.solid_geometry_at(0, 0, 900));
+        assert!(!grid.solid_geometry_at(0, 0, 1_500));
+        assert!(grid.solid_geometry_at(0, 0, 2_100));
+        assert!(!grid.solid_geometry_at(2_000, 0, 900));
+    }
+
+    #[test]
+    fn stamping_adds_to_the_shared_occupancy_grid() {
+        let wall = Prop {
+            kind: PropKind::Wall { length_mm: 2_000, thickness_mm: 300 },
+            x_mm: 0,
+            y_mm: 0,
+            quarter_turns: 0,
+        };
+        let mut grid = PropGrid::build(-1_000, -1_000, 8, 8, &[]);
+        assert!(!grid.solid_at(0, 0, 1_000));
+        grid.stamp(&wall);
+        assert!(grid.solid_at(0, 0, 1_000));
+        assert!(!grid.coarse_empty_at(0, 0));
+    }
 }
 
 /// Whether a mover of `radius_mm` can walk the straight line between two points (sampled every quarter cell).
