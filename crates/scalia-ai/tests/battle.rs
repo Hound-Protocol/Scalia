@@ -34,24 +34,17 @@ fn nobody_shoots_through_a_wall() {
     assert!(b.log.iter().all(|e| !matches!(e, Event::Shot { .. })), "no line of sight, no shots");
 }
 
-/// Hits landed on an unkillable target over 60 s of fire.
-fn hits_on(target: Soldier, props: &[Prop]) -> usize {
-    let mut b = Battle::new(field(props), vec![man(0, 50_000, 20_000, Stance::Stand), target], 11);
-    b.soldiers[1].health = i32::MAX;
-    b.soldiers[1].passive = true;
-    b.soldiers[0].mags = 99;
-    for _ in 0..1200 {
-        b.step(50);
-    }
-    b.log.iter().filter(|e| matches!(e, Event::Shot { hit: true, .. })).count()
+fn hit_chance(target: Soldier, props: &[Prop]) -> i64 {
+    let b = Battle::new(field(props), vec![man(0, 50_000, 20_000, Stance::Stand), target], 11);
+    b.hit_permille(0, 1)
 }
 
 #[test]
 fn cover_and_stance_make_a_man_harder_to_hit() {
     let bags = Prop { kind: PropKind::Wall { length_mm: 6_000, thickness_mm: 700 }, x_mm: 50_000, y_mm: 59_000, quarter_turns: 0 };
-    let open = hits_on(man(1, 50_000, 60_000, Stance::Stand), &[]);
-    let behind_bags = hits_on(man(1, 50_000, 60_000, Stance::Stand), &[bags]);
-    let crouched_behind = hits_on(man(1, 50_000, 60_000, Stance::Crouch), &[bags]);
+    let open = hit_chance(man(1, 50_000, 60_000, Stance::Stand), &[]);
+    let behind_bags = hit_chance(man(1, 50_000, 60_000, Stance::Stand), &[bags]);
+    let crouched_behind = hit_chance(man(1, 50_000, 60_000, Stance::Crouch), &[bags]);
     assert!(open > behind_bags, "legs behind the bags: {open} vs {behind_bags}");
     assert!(behind_bags > crouched_behind, "crouched behind the bags: {behind_bags} vs {crouched_behind}");
 }
