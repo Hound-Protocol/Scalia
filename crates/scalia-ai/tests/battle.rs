@@ -1,4 +1,4 @@
-use scalia_ai::battle::{Battle, Event, Soldier, Stance};
+use scalia_ai::battle::{Battle, Event, Soldier, Stance, Task};
 use scalia_ai::intelligence::IntelSource;
 use scalia_ai::sight::SightGrid;
 use scalia_core::nav::{Prop, PropKind};
