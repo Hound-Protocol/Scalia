@@ -493,6 +493,7 @@ version = "0.1.0"
 dependencies = [
  "scalia-ai",
  "scalia-core",
+ "scalia-world",
 ]
 
 [[package]]

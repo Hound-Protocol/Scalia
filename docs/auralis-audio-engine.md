@@ -52,7 +52,7 @@ The Rust acoustic model also uses the AI sight grid as its geometry source. This
 
 1. **Ownership and routing:** unify every sound source under one graph and lifecycle.
 2. **Voice system:** explicit voice handles, priorities, categories, pooling, stealing and cleanup.
-3. **Acoustic correctness:** test distance curves, occlusion edge cases, doors/windows, reflections, air absorption and listener movement.
+3. **Acoustic correctness:** route sounds through open doorways and over walls only when the elevated path is clear and roofless; define roof footprints in world-map data and validate distance, occlusion, reflections and listener movement.
 4. **Mixing:** master, music, ambience, weapons, Foley, UI and radio buses; ducking and snapshots.
 5. **Spatial audio:** stable 3D positioning, orientation, HRTF behaviour and zoom/listener scaling.
 6. **Performance:** profile dense firefights, cap expensive voices/effects, avoid per-frame graph churn.

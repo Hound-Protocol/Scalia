@@ -187,9 +187,18 @@ pub struct MapFile {
     /// Named rectangles (x0, y0, x1, y1): the range, the live-fire zone, the barracks and its rooms...
     #[serde(default)]
     pub areas: Vec<(String, (i64, i64, i64, i64))>,
+    /// Roof footprints for acoustic propagation (x0, y0, x1, y1, height mm).
+    #[serde(default)]
+    pub acoustic_roofs: Vec<AcousticRoof>,
     #[serde(default)]
     pub buildings: Vec<BuildingRef>,
     pub objects: Vec<Placed>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct AcousticRoof {
+    pub bounds: (i64, i64, i64, i64),
+    pub height_mm: i64,
 }
 
 /// An object in the world, its kind resolved.
@@ -250,6 +259,12 @@ impl World {
     pub fn load(catalog: &str, map: &str) -> Result<World, String> {
         let catalog = Catalog::parse(catalog)?;
         let map: MapFile = ron::from_str(map).map_err(|e| format!("map: {e}"))?;
+        for roof in &map.acoustic_roofs {
+            let (x0, y0, x1, y1) = roof.bounds;
+            if x0 >= x1 || y0 >= y1 || roof.height_mm <= 0 {
+                return Err(format!("map '{}': invalid acoustic roof {roof:?}", map.name));
+            }
+        }
         let mut objects = Vec::new();
         let kind_of = |id: &str| catalog.find(id).ok_or_else(|| format!("map '{}': no kind '{id}' in the catalog", map.name));
         for b in &map.buildings {
@@ -300,6 +315,11 @@ impl World {
     /// A named area (x0, y0, x1, y1).
     pub fn area(&self, name: &str) -> Option<(i64, i64, i64, i64)> {
         self.map.areas.iter().find(|(n, _)| n == name).map(|&(_, r)| r)
+    }
+
+    /// The roof surfaces that block sound traveling over walls.
+    pub fn acoustic_roofs(&self) -> Vec<AcousticRoof> {
+        self.map.acoustic_roofs.clone()
     }
 
     /// The training houses on the map (their rooms and doorways for the AI).

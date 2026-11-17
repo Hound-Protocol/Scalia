@@ -224,6 +224,121 @@ fn direct_ray_clear(sight: &SightGrid, from: Point, to: Point) -> bool {
     true
 }
 
+/// A clear acoustic route through one open doorway, if one joins the listener and source sides.
+/// The doorway centre is used as the waypoint; each leg must remain clear of solid geometry.
+fn open_door_path(
+    sight: &SightGrid,
+    listener: (f32, f32),
+    source: (f32, f32),
+) -> Option<Occlusion> {
+    let point = |at: (f32, f32), z: i64| Point {
+        x: (at.0 * 1000.0) as i64,
+        y: (at.1 * 1000.0) as i64,
+        z,
+    };
+    let ear = point(listener, 1_600);
+    let sound = point(source, PATH_MM);
+    let direct = ((source.0 - listener.0).powi(2) + (source.1 - listener.1).powi(2)).sqrt();
+    sight
+        .doors
+        .iter()
+        .filter(|door| {
+            matches!(
+                door.state,
+                scalia_ai::doors::DoorState::Open | scalia_ai::doors::DoorState::Breached
+            )
+        })
+        .filter_map(|door| {
+            let waypoint = point(
+                (door.at.0 as f32 / 1000.0, door.at.1 as f32 / 1000.0),
+                PATH_MM,
+            );
+            if !direct_ray_clear(sight, ear, waypoint) || !direct_ray_clear(sight, waypoint, sound)
+            {
+                return None;
+            }
+            let route = ((waypoint.x - ear.x) as f32 / 1000.0)
+                .hypot((waypoint.y - ear.y) as f32 / 1000.0)
+                + ((sound.x - waypoint.x) as f32 / 1000.0)
+                    .hypot((sound.y - waypoint.y) as f32 / 1000.0);
+            let detour_m = (route - direct).max(0.0);
+            let bend_db = if detour_m > 0.3 {
+                (4.0 + 4.0 * (1.0 + detour_m).log2()).min(22.0)
+            } else {
+                0.0
+            };
+            Some(Occlusion {
+                wall_db: 0.0,
+                bend_db,
+                detour_m,
+                low_db: bend_db,
+                mid_db: bend_db,
+                high_db: bend_db * 1.4,
+            })
+        })
+        .min_by(|a, b| a.low_db.total_cmp(&b.low_db))
+}
+
+const OVER_WALL_HEIGHT_MM: i64 = 4_500;
+const ROOFLESS_OVERFLIGHT_DB: f32 = 12.0;
+const OVERFLIGHT_EXTRA_DISTANCE_M: f32 = 6.0;
+
+fn roofless_overflight_path(
+    sight: &SightGrid,
+    roofs: &[scalia_world::AcousticRoof],
+    listener: (f32, f32),
+    source: (f32, f32),
+) -> Option<Occlusion> {
+    let point = |at: (f32, f32)| Point {
+        x: (at.0 * 1000.0) as i64,
+        y: (at.1 * 1000.0) as i64,
+        z: OVER_WALL_HEIGHT_MM,
+    };
+    let from = point(listener);
+    let to = point(source);
+    if !direct_ray_clear(sight, from, to) {
+        return None;
+    }
+    let (dx, dy, dz) = (to.x - from.x, to.y - from.y, to.z - from.z);
+    let steps = (dx.abs().max(dy.abs()).max(dz.abs()) / 100).max(1);
+    for k in 1..steps {
+        let x = from.x + dx * k / steps;
+        let y = from.y + dy * k / steps;
+        if roofs.iter().any(|roof| {
+            let (x0, y0, x1, y1) = roof.bounds;
+            x >= x0 && x <= x1 && y >= y0 && y <= y1 && OVER_WALL_HEIGHT_MM >= roof.height_mm
+        }) {
+            return None;
+        }
+    }
+    Some(Occlusion {
+        wall_db: 0.0,
+        bend_db: ROOFLESS_OVERFLIGHT_DB,
+        detour_m: OVERFLIGHT_EXTRA_DISTANCE_M,
+        low_db: ROOFLESS_OVERFLIGHT_DB,
+        mid_db: ROOFLESS_OVERFLIGHT_DB + 3.0,
+        high_db: ROOFLESS_OVERFLIGHT_DB + 8.0,
+    })
+}
+
+/// Prefer clear open-door or roofless over-wall routes when they attenuate less than the direct path.
+pub fn with_acoustic_routes(
+    sight: &SightGrid,
+    roofs: &[scalia_world::AcousticRoof],
+    listener: (f32, f32),
+    source: (f32, f32),
+    direct: Occlusion,
+) -> Occlusion {
+    if direct.low_db <= 0.0 {
+        return direct;
+    }
+    [Some(direct), open_door_path(sight, listener, source), roofless_overflight_path(sight, roofs, listener, source)]
+        .into_iter()
+        .flatten()
+        .min_by(|a, b| a.low_db.total_cmp(&b.low_db))
+        .unwrap_or(direct)
+}
+
 /// Cell of the propagation field (m).
 const FIELD_CELL_M: f32 = 0.5;
 /// Sound entering a wall from the air: what a plain masonry wall stops (dB, transmission loss).
@@ -446,6 +561,18 @@ mod tests {
     }
 
     #[test]
+    fn a_clear_sound_path_over_a_low_wall_is_not_occluded() {
+        let low_wall = Prop {
+            kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 700 },
+            x_mm: 50_000,
+            y_mm: 50_000,
+            quarter_turns: 1,
+        };
+        let g = grid(&[low_wall]);
+        assert_eq!(walls_between(&g, (40.0, 50.0, 1.6), (60.0, 50.0, 1.4)), 0);
+    }
+
+    #[test]
     fn zooming_out_takes_you_further_from_the_fight() {
         let g = grid(&[]);
         let env = listener_env(&g, (50.0, 50.0));
@@ -522,6 +649,60 @@ mod tests {
         let shut = Field::build(&room_with_door(DoorState::Closed), ear, 30.0);
         let e2 = shut.at((65.0, 50.5)).unwrap();
         assert!(e2.wall_db >= DOOR_DB && e2.wall_db < WALL_ENTER_DB && e2.gain() < east.gain() * 0.3, "{e2:?}");
+    }
+
+    #[test]
+    fn an_open_door_carries_sound_around_a_corner_but_a_shut_door_does_not() {
+        use scalia_ai::doors::DoorState;
+        let ear = (50.0, 50.0);
+        let source = (65.0, 60.0);
+        let masonry = Occlusion {
+            wall_db: 40.0,
+            bend_db: 0.0,
+            detour_m: 0.0,
+            low_db: 28.0,
+            mid_db: 40.0,
+            high_db: 52.0,
+        };
+        let open = room_with_door(DoorState::Open);
+        let roof = [scalia_world::AcousticRoof {
+            bounds: (30_000, 30_000, 70_000, 70_000),
+            height_mm: 3_900,
+        }];
+        let open_path = with_acoustic_routes(&open, &roof, ear, source, masonry);
+        assert_eq!(open_path.wall_db, 0.0, "{open_path:?}");
+        assert!(open_path.bend_db > 0.0 && open_path.low_db < masonry.low_db, "{open_path:?}");
+
+        let shut = room_with_door(DoorState::Closed);
+        assert_eq!(with_acoustic_routes(&shut, &roof, ear, source, masonry), masonry);
+    }
+
+    #[test]
+    fn roofless_walls_transmit_over_the_top_but_a_roof_blocks_the_path() {
+        let wall = Prop {
+            kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
+            x_mm: 50_000,
+            y_mm: 50_000,
+            quarter_turns: 1,
+        };
+        let g = grid(&[wall]);
+        let ear = (40.0, 50.0);
+        let source = (60.0, 50.0);
+        let direct = Occlusion {
+            wall_db: 40.0,
+            bend_db: 0.0,
+            detour_m: 0.0,
+            low_db: 28.0,
+            mid_db: 40.0,
+            high_db: 52.0,
+        };
+
+        let open_air = with_acoustic_routes(&g, &[], ear, source, direct);
+        assert_eq!(open_air.low_db, ROOFLESS_OVERFLIGHT_DB, "{open_air:?}");
+        assert_eq!(open_air.high_db, ROOFLESS_OVERFLIGHT_DB + 8.0);
+
+        let roofed = [scalia_world::AcousticRoof { bounds: (39_000, 49_000, 61_000, 51_000), height_mm: 3_900 }];
+        assert_eq!(with_acoustic_routes(&g, &roofed, ear, source, direct), direct);
     }
 
     #[test]
