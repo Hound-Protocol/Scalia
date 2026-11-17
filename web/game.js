@@ -1956,8 +1956,14 @@ try {
   // New installs start at 60 FPS. Uncapped rendering is an opt-in performance mode,
   // not a safe default for laptops or integrated/software WebGPU adapters.
   const savedCap = store.get('scalia.cap');
+  // Safety migration: older builds allowed uncapped rendering (stored as "0").
+  // Do not restore that setting automatically: it can saturate a CPU/GPU and freeze
+  // machines before the user can reach the in-game frame-cap control.
   let capIndex = savedCap == null ? 1 : Number(savedCap) % CAPS.length;
-  if (!Number.isInteger(capIndex) || capIndex < 0) capIndex = 1;
+  if (!Number.isInteger(capIndex) || capIndex < 0 || capIndex === 0) {
+    capIndex = 1;
+    store.set('scalia.cap', '1');
+  }
   let cpuMs = 0, last = performance.now(), lastDraw = 0;
 
   // Benchmark: ~1,000 soldiers around the commander, the camera turns one full circle in 20 s
