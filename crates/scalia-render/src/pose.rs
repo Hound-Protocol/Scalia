@@ -896,37 +896,43 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 0.12;
         }
         Pose::Crawl => {
-            // Low crawl: diagonal limbs alternate, with the cycle rotated by travel direction. This reverses the
-            // pull/push timing when backing up and changes the support pattern for either side-crawl.
-            let s = (phase * std::f32::consts::TAU + dir).sin();
+            let fwd = dir.cos();
             let lateral = dir.sin();
-            let draw = [s.max(0.0), (-s).max(0.0)];
+            let lat_abs = lateral.abs();
+            let s = (phase * std::f32::consts::TAU + dir).sin();
+            let c = (phase * std::f32::consts::TAU + dir).cos();
+            let draw = [0.5 - 0.5 * c, 0.5 + 0.5 * c];
             p.prone = 1.0;
-            // Keep the rifle anchored to the right shoulder while the legs provide the crawl cycle.
-            // The left support arm is solved by grip() rather than swinging away from the handguard.
-            p.shoulder = [2.8, 1.571];
-            p.elbow = [1.3, 2.084];
-            p.reach = [0.0, 0.401];
-            p.abduct = [0.0, 0.604];
-            p.rifle_yaw = 0.55;
-            p.hip = [0.1 + 0.3 * draw[0], 0.1 + 0.3 * draw[1]];
-            p.knee = [0.35 + 1.2 * draw[0], 0.35 + 1.2 * draw[1]];
-            p.side = [-0.12 - 0.55 * draw[0] - 0.16 * lateral, 0.12 + 0.55 * draw[1] + 0.16 * lateral];
-            p.twist = 0.06 * s + 0.08 * lateral;
-            p.tilt = 0.05 * s + 0.04 * lateral;
+            p.shoulder = [2.8, 1.571 + 0.14 * s * (1.0 - 0.35 * lat_abs)];
+            p.elbow = [1.3, 2.084 - 0.16 * s * (1.0 - 0.35 * lat_abs)];
+            p.reach = [0.0, 0.401 + 0.05 * c];
+            p.abduct = [0.0, 0.604 + 0.12 * lat_abs + 0.08 * s.abs()];
+            p.rifle_yaw = 0.55 - 0.06 * lateral;
+            p.hip = [0.08 + (0.34 - 0.10 * lat_abs) * draw[0], 0.08 + (0.34 - 0.10 * lat_abs) * draw[1]];
+            p.knee = [0.28 + (1.28 - 0.36 * lat_abs) * draw[0], 0.28 + (1.28 - 0.36 * lat_abs) * draw[1]];
+            let (lead_l, lead_r) = ((-lateral).max(0.0), lateral.max(0.0));
+            p.side = [-0.14 - (0.52 + 0.24 * lat_abs) * draw[0] - 0.22 * lead_l + 0.08 * lead_r,
+                      0.14 + (0.52 + 0.24 * lat_abs) * draw[1] + 0.22 * lead_r - 0.08 * lead_l];
+            p.twist = -0.22 + (0.14 + 0.06 * fwd) * s + 0.18 * lateral;
+            p.tilt = 0.0;
+            p.lean = -0.08;
+            p.look = 0.22 - 0.12 * s - 0.18 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
-            p.head = 1.0;
+            p.head = 0.94 + 0.06 * fwd.max(0.0);
         }
         Pose::Drop => return drop_params(phase),
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
         Pose::Prone => {
-            // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
             p.prone = 1.0;
             p.shoulder = [2.8, 1.571];
             p.elbow = [1.3, 2.084];
             p.reach = [0.0, 0.401];
             p.abduct = [0.0, 0.604];
+            p.hip = [0.14, 0.10];
+            p.knee = [0.26, 0.18];
+            p.side = [0.0, 0.0];
+            p.tilt = 0.0;
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.rifle_yaw = 0.55;
             p.twist = -0.55;
