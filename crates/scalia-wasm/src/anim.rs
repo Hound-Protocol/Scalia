@@ -350,7 +350,7 @@ impl Animator {
                 (Stance::Prone, true) => (Pose::Crawl, aim.then_some(Pose::ProneAim), speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
                 (Stance::Prone, false) => (if aim { Pose::ProneAim } else { Pose::Prone }, None, 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
-                (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
+                (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CrouchAim } else { Pose::CoverAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
                 (Stance::Stand, _) if skid == Skid::Stop => (Pose::Brake, None, 0.0),
                 // In a cut he drops low to pivot while his body still slides the old way.
                 (Stance::Stand, _) if skid == Skid::Cut => (Pose::Crouch, None, 0.0),
@@ -547,6 +547,27 @@ mod tests {
         d.rifle = Rifle::Slung;
         d.face = Face::Keep;
         assert_eq!(run(&mut a, 5, d).pose, Pose::Slung);
+    }
+
+    #[test]
+    fn crouched_aim_uses_a_kneel_unless_popping_up_at_cover() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.stance = Stance::Crouch;
+        d.rifle = Rifle::Aim;
+        assert_eq!(
+            a.step(&d).pose,
+            Pose::CoverAim,
+            "in the open, keep the grounded kneeling base"
+        );
+
+        d.ts += d.dt;
+        d.in_cover = true;
+        assert_eq!(
+            a.step(&d).pose,
+            Pose::CrouchAim,
+            "at cover, keep the existing pop-up shot"
+        );
     }
 
     #[test]

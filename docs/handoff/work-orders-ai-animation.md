@@ -75,6 +75,8 @@ that knowledge.
 
 ## Track Animation
 
+The project-wide animation direction and dependency order are in the [TrueRig roadmap](./truerig-roadmap.md).
+
 ### AN-1. Life in the still poses
 - Cover, cover aim, prone, prone aim, stack, peeks: breathing and sway, weight shifts, scanning; peeks lean out and back.
 - Shader-side (no per-soldier CPU).
