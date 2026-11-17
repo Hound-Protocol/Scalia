@@ -169,7 +169,7 @@ fn a_helper_resumes_his_prior_task_after_aid_and_after_threat_abort() {
         pos: b2.soldiers[2].pos,
         seen_ms: b2.time_ms,
         confidence: 1_000,
-        source: scalia_ai::battle::IntelSource::Visual,
+        source: scalia_ai::intelligence::IntelSource::Visual,
     });
     run(&mut b2, 1_500);
     assert_eq!(b2.soldiers[1].aiding(), None, "aid aborted under casualty threat");
