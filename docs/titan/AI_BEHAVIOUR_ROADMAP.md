@@ -34,6 +34,14 @@ Plans are commitments with reasons, not scripts. New observations, schedule chan
 resource shortfalls or failed routes trigger reassessment. Allied and hostile NPCs use the same reasoning process;
 their orders, information, resources and doctrine produce different plans.
 
+### Executable mission-cycle milestone — first slice implemented
+
+For a quiet squad relocation, the leader gathers the team, briefs each subordinate with the objective and movement
+posture, and only then begins the existing movement plan. Confirmed contact or active danger waives the meeting so
+survival and urgent orders are not delayed. The briefing is serialized and resumes deterministically after a save.
+This is a tactical-scale first slice; interstellar schedules, provisions, transport booking and inventory must wait
+for corresponding world simulation systems rather than being fabricated inside the battle AI.
+
 ## Design principles
 
 1. **Survival before obedience:** immediate danger may interrupt an order; it does not erase the order.

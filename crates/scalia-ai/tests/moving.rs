@@ -1,6 +1,7 @@
 //! The squad Move order: get there (round walls, through doors), then make the place safe: men take the cover
 //! within 10 m, or in the open form a 360-degree perimeter, each covering his own sector.
-use scalia_ai::battle::{Battle, Soldier, Stance, Task};
+use scalia_ai::battle::{Battle, Contact, Event, Soldier, Stance, Task};
+use scalia_ai::intelligence::IntelSource;
 use scalia_ai::leader::{Mode, Order};
 use scalia_ai::save::{Command, MapSpec};
 use scalia_core::killhouse::Killhouse;
@@ -19,6 +20,79 @@ fn run(b: &mut Battle, ms: i64) {
 
 fn dist(a: (i64, i64), b: (i64, i64)) -> i64 {
     (((a.0 - b.0).pow(2) + (a.1 - b.1).pow(2)) as f64).sqrt() as i64
+}
+
+#[test]
+fn a_quiet_relocation_is_briefed_with_its_objective_and_roles_before_departure() {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(4, (20_000, 20_000)), 10);
+    let to = (60_000, 60_000);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to, mode: Mode::Caution } });
+
+    run(&mut b, 8_000);
+
+    assert_eq!(b.squad_phase(0), "briefing");
+    assert!(b.soldiers.iter().all(|s| !matches!(s.task, Task::Move { to: target, .. } if target == to)));
+    assert!(b.log.iter().any(|e| matches!(e, Event::Order { squad: 0, step: "briefing" })));
+
+    run(&mut b, 2_000);
+    let briefed: Vec<_> = b.log.iter().filter_map(|e| match e {
+        Event::MissionBriefed { soldier, objective, mode, role, .. } => Some((*soldier, *objective, *mode, *role)),
+        _ => None,
+    }).collect();
+    assert_eq!(briefed.len(), 3, "each subordinate gets the relocation objective and role: {briefed:?}");
+    assert!(briefed.iter().all(|(_, objective, mode, _)| *objective == to && *mode == Mode::Caution));
+    assert_eq!(briefed.iter().map(|(_, _, _, role)| *role).collect::<Vec<_>>(), ["left flank", "right flank", "rear security"]);
+    assert!(b.soldiers.iter().any(|s| matches!(s.task, Task::Move { to: target, .. } if target == to)), "movement starts once the briefing ends");
+}
+
+#[test]
+fn a_confirmed_threat_waives_relocation_briefing_instead_of_delaying_the_order() {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(4, (20_000, 20_000)), 11);
+    let to = (60_000, 60_000);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to, mode: Mode::Confirmed } });
+    run(&mut b, 250);
+
+    assert!(b.log.iter().any(|e| matches!(e, Event::Order { squad: 0, step: "brief waived" })));
+    assert!(!b.log.iter().any(|e| matches!(e, Event::MissionBriefed { .. })));
+    assert!(b.soldiers.iter().any(|s| matches!(s.task, Task::Move { .. })), "the urgent order begins immediately");
+}
+
+#[test]
+fn contact_interrupts_an_active_briefing_and_releases_the_move_order() {
+    let mut soldiers = squad(4, (20_000, 20_000));
+    let mut enemy = Soldier::new(1, 1, (190_000, 190_000), Stance::Stand);
+    enemy.passive = true;
+    soldiers.push(enemy);
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), soldiers, 14);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: (60_000, 60_000), mode: Mode::Caution } });
+    run(&mut b, 2_000);
+    assert_eq!(b.squad_phase(0), "briefing");
+
+    b.contacts[0].push(Contact {
+        enemy: 4,
+        pos: b.soldiers[4].pos,
+        seen_ms: b.time_ms,
+        confidence: 1_000,
+        source: IntelSource::Visual,
+    });
+    run(&mut b, 250);
+
+    assert_ne!(b.squad_phase(0), "briefing");
+    assert!(b.log.iter().any(|e| matches!(e, Event::Order { squad: 0, step: "brief waived" })));
+    assert!(b.soldiers.iter().any(|s| matches!(s.task, Task::Move { .. })), "the squad resumes its assigned move");
+}
+
+#[test]
+fn a_relocation_briefing_resumes_deterministically_after_a_save() {
+    let mut b = Battle::on_map(MapSpec::new(0, 0, 100_000, 100_000, &[]), squad(4, (20_000, 20_000)), 12);
+    b.submit(0, Command::Squad { squad: 0, order: Order::Move { to: (60_000, 60_000), mode: Mode::Caution } });
+    run(&mut b, 3_000);
+    let mut restored = Battle::load(&b.save()).unwrap();
+    assert_eq!(restored.hash(), b.hash(), "brief progress is part of the save state");
+
+    run(&mut b, 15_000);
+    run(&mut restored, 15_000);
+    assert_eq!(restored.hash(), b.hash(), "the same briefing resumes into the same movement");
 }
 
 #[test]

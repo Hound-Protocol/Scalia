@@ -482,6 +482,8 @@ pub enum Event {
     Order { squad: usize, step: &'static str },
     /// The leader briefs a man on his part in the plan.
     Briefed { leader: usize, soldier: usize, role: &'static str },
+    /// The leader briefs a man on a squad move, including the objective and movement posture.
+    MissionBriefed { leader: usize, soldier: usize, objective: (i64, i64), mode: crate::leader::Mode, role: &'static str },
     Explosion { pos: (i64, i64) },
 }
 
