@@ -6,6 +6,8 @@ fn the_testing_ground_loads_and_every_object_kind_is_in_the_catalog() {
     assert!(w.objects.len() > 150, "{}", w.objects.len());
     assert!(w.area("range").is_some() && w.area("barracks_bay_1").is_some());
     assert_eq!(w.killhouses().len(), 1);
+    assert_eq!(w.acoustic_roofs().len(), 3);
+    assert!(w.acoustic_roofs().iter().all(|roof| roof.height_mm == 3_900));
 }
 
 #[test]
@@ -34,6 +36,14 @@ fn a_bad_map_or_catalog_is_refused_with_a_reason() {
     let e = World::load(cat, &map("Placed(kind: \"hatch\", at: (0, 0), state: Some(Breached))")).err().expect("a hatch cannot be breached");
     assert!(e.contains("cannot be Breached"), "{e}");
     assert!(World::load("Catalog(kinds: [Kind(id: \"d\", name: \"d\", class: Door, shape: Door(height_mm: 2000))])", &map("")).is_err(), "a door with no states");
+}
+
+#[test]
+fn an_invalid_acoustic_roof_is_refused() {
+    let cat = include_str!("../data/catalog.ron");
+    let map = "MapFile(name: \"t\", bounds: (0, 0, 10000, 10000), acoustic_roofs: [AcousticRoof(bounds: (5, 5, 5, 10), height_mm: 3000)], objects: [])";
+    let error = World::load(cat, map).err().expect("invalid roof");
+    assert!(error.contains("invalid acoustic roof"), "{error}");
 }
 
 #[test]

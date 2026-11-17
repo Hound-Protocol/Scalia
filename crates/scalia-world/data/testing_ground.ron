@@ -17,6 +17,12 @@ MapFile(
         ("barracks_common", (130000, 4000, 142000, 24000)),
         ("barracks_bay_1", (142000, 4000, 154000, 24000)),
     ],
+    // The barracks blocks north of the base are roofed; the range and training house are open to the sky.
+    acoustic_roofs: [
+        AcousticRoof(bounds: (33000, 114000, 57000, 122000), height_mm: 3900),
+        AcousticRoof(bounds: (73000, 114000, 97000, 122000), height_mm: 3900),
+        AcousticRoof(bounds: (113000, 114000, 137000, 122000), height_mm: 3900),
+    ],
     // The training house: four rooms, plywood walls, its doors start closed.
     buildings: [
         BuildingRef(kind: "killhouse", at: (34000, 20000), doors: Closed),
