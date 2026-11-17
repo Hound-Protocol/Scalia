@@ -166,10 +166,12 @@ def main():
     if args.command == "stamp":
         stamp()
         return
-    try:
-        head = git(ROOT, "rev-parse", "HEAD^2")
-    except subprocess.CalledProcessError:
-        head = "HEAD"
+    head = os.environ.get("PR_HEAD_SHA")
+    if not head:
+        try:
+            head = git(ROOT, "rev-parse", "HEAD^2")
+        except subprocess.CalledProcessError:
+            head = "HEAD"
     area = validate_pr_update(os.environ.get("PR_BODY", ""), commit_message(ROOT, head))
     print(f"PR release identity: {area}")
 
