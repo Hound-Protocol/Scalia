@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AudioEngine, spatialPosition } from '../audio.js';
+import { AudioEngine, stereoPan } from '../audio.js';
 
 const connectedElements = new WeakSet();
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
@@ -46,7 +46,6 @@ class FakeAudioContext {
   }
   createGain() { return this.track(Object.assign(new FakeNode(), { nodeType: 'gain' })); }
   createBiquadFilter() { return this.track(Object.assign(new FakeNode(), { nodeType: 'biquad' })); }
-  createPanner() { return this.track(Object.assign(new FakeNode(), { nodeType: 'panner' })); }
   createStereoPanner() { return this.track(Object.assign(new FakeNode(), { nodeType: 'stereo-panner' })); }
   createWaveShaper() { return this.track(Object.assign(new FakeNode(), { nodeType: 'waveshaper' })); }
   createDelay() { return this.track(Object.assign(new FakeNode(), { nodeType: 'delay' })); }
@@ -195,25 +194,20 @@ test('stream() does not claim an element already routed by Auralis media routing
 });
 
 
-test('spatialPosition maps camera-relative directions into HRTF coordinates', () => {
-  const right = spatialPosition(1, 0);
-  near(right[0], 1); near(right[1], 0); near(right[2], 0);
-  const left = spatialPosition(-1, 0);
-  near(left[0], -1); near(left[1], 0); near(left[2], 0);
-  const ahead = spatialPosition(0, 1);
-  near(ahead[0], 0); near(ahead[1], 0); near(ahead[2], -1);
-  const behind = spatialPosition(0, -1);
-  near(behind[0], 0); near(behind[1], 0); near(behind[2], 1);
-  const below = spatialPosition(0, 0, 2);
-  near(below[0], 0); near(below[1], -1); near(below[2], 0);
-  assert.deepEqual(spatialPosition(0, 0), [0, 0, -1]);
+test('stereoPan maps camera-relative ground direction to left and right only', () => {
+  near(stereoPan(1, 0), 1);
+  near(stereoPan(-1, 0), -1);
+  near(stereoPan(0, 1), 0);
+  near(stereoPan(0, -1), 0);
+  near(stereoPan(1, 1), Math.SQRT1_2);
+  near(stereoPan(-1, 1), -Math.SQRT1_2);
+  near(stereoPan(0, 0), 0);
 });
 
-test('spatialPosition normalises diagonal vectors and contains invalid inputs', () => {
-  const diagonal = spatialPosition(1, 1, 0);
-  near(Math.hypot(...diagonal), 1);
-  const invalid = spatialPosition(Number.NaN, Infinity, Number.NaN);
-  assert.deepEqual(invalid, [0, 0, -1]);
+test('stereoPan contains invalid inputs and leaves forward/back sounds centered', () => {
+  near(stereoPan(Number.NaN, Infinity), 0);
+  near(stereoPan(0, -20), 0);
+  near(stereoPan(20, 0), 1);
 });
 
 
@@ -244,6 +238,28 @@ test('voice allocator deterministically steals a lower-priority voice at the 64 
   assert.equal(audio.voiceStats().stolen, 1);
   audio.stopAll();
   assert.equal(audio.voiceStats().tracked, 0);
+});
+
+test('footsteps retain reserved voice capacity during dense gunfire', () => {
+  const audio = playbackEngine();
+  const shot = {
+    kind: 'shot', db: 130, gain: 1, room: 0, rx: 0, ry: 1,
+    below: 0, dist: 5, lowpass: 20000, space: [0, 30, 0], echoes: [],
+  };
+  const step = {
+    kind: 'step', db: 60, gain: 0.5, room: 0, rx: 0, ry: 1,
+    below: 0, dist: 5, lowpass: 20000, space: [0, 30, 0], echoes: [],
+  };
+  for (let i = 0; i < 48; i++) assert.ok(audio.play('shot', shot));
+  for (let i = 0; i < 16; i++) assert.ok(audio.play('step', step));
+
+  assert.equal(audio.active.length, 64);
+  assert.equal(audio.active.filter((voice) => voice.category === 'shot').length, 48);
+  assert.equal(audio.active.filter((voice) => voice.category === 'step').length, 16);
+  assert.equal(audio.play('shot', shot), null);
+  assert.equal(audio.play('step', step), null);
+  assert.equal(audio.active.length, 64);
+  audio.stopAll();
 });
 
 test('UI priority cannot steal higher-priority gunfire when all 64 slots are occupied', () => {

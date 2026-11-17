@@ -10,7 +10,7 @@ Auralis only: Rust acoustic model, browser audio renderer, audio content routing
 
 ### Current components
 - `crates/scalia-audio/src/lib.rs`: Rust acoustic model. Uses `scalia_ai::sight::SightGrid`; calculates listener environment, wall crossings, distance/air filtering, reflections, propagation delay and a Dijkstra-based occlusion field.
-- `web/audio.js`: Web Audio renderer. Creates an AudioContext lazily; supports decoded-buffer voices, a 64-voice cap, priority/stealing, HDR loudness, HRTF panning, reverb/air tails, echo taps, gunfire dynamics and a media-element stream API.
+- `web/audio.js`: Web Audio renderer. Creates an AudioContext lazily; supports decoded-buffer voices, a 64-voice cap, priority/stealing, HDR loudness, camera-relative stereo panning, reverb/air tails, echo taps, gunfire dynamics and a media-element stream API.
 - `web/game.js`: integration and sound event producers.
 - `web/jukebox.js`: persistent media playback integration.
 - `web/sfx/`: sound and music content.
@@ -55,6 +55,7 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 ### AU-03 — Voice lifecycle and allocation
 - Introduce explicit voice handles and categories.
 - Define deterministic priority/stealing policy and cleanup on ended/stolen/cancelled voices.
+- Reserve a bounded share of live voices for Foley; gunfire must not occupy every slot and make nearby footsteps disappear.
 - Reuse or pool nodes only where profiling proves beneficial.
 - Verify the 64-voice cap and no orphaned graph nodes.
 **Acceptance:** stress test at and above cap; bounded node count; no stale voices.
@@ -66,11 +67,11 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 **Acceptance:** repeatable tests and representative listening scenes.
 
 ### AU-02 — Spatial audio & occlusion
-- Verify HRTF direction mapping, listener orientation, source elevation, distance and zoom scaling.
-- Apply 3D line-of-sight obstruction for the elevated tablet camera; retain the propagation field for on-foot diffraction and door routing.
+- Verify camera-relative left/right stereo panning; keep front/back and elevation out of the pan, and use the camera as the acoustic listener.
+- Apply line-of-sight obstruction for the elevated tablet camera; retain the propagation field for on-foot diffraction and door routing.
 - Verify walls, thick walls, open/shut doors, corners and fallback behaviour outside the propagation field.
-- Test headphone and stereo fallback behaviour.
-**Acceptance:** directional test scene produces correct perceived direction; occlusion changes correctly with listener height and geometry; movement remains stable.
+- Test stereo output across headphones and speakers.
+**Acceptance:** directional test scene produces correct left/right direction; occlusion changes correctly with listener height and geometry; movement remains stable.
 
 ### AU-05 — Mixing and dynamics
 - Implement category buses, master controls, snapshots and ducking.
@@ -132,3 +133,9 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 - Added tests for handle cancellation, cleanup, priority stealing, drop behaviour, bounded tail retention, UI playback, managed loops/completion callbacks and auxiliary-node cleanup.
 
 **Verification:** automated tests and browser stress/listening checks are pending CI and manual validation. No merge until checks pass.
+
+## Dense-combat voice allocation regression — 2026-11-17
+
+**Implementation:** Auralis reserves 16 of its 64 live voice slots for footsteps, leaving up to 48 for combat and other sounds. The pools remain bounded and use the existing deterministic priority/gain policy within each pool. This prevents a volley from exhausting all admission capacity before nearby footsteps arrive. One-shots and persistent streams now use camera-relative left/right stereo panning; distance and occlusion remain acoustic-model properties, not 3D panning.
+
+**Verification:** browser audio regression tests fill the combat pool, then confirm 16 footsteps still play and both pools reject overflow without exceeding the global cap; stereo pan tests cover left, right, center, diagonal and invalid directions. HDR masking of distant sounds remains intentional; browser listening under dense combat and stereo/headphone checks are still required.

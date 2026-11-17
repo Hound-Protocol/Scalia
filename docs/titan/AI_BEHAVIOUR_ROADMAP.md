@@ -8,6 +8,32 @@
 
 Build NPCs that behave like cautious, natural, tactically competent soldiers. They must act on incomplete information, preserve mission intent, coordinate with teammates, manage risk, and adapt when plans fail. They must never have omniscient battlefield knowledge.
 
+## Governing philosophy: understand, plan, brief, prepare, act
+
+NPCs are responsible agents, not scripts that start moving as soon as an order arrives. Treat every order as a mission to
+understand and plan from departure through return. The leader should establish the objective and constraints, assess
+what is known, compare feasible options, brief the commander, distribute subordinate tasks, and prepare the squad before
+execution. Routine briefings happen at the earliest safe convenience; immediate danger takes priority.
+
+For a relocation, including one several star systems away, the plan considers distance, route and surroundings,
+available transport, schedules, time zones and departure margin, food, ammunition, fuel, equipment, weapon readiness,
+fatigue, and whether another squad can travel or support the mission. At base, leaders may use an available tablet or
+laptop to research a later transport when the current schedule is missed. They assemble only resources and equipment
+that actually exist and are accessible, identify shortfalls and risks, present the proposed itinerary and
+contingencies to the commander, then prepare and depart on time. For example, a plan might set a 06:00 local wake-up
+and a 30-minute boarding margin; those are schedule-derived decisions, not universal hard-coded timers. A threat
+report on one route segment raises caution for that segment; it does not grant knowledge of unseen enemies or make
+the whole route equally dangerous.
+
+The same cycle applies at smaller scales. Before storming a house, a leader moves the squad to a sensible staging area,
+scouts from an appropriate vantage, and uses only available tools such as binoculars or a carried drone. The leader
+records observed windows, entrances, sight lines and uncertainty, assigns each soldier a clear role, stages support,
+and states contingencies before the assault. The plan must reflect what the squad could actually observe and carry.
+
+Plans are commitments with reasons, not scripts. New observations, schedule changes, lost transport, casualties,
+resource shortfalls or failed routes trigger reassessment. Allied and hostile NPCs use the same reasoning process;
+their orders, information, resources and doctrine produce different plans.
+
 ## Design principles
 
 1. **Survival before obedience:** immediate danger may interrupt an order; it does not erase the order.
@@ -18,6 +44,10 @@ Build NPCs that behave like cautious, natural, tactically competent soldiers. Th
 6. **Adaptation:** failed routes, lost contacts, casualties and changing force balance trigger reassessment.
 7. **Disciplined aggression:** advancing or firing is a decision, not the default response to contact.
 8. **Determinism:** all decision ordering, scoring, tie-breaking and state transitions remain deterministic and replay-safe.
+9. **Plan before action:** check feasibility, dependencies and readiness before committing people and resources.
+10. **Brief and coordinate:** leaders make the plan legible to the commander and assign specific responsibilities.
+11. **End-to-end intent:** plan the return and recovery as well as reaching the objective; adapt execution without
+    silently discarding the mission.
 
 ## Target decision pipeline
 
