@@ -542,3 +542,7 @@ The code-level starting points were revalidated on `main`; the AI-00 gate is sat
 - **Authoritative fire gating (`battle.rs`):** `Battle` obeys `Soldier::may_fire` directly without silent close-range overrides outside `Battle::think` (`TakeCover` grants self-defense fire explicitly when `target_close`).
 - **Save compatibility (`save.rs`):** Incremented `SAVE_VERSION` from `12` to `13`; added explicit version 13 round-trip and version 12 refusal regression coverage alongside casualty-aid resumption, stale-order invalidation, nested survival interrupts, and exposed `BreakContact` tests.
 - **Verification status & limitation:** This environment lacks `cargo`/`rustc`, so Rust compilation and workspace tests could **not** execute locally (`node --test web/tests/*.mjs` passed 27/27 prior to Rust edits). Run `cargo test --workspace` and `bash scripts/check.sh` on a local Rust toolchain or GitHub Actions `Verify` before merge.
+
+## Design References
+
+- **Building the AI of F.E.A.R. with Goal Oriented Action Planning | AI 101** (`https://www.youtube.com/watch?v=PaOLBOuyswI`) — Reference for decoupling tactical AI planning (preconditions, effects, and dynamic replanning when world state changes) from a compact execution layer (`Goto`, `Animate`, and `UseSmartObject` smart-object interactions).

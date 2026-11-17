@@ -166,3 +166,7 @@ Scalia renders thousands of soldiers across galactic, orbital, and planetary eng
 3. **Phase 3 (Casualties and Morale):** Implement `CAS-01` through `CAS-05` and `MOR-01` wired directly to `scalia-ai` wound and readiness states.
 4. **Phase 4 (Weapons and Command Expansion):** Implement `WPN-01` through `WPN-04` (sidearms, LMGs, launchers) and `CMD-01` through `CMD-03` (expanded signals and low-stance PDA).
 5. **Phase 5 (Galactic Scale LOD):** Implement `LOD-01` and `LOD-02` validated against `battle_bench` at 1,000+ active combatants.
+
+## Design References
+
+- **Building the AI of F.E.A.R. with Goal Oriented Action Planning | AI 101** (`https://www.youtube.com/watch?v=PaOLBOuyswI`) — Reference for decoupling tactical AI planning (preconditions, effects, and dynamic replanning when world state changes) from a compact execution layer (`Goto`, `Animate`, and `UseSmartObject` smart-object interactions).
