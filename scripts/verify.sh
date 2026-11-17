@@ -7,7 +7,7 @@ echo "== release metadata tests"
 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
 echo "== browser audio routing and crosshair regression tests"
-node --test web/tests/audio.test.mjs web/tests/crosshair.test.mjs web/tests/diagnostics.test.mjs
+node --test web/tests/audio.test.mjs web/tests/crosshair.test.mjs web/tests/diagnostics.test.mjs web/tests/errors.test.mjs
 
 echo "== cargo test --workspace (debug)"
 cargo test --workspace -q

@@ -8,6 +8,11 @@
 // session's log survives a reload. Read it with the console's `log` command or `scaliaLog()`.
 const LOG_KEY = 'scalia.log', LOG_MAX = 200, SAVE_MS = 5000;
 
+export function isFatalError(e) {
+  const message = e && e.message ? e.message : String(e);
+  return message.startsWith('GPU_FATAL:') || e instanceof WebAssembly.RuntimeError || /unreachable|memory access out of bounds/i.test(message);
+}
+
 export function createErrors(version) {
   const recent = [];
   let log = [];
@@ -90,7 +95,7 @@ export function createErrors(version) {
     // After a crash, every later call into the dead engine fails with "recursive use": noise, not news.
     if (crashed) return;
     // A dead WebAssembly module (panic, out of memory) cannot recover: crash screen.
-    if (e instanceof WebAssembly.RuntimeError || /unreachable|memory access out of bounds/i.test(String(e && e.message))) {
+    if (isFatalError(e)) {
       crash(where, e);
       return;
     }
