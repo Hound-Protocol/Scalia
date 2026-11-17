@@ -11,11 +11,16 @@ use crate::battle::{
     Act, Battle, Cue, Event, Gait, Stance, Task, BODY_MM, DIRS_24, SPACING_MM,
     CONTACT_BUILDING_POLICY, CONTACT_COMBAT_POLICY, CONTACT_RECENT_POLICY, CONTACT_TACTICAL_POLICY,
 };
-use crate::goap::{self, Action, Goal, Limits, State};
+pub use crate::building_plan::{choose, Method, Situation};
+use crate::building_plan::{
+    choose_entry, facts, EntryOption, AT, BRIEFED, CLEARED, HOLDING, INSIDE, PIED, STACKED,
+};
+use crate::building_plan::plan_from;
+use crate::goap::State;
 use crate::sight::{isqrt, Point};
 use crate::tactics::{Building, Height, STACK_GAP_MM};
 use scalia_core::killhouse::Killhouse;
-use scalia_core::nav::{Prop, PropKind};
+use scalia_core::nav::{find_path, Prop, PropKind};
 
 /// The commander's intent for a squad.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -99,126 +104,8 @@ pub const SECURE_MM: i64 = 10_000;
 /// Close enough to the spot to count as there when he cannot get onto it (it is taken or blocked).
 const ARRIVE_NEAR_MM: i64 = 4_500;
 
-/// One step of a building assault.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Method {
-    /// Before the assault, out of contact: the squad kneels in a half circle in front of its leader and he
-    /// goes through the plan, man by man (positions, roles, how they will take it).
-    Brief,
-    Approach,
-    Drone,
-    Stack,
-    /// Slicing the pie: from the stack the point man steps out in an arc in front of the door, a slice at a
-    /// time, rifle on the room, seeing it bit by bit; his number two covers from the stack.
-    Pie,
-    Grenade,
-    Storm,
-    SlowEntry,
-    Clear,
-    Consolidate,
-}
-
-impl Method {
-    pub fn name(self) -> &'static str {
-        match self {
-            Method::Approach => "approach",
-            Method::Drone => "drone",
-            Method::Stack => "stack",
-            Method::Grenade => "grenade",
-            Method::Storm => "storm",
-            Method::SlowEntry => "slow entry",
-            Method::Clear => "clear",
-            Method::Consolidate => "consolidate",
-            Method::Pie => "pie",
-            Method::Brief => "briefing",
-        }
-    }
-}
-
-/// What the leader knows when he plans.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct Situation {
-    /// We know what is inside (a drone pass, or contacts in the building).
-    pub intel: bool,
-    /// Someone is known to be in the room behind the entry door.
-    pub enemy_in_entry: bool,
-    pub have_drone: bool,
-    pub have_grenade: bool,
-    /// Our men able to fight.
-    pub strength: i64,
-    /// Enemies known to be inside.
-    pub enemies_known: i64,
-    /// Out of contact: nobody under fire, no enemy seen lately (time for a briefing).
-    pub quiet: bool,
-}
-
-const AT: u32 = 0;
-const INTEL: u32 = 1;
-const ENTRY_HOT: u32 = 2;
-const STACKED: u32 = 3;
-const INSIDE: u32 = 4;
-const CLEARED: u32 = 5;
-const HOLDING: u32 = 6;
-/// The entry room has been looked into from outside (pied).
-const PIED: u32 = 7;
-/// The squad has been briefed.
-const BRIEFED: u32 = 8;
-const QUIET: u32 = 9;
 const BRIEF_GATHER_MS: i64 = 4_000;
 const BRIEF_PER_MAN_MS: i64 = 1_800;
-
-/// The steps from `start` (facts already true) to holding the building, cheapest first.
-fn plan_from(s: &Situation, start: State) -> Vec<Method> {
-    let ratio = s.strength / s.enemies_known.max(1);
-    let storm_cost = if ratio >= 3 { 2 } else if ratio >= 2 { 3 } else { 7 };
-    let mut acts: Vec<(Action, Method)> = vec![
-        // Briefed first when there is time (quiet): cheaper overall than going in without one.
-        (Action::new("brief", 1).needs(QUIET, true).needs(BRIEFED, false).needs(AT, false).sets(BRIEFED, true), Method::Brief),
-        (Action::new("approach", 2).needs(BRIEFED, true).sets(AT, true), Method::Approach),
-        (Action::new("approach unbriefed", 4).needs(BRIEFED, false).sets(AT, true), Method::Approach),
-        (Action::new("stack", 1).needs(AT, true).sets(STACKED, true), Method::Stack),
-        // Nobody goes through a door without looking through it first: pie it from outside (anyone seen in the
-        // entry room makes it hot, and the leader re-plans).
-        (Action::new("pie", 1).needs(STACKED, true).needs(PIED, false).sets(PIED, true), Method::Pie),
-        (Action::new("storm", storm_cost).needs(PIED, true).needs(INTEL, true).needs(ENTRY_HOT, false).sets(INSIDE, true), Method::Storm),
-        (Action::new("slow entry", 6).needs(PIED, true).needs(ENTRY_HOT, false).sets(INSIDE, true), Method::SlowEntry),
-        // Going in slowly on top of someone waiting in the entry room is the worst way in.
-        (Action::new("slow entry, hot", 10).needs(PIED, true).needs(ENTRY_HOT, true).sets(INSIDE, true), Method::SlowEntry),
-        (Action::new("clear", 3).needs(INSIDE, true).sets(CLEARED, true), Method::Clear),
-        (Action::new("consolidate", 1).needs(CLEARED, true).sets(HOLDING, true), Method::Consolidate),
-    ];
-    if s.have_drone {
-        acts.push((Action::new("drone", 2).needs(AT, true).needs(STACKED, false).needs(INTEL, false).sets(INTEL, true), Method::Drone));
-    }
-    if s.have_grenade {
-        acts.push((Action::new("grenade", 1).needs(STACKED, true).needs(ENTRY_HOT, true).sets(ENTRY_HOT, false), Method::Grenade));
-    }
-    let actions: Vec<Action> = acts.iter().map(|a| a.0.clone()).collect();
-    let goal = Goal::new().want(HOLDING, true);
-    match goap::plan(start, goal, &actions, Limits::default()) {
-        Some(p) => p.actions.iter().map(|&i| acts[i].1).collect(),
-        None => vec![Method::Approach, Method::Stack, Method::Pie, Method::SlowEntry, Method::Clear, Method::Consolidate],
-    }
-}
-
-fn facts(s: &Situation) -> State {
-    let mut v = 0u64;
-    if s.intel {
-        v |= 1 << INTEL;
-    }
-    if s.enemy_in_entry {
-        v |= 1 << ENTRY_HOT;
-    }
-    if s.quiet {
-        v |= 1 << QUIET;
-    }
-    State(v)
-}
-
-/// The leader's plan for taking a building in this situation, from the start.
-pub fn choose(s: &Situation) -> Vec<Method> {
-    plan_from(s, facts(s))
-}
 
 /// A squad leader's working state.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -414,6 +301,7 @@ impl Battle {
                     s.interrupt = None;
                 }
             }
+
         }
     }
 
@@ -821,6 +709,50 @@ impl Battle {
         let n = ms.len().max(1) as i64;
         let (sx, sy) = ms.iter().fold((0, 0), |a, &i| (a.0 + self.soldiers[i].pos.0, a.1 + self.soldiers[i].pos.1));
         (sx / n, sy / n)
+    }
+
+    fn entry_stack(&self, stack: &[(i64, i64)], door: scalia_core::killhouse::Door) -> Vec<(i64, i64)> {
+        let walk = |p: &(i64, i64)| self.nav().is_none_or(|n| n.walkable_at(p.0, p.1, 0));
+        if stack.iter().all(walk) {
+            return stack.to_vec();
+        }
+        let flipped: Vec<(i64, i64)> = stack.iter().map(|&(x, y)| {
+            if door.along_x { (2 * door.x_mm - x, y) } else { (x, 2 * door.y_mm - y) }
+        }).collect();
+        if flipped.iter().all(walk) { flipped } else { stack.to_vec() }
+    }
+
+    fn select_entry(&self, squad: usize, ms: &[usize], k: &Killhouse, plan: &Building) -> usize {
+        let from = self.centre(ms);
+        let nav = self.nav();
+        let mut options = Vec::new();
+        for (index, entry) in plan.entries.iter().enumerate() {
+            let door = k.doors[entry.door];
+            let stack = self.entry_stack(&entry.stack, door);
+            if stack.len() < 4 || nav.is_some_and(|n| stack.iter().any(|p| !n.walkable_at(p.0, p.1, 0))) {
+                continue;
+            }
+            let route_cost_mm = match nav {
+                Some(n) => {
+                    let Some(path) = find_path(n, from, stack[3], BODY_MM) else { continue };
+                    path.windows(2).map(|p| dist(p[0], p[1])).sum()
+                }
+                None => dist(from, stack[3]),
+            };
+            let Some(&entry_room) = plan.clear_order(entry.door).first() else { continue };
+            let reported_threat = self.contacts[squad].iter().filter(|c| {
+                c.usable_at(self.time_ms, CONTACT_BUILDING_POLICY)
+                    && self.soldiers[c.enemy].alive()
+                    && !self.soldiers[c.enemy].down()
+                    && k.room_at(c.pos.0, c.pos.1) == Some(entry_room)
+            }).map(|c| c.confidence as i64).sum();
+            options.push(EntryOption { index, route_cost_mm, reported_threat });
+        }
+        choose_entry(&options).unwrap_or_else(|| {
+            plan.entries.iter().enumerate().min_by_key(|(_, entry)| {
+                dist(entry.stack[0], from)
+            }).map(|(index, _)| index).expect("a building has an entry")
+        })
     }
 
     /// What the squad's leader knows when he plans.
@@ -1697,39 +1629,30 @@ impl Battle {
 
     fn lead_capture(&mut self, squad: usize) {
         // Cues are set afresh by the step being done.
-        for i in self.members(squad) {
+        let ms = self.members(squad);
+        for &i in &ms {
             self.soldiers[i].cue = Cue::None;
         }
         if self.brains[squad].holding {
             return;
         }
+        let (k, plan) = self.building.clone().expect("a building");
+        let (k, plan) = (&k, &plan);
+        if self.brains[squad].entry.is_none() {
+            let entry = self.select_entry(squad, &ms, k, plan);
+            self.brains[squad].entry = Some(entry);
+        }
         if self.brains[squad].plan.is_empty() {
             self.replan(squad);
         }
         self.brains[squad].phase_ms += LEAD_MS;
-        let ms = self.members(squad);
-        let (k, plan) = self.building.clone().expect("a building");
-        let (k, plan) = (&k, &plan);
         let kc = (k.origin.0 + 10_000, k.origin.1 + 7_000);
-        // Entry: the outside door nearest the squad.
-        if self.brains[squad].entry.is_none() {
-            let c = self.centre(&ms);
-            let e = (0..plan.entries.len()).min_by_key(|&e| dist(plan.entries[e].stack[0], c)).expect("an entry");
-            self.brains[squad].entry = Some(e);
-        }
         let e = self.brains[squad].entry.expect("chosen");
         let door = plan.entries[e].door;
         let d = k.doors[door];
         // The stack goes on whichever side of the door has wall to hug: mirrored if the planned side runs
         // past the corner (unwalkable, or out round the end of the wall).
-        let mut stack = plan.entries[e].stack.clone();
-        let walk = |p: &(i64, i64)| self.nav().is_none_or(|n| n.walkable_at(p.0, p.1, 0));
-        if !stack.iter().all(walk) {
-            let flip: Vec<(i64, i64)> = stack.iter().map(|&(x, y)| if d.along_x { (2 * d.x_mm - x, y) } else { (x, 2 * d.y_mm - y) }).collect();
-            if flip.iter().all(walk) {
-                stack = flip;
-            }
-        }
+        let stack = self.entry_stack(&plan.entries[e].stack, d);
         let entry_room = plan.clear_order(door)[0];
         let step = self.brains[squad].plan.first().copied();
         let phase_ms = self.brains[squad].phase_ms;
@@ -2145,5 +2068,80 @@ impl Battle {
                 self.log.push(Event::Order { squad, step: "holding" });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sight::SightGrid;
+    use crate::tactics::CoverMap;
+    use scalia_core::nav::NavGrid;
+
+    #[test]
+    fn building_entry_choice_uses_only_current_known_room_contacts() {
+        let k = Killhouse::new(80_000, 62_000);
+        let props = k.props();
+        let mut nav = NavGrid::new(40_000, 20_000, 200, 160);
+        nav.rebuild(&props);
+        let sight = SightGrid::build(40_000, 20_000, 400, 320, &props);
+        let cover = CoverMap::build(&props, &nav);
+        let defender_at = (94_000, 65_000);
+        let mut battle = Battle::with_map(
+            nav,
+            sight,
+            cover,
+            vec![
+                crate::battle::Soldier::new(0, 0, (93_000, 55_000), Stance::Stand),
+                crate::battle::Soldier::new(1, 1, defender_at, Stance::Stand),
+            ],
+            1,
+        );
+        battle.set_building(k.clone());
+        let plan = Building::of(&k);
+        let members = [0];
+        let nearest = battle.select_entry(0, &members, &k, &plan);
+        let occupied_room = k.room_at(defender_at.0, defender_at.1).unwrap();
+        assert_eq!(plan.clear_order(plan.entries[nearest].door)[0], occupied_room);
+
+        battle.report_pub(0, 1, defender_at, 900);
+        let informed = battle.select_entry(0, &members, &k, &plan);
+        assert_ne!(informed, nearest, "a valid room contact should change the preferred entry");
+
+        battle.time_ms = 30_001;
+        let stale = battle.select_entry(0, &members, &k, &plan);
+        assert_eq!(stale, nearest, "an expired contact must not affect entry choice");
+    }
+
+    #[test]
+    fn building_entry_choice_skips_an_unwalkable_stack_when_an_alternative_exists() {
+        let k = Killhouse::new(80_000, 62_000);
+        let plan = Building::of(&k);
+        let start = (93_000, 55_000);
+        let nearest = plan.entries.iter().enumerate().min_by_key(|(_, entry)| dist(entry.stack[0], start)).unwrap().0;
+        let entry = &plan.entries[nearest];
+        let door = k.doors[entry.door];
+        let flipped: Vec<(i64, i64)> = entry.stack.iter().map(|&(x, y)| {
+            if door.along_x { (2 * door.x_mm - x, y) } else { (x, 2 * door.y_mm - y) }
+        }).collect();
+        let mut props = k.props();
+        for &(x_mm, y_mm) in entry.stack.iter().chain(&flipped) {
+            props.push(Prop { kind: PropKind::Crate { size_mm: 1_000 }, x_mm, y_mm, quarter_turns: 0 });
+        }
+        let mut nav = NavGrid::new(40_000, 20_000, 200, 160);
+        nav.rebuild(&props);
+        let sight = SightGrid::build(40_000, 20_000, 400, 320, &props);
+        let cover = CoverMap::build(&props, &nav);
+        let mut battle = Battle::with_map(
+            nav,
+            sight,
+            cover,
+            vec![crate::battle::Soldier::new(0, 0, start, Stance::Stand)],
+            1,
+        );
+        battle.set_building(k.clone());
+
+        let selected = battle.select_entry(0, &[0], &k, &plan);
+        assert_ne!(selected, nearest, "an entry without a usable stack is not a candidate");
     }
 }
