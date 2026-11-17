@@ -153,9 +153,9 @@ Personality/traits may influence risk tolerance and reactions later, but must ne
 - Status: Active
 - As of: 2026-11-17
 - Canonical source: `docs/titan/AI_BEHAVIOUR_ROADMAP.md`
-- Implementation: `work/AI-03-building-decision-options-2026-11-17` / PR not opened / baseline `5e0951040247702a158961935fafe731971019cf`
-- Verification: `bash scripts/check.sh` — all 9 steps passed; `hash_battle` repeated twice with `594771974983721861` (intentional building-entry behavior change).
-- Next action: Commit the verified implementation and open the review PR.
+- Implementation: `work/AI-03-building-decision-options-2026-11-17` / PR #62 / commit `99372c7296f0b37543b354e46acb06ab967e2f60`
+- Verification: `bash scripts/check.sh` — all 9 steps passed; `hash_battle` repeated twice with `594771974983721861` (intentional building-entry behavior change). GitHub CI on PR #62 is pending.
+- Next action: Confirm PR #62 CI passes, then merge.
 
 Keep the existing Battle executor as an adapter while moving building-plan choices into deterministic, composable option providers. Add a first situation-driven choice by selecting a reachable entrance using route cost and currently valid, confidence-weighted contacts in the entry room.
 
