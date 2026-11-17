@@ -51,10 +51,10 @@ The Rust acoustic model also uses the AI sight grid as its geometry source. This
 ## Development roadmap
 
 1. **Ownership and routing:** unify every sound source under one graph and lifecycle.
-2. **Voice system:** explicit voice handles, priorities, categories, pooling, stealing and cleanup.
+2. **Voice system:** explicit voice handles, priorities, categories, pooling, stealing and cleanup. Keep bounded capacity for Foley so dense combat cannot consume every live voice.
 3. **Acoustic correctness:** test distance curves, occlusion edge cases, doors/windows, reflections, air absorption and listener movement.
 4. **Mixing:** master, music, ambience, weapons, Foley, UI and radio buses; ducking and snapshots.
-5. **Spatial audio:** stable 3D positioning, orientation, HRTF behaviour and zoom/listener scaling.
+5. **Spatial audio:** stable camera-relative 2D stereo panning; the camera is the listener, while distance, occlusion and zoom are handled by the acoustic model.
 6. **Performance:** profile dense firefights, cap expensive voices/effects, avoid per-frame graph churn.
 7. **Tooling:** diagnostics for active voices, routing, peak levels, clipping, context state and acoustic path values.
 8. **Quality:** browser/device compatibility, accessibility, settings persistence and listening-based tuning.

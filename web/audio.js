@@ -2,7 +2,7 @@
 // (gain, low-pass, how much is heard as reverb, where it is around his head) and what space he is in; this
 // graph applies it:
 //
-//   voice: source -> gain -> high-pass -> low-pass -+-> HRTF panner -+-> dry -> mix
+//   voice: source -> gain -> high-pass -> low-pass -+-> stereo panner -+-> dry -> mix
 //                                                   |                +-> the reverb of the room it is made in
 //                                                   |                    (small room, large room, corridor)
 //                                                   +-> echoes off what stands around it (map geometry):
@@ -10,9 +10,10 @@
 //   In the open with nothing near, a shot is just the crack: nothing to bounce off, no echo.
 //   mix -> tablet band-pass (200 Hz - 10 kHz while the PDA is up, open otherwise) -> limiter -> speakers
 //
-// Built for headphones (HRTF). Impulse responses are generated here, nothing to download.
+// World direction is panned left/right in stereo; distance and occlusion come from the acoustic model.
 
 const VOICES = 64;
+const STEP_VOICES = 16;
 const MAX_TAILS = 64;
 // HDR audio (as Frostbite): every sound has a logical loudness (dB at the source); what reaches the ear is that
 // plus the acoustics' gain. The loudest thing heard lately sets a window: anything more than WINDOW_DB below it
@@ -22,14 +23,12 @@ const HDR = { hifi: 60, wartapes: 25 };
 const QUIET_DB = 20, RELEASE_DB_S = 14, PEAK_FLOOR_DB = 40;
 const PRIORITY = { blast: 4, shot: 3, ui: 2, radio: 2, step: 1 };
 
-// Convert the camera-relative ground vector into the listener's HRTF coordinate frame.
-// +x is right, -z is ahead, +z is behind, and -y is below the listener.
-export function spatialPosition(rx, ry, below = 0) {
+// Pan a camera-relative ground vector across stereo. Front, rear and elevation stay centered.
+export function stereoPan(rx, ry) {
   const x = Number.isFinite(rx) ? rx : 0;
   const y = Number.isFinite(ry) ? ry : 0;
-  const by = (Number.isFinite(below) ? Math.max(0, below) : 0) * 0.35;
-  const len = Math.hypot(x, y, by);
-  return len < 0.3 ? [0, 0, -1] : [x / len, -by / len, -y / len];
+  const len = Math.hypot(x, y);
+  return len < 0.3 ? 0 : x / len;
 }
 
 // A media element may have exactly one MediaElementAudioSourceNode for its lifetime.
@@ -107,10 +106,13 @@ export class AudioEngine {
     this.active = this.active.filter((voice) => !voice.done && voice.state !== 'stopping');
   }
 
-  _admitVoice(priority, gain) {
+  _admitVoice(priority, gain, category = 'world') {
     this._pruneActive();
-    if (this.active.length < VOICES) return true;
-    const worst = this.active.reduce((a, b) => {
+    const steps = category === 'step';
+    const pool = this.active.filter((voice) => (voice.category === 'step') === steps);
+    const limit = steps ? STEP_VOICES : VOICES - STEP_VOICES;
+    if (pool.length < limit) return true;
+    const worst = pool.reduce((a, b) => {
       if (a.pri !== b.pri) return a.pri < b.pri ? a : b;
       if (a.gain !== b.gain) return a.gain < b.gain ? a : b;
       return a.id < b.id ? a : b;
@@ -292,7 +294,7 @@ export class AudioEngine {
     loop = false, loopStart = 0, loopEnd = 0, fadeIn = 0, onended = null } = {}) {
     const c = this.ensure(); if (!c || !buffer) return null;
     const safeGain = Number.isFinite(gain) ? Math.max(0, Math.min(4, gain)) : 1;
-    if (!this._admitVoice(priority, safeGain)) return null;
+    if (!this._admitVoice(priority, safeGain, category)) return null;
     const source = c.createBufferSource();
     source.buffer = buffer;
     source.loop = Boolean(loop);
@@ -506,7 +508,7 @@ export class AudioEngine {
     const transmissionMid = eq('peaking', 1500, 0.65);
     const transmissionHigh = eq('highshelf', 5000);
     const hpf = eq('highpass', 30, 0.6), lp = eq('lowpass', 20000, 0.5);
-    const p = c.createPanner(); p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0;
+    const p = c.createStereoPanner();
     const dry = c.createGain();
     src.connect(vol).connect(bass).connect(treble).connect(highs).connect(g).connect(transmissionMid).connect(transmissionHigh).connect(hpf).connect(lp).connect(p).connect(dry).connect(this.world);
     const sends = [this.rev.small, this.rev.large, this.rev.corridor].map((bus) => { const s = c.createGain(); s.gain.value = 0; p.connect(s).connect(bus); return s; });
@@ -526,8 +528,7 @@ export class AudioEngine {
         glide(transmissionHigh.gain, -Math.min(48, Math.max(0, highDb - lowDb)));
         glide(lp.frequency, Math.max(200, Math.min(20000, lowpass || 20000)));
         glide(hpf.frequency, Math.min(90, 30 + dist * 0.3));
-        const [x, y, z] = spatialPosition(rx, ry, below);
-        glide(p.positionX, x); glide(p.positionY, y); glide(p.positionZ, z);
+        glide(p.pan, stereoPan(rx, ry));
         glide(dry.gain, 1);
         const roomy = Math.max(0, Math.min(1, (9 - size) / 5)), c2 = cor * enc;
         [enc * roomy * (1 - c2), enc * (1 - roomy) * (1 - c2), c2].forEach((w, k) => glide(sends[k].gain, Math.min(0.35, w * room)));
@@ -567,7 +568,7 @@ export class AudioEngine {
     o.gain *= Math.pow(10, -under * 0.5 / 20);
     const buf = this.buffer(url); if (!buf) return;
     const pri = PRIORITY[o.kind] || 1;
-    if (!this._admitVoice(pri, o.gain)) return null;
+    if (!this._admitVoice(pri, o.gain, o.kind)) return null;
     // Gunfire inside (Battlefield 3 / bodycam): it overwhelms. Close shots crunch (saturated), the room rings
     // hard and keeps ringing as the fire goes on, the walls slap the crack straight back, everything else is
     // shoved aside for a moment, and close by the ears ring and dull.
@@ -593,12 +594,9 @@ export class AudioEngine {
     const hpf = own(c.createBiquadFilter()); hpf.type = 'highpass'; hpf.frequency.value = Math.min(90, 30 + o.dist * 0.3); hpf.Q.value = 0.6;
     // Distant fire is a boom more than a crack: the low end comes up as the top goes.
     const boom = own(c.createBiquadFilter()); boom.type = 'lowshelf'; boom.frequency.value = 160; boom.gain.value = gun ? 7 * o.far : 0;
-    const p = own(c.createPanner());
-    p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0; p.refDistance = 1;
-    // Around the head (the camera): right is +x, ahead is -z, below is -y. Below counts for less than the
-    // ground direction, so left and right stay clear from high up.
-    const [x, y, z] = spatialPosition(o.rx, o.ry, o.below);
-    p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z;
+    const p = own(c.createStereoPanner());
+    // The camera is the listener: ground-plane bearing controls left/right; distance is handled acoustically.
+    p.pan.value = stereoPan(o.rx, o.ry);
     // The direct sound: far off it is quieter, thinner and duller, never drowned in reverb.
     const dry = own(c.createGain()); dry.gain.value = 1;
     const out = own(c.createGain());
