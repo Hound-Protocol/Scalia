@@ -130,6 +130,9 @@ fn battle_save_version_13_round_trips_soldier_intents_and_refuses_v12() {
 
     let mut v12 = saved;
     v12[4..8].copy_from_slice(&12u32.to_le_bytes());
-    let err = Battle::load(&v12).unwrap_err();
+    let err = match Battle::load(&v12) {
+        Ok(_) => panic!("version 12 save must be rejected"),
+        Err(err) => err,
+    };
     assert!(err.contains("12") && err.contains("13"), "unexpected error: {err}");
 }
