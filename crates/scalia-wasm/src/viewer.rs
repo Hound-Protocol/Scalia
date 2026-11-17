@@ -20,6 +20,7 @@ fn camera_listener_position(target: Vec3, view_height: f32, origin: (f64, f64)) 
 fn sound_occlusion(
     sight: &scalia_ai::sight::SightGrid,
     field: Option<&scalia_audio::Field>,
+    roofs: &[scalia_world::AcousticRoof],
     ear: (f32, f32),
     source: (f32, f32),
     listener_height: f32,
@@ -40,13 +41,13 @@ fn sound_occlusion(
             y: (source.1 * 1000.0) as i64,
             z: 1_400,
         };
-        let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
+        let walls = scalia_audio::walls_between(sight.geometry(), (ear.0, ear.1, height), (source.0, source.1, 1.4));
         // Doors are stored separately from the static sight grid. A shut/locked leaf
         // attenuates sound, but less than masonry; open/breached doors add no loss.
         let doors = sight.doors.iter().filter(|door| door.blocks(from, to)).count();
         let masonry = walls as f32;
         let wood = doors as f32;
-        return scalia_audio::Occlusion {
+        let direct = scalia_audio::Occlusion {
             wall_db: masonry * 40.0 + wood * 18.0,
             bend_db: 0.0,
             detour_m: 0.0,
@@ -56,18 +57,20 @@ fn sound_occlusion(
             mid_db: masonry * 40.0 + wood * 18.0,
             high_db: masonry * 52.0 + wood * 30.0,
         };
+        return scalia_audio::with_acoustic_routes(sight.geometry(), &sight.doors, roofs, ear, source, direct);
     }
     if let Some(occlusion) = field.and_then(|field| field.at(source)) {
-        return occlusion;
+        return scalia_audio::with_acoustic_routes(sight.geometry(), &sight.doors, roofs, ear, source, occlusion);
     }
-    let walls = scalia_audio::walls_between(sight, (ear.0, ear.1, height), (source.0, source.1, 1.4));
+    let walls = scalia_audio::walls_between(sight.geometry(), (ear.0, ear.1, height), (source.0, source.1, 1.4));
     let wall_db = walls as f32 * 40.0;
-    scalia_audio::Occlusion {
+    let direct = scalia_audio::Occlusion {
         wall_db, bend_db: 0.0, detour_m: 0.0,
         low_db: walls as f32 * 28.0,
         mid_db: wall_db,
         high_db: walls as f32 * 52.0,
-    }
+    };
+    scalia_audio::with_acoustic_routes(sight.geometry(), &sight.doors, roofs, ear, source, direct)
 }
 use scalia_core::derive::{derive_visible, Derived, Phase, ViewBox};
 use scalia_core::flight::{flight_pos, plan_flight, FlightPlan, DEMO_PEAK_SPEED_MM_S};
@@ -238,6 +241,7 @@ pub struct Viewer {
     origin: (f64, f64),
     /// The testing ground: its props, nav grid, level height (metres), and the squads walking as agents in it.
     base_props: Vec<Prop>,
+    audio_roofs: Vec<scalia_world::AcousticRoof>,
     /// Which of the field battle's doors are steel (the rest wood), in its door order.
     door_steel: Vec<bool>,
     base_grid: NavGrid,
@@ -443,6 +447,7 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         far_level: None,
         origin: (0.0, 0.0),
         base_props: base_props(),
+        audio_roofs: scalia_world::World::testing_ground().acoustic_roofs(),
         door_steel: crate::ground::door_steel(),
         base_grid: NavGrid::new((BASE_LO * 1000.0) as i64, (BASE_LO * 1000.0) as i64, ((BASE_HI - BASE_LO) * 2.0) as usize, ((BASE_HI - BASE_LO) * 2.0) as usize),
         base_h: 0.0,
@@ -889,6 +894,11 @@ impl Viewer {
         self.door_steel = a.battle.doors.iter().map(|d| steel.contains(&d.at)).collect();
         // The ground drawn and walked on is the battle's map (the compound comes and goes with the scenario).
         self.base_props = a.battle.map_spec().map(|m| m.props()).unwrap_or_else(base_props);
+        self.audio_roofs = if c.is_some() {
+            Vec::new()
+        } else {
+            scalia_world::World::testing_ground().acoustic_roofs()
+        };
         self.base_grid.rebuild(&self.base_props);
         self.audio_spaces.clear();
         self.audio_reflectors.clear();
@@ -1027,7 +1037,7 @@ impl Viewer {
         if let Some(r) = self.audio_reflectors.get(&key) {
             return r.clone();
         }
-        let r = self.assault.as_ref().map_or(Vec::new(), |a| scalia_audio::reflectors(&a.battle.sight, (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
+        let r = self.assault.as_ref().map_or(Vec::new(), |a| scalia_audio::reflectors(a.battle.sight.geometry(), (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
         if self.audio_reflectors.len() > 20_000 {
             self.audio_reflectors.clear();
         }
@@ -1046,7 +1056,7 @@ impl Viewer {
         if let Some(e) = self.audio_spaces.get(&key) {
             return *e;
         }
-        let env = self.assault.as_ref().map_or(open, |a| scalia_audio::listener_env(&a.battle.sight, (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
+        let env = self.assault.as_ref().map_or(open, |a| scalia_audio::listener_env(a.battle.sight.geometry(), (key.0 as f32 * 2.0 + 1.0, key.1 as f32 * 2.0 + 1.0)));
         if self.audio_spaces.len() > 20_000 {
             self.audio_spaces.clear();
         }
@@ -1139,6 +1149,7 @@ impl Viewer {
             sound_occlusion(
                 &a.battle.sight,
                 None,
+                &self.audio_roofs,
                 ear,
                 (sx, sy),
                 l.2,
@@ -1157,7 +1168,7 @@ impl Viewer {
         let echoes = scalia_audio::echoes(l, (sx, sy), &refl);
         // Right and ahead as the camera looks (ahead = up the screen, on the ground); below = the height.
         let (rx, ry) = (dx * r.x + dy * r.y, -dx * r.y + dy * r.x);
-        out.extend_from_slice(&[kind, loud, wait + dist / 343.0, gain, lowpass, wet_room, rx, ry, l.2, dist, walls, space.enclosure, space.size_m, space.corridor]);
+        out.extend_from_slice(&[kind, loud, wait + (dist + occ.detour_m) / 343.0, gain, lowpass, wet_room, rx, ry, l.2, dist, walls, space.enclosure, space.size_m, space.corridor]);
         for k in 0..4 {
             match echoes.get(k) {
                 Some(e) => out.extend_from_slice(&[e.delay_s, e.gain, (e.dir.0 * r.x + e.dir.1 * r.y).clamp(-1.0, 1.0)]),
@@ -4515,8 +4526,8 @@ mod audio_spatial_tests {
         let ear = (40.0, 50.0);
         let source = (60.0, 50.0);
 
-        let ground_listener = sound_occlusion(&sight, None, ear, source, 1.6, true);
-        let overhead_camera = sound_occlusion(&sight, None, ear, source, 19.2, true);
+        let ground_listener = sound_occlusion(&sight, None, &[], ear, source, 1.6, true);
+        let overhead_camera = sound_occlusion(&sight, None, &[], ear, source, 19.2, true);
 
         assert!(ground_listener.wall_db >= 40.0, "{ground_listener:?}");
         assert_eq!(overhead_camera, ground_listener, "camera zoom height must not lift the acoustic obstruction ray");
@@ -4528,7 +4539,7 @@ mod audio_spatial_tests {
         let mut sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[]);
         sight.doors = vec![Door::new((50_000, 50_000), false, 2_000, 2_100, DoorState::Closed)];
 
-        let shut = sound_occlusion(&sight, None, (40.0, 50.0), (60.0, 50.0), 19.2, true);
+        let shut = sound_occlusion(&sight, None, &[], (40.0, 50.0), (60.0, 50.0), 19.2, true);
         assert_eq!(shut.wall_db, 18.0, "{shut:?}");
         assert!(shut.high_cut_db() >= 22.0, "{shut:?}");
     }
@@ -4542,20 +4553,20 @@ mod audio_spatial_tests {
         let door = Door::new((50_000, 50_000), false, 2_000, 2_100, DoorState::Closed);
         sight.doors = vec![door];
 
-        let shut = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        let shut = sound_occlusion(&sight, None, &[], ear, source, 1.6, true);
         assert_eq!(shut.wall_db, 18.0, "{shut:?}");
         assert!(shut.gain() < 0.2, "{shut:?}");
 
         sight.doors[0].state = DoorState::Open;
-        let open = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        let open = sound_occlusion(&sight, None, &[], ear, source, 1.6, true);
         assert_eq!(open, scalia_audio::Occlusion::NONE, "{open:?}");
 
         sight.doors[0].state = DoorState::Locked;
-        let locked = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        let locked = sound_occlusion(&sight, None, &[], ear, source, 1.6, true);
         assert_eq!(locked.wall_db, 18.0, "{locked:?}");
 
         sight.doors[0].state = DoorState::Breached;
-        let breached = sound_occlusion(&sight, None, ear, source, 1.6, true);
+        let breached = sound_occlusion(&sight, None, &[], ear, source, 1.6, true);
         assert_eq!(breached, scalia_audio::Occlusion::NONE, "{breached:?}");
     }
 
@@ -4564,7 +4575,7 @@ mod audio_spatial_tests {
         use scalia_ai::doors::{Door, DoorState};
         let mut sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[]);
         sight.doors = vec![Door::new((50_000, 50_000), false, 2_000, 2_100, DoorState::Closed)];
-        let above = sound_occlusion(&sight, None, (40.0, 50.0), (60.0, 50.0), 4.0, true);
+        let above = sound_occlusion(&sight, None, &[], (40.0, 50.0), (60.0, 50.0), 4.0, true);
         assert_eq!(above, scalia_audio::Occlusion::NONE, "{above:?}");
     }
 
@@ -4579,9 +4590,34 @@ mod audio_spatial_tests {
         let sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[wall]);
         let ear = (40.0, 50.0);
         let source = (60.0, 50.0);
-        let camera = sound_occlusion(&sight, None, ear, source, 4.0, true);
+        let camera = sound_occlusion(&sight, None, &[], ear, source, 4.0, true);
         assert!(camera.wall_db >= 40.0, "{camera:?}");
     }
+
+    #[test]
+    fn roofless_walls_transmit_over_the_top_but_roofed_walls_do_not() {
+        let wall = Prop {
+            kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
+            x_mm: 50_000,
+            y_mm: 50_000,
+            quarter_turns: 1,
+        };
+        let sight = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[wall]);
+        let ear = (40.0, 50.0);
+        let source = (60.0, 50.0);
+        let roofless = sound_occlusion(&sight, None, &[], ear, source, 1.6, true);
+        assert_eq!(roofless.wall_db, 0.0, "{roofless:?}");
+        assert_eq!(roofless.low_db, 12.0, "{roofless:?}");
+
+        let roof = [scalia_world::AcousticRoof {
+            bounds: (39_000, 49_000, 61_000, 51_000),
+            height_mm: 3_900,
+        }];
+        let roofed = sound_occlusion(&sight, None, &roof, ear, source, 1.6, true);
+        assert!(roofed.wall_db >= 40.0, "{roofed:?}");
+        assert!(roofed.low_db > roofless.low_db, "{roofed:?} versus {roofless:?}");
+    }
+
     #[test]
     fn far_terrain_uses_one_height_field_across_lod_boundaries() {
         let planet = Planet::demo(42);

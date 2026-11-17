@@ -46,13 +46,13 @@ The Rust crate computes acoustic properties; it does not play audio. The browser
 
 **Target:** migrate world ambience and all other world sounds into Auralis, then remove the parallel graph once parity is verified. Do not simply silence routing errors or remove existing ambience.
 
-The Rust acoustic model also uses the AI sight grid as its geometry source. This coupling should be reviewed as world geometry evolves, without duplicating the working occlusion model.
+The tactical sight grid and Auralis now share the core prop-geometry raster and height-band rules. Auralis receives the shared grid plus battle door state; material-specific transmission and material preservation through battle map saves remain future work.
 
 ## Development roadmap
 
 1. **Ownership and routing:** unify every sound source under one graph and lifecycle.
 2. **Voice system:** explicit voice handles, priorities, categories, pooling, stealing and cleanup. Keep bounded capacity for Foley so dense combat cannot consume every live voice.
-3. **Acoustic correctness:** test distance curves, occlusion edge cases, doors/windows, reflections, air absorption and listener movement.
+3. **Acoustic correctness:** route sounds through open doorways and over walls only when the elevated path is clear and roofless; define roof footprints in world-map data and validate distance, occlusion, reflections, air absorption and listener movement.
 4. **Mixing:** master, music, ambience, weapons, Foley, UI and radio buses; ducking and snapshots.
 5. **Spatial audio:** stable camera-relative 2D stereo panning; the camera is the listener, while distance, occlusion and zoom are handled by the acoustic model.
 6. **Performance:** profile dense firefights, cap expensive voices/effects, avoid per-frame graph churn.

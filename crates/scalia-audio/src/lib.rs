@@ -1,17 +1,18 @@
 //! Pack Engine acoustics: how a sound reaches the listener through the world. It reads the map's solid geometry
-//! (the sight grid) and works out, for the listener, the space he is in (open field, street, room, corridor),
+//! (the shared prop-geometry grid) and works out, for the listener, the space he is in (open field, street, room, corridor),
 //! and for each sound, what the walls between, the distance and the air do to it. The browser's audio graph
 //! applies the result (gain, filters, reverb sends, 3D position); nothing here plays sound.
 //!
 //! Not part of the deterministic simulation: plain floating point.
 
-use scalia_ai::sight::{Point, SightGrid};
+use scalia_ai::sight::Point;
+use scalia_core::nav::PropGrid;
 
 /// Ear height (mm) the rays are cast at.
 const EAR_MM: i64 = 1_600;
 /// Height a sound travels at between source and listener (chest).
 const PATH_MM: i64 = 1_400;
-/// Step along a ray (mm): the sight grid's cell size.
+/// Step along a ray (mm): the shared geometry grid's cell size.
 const STEP_MM: f32 = 250.0;
 /// How far the listener's rays look for walls (m): beyond this it is open.
 const ENV_REACH_M: f32 = 30.0;
@@ -47,12 +48,12 @@ pub struct Path {
 }
 
 /// Where the first wall is along a ray from `from` (m) in direction `dir` (unit), within `max_m`.
-pub fn ray_hit(sight: &SightGrid, from: (f32, f32), dir: (f32, f32), max_m: f32, z_mm: i64) -> Option<f32> {
+pub fn ray_hit(geometry: &PropGrid, from: (f32, f32), dir: (f32, f32), max_m: f32, z_mm: i64) -> Option<f32> {
     let n = (max_m * 1000.0 / STEP_MM) as usize;
     for k in 1..=n {
         let d = k as f32 * STEP_MM / 1000.0;
         let (x, y) = (from.0 + dir.0 * d, from.1 + dir.1 * d);
-        if sight.solid_at((x * 1000.0) as i64, (y * 1000.0) as i64, z_mm) {
+        if geometry.solid_at((x * 1000.0) as i64, (y * 1000.0) as i64, z_mm) {
             return Some(d);
         }
     }
@@ -60,11 +61,11 @@ pub fn ray_hit(sight: &SightGrid, from: (f32, f32), dir: (f32, f32), max_m: f32,
 }
 
 /// The listener's space at `at` (m): rays all around at ear height.
-pub fn listener_env(sight: &SightGrid, at: (f32, f32)) -> Env {
+pub fn listener_env(geometry: &PropGrid, at: (f32, f32)) -> Env {
     let mut hits = [f32::INFINITY; RAYS];
     for (k, h) in hits.iter_mut().enumerate() {
         let a = k as f32 * std::f32::consts::TAU / RAYS as f32;
-        if let Some(d) = ray_hit(sight, at, (a.cos(), a.sin()), ENV_REACH_M, EAR_MM) {
+        if let Some(d) = ray_hit(geometry, at, (a.cos(), a.sin()), ENV_REACH_M, EAR_MM) {
             *h = d;
         }
     }
@@ -88,7 +89,7 @@ pub fn listener_env(sight: &SightGrid, at: (f32, f32)) -> Env {
 
 /// Solid walls crossed on the straight line from `a` to `b` (x, y, height; m): a camera high above hears
 /// over the walls, one at ground level through them.
-pub fn walls_between(sight: &SightGrid, a: (f32, f32, f32), b: (f32, f32, f32)) -> u32 {
+pub fn walls_between(geometry: &PropGrid, a: (f32, f32, f32), b: (f32, f32, f32)) -> u32 {
     let (dx, dy, dz) = (b.0 - a.0, b.1 - a.1, b.2 - a.2);
     let len = (dx * dx + dy * dy).sqrt();
     let n = (len * 1000.0 / STEP_MM).ceil().max(1.0) as usize;
@@ -97,7 +98,7 @@ pub fn walls_between(sight: &SightGrid, a: (f32, f32, f32), b: (f32, f32, f32)) 
         let t = k as f32 / n as f32;
         let (x, y, z) = (a.0 + dx * t, a.1 + dy * t, a.2 + dz * t);
         // Above anything that stands on the testing ground: nothing more to cross.
-        let solid = z < 8.0 && sight.solid_at((x * 1000.0) as i64, (y * 1000.0) as i64, (z * 1000.0) as i64);
+        let solid = z < 8.0 && geometry.solid_at((x * 1000.0) as i64, (y * 1000.0) as i64, (z * 1000.0) as i64);
         if solid && !inside {
             walls += 1;
         }
@@ -115,11 +116,11 @@ pub fn camera_height_m(view_h_m: f32) -> f32 {
 
 /// How a sound at `source` (m, on the ground; chest height) reaches ears at `listener` (x, y, height; m).
 /// `at_source` is the space the sound is made in: its reverb rings there and is heard as such.
-pub fn path(sight: &SightGrid, listener: (f32, f32, f32), source: (f32, f32), at_source: &Env) -> Path {
+pub fn path(geometry: &PropGrid, listener: (f32, f32, f32), source: (f32, f32), at_source: &Env) -> Path {
     let src = (source.0, source.1, PATH_MM as f32 / 1000.0);
     let (dx, dy, dz) = (src.0 - listener.0, src.1 - listener.1, src.2 - listener.2);
     let d = (dx * dx + dy * dy + dz * dz).sqrt();
-    let walls = if d > 0.5 { walls_between(sight, listener, src) } else { 0 };
+    let walls = if d > 0.5 { walls_between(geometry, listener, src) } else { 0 };
     // Distance: about -6 dB per doubling past 10 m; each wall takes most of what remains.
     let gain = 1.0 / (1.0 + d / 10.0) * 0.32f32.powi(walls as i32);
     // Air takes the highs over distance; a wall leaves a thump.
@@ -146,12 +147,12 @@ const ECHO_REACH_M: f32 = 80.0;
 
 /// The surfaces around a spot that a sound made there bounces off (points on walls, buildings, containers
 /// within reach; m). Open ground has none.
-pub fn reflectors(sight: &SightGrid, at: (f32, f32)) -> Vec<(f32, f32)> {
+pub fn reflectors(geometry: &PropGrid, at: (f32, f32)) -> Vec<(f32, f32)> {
     let mut out = Vec::new();
     for k in 0..ECHO_RAYS {
         let a = (k as f32 + 0.5) * std::f32::consts::TAU / ECHO_RAYS as f32;
         let dir = (a.cos(), a.sin());
-        if let Some(d) = ray_hit(sight, at, dir, ECHO_REACH_M, PATH_MM) {
+        if let Some(d) = ray_hit(geometry, at, dir, ECHO_REACH_M, PATH_MM) {
             // Hugging a wall (under 1.5 m) it is part of the direct sound and the room, not an echo.
             if d > 1.5 {
                 out.push((at.0 + dir.0 * d, at.1 + dir.1 * d));
@@ -207,8 +208,8 @@ pub fn air_lowpass_hz(d_m: f32) -> f32 {
 }
 
 /// Direct sound visibility against exact prop footprints, not the deliberately conservative sight raster.
-fn direct_ray_clear(sight: &SightGrid, from: Point, to: Point) -> bool {
-    if sight.doors.iter().any(|door| door.blocks(from, to)) {
+fn direct_ray_clear(geometry: &PropGrid, doors: &[scalia_ai::doors::Door], from: Point, to: Point) -> bool {
+    if doors.iter().any(|door| door.blocks(from, to)) {
         return false;
     }
     let (dx, dy, dz) = (to.x - from.x, to.y - from.y, to.z - from.z);
@@ -217,11 +218,132 @@ fn direct_ray_clear(sight: &SightGrid, from: Point, to: Point) -> bool {
         let x = from.x + dx * k / steps;
         let y = from.y + dy * k / steps;
         let z = from.z + dz * k / steps;
-        if sight.solid_geometry_at(x, y, z) {
+        if geometry.solid_geometry_at(x, y, z) {
             return false;
         }
     }
     true
+}
+
+/// A clear acoustic route through one open doorway, if one joins the listener and source sides.
+/// The doorway centre is used as the waypoint; each leg must remain clear of solid geometry.
+fn open_door_path(
+    geometry: &PropGrid,
+    doors: &[scalia_ai::doors::Door],
+    listener: (f32, f32),
+    source: (f32, f32),
+) -> Option<Occlusion> {
+    let point = |at: (f32, f32), z: i64| Point {
+        x: (at.0 * 1000.0) as i64,
+        y: (at.1 * 1000.0) as i64,
+        z,
+    };
+    let ear = point(listener, 1_600);
+    let sound = point(source, PATH_MM);
+    let direct = ((source.0 - listener.0).powi(2) + (source.1 - listener.1).powi(2)).sqrt();
+    doors
+        .iter()
+        .filter(|door| {
+            matches!(
+                door.state,
+                scalia_ai::doors::DoorState::Open | scalia_ai::doors::DoorState::Breached
+            )
+        })
+        .filter_map(|door| {
+            let waypoint = point(
+                (door.at.0 as f32 / 1000.0, door.at.1 as f32 / 1000.0),
+                PATH_MM,
+            );
+            if !direct_ray_clear(geometry, doors, ear, waypoint) || !direct_ray_clear(geometry, doors, waypoint, sound)
+            {
+                return None;
+            }
+            let route = ((waypoint.x - ear.x) as f32 / 1000.0)
+                .hypot((waypoint.y - ear.y) as f32 / 1000.0)
+                + ((sound.x - waypoint.x) as f32 / 1000.0)
+                    .hypot((sound.y - waypoint.y) as f32 / 1000.0);
+            let detour_m = (route - direct).max(0.0);
+            let bend_db = if detour_m > 0.3 {
+                (4.0 + 4.0 * (1.0 + detour_m).log2()).min(22.0)
+            } else {
+                0.0
+            };
+            Some(Occlusion {
+                wall_db: 0.0,
+                bend_db,
+                detour_m,
+                low_db: bend_db,
+                mid_db: bend_db,
+                high_db: bend_db * 1.4,
+            })
+        })
+        .min_by(|a, b| a.low_db.total_cmp(&b.low_db))
+}
+
+const OVER_WALL_HEIGHT_MM: i64 = 4_500;
+const ROOFLESS_OVERFLIGHT_DB: f32 = 12.0;
+const OVERFLIGHT_EXTRA_DISTANCE_M: f32 = 6.0;
+
+fn roofless_overflight_path(
+    geometry: &PropGrid,
+    doors: &[scalia_ai::doors::Door],
+    roofs: &[scalia_world::AcousticRoof],
+    listener: (f32, f32),
+    source: (f32, f32),
+) -> Option<Occlusion> {
+    let point = |at: (f32, f32)| Point {
+        x: (at.0 * 1000.0) as i64,
+        y: (at.1 * 1000.0) as i64,
+        z: OVER_WALL_HEIGHT_MM,
+    };
+    let from = point(listener);
+    let to = point(source);
+    if !direct_ray_clear(geometry, doors, from, to) {
+        return None;
+    }
+    let (dx, dy, dz) = (to.x - from.x, to.y - from.y, to.z - from.z);
+    let steps = (dx.abs().max(dy.abs()).max(dz.abs()) / 100).max(1);
+    for k in 1..steps {
+        let x = from.x + dx * k / steps;
+        let y = from.y + dy * k / steps;
+        if roofs.iter().any(|roof| {
+            let (x0, y0, x1, y1) = roof.bounds;
+            x >= x0 && x <= x1 && y >= y0 && y <= y1 && OVER_WALL_HEIGHT_MM >= roof.height_mm
+        }) {
+            return None;
+        }
+    }
+    Some(Occlusion {
+        wall_db: 0.0,
+        bend_db: ROOFLESS_OVERFLIGHT_DB,
+        detour_m: OVERFLIGHT_EXTRA_DISTANCE_M,
+        low_db: ROOFLESS_OVERFLIGHT_DB,
+        mid_db: ROOFLESS_OVERFLIGHT_DB + 3.0,
+        high_db: ROOFLESS_OVERFLIGHT_DB + 8.0,
+    })
+}
+
+/// Prefer clear open-door or roofless over-wall routes when they attenuate less than the direct path.
+pub fn with_acoustic_routes(
+    geometry: &PropGrid,
+    doors: &[scalia_ai::doors::Door],
+    roofs: &[scalia_world::AcousticRoof],
+    listener: (f32, f32),
+    source: (f32, f32),
+    direct: Occlusion,
+) -> Occlusion {
+    if direct.low_db <= 0.0 {
+        return direct;
+    }
+    [
+        Some(direct),
+        open_door_path(geometry, doors, listener, source),
+        roofless_overflight_path(geometry, doors, roofs, listener, source),
+    ]
+        .into_iter()
+        .flatten()
+        .min_by(|a, b| a.low_db.total_cmp(&b.low_db))
+        .unwrap_or(direct)
 }
 
 /// Cell of the propagation field (m).
@@ -286,8 +408,8 @@ impl Occlusion {
 }
 
 impl Field {
-    /// Floods `radius_m` round the ears at `ear` (m), at chest height, over `sight` and its doors.
-    pub fn build(sight: &SightGrid, ear: (f32, f32), radius_m: f32) -> Field {
+    /// Floods `radius_m` round the ears at `ear` (m), at chest height, over shared prop geometry and battle doors.
+    pub fn build(geometry: &PropGrid, doors: &[scalia_ai::doors::Door], ear: (f32, f32), radius_m: f32) -> Field {
         let n = (radius_m * 2.0 / FIELD_CELL_M).ceil() as usize | 1;
         let half = (n / 2) as f32 * FIELD_CELL_M;
         let origin = (ear.0 - half, ear.1 - half);
@@ -298,7 +420,7 @@ impl Field {
                 let (x, y) = (origin.0 + i as f32 * FIELD_CELL_M, origin.1 + j as f32 * FIELD_CELL_M);
                 let solid = [(0.125, 0.125), (0.375, 0.125), (0.125, 0.375), (0.375, 0.375)]
                     .iter()
-                    .any(|(a, b)| sight.solid_at(((x + a) * 1000.0) as i64, ((y + b) * 1000.0) as i64, PATH_MM));
+                    .any(|(a, b)| geometry.solid_at(((x + a) * 1000.0) as i64, ((y + b) * 1000.0) as i64, PATH_MM));
                 kind[j * n + i] = solid as u8;
             }
         }
@@ -314,10 +436,10 @@ impl Field {
                     y: ((origin.1 + j as f32 * FIELD_CELL_M) * 1000.0) as i64,
                     z: PATH_MM,
                 };
-                direct_clear[j * n + i] = direct_ray_clear(sight, from, to);
+                direct_clear[j * n + i] = direct_ray_clear(geometry, doors, from, to);
             }
         }
-        for d in sight.doors.iter().filter(|d| d.shut()) {
+        for d in doors.iter().filter(|d| d.shut()) {
             let (cx, cy) = (d.at.0 as f32 / 1000.0, d.at.1 as f32 / 1000.0);
             let w = d.width_mm as f32 / 2000.0;
             let mut t = -w;
@@ -413,8 +535,8 @@ mod tests {
     fn wall(x: i64, y: i64, len: i64, turns: u8) -> Prop {
         Prop { kind: PropKind::Wall { length_mm: len, thickness_mm: 300 }, x_mm: x, y_mm: y, quarter_turns: turns }
     }
-    fn grid(props: &[Prop]) -> SightGrid {
-        SightGrid::build(0, 0, 400, 400, props)
+    fn grid(props: &[Prop]) -> PropGrid {
+        PropGrid::build(0, 0, 400, 400, props)
     }
 
     #[test]
@@ -443,6 +565,18 @@ mod tests {
         assert!(low.gain < clear.gain * 0.5 && low.lowpass_hz < clear.lowpass_hz * 0.3, "{low:?} vs {clear:?}");
         let above = path(&g, (45.0, 50.0, 30.0), (60.0, 50.0), &open);
         assert_eq!(above.walls, 0, "{above:?}");
+    }
+
+    #[test]
+    fn a_clear_sound_path_over_a_low_wall_is_not_occluded() {
+        let low_wall = Prop {
+            kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 700 },
+            x_mm: 50_000,
+            y_mm: 50_000,
+            quarter_turns: 1,
+        };
+        let g = grid(&[low_wall]);
+        assert_eq!(walls_between(&g, (40.0, 50.0, 1.6), (60.0, 50.0, 1.4)), 0);
     }
 
     #[test]
@@ -485,21 +619,21 @@ mod tests {
     }
 
     /// A 10 x 10 m room round (50, 50) with a 1.5 m doorway in its east wall, its door open or shut.
-    fn room_with_door(state: scalia_ai::doors::DoorState) -> SightGrid {
-        let mut g = grid(&[
+    fn room_with_door(state: scalia_ai::doors::DoorState) -> (PropGrid, Vec<scalia_ai::doors::Door>) {
+        let g = grid(&[
             wall(50_000, 45_000, 10_300, 0),
             wall(50_000, 55_000, 10_300, 0),
             wall(45_000, 50_000, 10_300, 1),
             wall(55_000, 47_000, 4_300, 1),
             wall(55_000, 53_500, 3_300, 1),
         ]);
-        g.doors = vec![scalia_ai::doors::Door::new((55_000, 50_500), false, 1_500, 2_100, state)];
-        g
+        let doors = vec![scalia_ai::doors::Door::new((55_000, 50_500), false, 1_500, 2_100, state)];
+        (g, doors)
     }
 
     #[test]
     fn in_the_open_nothing_stands_between() {
-        let f = Field::build(&grid(&[]), (50.0, 50.0), 30.0);
+        let f = Field::build(&grid(&[]), &[], (50.0, 50.0), 30.0);
         let o = f.at((62.0, 55.0)).unwrap();
         assert!(o.wall_db == 0.0 && o.bend_db == 0.0, "{o:?}");
     }
@@ -508,7 +642,8 @@ mod tests {
     fn inside_a_room_the_outside_comes_through_the_open_door_and_is_walled_off_when_it_shuts() {
         use scalia_ai::doors::DoorState;
         let ear = (50.0, 50.0);
-        let open = Field::build(&room_with_door(DoorState::Open), ear, 30.0);
+        let (open_grid, open_doors) = room_with_door(DoorState::Open);
+        let open = Field::build(&open_grid, &open_doors, ear, 30.0);
         // East, outside, in line with the doorway: straight in.
         let east = open.at((65.0, 50.5)).unwrap();
         assert!(east.wall_db == 0.0 && east.bend_db < 6.0, "{east:?}");
@@ -519,9 +654,64 @@ mod tests {
         let ne = open.at((60.0, 60.0)).unwrap();
         assert!(ne.wall_db == 0.0 && ne.bend_db > 0.0 && ne.lowpass_hz() < 20_000.0, "{ne:?}");
         // Shut the door: the east comes through the door's leaf, duller and quieter, still less than masonry.
-        let shut = Field::build(&room_with_door(DoorState::Closed), ear, 30.0);
+        let (shut_grid, shut_doors) = room_with_door(DoorState::Closed);
+        let shut = Field::build(&shut_grid, &shut_doors, ear, 30.0);
         let e2 = shut.at((65.0, 50.5)).unwrap();
         assert!(e2.wall_db >= DOOR_DB && e2.wall_db < WALL_ENTER_DB && e2.gain() < east.gain() * 0.3, "{e2:?}");
+    }
+
+    #[test]
+    fn an_open_door_carries_sound_around_a_corner_but_a_shut_door_does_not() {
+        use scalia_ai::doors::DoorState;
+        let ear = (50.0, 50.0);
+        let source = (65.0, 60.0);
+        let masonry = Occlusion {
+            wall_db: 40.0,
+            bend_db: 0.0,
+            detour_m: 0.0,
+            low_db: 28.0,
+            mid_db: 40.0,
+            high_db: 52.0,
+        };
+        let (open, open_doors) = room_with_door(DoorState::Open);
+        let roof = [scalia_world::AcousticRoof {
+            bounds: (30_000, 30_000, 70_000, 70_000),
+            height_mm: 3_900,
+        }];
+        let open_path = with_acoustic_routes(&open, &open_doors, &roof, ear, source, masonry);
+        assert_eq!(open_path.wall_db, 0.0, "{open_path:?}");
+        assert!(open_path.bend_db > 0.0 && open_path.low_db < masonry.low_db, "{open_path:?}");
+
+        let (shut, shut_doors) = room_with_door(DoorState::Closed);
+        assert_eq!(with_acoustic_routes(&shut, &shut_doors, &roof, ear, source, masonry), masonry);
+    }
+
+    #[test]
+    fn roofless_walls_transmit_over_the_top_but_a_roof_blocks_the_path() {
+        let wall = Prop {
+            kind: PropKind::Wall { length_mm: 20_000, thickness_mm: 300 },
+            x_mm: 50_000,
+            y_mm: 50_000,
+            quarter_turns: 1,
+        };
+        let g = grid(&[wall]);
+        let ear = (40.0, 50.0);
+        let source = (60.0, 50.0);
+        let direct = Occlusion {
+            wall_db: 40.0,
+            bend_db: 0.0,
+            detour_m: 0.0,
+            low_db: 28.0,
+            mid_db: 40.0,
+            high_db: 52.0,
+        };
+
+        let open_air = with_acoustic_routes(&g, &[], &[], ear, source, direct);
+        assert_eq!(open_air.low_db, ROOFLESS_OVERFLIGHT_DB, "{open_air:?}");
+        assert_eq!(open_air.high_db, ROOFLESS_OVERFLIGHT_DB + 8.0);
+
+        let roofed = [scalia_world::AcousticRoof { bounds: (39_000, 49_000, 61_000, 51_000), height_mm: 3_900 }];
+        assert_eq!(with_acoustic_routes(&g, &[], &roofed, ear, source, direct), direct);
     }
 
     #[test]
@@ -544,22 +734,24 @@ mod tests {
 
     #[test]
     fn a_thick_wall_stops_more_than_a_thin_one() {
-        let thin = Field::build(&grid(&[wall(50_000, 50_000, 40_000, 1)]), (45.0, 50.0), 20.0).at((55.0, 50.0)).unwrap();
+        let thin = Field::build(&grid(&[wall(50_000, 50_000, 40_000, 1)]), &[], (45.0, 50.0), 20.0).at((55.0, 50.0)).unwrap();
         let mut w = wall(50_000, 50_000, 40_000, 1);
         w.kind = PropKind::Wall { length_mm: 40_000, thickness_mm: 1_500 };
-        let thick = Field::build(&grid(&[w]), (45.0, 50.0), 20.0).at((55.0, 50.0)).unwrap();
+        let thick = Field::build(&grid(&[w]), &[], (45.0, 50.0), 20.0).at((55.0, 50.0)).unwrap();
         assert!(thick.wall_db > thin.wall_db + 10.0, "{thin:?} {thick:?}");
     }
 }
 #[cfg(test)]
 mod timing {
+    use scalia_core::nav::PropGrid;
+
     #[test]
     #[ignore]
     fn field_build_time() {
-        let g = scalia_ai::sight::SightGrid::build(0, 0, 400, 400, &[]);
+        let g = PropGrid::build(0, 0, 400, 400, &[]);
         let t = std::time::Instant::now();
         for k in 0..20 {
-            let _ = super::Field::build(&g, (50.0 + k as f32 * 0.5, 50.0), 35.0);
+            let _ = super::Field::build(&g, &[], (50.0 + k as f32 * 0.5, 50.0), 35.0);
         }
         eprintln!("field: {:.2} ms each", t.elapsed().as_secs_f64() * 1000.0 / 20.0);
     }

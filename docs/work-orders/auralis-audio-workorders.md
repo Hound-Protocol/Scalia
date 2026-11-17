@@ -66,6 +66,12 @@ Additional standalone HTMLAudioElement playback exists for effects such as the t
 - Review coupling to AI SightGrid without duplicating geometry.
 **Acceptance:** repeatable tests and representative listening scenes.
 
+**Progress — open-door and roofless propagation:** when the camera's direct acoustic ray is blocked, Auralis checks a clear two-leg route through open/breached doorways and a high path over walls. The over-wall route is admitted only if it clears static geometry and explicit map roof footprints; both alternatives carry modeled bend/transmission loss and win only when less attenuated than the direct path. The testing-ground map marks roofed barracks blocks; its range and killhouse remain roofless.
+
+**Validation:** tests cover sound routed around a corner through an open doorway, shut-door fallback, over-wall transmission in roofless space, roof blocking, map roof parsing/validation, and sound clearing a low wall.
+
+**Shared geometry follow-up:** Auralis now queries the core prop-geometry grid directly instead of depending on `SightGrid` for occupancy. The battle still supplies dynamic door state separately, and existing acoustic routing tests cover open/shut doors and roof constraints.
+
 ### AU-02 — Spatial audio & occlusion
 - Verify camera-relative left/right stereo panning; keep front/back and elevation out of the pan, and use the camera as the acoustic listener.
 - Apply line-of-sight obstruction for the elevated tablet camera; retain the propagation field for on-foot diffraction and door routing.

@@ -7,3 +7,4 @@ description = "Auralis Audio Engine: world-aware acoustic simulation for Scalia"
 [dependencies]
 scalia-ai = { path = "../scalia-ai" }
 scalia-core = { path = "../scalia-core" }
+scalia-world = { path = "../scalia-world" }
