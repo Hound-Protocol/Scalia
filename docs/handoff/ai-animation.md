@@ -113,3 +113,7 @@ Short state of play for whoever picks up AI or animation work next. The repo is 
 - The target is order-aware, situation-driven behaviour shared by allies and hostiles: orders define objectives, while soldiers reassess risk, terrain, contact and squad needs.
 - First execution slice: keep ordered movers progressing while firing, search for protective cover within a bounded 30 m ground radius, reject cover reached by materially closing on a known threat, and use prone posture when exposed without usable cover and stationary.
 - The staged plan and acceptance criteria are in [the Titan AI behaviour roadmap](../titan/AI_BEHAVIOUR_ROADMAP.md). Validate the Standoff lab against that plan; deterministic seeded scenarios and combat-log evidence are merge gates.
+
+## TrueRig combat reactions (17 Nov)
+- Direct hits still produce a full flinch; a miss now produces a graded reaction only when its shot segment passes within 1.5 m of the target.
+- The reaction remains visual-only and does not change hit rolls or battle timing.

@@ -2,6 +2,7 @@
 //! (pose, gait cadence, aim layer) and heard (shots, grenades, the leader's steps).
 use scalia_ai::battle::{Act, Bark, Battle, Event, Gait, Soldier, Stance};
 pub use scalia_ai::scenario::KILLHOUSE_ATTACKERS as ATTACKERS;
+use scalia_ai::sight::Point;
 use scalia_render::pose::Pose;
 
 /// Leg changes by pace (m/s): running legs from RUN_FROM, sprinting legs from SPRINT_FROM (sprinters only).
@@ -76,6 +77,38 @@ fn animation_dt(last_ms: f64, now_ms: f64, visible: bool) -> Option<f32> {
 
 /// How hard a round past him makes a man flinch (a hit is 1).
 const NEAR_MISS_FLINCH: f32 = 0.55;
+const NEAR_MISS_RADIUS_MM: f64 = 1_500.0;
+
+/// Near misses only provoke a reaction when the drawn shot segment passes close to the target.
+fn shot_flinch_power(hit: bool, from: Point, target: Point, impact: (i64, i64, i64)) -> f32 {
+    if hit {
+        return 1.0;
+    }
+
+    let start = [from.x as f64, from.y as f64, from.z as f64];
+    let end = [impact.0 as f64, impact.1 as f64, impact.2 as f64];
+    let target = [target.x as f64, target.y as f64, target.z as f64];
+    let segment = [end[0] - start[0], end[1] - start[1], end[2] - start[2]];
+    let offset = [
+        target[0] - start[0],
+        target[1] - start[1],
+        target[2] - start[2],
+    ];
+    let length_sq = segment.iter().map(|v| v * v).sum::<f64>();
+    let along = if length_sq > 0.0 {
+        (offset.iter().zip(segment).map(|(a, b)| a * b).sum::<f64>() / length_sq).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let distance_sq = (0..3)
+        .map(|axis| {
+            let delta = start[axis] + segment[axis] * along - target[axis];
+            delta * delta
+        })
+        .sum::<f64>();
+    let proximity = (1.0 - distance_sq.sqrt() / NEAR_MISS_RADIUS_MM).clamp(0.0, 1.0);
+    NEAR_MISS_FLINCH * proximity as f32
+}
 
 /// A flinch of `power` that started at `at`, at `now`: in fast (60 ms), then easing off (about 0.3 s for a near
 /// miss, longer for a hit).
@@ -299,16 +332,17 @@ impl Assault {
                         let (dx, dy) = (to.x - from.x, to.y - from.y);
                         let d = (((dx * dx + dy * dy) as f64).sqrt() as i64).max(1);
                         let muzzle = self.muzzle.get(shooter).copied().flatten().unwrap_or((from.x + dx * 600 / d, from.y + dy * 600 / d, from.z - 250));
+                        let shot_from = Point { x: muzzle.0, y: muzzle.1, z: muzzle.2 };
                         // A miss lands short, long or wide: in the dirt a few metres around him.
                         let r = scalia_core::hash::mix64(at_ms as u64 ^ (shooter as u64) << 32);
                         // A round at nobody (the commander firing into the open) lands where it flew to.
                         let impact = if hit || target == shooter { (to.x, to.y, to.z) } else { (to.x + (r % 4_001) as i64 - 2_000, to.y + ((r >> 16) % 4_001) as i64 - 2_000, 0) };
                         // One round in four is a tracer.
                         let tracer = (r >> 40) % 4 == 0;
-                        // The man shot at flinches: hard when hit, less for a round past him. Not at himself (the
-                        // commander firing into the open).
+                        // A hit is immediate; a miss only flinches him if the shot passes within 1.5 m. Not at
+                        // himself (the commander firing into the open).
                         if target != shooter {
-                            let power = if hit { 1.0 } else { NEAR_MISS_FLINCH };
+                            let power = shot_flinch_power(hit, shot_from, to, impact);
                             if let Some(f) = self.shaken.get_mut(target) {
                                 if flinch_amount(f.0, f.1, at) < power {
                                     *f = (at, power);
@@ -571,6 +605,35 @@ pub fn drive_of(s: &Soldier, dt: f32, ts: f32) -> crate::anim::Drive {
 
 #[cfg(test)]
 mod tests {
+    use scalia_ai::sight::Point;
+
+    #[test]
+    fn only_a_close_miss_causes_a_near_miss_flinch() {
+        let from = Point {
+            x: 0,
+            y: 0,
+            z: 1_500,
+        };
+        let target = Point {
+            x: 0,
+            y: 10_000,
+            z: 1_000,
+        };
+        let near = super::shot_flinch_power(false, from, target, (500, 10_000, 0));
+        let far = super::shot_flinch_power(false, from, target, (2_000, 10_000, 0));
+        let direct_hit = super::shot_flinch_power(true, from, target, (2_000, 10_000, 0));
+
+        assert!(
+            near > 0.0 && near < super::NEAR_MISS_FLINCH,
+            "close miss is reduced: {near}"
+        );
+        assert_eq!(far, 0.0, "a distant miss is not a near miss");
+        assert_eq!(
+            direct_hit, 1.0,
+            "confirmed hits always produce a full reaction"
+        );
+    }
+
     #[test]
     fn fire_makes_a_man_flinch_quickly_and_settle() {
         let f = |ms: f64, p: f32| super::flinch_amount(0.0, p, ms);
