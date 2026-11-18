@@ -647,6 +647,47 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
     params_dir(pose, phase, 0.0)
 }
 
+/// AN-02-S06: forward crawl baked from the reference clip (Prone Forward). One loop of 24 samples, fields in
+/// order: knee L, knee R, hip L, hip R, shoulder L, shoulder R, elbow L, elbow R, twist, head.
+pub const CRAWL_FWD_BAKE: [[f32; 10]; 24] = [
+    [0.5357, 0.9948, 0.2597, 0.2838, 1.4744, 1.7901, 2.1390, 1.8476, -0.2758, 0.9824],
+    [0.5709, 1.0000, 0.2583, 0.2694, 1.5024, 1.8133, 2.1131, 1.8261, -0.2900, 1.0000],
+    [0.4936, 0.8971, 0.2259, 0.2868, 1.4621, 1.8200, 2.1504, 1.8200, -0.2681, 0.9716],
+    [0.4350, 0.7691, 0.2150, 0.3070, 1.4168, 1.7356, 2.1922, 1.8979, -0.2443, 0.9485],
+    [0.3939, 0.6277, 0.2037, 0.3340, 1.4353, 1.6729, 2.1751, 1.9558, -0.2429, 0.9435],
+    [0.3271, 0.4203, 0.1800, 0.3703, 1.4865, 1.6490, 2.1279, 1.9778, -0.2517, 0.9472],
+    [0.2498, 0.2115, 0.1994, 0.3800, 1.5698, 1.6332, 2.0510, 1.9924, -0.2631, 0.9555],
+    [0.2403, 0.0812, 0.2616, 0.3270, 1.6807, 1.5950, 1.9486, 2.0277, -0.2721, 0.9584],
+    [0.2531, 0.0500, 0.3224, 0.2425, 1.7554, 1.4500, 1.8796, 2.1615, -0.2497, 0.9526],
+    [0.1860, 0.0765, 0.3800, 0.2188, 1.8156, 1.3000, 1.8240, 2.3000, -0.2101, 0.9322],
+    [0.1286, 0.0976, 0.2830, 0.2481, 1.8177, 1.3264, 1.8221, 2.2756, -0.1941, 0.9167],
+    [0.0962, 0.1041, 0.2791, 0.2563, 1.7981, 1.4088, 1.8402, 2.1996, -0.1904, 0.9051],
+    [0.1535, 0.1159, 0.2449, 0.2628, 1.7795, 1.4453, 1.8574, 2.1659, -0.1900, 0.8939],
+    [0.0684, 0.1483, 0.2741, 0.2368, 1.8091, 1.4147, 1.8300, 2.1941, -0.1918, 0.8800],
+    [0.0500, 0.1992, 0.3277, 0.2134, 1.8200, 1.3862, 1.8200, 2.2204, -0.2065, 0.8836],
+    [0.1855, 0.2755, 0.3670, 0.1995, 1.8189, 1.3832, 1.8210, 2.2232, -0.2146, 0.8947],
+    [0.2973, 0.3653, 0.3764, 0.1918, 1.8041, 1.4134, 1.8347, 2.1953, -0.2233, 0.9029],
+    [0.3810, 0.4641, 0.3774, 0.1963, 1.7213, 1.4387, 1.9111, 2.1719, -0.2275, 0.9065],
+    [0.4653, 0.5658, 0.3602, 0.1859, 1.5913, 1.5265, 2.0311, 2.0909, -0.2333, 0.9263],
+    [0.5533, 0.6772, 0.3329, 0.1800, 1.4203, 1.6669, 2.1889, 1.9614, -0.2447, 0.9480],
+    [0.5871, 0.8120, 0.3061, 0.2196, 1.3419, 1.7513, 2.2613, 1.8834, -0.2495, 0.9582],
+    [0.5550, 0.9125, 0.2866, 0.2493, 1.3698, 1.7780, 2.2356, 1.8587, -0.2551, 0.9673],
+    [0.5508, 0.9697, 0.2689, 0.2708, 1.4304, 1.7784, 2.1796, 1.8584, -0.2669, 0.9733],
+    [0.5250, 0.9912, 0.2614, 0.2812, 1.4646, 1.7884, 2.1480, 1.8492, -0.2733, 0.9778],
+];
+
+/// Interpolates the baked forward crawl at `phase` (one loop, wraps at 1.0).
+fn crawl_bake(phase: f32) -> [f32; 10] {
+    let x = phase.rem_euclid(1.0) * 24.0;
+    let i0 = (x.floor() as usize) % 24;
+    let i1 = (i0 + 1) % 24;
+    let f = x - x.floor();
+    std::array::from_fn(|k| {
+        let (a, b) = (CRAWL_FWD_BAKE[i0][k], CRAWL_FWD_BAKE[i1][k]);
+        a + (b - a) * f
+    })
+}
+
 /// `params` for a soldier moving in direction `dir` (from straight ahead towards the left, radians) while facing
 /// ahead: the gaits step sideways and backwards; other poses ignore it.
 pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
@@ -932,6 +973,17 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.look = 0.24 - 0.16 * s - 0.18 * lateral;
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.head = 0.94 + 0.06 * fwd.max(0.0);
+            // AN-02-S06: straight-ahead crawl follows the baked reference loop; turning out of line blends back
+            // to the procedural terms above (weight = forward component).
+            let w = fwd.max(0.0);
+            let b = crawl_bake(phase);
+            let m = |a: f32, t: f32| a + (t - a) * w;
+            p.knee = [m(p.knee[0], b[0]), m(p.knee[1], b[1])];
+            p.hip = [m(p.hip[0], b[2]), m(p.hip[1], b[3])];
+            p.shoulder = [m(p.shoulder[0], b[4]), m(p.shoulder[1], b[5])];
+            p.elbow = [m(p.elbow[0], b[6]), m(p.elbow[1], b[7])];
+            p.twist = m(p.twist, b[8]);
+            p.head = m(p.head, b[9]);
         }
         Pose::Drop => return drop_params(phase),
         Pose::DropReach => return drop_reach(),
