@@ -542,7 +542,8 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let c = cos(phase * 6.2831853 + dir);
     let draw = vec2f(0.5 - 0.5 * c, 0.5 + 0.5 * c);
     p.prone = 1.0;
-    let surge = s * (1.0 - 0.35 * lat_abs);
+    // Arms follow the knee draw (AN-02-S05, mirrors pose.rs).
+    let surge = c * (1.0 - 0.35 * lat_abs);
     p.sh = vec2f(2.8, 1.56 + 0.26 * surge);
     p.el = vec2f(1.3, 2.06 - 0.24 * surge);
     p.reach = vec2f(0.0, 0.42 + 0.12 * c * (1.0 - 0.3 * lat_abs));
