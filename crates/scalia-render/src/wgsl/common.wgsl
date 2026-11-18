@@ -549,7 +549,8 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.abd = vec2f(0.0, 0.62 + 0.16 * lat_abs + 0.12 * abs(surge));
     p.ryaw = 0.52 - 0.10 * surge - 0.08 * lateral;
     p.hip = vec2f(0.18) + 0.20 * draw;
-    p.knee = vec2f(0.05) + (0.85 - 0.22 * lat_abs) * draw;
+    // Per-leg knee draw (AN-02-S04): mirrors pose.rs.
+    p.knee = vec2f(0.05) + vec2f(0.55 - 0.14 * lat_abs, 0.95 - 0.22 * lat_abs) * draw;
     let lead_l = max(-lateral, 0.0);
     let lead_r = max(lateral, 0.0);
     p.side = vec2f(-0.14 - (1.08 - 0.18 * lat_abs) * draw.x - 0.24 * lead_l + 0.08 * lead_r,

@@ -915,7 +915,9 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             // Keep hip pitch near zero so knees never plunge underground, while swinging side outward (~65 deg)
             // in proportion to knee bend so the bent shin and boot stay flat on the ground rather than rising.
             p.hip = [0.18 + 0.20 * draw[0], 0.18 + 0.20 * draw[1]];
-            p.knee = [0.05 + (0.85 - 0.22 * lat_abs) * draw[0], 0.05 + (0.85 - 0.22 * lat_abs) * draw[1]];
+            // Per-leg knee draw (AN-02-S04, reference clips): the right knee draws further than the left, as in
+            // the reference forward crawl (right knee swing about 91 deg, left about 18 deg).
+            p.knee = [0.05 + (0.55 - 0.14 * lat_abs) * draw[0], 0.05 + (0.95 - 0.22 * lat_abs) * draw[1]];
             let (lead_l, lead_r) = ((-lateral).max(0.0), lateral.max(0.0));
             p.side = [
                 -0.14 - (1.08 - 0.18 * lat_abs) * draw[0] - 0.24 * lead_l + 0.08 * lead_r,
