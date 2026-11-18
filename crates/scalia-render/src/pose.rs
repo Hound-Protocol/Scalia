@@ -926,7 +926,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
                 0.14 + (1.08 - 0.18 * lat_abs) * draw[1] + 0.24 * lead_r - 0.08 * lead_l,
             ];
             p.bob = 0.0;
-            p.twist = -0.24 + (0.20 + 0.06 * fwd) * s + 0.18 * lateral;
+            p.twist = -0.24 + (0.03 + 0.02 * fwd) * s + 0.18 * lateral;
             p.tilt = 0.0;
             p.lean = -0.08;
             p.look = 0.24 - 0.16 * s - 0.18 * lateral;
