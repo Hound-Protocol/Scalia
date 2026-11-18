@@ -255,7 +255,18 @@ impl Animator {
         let hard = self.spin.abs() > SHUFFLE_SPIN;
         self.turning = if hard { self.turning + dt } else { 0.0 };
         let shuffling = alive_up && !moving && hard && (self.gap.abs() > 0.35 || self.turning > 0.3) && d.stance == Stance::Stand && d.action.is_none();
-        self.dir = if moving { wrap(travel - self.heading) } else if shuffling { self.spin.signum() * std::f32::consts::FRAC_PI_2 } else { 0.0 };
+        let crawl_blending = self.shown.0 == Pose::Crawl
+            || (self.shown.1 == Pose::Crawl && d.ts - self.shown.2 < pose::BLEND_S);
+        self.dir = if moving {
+            wrap(travel - self.heading)
+        } else if shuffling {
+            self.spin.signum() * std::f32::consts::FRAC_PI_2
+        } else if d.stance == Stance::Prone && crawl_blending {
+            // The outgoing crawl is still drawn. Its frozen phase also needs its last travel direction.
+            self.dir
+        } else {
+            0.0
+        };
         // Legs by real pace, with hysteresis.
         let was = self.legs;
         let fast = matches!(was, Pose::Run | Pose::Sprint);
@@ -269,7 +280,7 @@ impl Animator {
             Pose::Stand
         };
         // Setting off from still, he steps out with a foot straight away (not from the middle of a stride).
-        if was_still && moving {
+        if was_still && moving && !(d.stance == Stance::Prone && crawl_blending) {
             self.phase = 0.12;
         }
         let aim = d.rifle == Rifle::Aim;
@@ -348,7 +359,7 @@ impl Animator {
         } else {
             match (d.stance, moving) {
                 (Stance::Prone, true) => (Pose::Crawl, aim.then_some(Pose::ProneAim), speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
-                (Stance::Prone, false) => (if aim { Pose::ProneAim } else { Pose::Prone }, None, 0.0),
+                (Stance::Prone, false) => (Pose::Prone, aim.then_some(Pose::ProneAim), 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
                 (Stance::Stand, _) if skid == Skid::Stop => (Pose::Brake, None, 0.0),
@@ -373,9 +384,15 @@ impl Animator {
                 (pose, self.shown.0, pose::switch_start(self.shown.1, self.shown.2, pose, d.ts))
             };
         }
-        let eff = upper.unwrap_or(pose);
+        // Both prone bases share one raise/lower state: starting or stopping the feet must not restart it.
+        let eff = upper.unwrap_or(if pose == Pose::Crawl { Pose::Prone } else { pose });
         if eff != self.upper.0 {
-            self.upper = (eff, self.upper.0, d.ts);
+            let elapsed = (d.ts - self.upper.2).clamp(0.0, LAYER_BLEND_S);
+            let reversing_prone_aim = matches!((self.upper.0, eff),
+                (Pose::Prone, Pose::ProneAim) | (Pose::ProneAim, Pose::Prone))
+                && eff == self.upper.1 && elapsed < LAYER_BLEND_S;
+            let since = if reversing_prone_aim { d.ts - (LAYER_BLEND_S - elapsed) } else { d.ts };
+            self.upper = (eff, self.upper.0, since);
         }
         // The phase is integrated here (cadence changes as he winds up and brakes) and handed to the shader as is.
         let before = self.phase;
@@ -392,7 +409,8 @@ impl Animator {
             (None, None) => (self.phase, if steps == 0.0 && d.ts - self.shown.2 > 0.4 { 0.0 } else { -1.0 }),
         };
         let up = alive_up && falling.is_none();
-        let lean = if up { pose::pack_tilt(pose::bank(speed, self.spin), pose::accel_pitch(self.accel)) } else { 0.0 };
+        // Upright momentum tilt pivots around the feet; on the ground it would lift or sink the whole rig.
+        let lean = if up && d.stance != Stance::Prone && dropping.is_none() { pose::pack_tilt(pose::bank(speed, self.spin), pose::accel_pitch(self.accel)) } else { 0.0 };
         Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall }
     }
 
@@ -418,6 +436,15 @@ impl Animator {
         let reload_phase_active = f.pose == Pose::Reload || f.upper == Some(Pose::Reload)
             || base_reload_blending_out || upper_reload_blending_out;
         let cadence = if reload_phase_active { -1.0 - self.reload_phase.clamp(0.0, 0.9999) } else { f.cadence };
+        let previous_upper = if matches!(f.pose, Pose::Prone | Pose::Crawl) {
+            // Unaimed prone uses the base as drawn, not a second copy of the idle over the crawl.
+            (self.upper.1 == Pose::ProneAim).then_some(Pose::ProneAim)
+        } else if f.pose == Pose::Drop && matches!(self.upper.1, Pose::Prone | Pose::ProneAim) {
+            None
+        } else {
+            Some(self.upper.1)
+        };
+        let remaining = if previous_upper.is_none() && f.upper.is_none() { 0.0 } else { remaining };
         [
             at.0,
             at.1,
@@ -430,7 +457,7 @@ impl Animator {
             pose::pack_flinch(prev, flinch),
             since,
             pose::pack_layer(f.upper, f.dir),
-            pose::pack_fade_layer(fade, Some(self.upper.1), remaining),
+            pose::pack_fade_layer(fade, previous_upper, remaining),
         ]
     }
 
@@ -524,7 +551,7 @@ mod tests {
         d.rifle = Rifle::Aim;
         d.face = Face::Aim { heading: 0.4 };
         let f = run(&mut a, 5, d);
-        assert_eq!(f.pose, Pose::ProneAim);
+        assert_eq!((f.pose, f.upper), (Pose::Prone, Some(Pose::ProneAim)));
         assert!(a.barrel(&f, (0.0, 0.0)).0.is_some(), "the prone rifle has a firing muzzle");
 
         d.ts = ts + 0.2;
@@ -534,6 +561,54 @@ mod tests {
         assert_eq!(moving.pose, Pose::Crawl);
         assert_eq!(moving.upper, Some(Pose::ProneAim), "aim stays on the upper body while the legs crawl");
         assert!(a.barrel(&moving, (0.0, 0.0)).0.is_some(), "the layered prone aim keeps its muzzle");
+    }
+
+    #[test]
+    fn aimed_crawl_stops_and_restarts_without_switching_its_upper_body_or_resetting_its_stride() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Prone, 1.5);
+        let mut d = drive(ts);
+        d.stance = Stance::Prone;
+        d.rifle = Rifle::Aim;
+        d.vel = (1.05, 0.0);
+        let advance = |a: &mut Animator, d: &mut Drive| {
+            d.ts += d.dt;
+            a.step(d)
+        };
+        for _ in 0..22 { advance(&mut a, &mut d); }
+        let moving = advance(&mut a, &mut d);
+        d.vel = (0.0, 0.0);
+        let stopped = advance(&mut a, &mut d);
+        assert_eq!((moving.pose, stopped.pose), (Pose::Crawl, Pose::Prone));
+        assert_eq!((moving.upper, stopped.upper), (Some(Pose::ProneAim), Some(Pose::ProneAim)));
+        assert_eq!((stopped.dir, stopped.phase), (moving.dir, moving.phase));
+        assert_eq!((moving.lean, stopped.lean), (0.0, 0.0), "no standing momentum tilt on the ground");
+        assert_eq!(a.record(&stopped, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0)[11], 0.0, "legs stopping must not restart the aim layer");
+
+        d.vel = (1.05, 0.0);
+        let resumed = advance(&mut a, &mut d);
+        let expected = (stopped.phase + d.dt * 1.05 / stride_m_dir(Pose::Crawl, stopped.dir)).fract();
+        assert!((resumed.phase - expected).abs() < 1e-5, "crawl resumes from the frozen stride, not a new step");
+    }
+
+    #[test]
+    fn reversing_prone_aim_mid_blend_preserves_the_rifle_raise() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Prone, 1.5);
+        let mut d = drive(ts);
+        d.stance = Stance::Prone;
+        d.rifle = Rifle::Aim;
+        a.step(&d);
+        d.ts += 0.10;
+        d.rifle = Rifle::Ready;
+        let f = a.step(&d);
+        let record = a.record(&f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
+        let (_, old, remaining) = pose::unpack_fade_layer(record[11]);
+        assert_eq!(f.upper, None);
+        assert_eq!(old, Pose::ProneAim as u32 as f32 + 1.0);
+        assert!((remaining - 0.10 / LAYER_BLEND_S).abs() < 0.02, "aim weight jumped on reversal: {remaining}");
     }
 
     #[test]

@@ -178,6 +178,29 @@ fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
 }
 
 #[test]
+fn prone_aim_keeps_the_same_legs_at_rest_and_an_independent_upper_body_in_motion() {
+    use scalia_render::pose::{layer, params_dir};
+    let rest = params(Pose::Prone, 0.0);
+    let aim = params(Pose::ProneAim, 0.0);
+    assert_eq!((rest.hip, rest.knee, rest.side, rest.drop), (aim.hip, aim.knee, aim.side, aim.drop));
+
+    let (tip_at_rest, bore_at_rest) = barrel_with_phases(RIFLE, Pose::ProneAim, None, 0.0, 0.0, 0.0);
+    for dir in [0.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, -std::f32::consts::FRAC_PI_2] {
+        for i in 0..24 {
+            let phase = i as f32 / 24.0;
+            let crawl = params_dir(Pose::Crawl, phase, dir);
+            let p = layer(&crawl, &aim);
+            assert_eq!((p.hip, p.knee, p.side, p.drop), (crawl.hip, crawl.knee, crawl.side, crawl.drop));
+            let (tip, bore) = barrel_with_phases(RIFLE, Pose::Crawl, Some(Pose::ProneAim), phase, 0.0, dir);
+            // The leg grounding offset acts fore-aft once the rig is horizontal; it must not tilt the rifle.
+            let expected_tip = tip_at_rest + Vec3::Y * (crawl.drop - rest.drop);
+            assert!(tip.distance(expected_tip) < 0.001, "muzzle drifts during aimed crawl at {dir:.2}/{phase:.2}: {tip:?}");
+            assert!(bore.distance(bore_at_rest) < 0.001, "bore drifts during aimed crawl at {dir:.2}/{phase:.2}: {bore:?}");
+        }
+    }
+}
+
+#[test]
 fn aiming_tucks_the_firing_elbow_and_reaches_across_with_the_other() {
     let pp = params(Pose::StandAim, 0.0);
     // The right (firing) elbow is tucked and bent; the left arm reaches nearly straight to the rifle and swings in.

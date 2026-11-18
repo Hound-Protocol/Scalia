@@ -70,7 +70,7 @@ Scalia renders thousands of soldiers across galactic, orbital, and planetary eng
 
 ## 3. Current Audit: Defects and Polish Required
 
-1. **Prone Visual Polish (`AN-02`):** `Prone` (`5`), `Crawl` (`32`), and `ProneAim` (`36`) require browser tuning for elbow/ground contact, crawl cadence feel, and transitions between crawling and aiming.
+1. **Prone Visual Polish (`AN-02`):** `Prone` (`5`) and `Crawl` (`32`) now share `ProneAim` (`36`) as an upper layer, so starting or stopping the crawl does not restart the aim blend. The model viewer exposes stationary aim and all four aimed crawl directions. Elbow/ground contact and cadence are still separate visual-tuning items.
 2. **Prone-to-Tablet Joint Velocity (`AN-01`):** `anim_audit` flags `Prone -> Tablet` at `10.5 rad/s` (highest joint speed in the rig) because the figure stands up and pulls the rifle onto the back simultaneously; needs an intermediate `Drop` stand-up phase before raising the PDA.
 3. **Cover Peek Dynamics (`AN-01`):** `Cover`, `CoverAim`, `LeanLeft`, and `LeanRight` hold static angles once blended; need shader-side weight shifts, subtle head checks, and smooth peek-in/peek-out micro-motion.
 4. **Idle Life (`AN-01`):** `Stand`, `Ready`, `Crouch`, and `Stack` need low-cost shader breathing, weight shifting, and occasional weapon/horizon scans so squads in hold positions look alive.

@@ -932,37 +932,28 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         Pose::Drop => return drop_params(phase),
         Pose::DropReach => return drop_reach(),
         Pose::DropPlant => return drop_plant(),
-        Pose::Prone => {
+        Pose::Prone | Pose::ProneAim => {
             p.prone = 1.0;
-            p.shoulder = [2.8, 1.571];
-            p.elbow = [1.3, 2.084];
-            p.reach = [0.0, 0.401];
-            p.abduct = [0.0, 0.604];
             p.hip = [0.18, 0.16];
             p.knee = [0.06, 0.04];
-            p.side = [0.0, 0.0];
-            p.tilt = 0.0;
-            p.rifle = std::f32::consts::FRAC_PI_2;
-            p.rifle_yaw = 0.55;
-            p.twist = -0.55;
-            p.lean = -0.1;
-            p.look = 0.55;
-            p.head = 1.0;
-        }
-        Pose::ProneAim => {
-            // Solved blend of prone support and the two-handed aim rig: both elbows stay supported,
-            // the right hand anchors the rifle, and the left hand reaches the handguard.
-            p.prone = 1.0;
-            p.shoulder = [1.965, 0.559];
-            p.elbow = [0.905, 1.791];
-            p.reach = [0.07, 0.522];
-            p.abduct = [-0.015, 0.45];
             p.rifle = std::f32::consts::FRAC_PI_2;
             p.rifle_yaw = 0.55;
             p.twist = -0.55;
             p.look = 0.55;
             p.lean = -0.1;
-            p.head = 0.82;
+            if pose == Pose::ProneAim {
+                p.shoulder = [1.965, 0.559];
+                p.elbow = [0.905, 1.791];
+                p.reach = [0.07, 0.522];
+                p.abduct = [-0.015, 0.45];
+                p.head = 0.82;
+            } else {
+                p.shoulder = [2.8, 1.571];
+                p.elbow = [1.3, 2.084];
+                p.reach = [0.0, 0.401];
+                p.abduct = [0.0, 0.604];
+                p.head = 1.0;
+            }
         }
         Pose::StandAim => {
             // On the same athletic base as the ready (feet staggered, knees flexed, leaning in), rifle shouldered:
@@ -991,7 +982,9 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
 /// Two layers (motion guide rule 1): the legs of one pose (gait, crouch) under the upper body of another (aim,
 /// carry), so a soldier can walk while aiming.
 pub fn layer(legs: &PoseParams, upper: &PoseParams) -> PoseParams {
-    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, rifle_yaw: upper.rifle_yaw, tilt: upper.tilt, twist: legs.twist + upper.twist, head: upper.head, sling: upper.sling, look: upper.look, abduct: upper.abduct, ..*legs }
+    // A fully prone upper pose is already braced. The unaimed crawl's torso roll must not be added to it.
+    let twist = if upper.prone == 1.0 { upper.twist } else { legs.twist + upper.twist };
+    PoseParams { lean: upper.lean, shoulder: upper.shoulder, elbow: upper.elbow, reach: upper.reach, rifle: upper.rifle, rifle_yaw: upper.rifle_yaw, tilt: upper.tilt, twist, head: upper.head, sling: upper.sling, look: upper.look, abduct: upper.abduct, ..*legs }
 }
 
 /// The life a stride puts into the body: a rise and fall twice per cycle, the upper body turning against the legs,
