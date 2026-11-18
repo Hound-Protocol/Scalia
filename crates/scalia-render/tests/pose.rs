@@ -722,3 +722,20 @@ fn a_fall_ends_exactly_in_the_pose_he_lies_in() {
         assert_eq!(params(fall, 0.0).prone, 0.0);
     }
 }
+
+#[test]
+fn baked_forward_crawl_loops_without_a_seam() {
+    // AN-02-S06: the forward crawl table wraps at phase 1.0, so the last sample must meet the first.
+    let end = params(Pose::Crawl, 0.9999);
+    let start = params(Pose::Crawl, 0.0);
+    for (name, a, b) in [
+        ("knee L", end.knee[0], start.knee[0]),
+        ("knee R", end.knee[1], start.knee[1]),
+        ("hip R", end.hip[1], start.hip[1]),
+        ("elbow R", end.elbow[1], start.elbow[1]),
+        ("twist", end.twist, start.twist),
+        ("head", end.head, start.head),
+    ] {
+        assert!((a - b).abs() < 0.03, "{name} jumps {:.3} at the loop seam", (a - b).abs());
+    }
+}
