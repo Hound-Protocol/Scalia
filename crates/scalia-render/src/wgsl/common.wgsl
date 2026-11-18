@@ -311,36 +311,29 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.lean = 0.12;
     carry(&p, 4u);
     p.head = -0.25;
-  } else if (pose == 5u) {
-    // Keep the rifle anchored in the right shoulder at a reachable height; grip() solves the left support arm.
+  } else if (pose == 5u || pose == 36u) {
+    // Prone ready and aim share the same legs; grip() solves the left support arm in both.
     p.prone = 1.0;
-    p.sh = vec2f(2.8, 1.571);
-    p.el = vec2f(1.3, 2.084);
-    p.reach = vec2f(0.0, 0.401);
-    p.abd = vec2f(0.0, 0.604);
     p.hip = vec2f(0.18, 0.16);
     p.knee = vec2f(0.06, 0.04);
-    p.side = vec2f(0.0, 0.0);
-    p.tilt = 0.0;
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
     p.lean = -0.1;
     p.look = 0.55;
-    p.head = 1.0;
-  } else if (pose == 36u) {
-    // Solved blend of prone support and the two-handed aim rig.
-    p.prone = 1.0;
-    p.sh = vec2f(1.965, 0.559);
-    p.el = vec2f(0.905, 1.791);
-    p.reach = vec2f(0.07, 0.522);
-    p.abd = vec2f(-0.015, 0.45);
-    p.rifle = 1.5707963;
-    p.ryaw = 0.55;
-    p.twist = -0.55;
-    p.look = 0.55;
-    p.lean = -0.1;
-    p.head = 0.82;
+    if (pose == 36u) {
+      p.sh = vec2f(1.965, 0.559);
+      p.el = vec2f(0.905, 1.791);
+      p.reach = vec2f(0.07, 0.522);
+      p.abd = vec2f(-0.015, 0.45);
+      p.head = 0.82;
+    } else {
+      p.sh = vec2f(2.8, 1.571);
+      p.el = vec2f(1.3, 2.084);
+      p.reach = vec2f(0.0, 0.401);
+      p.abd = vec2f(0.0, 0.604);
+      p.head = 1.0;
+    }
   } else if (pose == 6u) {
     // On the athletic base (pose.rs `athletic`), leaning in by AIM_LEAN 0.1 with the rifle and head taking it back.
     athletic(&p);
@@ -811,8 +804,18 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
       }
       pp = blend(was, pp, 1.0 - lb.y);
     }
-    // Standing still: idle life, each soldier out of step with the next.
-    if (b.z == 0.0) { pp = idle(pp, u32(b.w), time + b.y * 97.0, b.y); }
+    // At rest: idle life, each soldier out of step with the next. An aimed prone soldier still has
+    // the Prone base, so fade its unaimed scan and sway with the rifle layer, not with the legs.
+    if (b.z == 0.0) {
+      let base_id = u32(b.w);
+      let idle_time = time + b.y * 97.0;
+      if (base_id == 5u && (upper_id == 36u || lb.x == 37.0)) {
+        let idle_weight = select(1.0 - lb.y, lb.y, upper_id == 36u);
+        if (idle_weight > 0.0) { pp = blend(pp, idle(pp, base_id, idle_time, b.y), idle_weight); }
+      } else {
+        pp = idle(pp, base_id, idle_time, b.y);
+      }
+    }
     // Recoil pressure, carried in the pose id's fraction.
     let kick = fract(b.w);
     if (kick > 0.0) {
@@ -876,7 +879,8 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
 // An upper-body stance laid over the legs' pose (pose.rs `layer`).
 fn upper_over(legs: PP, up: PP) -> PP {
   var pp = legs;
-  pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.tilt = up.tilt; pp.twist = legs.twist + up.twist; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
+  pp.lean = up.lean; pp.sh = up.sh; pp.el = up.el; pp.reach = up.reach; pp.rifle = up.rifle; pp.ryaw = up.ryaw; pp.tilt = up.tilt; pp.head = up.head; pp.sling = up.sling; pp.look = up.look; pp.abd = up.abd;
+  pp.twist = select(legs.twist + up.twist, up.twist, up.prone == 1.0);
   return pp;
 }
 

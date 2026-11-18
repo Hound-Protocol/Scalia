@@ -2573,6 +2573,7 @@ impl Viewer {
             use std::f32::consts::{FRAC_PI_2, PI};
             use scalia_render::pose::stride_m_dir;
             let walk = |dir: f32| 1.2 / stride_m_dir(Pose::Walk, dir);
+            let aimed_crawl = |dir| (Pose::Crawl, 0.55 / stride_m_dir(Pose::Crawl, dir), Some(Pose::ProneAim), dir);
             let combo: Option<(Pose, f32, Option<Pose>, f32)> = match self.preview_pose {
                 Some(9) => Some((Pose::Walk, walk(0.0), Some(Pose::StandAim), 0.0)),
                 Some(10) => Some((Pose::Walk, walk(FRAC_PI_2), Some(Pose::StandAim), FRAC_PI_2)),
@@ -2597,6 +2598,11 @@ impl Viewer {
                 Some(29) => Some((Pose::FallBack, 0.9, None, 0.0)),
                 Some(30) => Some((Pose::FallForward, 1.0, None, 0.0)),
                 Some(31) => Some((Pose::DeadBack, 0.0, None, 0.0)),
+                Some(32) => Some((Pose::Prone, 0.0, Some(Pose::ProneAim), 0.0)),
+                Some(33) => Some(aimed_crawl(0.0)),
+                Some(34) => Some(aimed_crawl(FRAC_PI_2)),
+                Some(35) => Some(aimed_crawl(-FRAC_PI_2)),
+                Some(36) => Some(aimed_crawl(PI)),
                 _ => None,
             };
             let (pose, steps, upper, dir) = combo.unwrap_or_else(|| {
@@ -2619,7 +2625,7 @@ impl Viewer {
             let variant = VARIANTS[self.model_variant as usize % VARIANTS.len()].0;
             let cycling = if self.preview_pose.is_none() { " (poses change every 3 s)" } else { "" };
             // A prone soldier lies 2.5 m forward from where he stood: centre on him and pull back.
-            let (centre, size) = if pose == Pose::Prone { (Vec3::new(0.0, 1.2, 0.3), 3.4) } else { (Vec3::new(0.0, 0.0, 0.9), 2.6) };
+            let (centre, size) = if matches!(pose, Pose::Prone | Pose::Crawl) { (Vec3::new(0.0, 1.2, 0.3), 3.4) } else { (Vec3::new(0.0, 0.0, 0.9), 2.6) };
             self.model_yaw = yaw;
             return (centre, yaw, size * self.model_zoom, 10.0, format!("Soldier, {variant}: {tris} triangles, {detail}, pose {pose:?}{cycling}"));
         }

@@ -1,7 +1,13 @@
 # Scalia Agent Handoff
 
-## Active task
-PR #45 — AN-2.1 prone/crawl rifle support
+## Current animation lane
+
+AN-02-S03: keep prone aim independent of the crawl gait, preserve direction and phase through brief stops, and expose the four aimed crawls in the model viewer. The next animation work order is AN-01 (life in held poses); keep further elbow contact or crawl cadence tuning separate from this transition fix.
+
+## Historical: AN-2.1 prone/crawl rifle support
+
+PR #45 merged with Verify green. PRs #63 and #64 subsequently landed grounded idle, directional crawl, and fast crawl. The following was the diagnosis before PR #45 merged.
+
 Branch: `work/scalia-an2-1-prone-crawl-repair-2026-11-16`
 
 ## CI diagnosis
@@ -26,13 +32,8 @@ Workflow Verify repeatedly failed in `cargo test --workspace (debug)`.
 - `0e8dcd78020fd34e6ff744b9c2e117aa3da119e5` — prone/crawl right-arm tuning (46 pose tests passed; WGSL parity still failed)
 - `f6b3396aa60bc730d71cb00784e8fed698f7317a` — sync generated drop-plant constant
 
-## Verification
+## Verification snapshot (before merge)
 - Latest code head: `f6b3396aa60bc730d71cb00784e8fed698f7317a`
 - Exact-head CI pending; do not mark PR fixed until Verify passes.
 - Visual in-game QA remains outstanding.
 - PR remains draft; do not merge or mark ready without passing CI and visual QA.
-
-## Next steps
-1. Check exact-head Verify run for `f6b3396aa60bc730d71cb00784e8fed698f7317a`.
-2. If green, review Rust/WGSL parity and inspect rendered prone/crawl poses in-game.
-3. If failing, download `scalia-verification-log` and fix the specific failing test; do not weaken tests.
