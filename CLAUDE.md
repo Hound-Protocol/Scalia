@@ -1,8 +1,7 @@
 # Scalia: notes for agent sessions
 
-Browser co-op tactical command game. Rust (wgpu, WASM) in `crates/`; the page is in `web/`; live at
-hound-protocol.github.io/Scalia (GitHub Pages builds on push to main). The current plan and state of play are in
-`docs/handoff/` (work order, AI and animation handoff): read those first instead of exploring.
+Start with [README.md](README.md), [AGENTS.md](AGENTS.md), and [CONTRIBUTING.md](CONTRIBUTING.md).
+Read [HANDOFF.md](HANDOFF.md) and the work order for your lane before exploring. This file is a code map and local workflow aid, not a separate contribution policy.
 
 ## Map
 - `crates/scalia-ai`: the battle simulation (fixed 50 ms steps, deterministic). `battle.rs` (fire, sight, cover use),
@@ -17,8 +16,7 @@ hound-protocol.github.io/Scalia (GitHub Pages builds on push to main). The curre
 - `scripts/check.sh`: the full verification, quiet (one line on success). Run it before every push.
 - Determinism: `cargo run -q --release -p scalia-bench --bin hash_battle` must give the same hash before and after a
   change, unless the change is meant to alter the battle.
-- Commits: the description goes into the in-game changelog (write it for players) and carries an `Update: <Area>`
-  trailer.
+- Follow the [PR naming](CONTRIBUTING.md#pull-requests) and [release identity](CONTRIBUTING.md#release-identity) rules. Write commit subjects and bodies for players; they appear in the in-game changelog.
 
 ## Keep token use low (the user's standing request)
 - Grep and read line ranges; never read whole large files (`viewer.rs`, `battle.rs`, `leader.rs`, `game.js`).
