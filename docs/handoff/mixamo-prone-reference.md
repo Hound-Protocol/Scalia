@@ -44,3 +44,9 @@ Method: each clip's joint swing is measured as the angle from its first frame, p
   reliable. We use the peak timing above and the swing ranges, not a fitted cycle.
 - Our crawl now drives the arms from the knee draw (`c`) instead of a quarter cycle later (`s`), in both
   `pose.rs` and `common.wgsl`. Stride length is unchanged (`CRAWL_STRIDE` 0.6 m).
+- Elbow ground contact through the crawl cycle (new test `crawl_keeps_elbows_on_the_ground_and_head_up_through_the_cycle`):
+  before this change the left elbow lifted to 0.139 m at phase 0.25 on main. Reducing the body twist from
+  `(0.20 + 0.06 fwd)` to `(0.03 + 0.02 fwd)` brings the worst lift to about 0.10 m. The reference spine swings under
+  30 degrees, so a small twist fits it.
+- Lift is still close to the 0.10 m limit. Our figure's proportions may need the twist lower still on screen; check
+  it in the model viewer before going further.
