@@ -906,7 +906,9 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.prone = 1.0;
             // Right arm and rifle surge fore-and-aft while grip() keeps the left support hand on the handguard,
             // driving both elbows forward to plant and pull the chest along the ground.
-            let surge = s * (1.0 - 0.35 * lat_abs);
+            // Arms follow the knee draw (reference: right forearm peaks within 0.03 s of the right knee), so the
+            // arms and the legs on each side move together instead of a quarter cycle apart.
+            let surge = c * (1.0 - 0.35 * lat_abs);
             p.shoulder = [2.8, 1.56 + 0.26 * surge];
             p.elbow = [1.3, 2.06 - 0.24 * surge];
             p.reach = [0.0, 0.42 + 0.12 * c * (1.0 - 0.3 * lat_abs)];

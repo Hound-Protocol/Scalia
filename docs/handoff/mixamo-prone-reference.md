@@ -35,3 +35,12 @@ Method: each clip's joint swing is measured as the angle from its first frame, p
   this note yet.
 - Stand-to-prone and crouch-to-prone transitions are not measured here.
 - The rig mapping (reference bone names to our joints) is not written yet.
+
+## Crawl timing (AN-02-S05)
+
+- Reference forward crawl: right forearm peaks at about 0.80 s and right knee at about 0.77 s, so the right arm and
+  right leg move together. The left forearm peaks at about 1.53 s.
+- The clip is short and does not loop cleanly (autocorrelation about 0.2), so a full per-cycle fit from it is not
+  reliable. We use the peak timing above and the swing ranges, not a fitted cycle.
+- Our crawl now drives the arms from the knee draw (`c`) instead of a quarter cycle later (`s`), in both
+  `pose.rs` and `common.wgsl`. Stride length is unchanged (`CRAWL_STRIDE` 0.6 m).
