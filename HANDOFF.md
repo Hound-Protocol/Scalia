@@ -1,8 +1,12 @@
 # Scalia Agent Handoff
 
+Start at the [README](README.md) for all workstreams and the [contribution standards](CONTRIBUTING.md) for how to deliver changes.
+
 ## Current animation lane
 
-AN-02-S03: keep prone aim independent of the crawl gait, preserve direction and phase through brief stops, and expose the four aimed crawls in the model viewer. The next animation work order is AN-01 (life in held poses); keep further elbow contact or crawl cadence tuning separate from this transition fix.
+As of 2026-11-18, **AN-02-S03 is merged**, not an open implementation task. [PR #67](https://github.com/Hound-Protocol/Scalia/pull/67) landed on `main` at `830d860`, keeping prone aim independent of the crawl gait and adding aimed-crawl previews. Automated checks passed locally on `ef4e8c4` and in [GitHub Verify](https://github.com/Hound-Protocol/Scalia/actions/runs/44222138675/job/134526345490); browser visual sign-off was not recorded. Check [live build identity](https://hound-protocol.github.io/Scalia/version.json) for deployment rather than inferring it from the merge.
+
+**Next:** Review the pipeline in the [Animation Codex](docs/animation-codex.md), confirm live transitions in the model viewer or game on a working WebGPU device, and then scope AN-01 (life in held poses) using the [animation work orders](docs/handoff/work-orders-ai-animation.md). Keep further prone elbow-contact and crawl-cadence tuning separate from that slice.
 
 ## Historical: AN-2.1 prone/crawl rifle support
 
