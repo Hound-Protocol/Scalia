@@ -763,3 +763,17 @@ fn crawl_keeps_elbows_on_the_ground_and_head_up_through_the_cycle() {
     assert!(low_face > 0.03, "face in the ground ({low_face:.3} m)");
     assert!(low_head > 0.2, "head too low ({low_head:.3} m)");
 }
+
+#[test]
+fn crawl_keeps_both_shins_near_the_ground() {
+    // AN-02-S08: the drawn-up leg stays low like a real low crawl; flat prone shins top out near 0.24 m.
+    let mut worst = 0.0f32;
+    for k in 0..48 {
+        let v = posed(Pose::Crawl, k as f32 / 48.0);
+        for shin in [Part::LeftShin, Part::RightShin] {
+            let z = v.iter().filter(|p| p.0 == shin).map(|p| p.1.z).fold(f32::MIN, f32::max);
+            worst = worst.max(z);
+        }
+    }
+    assert!(worst < 0.36, "a shin rises to {worst:.2} m in the crawl");
+}

@@ -14,9 +14,11 @@ Merged to `main`:
 
 - AN-02-S07 (this PR): smaller body twist and the elbow-on-ground test. This commit was pushed to the S05 branch after #70 merged, so it was missing from `main` until now.
 
+- AN-02-S08 (this PR): knee draw capped (left 0.40, right 0.60 of the old range) because the right shin rose to 0.43 m, as high as the torso; now 0.33 m. Measured by `crawl_keeps_both_shins_near_the_ground`.
+
 Not verified: the in-game look. On 2026-11-18 the project lead reported the forward crawl looked unchanged in the model viewer after #71. The deploy for `ffcd47e` succeeded and the page referenced that build, so a cached page is the likely cause, but this was not confirmed. Visual QA is outstanding.
 
-Known issues to fix next: the table also overrides the left shoulder and elbow (support hand may look wrong); the knee scaling is approximate; hips may sit too high; the near elbow is not planted.
+Known issues to fix next: the table also overrides the left shoulder and elbow (support hand may look wrong); other crawl directions are still procedural. Measured on 2026-11-20: hips and upper body sit at flat-prone height; only the shin was an outlier.
 
 Reference data: [mixamo-prone-reference.md](docs/handoff/mixamo-prone-reference.md). Raw Mixamo files are not in the repo and must not be committed. A scratch copy exists on the working machine only; delete it when tuning is finished.
 
