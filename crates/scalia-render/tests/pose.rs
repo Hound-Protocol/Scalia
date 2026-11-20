@@ -775,7 +775,7 @@ fn crawl_keeps_both_shins_near_the_ground() {
             worst = worst.max(z);
         }
     }
-    assert!(worst < 0.36, "a shin rises to {worst:.2} m in the crawl");
+    assert!(worst < 0.25, "a shin rises to {worst:.2} m in the crawl");
 }
 
 #[test]
@@ -791,4 +791,21 @@ fn prone_hips_and_legs_rest_on_the_ground() {
         assert!(z < 0.04, "body {:.2} m from the feet floats {z:.2} m off the ground", y - y0);
         y += 0.1;
     }
+}
+
+#[test]
+fn crawl_draws_the_knee_up_sideways_without_lifting_the_shin() {
+    // AN-02-S10: with the full knee draw from the reference, leg roll keeps the drawn shin low (0.32 m without it).
+    let mut worst = 0.0f32;
+    let mut drawn = 0.0f32;
+    for k in 0..48 {
+        let ph = k as f32 / 48.0;
+        drawn = drawn.max(params(Pose::Crawl, ph).knee[1]);
+        let v = posed(Pose::Crawl, ph);
+        for shin in [Part::LeftShin, Part::RightShin] {
+            worst = worst.max(v.iter().filter(|p| p.0 == shin).map(|p| p.1.z).fold(f32::MIN, f32::max));
+        }
+    }
+    assert!(drawn > 0.9, "the right knee draws up fully ({drawn:.2})");
+    assert!(worst < 0.23, "a shin rises to {worst:.2} m in the crawl");
 }
