@@ -71,7 +71,7 @@ fn crawling_has_continuous_directional_cycles_forward_backward_and_sideways() {
     let dirs = [0.0f32, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
     let poses: Vec<_> = dirs.iter().map(|&dir| params_dir(Pose::Crawl, 0.23, dir)).collect();
     assert!(poses.iter().all(|p| p.prone == 1.0 && p.rifle > 1.5), "crawl stays low with the rifle carried forward");
-    assert_ne!(poses[0].hip, poses[1].hip, "backwards crawl reverses the diagonal limb phase");
+    assert_ne!(poses[0].knee, poses[1].knee, "backwards crawl reverses the diagonal limb phase");
     assert_ne!(poses[2].side, poses[3].side, "left and right crawl use opposite support patterns");
     for &dir in &dirs {
         let a = params_dir(Pose::Crawl, 0.0, dir);
@@ -776,4 +776,19 @@ fn crawl_keeps_both_shins_near_the_ground() {
         }
     }
     assert!(worst < 0.36, "a shin rises to {worst:.2} m in the crawl");
+}
+
+#[test]
+fn prone_hips_and_legs_rest_on_the_ground() {
+    // AN-02-S09: lying prone, the body is not a plank on its toes. Along the legs and hips (the back of the
+    // body, 0.2 to 1.0 m from the feet; the hips are at 0.88 m) the lowest point at every 10 cm stays within 4 cm of
+    // the ground.
+    let v = posed(Pose::Prone, 0.0);
+    let y0 = v.iter().map(|p| p.1.y).fold(f32::MAX, f32::min);
+    let mut y = y0 + 0.2;
+    while y < y0 + 1.0 {
+        let z = v.iter().filter(|p| p.1.y >= y && p.1.y < y + 0.1).map(|p| p.1.z).fold(f32::MAX, f32::min);
+        assert!(z < 0.04, "body {:.2} m from the feet floats {z:.2} m off the ground", y - y0);
+        y += 0.1;
+    }
 }

@@ -16,15 +16,17 @@ Merged to `main`:
 
 - AN-02-S08 (this PR): knee draw capped (left 0.40, right 0.60 of the old range) because the right shin rose to 0.43 m, as high as the torso; now 0.33 m. Measured by `crawl_keeps_both_shins_near_the_ground`.
 
+- AN-02-S09 (this PR): prone no longer a plank on the toes. `PRONE_LIFT` 0.23 to 0.14, feet point back when settled (`PRONE_POINT`), chest arched up on the elbows (`PRONE_LEAN` -0.28, `PRONE_AIM_LEAN` -0.30) with rifle and head compensated, crawl hips held at the prone value. Transitions keep the old 0.23 lift until fully down (`prone_settle`). Mirrored in `common.wgsl` and `skeleton.rs`. Checked with a rendered side view (scripts/stance_sheet.py) and `prone_hips_and_legs_rest_on_the_ground`.
+
 Not verified: the in-game look. On 2026-11-18 the project lead reported the forward crawl looked unchanged in the model viewer after #71. The deploy for `ffcd47e` succeeded and the page referenced that build, so a cached page is the likely cause, but this was not confirmed. Visual QA is outstanding.
 
-Known issues to fix next: the table also overrides the left shoulder and elbow (support hand may look wrong); other crawl directions are still procedural. Measured on 2026-11-20: hips and upper body sit at flat-prone height; only the shin was an outlier.
+Known issues to fix next: the drawn leg's shin still lifts in the crawl because the rig has no hip roll, so knee bend can only raise a prone shin (AN-02-S10: add a leg-roll joint for a frog-leg low crawl). Also: the table also overrides the left shoulder and elbow (support hand may look wrong); other crawl directions are still procedural. Measured on 2026-11-20: hips and upper body sit at flat-prone height; only the shin was an outlier.
 
 Reference data: [mixamo-prone-reference.md](docs/handoff/mixamo-prone-reference.md). Raw Mixamo files are not in the repo and must not be committed. A scratch copy exists on the working machine only; delete it when tuning is finished.
 
 ## Next
 
-1. Confirm the crawl in the model viewer after a hard refresh (check `models.js?v=` matches the live build).
+1. Without a browser, check poses with `python3 scripts/stance_sheet.py out.png 5+36 32+36@0.25` (side and three-quarter views). Confirm in the model viewer when possible.
 2. Fix pass on S06 (above), then stand/crouch to prone transitions.
 3. Implement the finished animations in the game so AI work can continue (project lead priority, 2026-11-20).
 
