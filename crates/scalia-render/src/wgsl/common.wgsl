@@ -596,7 +596,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.side = vec2f(-0.14 - (1.08 - 0.18 * lat_abs) * draw.x - 0.24 * lead_l + 0.08 * lead_r,
                    0.14 + (1.08 - 0.18 * lat_abs) * draw.y + 0.24 * lead_r - 0.08 * lead_l);
     p.bob = 0.0;
-    p.twist = -0.24 + (0.20 + 0.06 * fwd) * s + 0.18 * lateral;
+    p.twist = -0.24 + (0.03 + 0.02 * fwd) * s + 0.18 * lateral; // AN-02-S05: smaller body twist, mirrors pose.rs
     p.tilt = 0.0;
     p.lean = -0.08;
     p.look = 0.24 - 0.16 * s - 0.18 * lateral;

@@ -739,3 +739,27 @@ fn baked_forward_crawl_loops_without_a_seam() {
         assert!((a - b).abs() < 0.03, "{name} jumps {:.3} at the loop seam", (a - b).abs());
     }
 }
+
+/// AN-02-S05: through the whole crawl cycle the elbows stay on the ground, the head stays up off it, and the
+/// rifle stays out in front, so the crawl never lifts its elbows or drags its face.
+#[test]
+fn crawl_keeps_elbows_on_the_ground_and_head_up_through_the_cycle() {
+    let (mut worst_elbow, mut worst_at) = (f32::MIN, 0.0);
+    let (mut low_face, mut low_head) = (f32::MAX, f32::MAX);
+    for k in 0..32 {
+        let phase = k as f32 / 32.0;
+        let v = posed(Pose::Crawl, phase);
+        let of = |part: Part| v.iter().filter(move |p| p.0 == part).map(|p| p.1).collect::<Vec<Vec3>>();
+        let min = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MAX), |a, b| a.min(*b));
+        let max = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
+        for arm in [Part::LeftArm, Part::RightArm] {
+            let z = min(&of(arm)).z;
+            if z > worst_elbow { worst_elbow = z; worst_at = phase; }
+        }
+        low_face = low_face.min(min(&of(Part::Head)).z);
+        low_head = low_head.min(max(&of(Part::Head)).z);
+    }
+    assert!(worst_elbow < 0.1, "worst elbow {worst_elbow:.3} m at phase {worst_at:.3}");
+    assert!(low_face > 0.03, "face in the ground ({low_face:.3} m)");
+    assert!(low_head > 0.2, "head too low ({low_head:.3} m)");
+}

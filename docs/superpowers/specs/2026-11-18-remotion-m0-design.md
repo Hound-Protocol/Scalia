@@ -1,6 +1,6 @@
 # ReMotion M0: motion file format and playback
 
-Status: draft, awaiting owner approval. No code until approved.
+Status: approved by the project lead on 2026-11-20; implementation deferred until the animation fixes and the animation-to-AI hookup are done. The three decisions at the end stand at their recommended values.
 
 ## Goal
 
