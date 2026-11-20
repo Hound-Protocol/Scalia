@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo "== markdown links"
+python3 scripts/check_links.py
+
 echo "== release metadata tests"
 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 

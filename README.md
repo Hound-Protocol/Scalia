@@ -9,7 +9,7 @@ Scalia is a browser-based co-op tactical command game built on Pack Engine. You 
 For humans and coding agents, the path is the same:
 
 1. **Read [CONTRIBUTING.md](CONTRIBUTING.md).** It defines branch and PR naming, work-order revisions, release identity, engineering standards, and verification.
-2. **Read [HANDOFF.md](HANDOFF.md), then open the work order for your lane.** Confirm the work-order ID, scope, acceptance criteria, and next action. Coding agents also read [AGENTS.md](AGENTS.md).
+2. **Read [HANDOFF.md](HANDOFF.md), then open the work order for your lane** (the [docs index](docs/README.md) lists every document with its status, and [architecture](docs/architecture.md) maps the crates). Confirm the work-order ID, scope, acceptance criteria, and next action. Coding agents also read [AGENTS.md](AGENTS.md).
 3. **Check [`origin/main`](https://github.com/Hound-Protocol/Scalia/tree/main) and [open pull requests](https://github.com/Hound-Protocol/Scalia/pulls).** A handoff is a record, not proof of what's merged or deployed. Use Git history and CI to check what landed, and the live build identity to check what players are running.
 4. **Deliver one focused PR.** Branch from current `main` unless the work order names another base. Put the work-order ID in the branch and PR title, run the relevant checks and record the evidence, and leave the PR in draft if required validation is outstanding.
 

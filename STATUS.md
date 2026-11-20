@@ -1,5 +1,7 @@
 # Scalia core status
 
+> Historical (Milestones 0 and 1). Kept as measurement evidence, not a live status page. Current state: [HANDOFF.md](HANDOFF.md).
+
 Milestone 0 (core) and Milestone 1 (blueprints, planet, Pages page) are below. Everything is verified with one command: `bash scripts/verify.sh`.
 
 # Milestone 0
