@@ -513,6 +513,28 @@ pub fn prone_settle(a: f32) -> f32 {
     a.powi(12)
 }
 
+/// Leg roll lying prone (AN-02-S10): each leg turns about its own long axis, up to a quarter turn as the knee
+/// draws up (`LEG_ROLL_FROM` to `LEG_ROLL_FULL` knee bend), so the bent knee folds sideways along the ground
+/// instead of lifting the shin into the air. Nothing until fully settled prone (`prone_settle`), so standing,
+/// kneeling and the drop are unchanged; straight prone legs (knee under `LEG_ROLL_FROM`) are not rolled.
+pub fn leg_roll_angle(p: &PoseParams, i: usize) -> f32 {
+    let t = ((p.knee[i] - LEG_ROLL_FROM) / (LEG_ROLL_FULL - LEG_ROLL_FROM)).clamp(0.0, 1.0);
+    let r = std::f32::consts::FRAC_PI_2 * prone_settle(p.prone.max(0.0)) * t * t * (3.0 - 2.0 * t);
+    if i == 0 { -r } else { r }
+}
+pub const LEG_ROLL_FROM: f32 = 0.1;
+pub const LEG_ROLL_FULL: f32 = 0.4;
+
+/// A leg point turned by `leg_roll_angle` about the vertical through its hip (the leg's own axis when straight).
+fn leg_roll(q: Vec3, p: &PoseParams, i: usize) -> Vec3 {
+    let a = leg_roll_angle(p, i);
+    if a == 0.0 { return q; }
+    let x0 = if i == 0 { -HIP_X } else { HIP_X };
+    let (s, c) = a.sin_cos();
+    let dx = q.x - x0;
+    Vec3::new(x0 + dx * c - q.y * s, dx * s + q.y * c, q.z)
+}
+
 /// A foot point: ankle bend, then the leg. `prone` points the foot back (`PRONE_POINT`) as he lies down.
 fn foot(q: Vec3, hip: f32, knee: f32, flat: f32, prone: f32) -> Vec3 {
     leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat) + PRONE_POINT * prone_settle(prone.max(0.0))), hip, knee)
@@ -666,30 +688,30 @@ pub fn params(pose: Pose, phase: f32) -> PoseParams {
 /// AN-02-S06: forward crawl baked from the reference clip (Prone Forward). One loop of 24 samples, fields in
 /// order: knee L, knee R, hip L, hip R, shoulder L, shoulder R, elbow L, elbow R, twist, head.
 pub const CRAWL_FWD_BAKE: [[f32; 10]; 24] = [
-    [0.4032, 0.6467, 0.2597, 0.2838, 1.4744, 1.7901, 2.1390, 1.8476, -0.2758, 0.9824],
-    [0.4289, 0.6500, 0.2583, 0.2694, 1.5024, 1.8133, 2.1131, 1.8261, -0.2900, 1.0000],
-    [0.3726, 0.5850, 0.2259, 0.2868, 1.4621, 1.8200, 2.1504, 1.8200, -0.2681, 0.9716],
-    [0.3300, 0.5042, 0.2150, 0.3070, 1.4168, 1.7356, 2.1922, 1.8979, -0.2443, 0.9485],
-    [0.3001, 0.4149, 0.2037, 0.3340, 1.4353, 1.6729, 2.1751, 1.9558, -0.2429, 0.9435],
-    [0.2515, 0.2839, 0.1800, 0.3703, 1.4865, 1.6490, 2.1279, 1.9778, -0.2517, 0.9472],
-    [0.1953, 0.1520, 0.1994, 0.3800, 1.5698, 1.6332, 2.0510, 1.9924, -0.2631, 0.9555],
-    [0.1884, 0.0697, 0.2616, 0.3270, 1.6807, 1.5950, 1.9486, 2.0277, -0.2721, 0.9584],
-    [0.1977, 0.0500, 0.3224, 0.2425, 1.7554, 1.4500, 1.8796, 2.1615, -0.2497, 0.9526],
-    [0.1489, 0.0667, 0.3800, 0.2188, 1.8156, 1.3000, 1.8240, 2.3000, -0.2101, 0.9322],
-    [0.1072, 0.0801, 0.2830, 0.2481, 1.8177, 1.3264, 1.8221, 2.2756, -0.1941, 0.9167],
-    [0.0836, 0.0842, 0.2791, 0.2563, 1.7981, 1.4088, 1.8402, 2.1996, -0.1904, 0.9051],
-    [0.1253, 0.0916, 0.2449, 0.2628, 1.7795, 1.4453, 1.8574, 2.1659, -0.1900, 0.8939],
-    [0.0634, 0.1121, 0.2741, 0.2368, 1.8091, 1.4147, 1.8300, 2.1941, -0.1918, 0.8800],
-    [0.0500, 0.1442, 0.3277, 0.2134, 1.8200, 1.3862, 1.8200, 2.2204, -0.2065, 0.8836],
-    [0.1486, 0.1924, 0.3670, 0.1995, 1.8189, 1.3832, 1.8210, 2.2232, -0.2146, 0.8947],
-    [0.2299, 0.2491, 0.3764, 0.1918, 1.8041, 1.4134, 1.8347, 2.1953, -0.2233, 0.9029],
-    [0.2907, 0.3115, 0.3774, 0.1963, 1.7213, 1.4387, 1.9111, 2.1719, -0.2275, 0.9065],
-    [0.3520, 0.3758, 0.3602, 0.1859, 1.5913, 1.5265, 2.0311, 2.0909, -0.2333, 0.9263],
-    [0.4160, 0.4461, 0.3329, 0.1800, 1.4203, 1.6669, 2.1889, 1.9614, -0.2447, 0.9480],
-    [0.4406, 0.5313, 0.3061, 0.2196, 1.3419, 1.7513, 2.2613, 1.8834, -0.2495, 0.9582],
-    [0.4172, 0.5947, 0.2866, 0.2493, 1.3698, 1.7780, 2.2356, 1.8587, -0.2551, 0.9673],
-    [0.4142, 0.6309, 0.2689, 0.2708, 1.4304, 1.7784, 2.1796, 1.8584, -0.2669, 0.9733],
-    [0.3954, 0.6445, 0.2614, 0.2812, 1.4646, 1.7884, 2.1480, 1.8492, -0.2733, 0.9778],
+    [0.5798, 0.9948, 0.2597, 0.2838, 1.4744, 1.7901, 2.1390, 1.8476, -0.2758, 0.9824],
+    [0.6183, 1.0000, 0.2583, 0.2694, 1.5024, 1.8133, 2.1131, 1.8261, -0.2900, 1.0000],
+    [0.5339, 0.8971, 0.2259, 0.2868, 1.4621, 1.8200, 2.1504, 1.8200, -0.2681, 0.9716],
+    [0.4700, 0.7691, 0.2150, 0.3070, 1.4168, 1.7356, 2.1922, 1.8979, -0.2443, 0.9485],
+    [0.4251, 0.6277, 0.2037, 0.3340, 1.4353, 1.6729, 2.1751, 1.9558, -0.2429, 0.9435],
+    [0.3523, 0.4203, 0.1800, 0.3703, 1.4865, 1.6490, 2.1279, 1.9778, -0.2517, 0.9472],
+    [0.2680, 0.2115, 0.1994, 0.3800, 1.5698, 1.6332, 2.0510, 1.9924, -0.2631, 0.9555],
+    [0.2576, 0.0812, 0.2616, 0.3270, 1.6807, 1.5950, 1.9486, 2.0277, -0.2721, 0.9584],
+    [0.2716, 0.0500, 0.3224, 0.2425, 1.7554, 1.4500, 1.8796, 2.1615, -0.2497, 0.9526],
+    [0.1984, 0.0765, 0.3800, 0.2188, 1.8156, 1.3000, 1.8240, 2.3000, -0.2101, 0.9322],
+    [0.1358, 0.0976, 0.2830, 0.2481, 1.8177, 1.3264, 1.8221, 2.2756, -0.1941, 0.9167],
+    [0.1004, 0.1041, 0.2791, 0.2563, 1.7981, 1.4088, 1.8402, 2.1996, -0.1904, 0.9051],
+    [0.1629, 0.1159, 0.2449, 0.2628, 1.7795, 1.4453, 1.8574, 2.1659, -0.1900, 0.8939],
+    [0.0701, 0.1483, 0.2741, 0.2368, 1.8091, 1.4147, 1.8300, 2.1941, -0.1918, 0.8800],
+    [0.0500, 0.1992, 0.3277, 0.2134, 1.8200, 1.3862, 1.8200, 2.2204, -0.2065, 0.8836],
+    [0.1978, 0.2755, 0.3670, 0.1995, 1.8189, 1.3832, 1.8210, 2.2232, -0.2146, 0.8947],
+    [0.3198, 0.3653, 0.3764, 0.1918, 1.8041, 1.4134, 1.8347, 2.1953, -0.2233, 0.9029],
+    [0.4111, 0.4641, 0.3774, 0.1963, 1.7213, 1.4387, 1.9111, 2.1719, -0.2275, 0.9065],
+    [0.5030, 0.5658, 0.3602, 0.1859, 1.5913, 1.5265, 2.0311, 2.0909, -0.2333, 0.9263],
+    [0.5990, 0.6772, 0.3329, 0.1800, 1.4203, 1.6669, 2.1889, 1.9614, -0.2447, 0.9480],
+    [0.6360, 0.8120, 0.3061, 0.2196, 1.3419, 1.7513, 2.2613, 1.8834, -0.2495, 0.9582],
+    [0.6009, 0.9125, 0.2866, 0.2493, 1.3698, 1.7780, 2.2356, 1.8587, -0.2551, 0.9673],
+    [0.5964, 0.9697, 0.2689, 0.2708, 1.4304, 1.7784, 2.1796, 1.8584, -0.2669, 0.9733],
+    [0.5681, 0.9912, 0.2614, 0.2812, 1.4646, 1.7884, 2.1480, 1.8492, -0.2733, 0.9778],
 ];
 
 /// Interpolates the baked forward crawl at `phase` (one loop, wraps at 1.0).
@@ -1340,12 +1362,12 @@ pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32
 pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
     let mut q = match part {
         Part::Body | Part::Sway | Part::Glow => return v,
-        Part::LeftThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[0]), p.side[0], -HIP_X),
-        Part::RightThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[1]), p.side[1], HIP_X),
-        Part::LeftShin => sideways(leg(v, p.hip[0], p.knee[0]), p.side[0], -HIP_X),
-        Part::RightShin => sideways(leg(v, p.hip[1], p.knee[1]), p.side[1], HIP_X),
-        Part::LeftFoot => sideways(foot(v, p.hip[0], p.knee[0], p.flat, p.prone), p.side[0], -HIP_X),
-        Part::RightFoot => sideways(foot(v, p.hip[1], p.knee[1], p.flat, p.prone), p.side[1], HIP_X),
+        Part::LeftThigh => sideways(leg_roll(rot(v, 0.0, HIP_Z, p.hip[0]), p, 0), p.side[0], -HIP_X),
+        Part::RightThigh => sideways(leg_roll(rot(v, 0.0, HIP_Z, p.hip[1]), p, 1), p.side[1], HIP_X),
+        Part::LeftShin => sideways(leg_roll(leg(v, p.hip[0], p.knee[0]), p, 0), p.side[0], -HIP_X),
+        Part::RightShin => sideways(leg_roll(leg(v, p.hip[1], p.knee[1]), p, 1), p.side[1], HIP_X),
+        Part::LeftFoot => sideways(leg_roll(foot(v, p.hip[0], p.knee[0], p.flat, p.prone), p, 0), p.side[0], -HIP_X),
+        Part::RightFoot => sideways(leg_roll(foot(v, p.hip[1], p.knee[1], p.flat, p.prone), p, 1), p.side[1], HIP_X),
         Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
         Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
         Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
