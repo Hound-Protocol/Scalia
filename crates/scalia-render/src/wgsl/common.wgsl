@@ -133,10 +133,10 @@ fn crouch_gait(p: ptr<function, PP>, phase: f32, reach: f32, height: f32, lift: 
 // A leg point swung out to the side around the front-to-back line through the hip at px (port of pose.rs
 // `sideways`, HIP_X 0.1).
 // Leg roll lying prone (pose.rs leg_roll_angle, AN-02-S10): up to a quarter turn about the leg's own axis as the
-// knee draws from 0.1 to 0.4, only once settled prone.
+// knee draws from 0.1 to 0.4, only once settled prone; inward, so the foot tucks behind the knee (AN-02-S11).
 fn leg_roll(q: vec3f, p: PP, knee: f32, px: f32) -> vec3f {
   let t = clamp((knee - 0.1) / 0.3, 0.0, 1.0);
-  let a = 1.5707963 * pow(max(p.prone, 0.0), 12.0) * t * t * (3.0 - 2.0 * t) * sign(px);
+  let a = 1.5707963 * pow(max(p.prone, 0.0), 12.0) * t * t * (3.0 - 2.0 * t) * -sign(px);
   if (a == 0.0) { return q; }
   let s = sin(a);
   let c = cos(a);
@@ -285,6 +285,45 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
 const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
 const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.858064, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
+
+// AN-02-S11 forward crawl legs (mirrors CRAWL_FWD_LEGS in pose.rs): hip L, hip R, knee L, knee R, side L, side R.
+fn crawl_legs(phase: f32) -> array<f32, 6> {
+  let t = array<array<f32, 6>, 24>(
+    array<f32, 6>(0.0608, 0.0918, 0.1294, 1.0186, -0.4782, 0.1925),
+    array<f32, 6>(0.0230, 0.0924, 0.1295, 1.0199, -0.4637, 0.1932),
+    array<f32, 6>(0.0341, 0.1271, 0.1442, 1.1766, -0.4322, 0.2278),
+    array<f32, 6>(0.0422, 0.1786, 0.1606, 1.3913, -0.3983, 0.2793),
+    array<f32, 6>(0.0385, 0.2532, 0.1651, 1.6404, -0.3612, 0.3539),
+    array<f32, 6>(0.0437, 0.3734, 0.1474, 1.9935, -0.3131, 0.4741),
+    array<f32, 6>(0.0517, 0.5165, 0.1298, 2.3391, -0.2728, 0.6172),
+    array<f32, 6>(0.0269, 0.6429, 0.1196, 2.4000, -0.2635, 0.7436),
+    array<f32, 6>(0.0081, 0.6909, 0.1159, 2.4000, -0.2753, 0.7916),
+    array<f32, 6>(0.0445, 0.6752, 0.1152, 2.4000, -0.2635, 0.7759),
+    array<f32, 6>(0.1132, 0.6635, 0.1204, 2.4000, -0.2230, 0.7642),
+    array<f32, 6>(0.1517, 0.6599, 0.1221, 2.4000, -0.2173, 0.7607),
+    array<f32, 6>(0.1684, 0.6442, 0.1240, 2.4000, -0.2103, 0.7450),
+    array<f32, 6>(0.2425, 0.6098, 0.1297, 2.4000, -0.2237, 0.7105),
+    array<f32, 6>(0.2888, 0.5472, 0.1383, 2.3986, -0.2640, 0.6480),
+    array<f32, 6>(0.2663, 0.4405, 0.1509, 2.2749, -0.3418, 0.5413),
+    array<f32, 6>(0.2249, 0.3272, 0.1580, 2.1198, -0.4478, 0.4279),
+    array<f32, 6>(0.1805, 0.2385, 0.1675, 1.9488, -0.5230, 0.3392),
+    array<f32, 6>(0.1434, 0.1705, 0.1790, 1.7718, -0.5775, 0.2712),
+    array<f32, 6>(0.1163, 0.1175, 0.1867, 1.5773, -0.6173, 0.2182),
+    array<f32, 6>(0.0967, 0.0859, 0.1734, 1.4184, -0.6369, 0.1866),
+    array<f32, 6>(0.1012, 0.0626, 0.1631, 1.2518, -0.6203, 0.1634),
+    array<f32, 6>(0.0914, 0.0677, 0.1616, 1.1299, -0.5644, 0.1685),
+    array<f32, 6>(0.1028, 0.0796, 0.1486, 1.0597, -0.5110, 0.1803)
+  );
+  let x = fract(phase) * 24.0;
+  let i0 = u32(floor(x)) % 24u;
+  let i1 = (i0 + 1u) % 24u;
+  let f = x - floor(x);
+  var o = array<f32, 6>();
+  for (var k = 0u; k < 6u; k++) {
+    o[k] = mix(t[i0][k], t[i1][k], f);
+  }
+  return o;
+}
 
 // AN-02-S06 bake: forward crawl reference loop (mirrors CRAWL_FWD_BAKE in pose.rs).
 fn crawl_bake(phase: f32) -> array<f32, 10> {
@@ -623,7 +662,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     // AN-02-S06: straight-ahead crawl follows the baked loop, blending out as the direction turns.
     let wf = max(fwd, 0.0);
     let b = crawl_bake(phase);
-    p.knee = mix(p.knee, vec2f(b[0], b[1]), wf);
+    let lg = crawl_legs(phase);
+    p.hip = mix(p.hip, vec2f(lg[0], lg[1]), wf);
+    p.knee = mix(p.knee, vec2f(lg[2], lg[3]), wf);
+    p.side = mix(p.side, vec2f(lg[4], lg[5]), wf);
     p.sh = mix(p.sh, vec2f(b[4], b[5]), wf);
     p.el = mix(p.el, vec2f(b[6], b[7]), wf);
     p.twist = mix(p.twist, b[8], wf);

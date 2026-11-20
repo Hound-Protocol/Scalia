@@ -20,9 +20,11 @@ Merged to `main`:
 
 - AN-02-S10 (this PR): leg roll lying prone (`leg_roll_angle`): each leg turns up to a quarter turn about its own axis as the knee draws (0.1 to 0.4 rad), only when settled prone, so the bent knee folds sideways along the ground. Full reference knee draw restored (left 0.60, right 0.95). Highest shin in the crawl 0.32 m to 0.19 m. Test `crawl_draws_the_knee_up_sideways_without_lifting_the_shin`. Not in `skeleton.rs` (it also omits `side`; its exactness test covers poses 0 to 10 only).
 
+- AN-02-S11 (this PR): forward crawl legs solved by position from the reference (`CRAWL_FWD_LEGS`: hip, knee, side per leg, 24 samples). Reference knees and ankles found by forward kinematics on the FBX (assimp: skip the `$AssimpFbx$` translation and pre-rotation helpers of animated bones), scaled to our leg length, then least-squares fitted with a Python port of the leg chain (port matches Rust exactly). Leg roll turned inward (fit error 7 cm against 30 cm outward). One knee draws out and tucks; the other trails. Tests: `forward_crawl_legs_follow_the_reference_not_a_splay`.
+
 Not verified: the in-game look. On 2026-11-18 the project lead reported the forward crawl looked unchanged in the model viewer after #71. The deploy for `ffcd47e` succeeded and the page referenced that build, so a cached page is the likely cause, but this was not confirmed. Visual QA is outstanding.
 
-Known issues to fix next: the rolled boot lies on its side and the shin end sits about 5 cm higher than a flat leg. Also: the table also overrides the left shoulder and elbow (support hand may look wrong); other crawl directions are still procedural. Measured on 2026-11-20: hips and upper body sit at flat-prone height; only the shin was an outlier.
+Known issues to fix next: back, left and right crawl still use the procedural legs (bake them the same way from `Crawl Backwards In Prone`, `Prone Left Turn` etc.); the rolled boot lies on its side. Also: the table also overrides the left shoulder and elbow (support hand may look wrong); other crawl directions are still procedural. Measured on 2026-11-20: hips and upper body sit at flat-prone height; only the shin was an outlier.
 
 Reference data: [mixamo-prone-reference.md](docs/handoff/mixamo-prone-reference.md). Raw Mixamo files are not in the repo and must not be committed. A scratch copy exists on the working machine only; delete it when tuning is finished.
 

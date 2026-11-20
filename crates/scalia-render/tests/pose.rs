@@ -775,7 +775,8 @@ fn crawl_keeps_both_shins_near_the_ground() {
             worst = worst.max(z);
         }
     }
-    assert!(worst < 0.25, "a shin rises to {worst:.2} m in the crawl");
+    // AN-02-S11: the trailing leg rests on its toes with the heel up, as in the reference (ankle 17-21 cm up).
+    assert!(worst < 0.28, "a shin rises to {worst:.2} m in the crawl");
 }
 
 #[test]
@@ -806,6 +807,18 @@ fn crawl_draws_the_knee_up_sideways_without_lifting_the_shin() {
             worst = worst.max(v.iter().filter(|p| p.0 == shin).map(|p| p.1.z).fold(f32::MIN, f32::max));
         }
     }
-    assert!(drawn > 0.9, "the right knee draws up fully ({drawn:.2})");
-    assert!(worst < 0.23, "a shin rises to {worst:.2} m in the crawl");
+    assert!(drawn > 2.0, "the right knee tucks up fully as in the reference ({drawn:.2})");
+    assert!(worst < 0.28, "a shin rises to {worst:.2} m in the crawl (reference trailing ankle: 17-21 cm)");
+}
+
+#[test]
+fn forward_crawl_legs_follow_the_reference_not_a_splay() {
+    // AN-02-S11: one knee draws out and tucks while the other trails nearly straight; the legs never both swing
+    // wide (the old side-swing formula splayed both out to about 60 deg).
+    use scalia_render::pose::params_dir;
+    for k in 0..24 {
+        let p = params_dir(Pose::Crawl, k as f32 / 24.0, 0.0);
+        assert!(p.knee[0] < 0.4, "left leg trails nearly straight: knee {:.2}", p.knee[0]);
+        assert!(p.side[0].abs() < 0.7 && p.side[1].abs() < 0.9, "no splay: side {:?}", p.side);
+    }
 }
