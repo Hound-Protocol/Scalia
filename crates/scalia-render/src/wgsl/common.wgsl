@@ -61,8 +61,9 @@ fn ankle_flat(hip: f32, knee: f32, flat: f32) -> f32 {
   return a + (-(hip - knee) - a) * flat;
 }
 
-fn foot(q: vec3f, hip: f32, knee: f32, flat: f32) -> vec3f {
-  return leg(rot(q, 0.0, 0.085, ankle_flat(hip, knee, flat)), hip, knee);
+// prone points the foot back, boots flat, only once settled (pose.rs PRONE_POINT -1.2, prone_settle).
+fn foot(q: vec3f, hip: f32, knee: f32, flat: f32, prone: f32) -> vec3f {
+  return leg(rot(q, 0.0, 0.085, ankle_flat(hip, knee, flat) - 1.2 * pow(max(prone, 0.0), 12.0)), hip, knee);
 }
 
 // Gait for both legs (port of pose.rs `gait`): x = left, y = right; the right leg is half a cycle behind.
@@ -271,7 +272,7 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
 const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.987349, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.858064, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
 
 // AN-02-S06 bake: forward crawl reference loop (mirrors CRAWL_FWD_BAKE in pose.rs).
 fn crawl_bake(phase: f32) -> array<f32, 10> {
@@ -358,20 +359,24 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
-    p.lean = -0.1;
+    // Chest up on the elbows, hips flat (pose.rs PRONE_LEAN -0.28, PRONE_AIM_LEAN -0.30); rifle and head take back
+    // the extra lean over the old -0.1.
+    p.lean = select(-0.28, -0.30, pose == 36u);
+    let arch = p.lean + 0.1;
+    p.rifle = p.rifle + arch;
     p.look = 0.55;
     if (pose == 36u) {
       p.sh = vec2f(1.965, 0.559);
       p.el = vec2f(0.905, 1.791);
       p.reach = vec2f(0.07, 0.522);
       p.abd = vec2f(-0.015, 0.45);
-      p.head = 0.82;
+      p.head = 0.82 + arch;
     } else {
       p.sh = vec2f(2.8, 1.571);
       p.el = vec2f(1.3, 2.084);
       p.reach = vec2f(0.0, 0.401);
       p.abd = vec2f(0.0, 0.604);
-      p.head = 1.0;
+      p.head = 1.0 + arch;
     }
   } else if (pose == 6u) {
     // On the athletic base (pose.rs `athletic`), leaning in by AIM_LEAN 0.1 with the rifle and head taking it back.
@@ -588,7 +593,8 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.reach = vec2f(0.0, 0.42 + 0.12 * c * (1.0 - 0.3 * lat_abs));
     p.abd = vec2f(0.0, 0.62 + 0.16 * lat_abs + 0.12 * abs(surge));
     p.ryaw = 0.52 - 0.10 * surge - 0.08 * lateral;
-    p.hip = vec2f(0.18) + 0.20 * draw;
+    // Hips stay at the prone value (AN-02-S09, mirrors pose.rs).
+    p.hip = vec2f(0.18, 0.16);
     // Per-leg knee draw (AN-02-S04): mirrors pose.rs.
     p.knee = vec2f(0.05) + vec2f(0.55 - 0.14 * lat_abs, 0.95 - 0.22 * lat_abs) * draw;
     let lead_l = max(-lateral, 0.0);
@@ -606,7 +612,6 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let wf = max(fwd, 0.0);
     let b = crawl_bake(phase);
     p.knee = mix(p.knee, vec2f(b[0], b[1]), wf);
-    p.hip = mix(p.hip, vec2f(b[2], b[3]), wf);
     p.sh = mix(p.sh, vec2f(b[4], b[5]), wf);
     p.el = mix(p.el, vec2f(b[6], b[7]), wf);
     p.twist = mix(p.twist, b[8], wf);
@@ -632,8 +637,8 @@ fn ground_drop(hip: vec2f, knee: vec2f, side: vec2f, flat: f32) -> f32 {
   var low = 1e9;
   for (var i = 0; i < 2; i++) {
     let px = select(0.1, -0.1, i == 0);
-    low = min(low, sideways(foot(vec3f(px, -0.09, 0.0), hip[i], knee[i], flat), side[i], px).z);
-    low = min(low, sideways(foot(vec3f(px, 0.14, 0.0), hip[i], knee[i], flat), side[i], px).z);
+    low = min(low, sideways(foot(vec3f(px, -0.09, 0.0), hip[i], knee[i], flat, 0.0), side[i], px).z);
+    low = min(low, sideways(foot(vec3f(px, 0.14, 0.0), hip[i], knee[i], flat, 0.0), side[i], px).z);
   }
   return -low;
 }
@@ -784,8 +789,8 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   else if (part == 2u) { q = sideways(rot(v, 0.0, 0.88, p.hip.y), p.side.y, 0.1); }
   else if (part == 6u) { q = sideways(leg(v, p.hip.x, p.knee.x), p.side.x, -0.1); }
   else if (part == 7u) { q = sideways(leg(v, p.hip.y, p.knee.y), p.side.y, 0.1); }
-  else if (part == 13u) { q = sideways(foot(v, p.hip.x, p.knee.x, p.flat), p.side.x, -0.1); }
-  else if (part == 14u) { q = sideways(foot(v, p.hip.y, p.knee.y, p.flat), p.side.y, 0.1); }
+  else if (part == 13u) { q = sideways(foot(v, p.hip.x, p.knee.x, p.flat, p.prone), p.side.x, -0.1); }
+  else if (part == 14u) { q = sideways(foot(v, p.hip.y, p.knee.y, p.flat, p.prone), p.side.y, 0.1); }
   else if (part == 3u) { q = arm(v, p.sh.x, 0.0, p.reach.x, p.abd.x, -0.238); }
   else if (part == 4u) { q = arm(v, p.sh.y, 0.0, p.reach.y, p.abd.y, 0.238); }
   else if (part == 11u) { q = arm(v, p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
@@ -806,10 +811,12 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   }
   q.z = q.z + p.drop + p.bob;
   if (p.prone != 0.0) {
-    // Positive onto his front, negative onto his back (pose.rs PRONE_LIFT 0.23, SUPINE_LIFT 0.16).
+    // Positive onto his front, negative onto his back (pose.rs PRONE_LIFT 0.14, SUPINE_LIFT 0.16).
     q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
     let ap = abs(p.prone);
-    q.z = q.z + select(0.16, 0.23, p.prone > 0.0) * ap + 0.12 * sin(3.1415927 * ap);
+    // Prone keeps the transition lift 0.23 until the end, then settles to 0.14 (pose.rs PRONE_LIFT_MID, prone_settle).
+    let lift = select(0.16 * ap, 0.23 * ap - 0.09 * pow(ap, 12.0), p.prone > 0.0);
+    q.z = q.z + lift + 0.12 * sin(3.1415927 * ap);
   }
   return q;
 }

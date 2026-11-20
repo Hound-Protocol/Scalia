@@ -15,7 +15,9 @@ pub const NECK_Z: f32 = 1.46;
 /// Where the right hand grips the rifle in the rest pose.
 pub const GRIP_Z: f32 = 0.81;
 /// How far the lying body is lifted so the chest rests on the ground.
-pub const PRONE_LIFT: f32 = 0.23;
+pub const PRONE_LIFT: f32 = 0.14;
+/// The lift through the move onto his front, before he settles flat (see `pose_vertex`).
+pub const PRONE_LIFT_MID: f32 = 0.23;
 /// Lying on the back (prone < 0): the back and its kit are thinner than the chest and its pouches.
 pub const SUPINE_LIFT: f32 = 0.16;
 
@@ -497,9 +499,23 @@ pub fn ankle_flat(hip: f32, knee: f32, flat: f32) -> f32 {
     a + (-(hip - knee) - a) * flat
 }
 
-/// A foot point: ankle bend, then the leg.
-fn foot(q: Vec3, hip: f32, knee: f32, flat: f32) -> Vec3 {
-    leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat)), hip, knee)
+/// Lying on his front the feet point back, boots flat on the ground, so the toes do not prop the body up.
+pub const PRONE_POINT: f32 = -1.2;
+/// Upper-body lean lying prone: back, so the chest rises off the ground onto the elbows (was `PRONE_LEAN_OLD`).
+pub const PRONE_LEAN: f32 = -0.28;
+/// The same, aiming: a little more, so the support forearm clears the ground under the rifle.
+pub const PRONE_AIM_LEAN: f32 = -0.30;
+const PRONE_LEAN_OLD: f32 = -0.1;
+
+/// How far he has settled flat, 0 to 1: nothing through the move onto his front, all of it at the end, so
+/// the dive and the get-up keep their shape and only the fully prone body lies flat.
+pub fn prone_settle(a: f32) -> f32 {
+    a.powi(12)
+}
+
+/// A foot point: ankle bend, then the leg. `prone` points the foot back (`PRONE_POINT`) as he lies down.
+fn foot(q: Vec3, hip: f32, knee: f32, flat: f32, prone: f32) -> Vec3 {
+    leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat) + PRONE_POINT * prone_settle(prone.max(0.0))), hip, knee)
 }
 
 /// Crouched gait in any direction (see `gait_dir`): each foot's target moves in a straight line at an even speed
@@ -957,7 +973,8 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle_yaw = 0.52 - 0.10 * surge - 0.08 * lateral;
             // Keep hip pitch near zero so knees never plunge underground, while swinging side outward (~65 deg)
             // in proportion to knee bend so the bent shin and boot stay flat on the ground rather than rising.
-            p.hip = [0.18 + 0.20 * draw[0], 0.18 + 0.20 * draw[1]];
+            // Hips stay at the prone value (AN-02-S09): lying down, more hip bend drives the knee into the ground.
+            p.hip = [0.18, 0.16];
             // Per-leg knee draw (AN-02-S04, reference clips): the right knee draws further than the left, as in
             // the reference forward crawl (right knee swing about 91 deg, left about 18 deg).
             p.knee = [0.05 + (0.55 - 0.14 * lat_abs) * draw[0], 0.05 + (0.95 - 0.22 * lat_abs) * draw[1]];
@@ -979,7 +996,6 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             let b = crawl_bake(phase);
             let m = |a: f32, t: f32| a + (t - a) * w;
             p.knee = [m(p.knee[0], b[0]), m(p.knee[1], b[1])];
-            p.hip = [m(p.hip[0], b[2]), m(p.hip[1], b[3])];
             p.shoulder = [m(p.shoulder[0], b[4]), m(p.shoulder[1], b[5])];
             p.elbow = [m(p.elbow[0], b[6]), m(p.elbow[1], b[7])];
             p.twist = m(p.twist, b[8]);
@@ -996,19 +1012,23 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle_yaw = 0.55;
             p.twist = -0.55;
             p.look = 0.55;
-            p.lean = -0.1;
+            // Chest up on the elbows, hips and legs flat on the ground (AN-02-S09); rifle and head take back the
+            // extra lean so the aim and the eyes stay where they were.
+            p.lean = if pose == Pose::ProneAim { PRONE_AIM_LEAN } else { PRONE_LEAN };
+            let arch = p.lean - PRONE_LEAN_OLD;
+            p.rifle += arch;
             if pose == Pose::ProneAim {
                 p.shoulder = [1.965, 0.559];
                 p.elbow = [0.905, 1.791];
                 p.reach = [0.07, 0.522];
                 p.abduct = [-0.015, 0.45];
-                p.head = 0.82;
+                p.head = 0.82 + arch;
             } else {
                 p.shoulder = [2.8, 1.571];
                 p.elbow = [1.3, 2.084];
                 p.reach = [0.0, 0.401];
                 p.abduct = [0.0, 0.604];
-                p.head = 1.0;
+                p.head = 1.0 + arch;
             }
         }
         Pose::StandAim => {
@@ -1310,7 +1330,7 @@ pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32
     for i in 0..2 {
         let px = if i == 0 { -HIP_X } else { HIP_X };
         for y in [HEEL_Y, TOE_Y] {
-            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i], flat), side[i], px).z);
+            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i], flat, 0.0), side[i], px).z);
         }
     }
     -low
@@ -1324,8 +1344,8 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightThigh => sideways(rot(v, 0.0, HIP_Z, p.hip[1]), p.side[1], HIP_X),
         Part::LeftShin => sideways(leg(v, p.hip[0], p.knee[0]), p.side[0], -HIP_X),
         Part::RightShin => sideways(leg(v, p.hip[1], p.knee[1]), p.side[1], HIP_X),
-        Part::LeftFoot => sideways(foot(v, p.hip[0], p.knee[0], p.flat), p.side[0], -HIP_X),
-        Part::RightFoot => sideways(foot(v, p.hip[1], p.knee[1], p.flat), p.side[1], HIP_X),
+        Part::LeftFoot => sideways(foot(v, p.hip[0], p.knee[0], p.flat, p.prone), p.side[0], -HIP_X),
+        Part::RightFoot => sideways(foot(v, p.hip[1], p.knee[1], p.flat, p.prone), p.side[1], HIP_X),
         Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
         Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
         Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
@@ -1347,7 +1367,10 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2 * p.prone);
         // Mid-transition the bent knees would dip into the ground: lift a little, most at the halfway point.
         let a = p.prone.abs();
-        q.z += if p.prone > 0.0 { PRONE_LIFT } else { SUPINE_LIFT } * a + 0.12 * (std::f32::consts::PI * a).sin();
+        // Onto his front the body keeps the transition height (PRONE_LIFT_MID) until the very end, then settles
+        // flat (PRONE_LIFT): hips and legs on the ground only once he is fully down.
+        let lift = if p.prone > 0.0 { PRONE_LIFT_MID * a - (PRONE_LIFT_MID - PRONE_LIFT) * prone_settle(a) } else { SUPINE_LIFT * a };
+        q.z += lift + 0.12 * (std::f32::consts::PI * a).sin();
     }
     q
 }

@@ -6,7 +6,7 @@
 //! `pose::pose_vertex` puts it (the tests check this for every part), and vertices shared between bones blend.
 
 use crate::mesh::Part;
-use crate::pose::{ankle_flat, ANKLE_Z, hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, SHOULDER_X, SHOULDER_Z};
+use crate::pose::{ankle_flat, prone_settle, ANKLE_Z, hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, PRONE_LIFT_MID, PRONE_POINT, SHOULDER_X, SHOULDER_Z};
 use glam::{Affine3A, Mat3A, Vec3, Vec3A};
 
 /// The bones, in the order of `skin_matrices`.
@@ -79,7 +79,7 @@ fn arm_xform(p: &PoseParams, i: usize, with_elbow: bool) -> Affine3A {
 fn posture(p: &PoseParams) -> Affine3A {
     let up = Affine3A::from_translation(Vec3::new(0.0, 0.0, p.drop + p.bob));
     if p.prone > 0.0 {
-        let lift = PRONE_LIFT * p.prone + 0.12 * (std::f32::consts::PI * p.prone).sin();
+        let lift = PRONE_LIFT_MID * p.prone - (PRONE_LIFT_MID - PRONE_LIFT) * prone_settle(p.prone) + 0.12 * (std::f32::consts::PI * p.prone).sin();
         Affine3A::from_translation(Vec3::new(0.0, 0.0, lift)) * pitch_at(0.0, -std::f32::consts::FRAC_PI_2 * p.prone) * up
     } else {
         up
@@ -119,7 +119,7 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     let rifle = if p.sling > 0.0 { lerp_affine(held, slung_affine(), p.sling) } else { held };
     let thigh = |i: usize| body * pitch_at(HIP_Z, p.hip[i]);
     let shin = |i: usize| body * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);
-    let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle_flat(p.hip[i], p.knee[i], p.flat));
+    let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle_flat(p.hip[i], p.knee[i], p.flat) + PRONE_POINT * prone_settle(p.prone.max(0.0)));
     [
         body,
         spine,
