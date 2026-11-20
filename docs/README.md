@@ -19,7 +19,7 @@ Start with [../README.md](../README.md), [../CONTRIBUTING.md](../CONTRIBUTING.md
 | [handoff/work-orders-ai-animation.md](handoff/work-orders-ai-animation.md) | current | AI and animation work orders (AN-xx, AI-xx) |
 | [handoff/mixamo-prone-reference.md](handoff/mixamo-prone-reference.md) | reference | Measured prone and crawl joint ranges |
 | [handoff/AN-02-S02.md](handoff/AN-02-S02.md) | historical | Prone, crawl and fast crawl (merged #63, #64) |
-| [superpowers/specs/2026-11-18-remotion-m0-design.md](superpowers/specs/2026-11-18-remotion-m0-design.md) | draft | ReMotion M0: motion file format and playback |
+| [superpowers/specs/2026-11-18-remotion-m0-design.md](superpowers/specs/2026-11-18-remotion-m0-design.md) | approved, deferred | ReMotion M0: motion file format and playback |
 
 ## Tactical AI (Titan)
 

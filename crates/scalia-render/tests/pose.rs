@@ -738,6 +738,7 @@ fn baked_forward_crawl_loops_without_a_seam() {
     ] {
         assert!((a - b).abs() < 0.03, "{name} jumps {:.3} at the loop seam", (a - b).abs());
     }
+}
 
 /// AN-02-S05: through the whole crawl cycle the elbows stay on the ground, the head stays up off it, and the
 /// rifle stays out in front, so the crawl never lifts its elbows or drags its face.

@@ -9,8 +9,10 @@ Last updated: 2026-11-20.
 Merged to `main`:
 - AN-02-S03 ([#67](https://github.com/Hound-Protocol/Scalia/pull/67)): prone aim independent of crawl gait.
 - AN-02-S04 ([#69](https://github.com/Hound-Protocol/Scalia/pull/69)): per-leg knee draw from the reference clips.
-- AN-02-S05 ([#70](https://github.com/Hound-Protocol/Scalia/pull/70)): arms follow the knee draw; smaller body twist; elbow-on-ground test.
+- AN-02-S05 ([#70](https://github.com/Hound-Protocol/Scalia/pull/70)): arms follow the knee draw.
 - AN-02-S06 ([#71](https://github.com/Hound-Protocol/Scalia/pull/71), `ffcd47e`): forward crawl baked from the Mixamo reference (24-sample table in `pose.rs`, mirrored in `common.wgsl`).
+
+- AN-02-S07 (this PR): smaller body twist and the elbow-on-ground test. This commit was pushed to the S05 branch after #70 merged, so it was missing from `main` until now.
 
 Not verified: the in-game look. On 2026-11-18 the project lead reported the forward crawl looked unchanged in the model viewer after #71. The deploy for `ffcd47e` succeeded and the page referenced that build, so a cached page is the likely cause, but this was not confirmed. Visual QA is outstanding.
 
@@ -22,10 +24,11 @@ Reference data: [mixamo-prone-reference.md](docs/handoff/mixamo-prone-reference.
 
 1. Confirm the crawl in the model viewer after a hard refresh (check `models.js?v=` matches the live build).
 2. Fix pass on S06 (above), then stand/crouch to prone transitions.
+3. Implement the finished animations in the game so AI work can continue (project lead priority, 2026-11-20).
 
 ## Planned: ReMotion (motion file format and animation suite)
 
-Draft M0 spec: [docs/superpowers/specs/2026-11-18-remotion-m0-design.md](docs/superpowers/specs/2026-11-18-remotion-m0-design.md). Awaiting project lead approval; no code written. Longer design in the Claude project doc `remotion-design.md`.
+Approved by the project lead on 2026-11-20 as the plan, but implementation is deferred until the animation fixes and the animation-to-AI hookup are done. M0 spec: [docs/superpowers/specs/2026-11-18-remotion-m0-design.md](docs/superpowers/specs/2026-11-18-remotion-m0-design.md). No code written. Longer design in the Claude project doc `remotion-design.md`.
 
 ## Direction
 
@@ -34,7 +37,7 @@ After alpha, Scalia ships as a native Windows and Linux program for Steam, and t
 ## Open decisions (project lead)
 
 - Licence for the repository (none is set yet).
-- ReMotion M0 spec approval and its three open decisions.
+- ReMotion M0: the three open decisions in the spec (repo location, GPU path, baseline first) stand at their recommended values unless changed.
 - Which merged remote branches to delete (see [CONTRIBUTING.md](CONTRIBUTING.md#branch-retirement)).
 
 Older handoff material: [docs/archive/](docs/archive/).
