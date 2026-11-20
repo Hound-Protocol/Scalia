@@ -15,7 +15,8 @@
 |---|---|
 | `glb_figure.py`, `glb_inspect.py`, `glb_prop.py`, `glb_render_front.py` | Convert and inspect GLB models |
 | `first_person.py`, `fp_hands.py`, `pda_relief.py`, `widen.py` | First-person arms and the command tablet |
-| `filmstrip.py`, `stance_sheet.py` | Render pose sheets for review |
+| `filmstrip.py`, `stance_sheet.py` | Render pose sheets for review (use these to check poses without a browser) |
+| `ref_fk.py`, `fit_crawl_legs.py` | Reference clip joint positions, and fitting our leg params to them |
 | `gun_sounds_split.py`, `radio_voices.py` | Audio asset preparation |
 
 These need extra tools (Python imaging libraries, Blender-style inputs) that CI does not install. Each file's header says what it does.

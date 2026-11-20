@@ -520,7 +520,9 @@ pub fn prone_settle(a: f32) -> f32 {
 pub fn leg_roll_angle(p: &PoseParams, i: usize) -> f32 {
     let t = ((p.knee[i] - LEG_ROLL_FROM) / (LEG_ROLL_FULL - LEG_ROLL_FROM)).clamp(0.0, 1.0);
     let r = std::f32::consts::FRAC_PI_2 * prone_settle(p.prone.max(0.0)) * t * t * (3.0 - 2.0 * t);
-    if i == 0 { -r } else { r }
+    // Inward: the bent knee tucks the foot in behind it, as in the reference crawl (fits the reference to 7 cm,
+    // against 30 cm turning outward).
+    if i == 0 { r } else { -r }
 }
 pub const LEG_ROLL_FROM: f32 = 0.1;
 pub const LEG_ROLL_FULL: f32 = 0.4;
@@ -713,6 +715,45 @@ pub const CRAWL_FWD_BAKE: [[f32; 10]; 24] = [
     [0.5964, 0.9697, 0.2689, 0.2708, 1.4304, 1.7784, 2.1796, 1.8584, -0.2669, 0.9733],
     [0.5681, 0.9912, 0.2614, 0.2812, 1.4646, 1.7884, 2.1480, 1.8492, -0.2733, 0.9778],
 ];
+
+/// AN-02-S11: forward crawl legs solved from the reference clip by position: per sample, the hip, knee and
+/// side swing that put our knees and ankles where the reference's are (scaled to our leg length), fitted by
+/// least squares (knee error 7 cm, ankle 7 cm on average). Order: hip L, hip R, knee L, knee R, side L, side R.
+pub const CRAWL_FWD_LEGS: [[f32; 6]; 24] = [
+    [0.0608, 0.0918, 0.1294, 1.0186, -0.4782, 0.1925],
+    [0.0230, 0.0924, 0.1295, 1.0199, -0.4637, 0.1932],
+    [0.0341, 0.1271, 0.1442, 1.1766, -0.4322, 0.2278],
+    [0.0422, 0.1786, 0.1606, 1.3913, -0.3983, 0.2793],
+    [0.0385, 0.2532, 0.1651, 1.6404, -0.3612, 0.3539],
+    [0.0437, 0.3734, 0.1474, 1.9935, -0.3131, 0.4741],
+    [0.0517, 0.5165, 0.1298, 2.3391, -0.2728, 0.6172],
+    [0.0269, 0.6429, 0.1196, 2.4000, -0.2635, 0.7436],
+    [0.0081, 0.6909, 0.1159, 2.4000, -0.2753, 0.7916],
+    [0.0445, 0.6752, 0.1152, 2.4000, -0.2635, 0.7759],
+    [0.1132, 0.6635, 0.1204, 2.4000, -0.2230, 0.7642],
+    [0.1517, 0.6599, 0.1221, 2.4000, -0.2173, 0.7607],
+    [0.1684, 0.6442, 0.1240, 2.4000, -0.2103, 0.7450],
+    [0.2425, 0.6098, 0.1297, 2.4000, -0.2237, 0.7105],
+    [0.2888, 0.5472, 0.1383, 2.3986, -0.2640, 0.6480],
+    [0.2663, 0.4405, 0.1509, 2.2749, -0.3418, 0.5413],
+    [0.2249, 0.3272, 0.1580, 2.1198, -0.4478, 0.4279],
+    [0.1805, 0.2385, 0.1675, 1.9488, -0.5230, 0.3392],
+    [0.1434, 0.1705, 0.1790, 1.7718, -0.5775, 0.2712],
+    [0.1163, 0.1175, 0.1867, 1.5773, -0.6173, 0.2182],
+    [0.0967, 0.0859, 0.1734, 1.4184, -0.6369, 0.1866],
+    [0.1012, 0.0626, 0.1631, 1.2518, -0.6203, 0.1634],
+    [0.0914, 0.0677, 0.1616, 1.1299, -0.5644, 0.1685],
+    [0.1028, 0.0796, 0.1486, 1.0597, -0.5110, 0.1803],
+];
+
+/// Interpolates `CRAWL_FWD_LEGS` at `phase` (one loop, wraps at 1.0).
+fn crawl_legs(phase: f32) -> [f32; 6] {
+    let x = phase.rem_euclid(1.0) * 24.0;
+    let i0 = (x.floor() as usize) % 24;
+    let i1 = (i0 + 1) % 24;
+    let f = x - x.floor();
+    std::array::from_fn(|k| CRAWL_FWD_LEGS[i0][k] + (CRAWL_FWD_LEGS[i1][k] - CRAWL_FWD_LEGS[i0][k]) * f)
+}
 
 /// Interpolates the baked forward crawl at `phase` (one loop, wraps at 1.0).
 fn crawl_bake(phase: f32) -> [f32; 10] {
@@ -1017,7 +1058,10 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             let w = fwd.max(0.0);
             let b = crawl_bake(phase);
             let m = |a: f32, t: f32| a + (t - a) * w;
-            p.knee = [m(p.knee[0], b[0]), m(p.knee[1], b[1])];
+            let l = crawl_legs(phase);
+            p.hip = [m(p.hip[0], l[0]), m(p.hip[1], l[1])];
+            p.knee = [m(p.knee[0], l[2]), m(p.knee[1], l[3])];
+            p.side = [m(p.side[0], l[4]), m(p.side[1], l[5])];
             p.shoulder = [m(p.shoulder[0], b[4]), m(p.shoulder[1], b[5])];
             p.elbow = [m(p.elbow[0], b[6]), m(p.elbow[1], b[7])];
             p.twist = m(p.twist, b[8]);
