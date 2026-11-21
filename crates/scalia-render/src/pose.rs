@@ -969,7 +969,7 @@ pub fn gait_bake(pose: Pose, phase: f32, dir: f32) -> Option<[f32; 11]> {
 /// (`ground_drop_side`, boots flat) or, in the flight of a run, from the clip's lift; the procedural bob is dropped.
 /// How much of the baked sprint's torso twist is kept (common.wgsl `SPRINT_TWIST`): the Mixamo sprint swings a
 /// one-handed rifle a third of a turn each way, which on the soldier reads as the body buzzing side to side.
-pub const SPRINT_TWIST: f32 = 0.35;
+pub const SPRINT_TWIST: f32 = 0.8;
 /// How much of the baked run and sprint upper-body side lean is kept (common.wgsl `RUN_TILT`): in full it sways
 /// the head 13 cm each stride, which reads as the body rocking from side to side at speed.
 pub const RUN_TILT: f32 = 0.4;

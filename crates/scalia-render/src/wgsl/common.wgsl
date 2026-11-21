@@ -189,7 +189,7 @@ fn carry(p: ptr<function, PP>, c: u32) {
 // back in the clip buffer from `at0` (WALK_F_AT, RUN_F_AT, SPRINT_F_AT), WALK_F_N rows of 11 fields.
 // Returns the body lift (the drop never goes below it).
 // pose.rs `SPRINT_TWIST`: the part of the baked sprint's torso twist that is kept.
-const SPRINT_TWIST: f32 = 0.35;
+const SPRINT_TWIST: f32 = 0.8;
 // pose.rs `RUN_TILT`: the part of the baked run and sprint upper-body side lean that is kept.
 const RUN_TILT: f32 = 0.4;
 fn bake_gait(p: ptr<function, PP>, at0: u32, phase: f32, dir: f32, twist_k: f32, tilt_k: f32) -> f32 {

@@ -871,7 +871,7 @@ fn baked_backward_crawl_holds_the_rifle_and_stays_on_the_ground() {
 #[test]
 fn sprint_keeps_its_torso_twist_to_a_run_like_swing() {
     let most = (0..48).map(|i| scalia_render::pose::params_dir(Pose::Sprint, i as f32 / 48.0, 0.0).twist.abs()).fold(0.0, f32::max);
-    assert!(most <= 0.25, "sprint twist reaches {most:.3} rad");
+    assert!(most <= 0.55, "sprint twist reaches {most:.3} rad");
 }
 
 /// Running and sprinting carry the head nearly level from side to side: a 13 cm sway each stride (the baked
@@ -1005,4 +1005,28 @@ fn unposing_the_upper_body_undoes_posing_it() {
             assert!(back.distance(v) < 1e-4, "at {t}: {v} came back as {back}");
         }
     }
+}
+
+/// S10: a sprint shows effort (Battlefield 3's sprint): the shoulders drive round with each stride and carry the
+/// rifle left and right across the body, far more than at a run, while the head stays steady. (Pumping the arms
+/// fore and aft as well pulls the left palm off the handguard of the collapsed carry, so the swing comes from the
+/// torso.)
+#[test]
+fn sprinting_drives_the_rifle_across_the_body_with_the_shoulders() {
+    use scalia_render::pose::{grip, params_dir, two_handed};
+    let fig = figure();
+    let sweep = |pose: Pose| {
+        let (mut xs, mut sh) = (vec![], vec![]);
+        for i in 0..48 {
+            let p = grip(&params_dir(pose, i as f32 / 48.0, 0.0), two_handed(pose));
+            let tip = fig.vertices.iter().filter(|v| part_of(v.color) == Part::Rifle)
+                .map(|v| pose_vertex(Vec3::from(v.pos), Part::Rifle, &p)).max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+            xs.push(tip.x);
+            sh.push(scalia_render::pose::pose_upper(scalia_render::pose::hand(&p, scalia_render::pose::Side::Right), &p).y);
+        }
+        let r = |v: &[f32]| v.iter().cloned().fold(f32::MIN, f32::max) - v.iter().cloned().fold(f32::MAX, f32::min);
+        (r(&xs), r(&sh))
+    };
+    let ((run, _), (sprint, _)) = (sweep(Pose::Run), sweep(Pose::Sprint));
+    assert!(sprint > 0.4 && sprint > 2.5 * run, "sprint muzzle sweeps {sprint:.3} m, run {run:.3} m");
 }
