@@ -85,6 +85,8 @@ pub struct Drive {
     pub rifle: Rifle,
     /// Allowed to sprint (sprint legs need this as well as the pace).
     pub sprint: bool,
+    /// Drawn as the procedural figure (the commander): legs cycle at its stride, not the baked clips' (AN-03).
+    pub procedural: bool,
     /// Aiming from cover (crouched aim over a wall).
     pub in_cover: bool,
     /// Shot down (alive, on the ground) or killed.
@@ -97,7 +99,7 @@ pub struct Drive {
 
 impl Drive {
     pub fn new(dt: f32, ts: f32) -> Drive {
-        Drive { dt, ts, vel: (0.0, 0.0), want: None, face: Face::Keep, stance: Stance::Stand, rifle: Rifle::Ready, sprint: true, in_cover: false, down: false, dead: false, action: None }
+        Drive { dt, ts, vel: (0.0, 0.0), want: None, face: Face::Keep, stance: Stance::Stand, rifle: Rifle::Ready, sprint: true, procedural: false, in_cover: false, down: false, dead: false, action: None }
     }
 }
 
@@ -336,6 +338,7 @@ impl Animator {
             }
         }
         let dropping = self.drop;
+        let stride_m_dir = |p: Pose, dir: f32| if d.procedural { pose::stride_m_dir(p, dir) } else { scalia_render::skin::stride_m_dir(p, dir) };
         let carried = |legs: Pose| match d.rifle {
             Rifle::Aim => Some(Pose::StandAim),
             Rifle::Reload => Some(Pose::Reload),
@@ -776,6 +779,24 @@ mod tests {
             assert!(r[7] as u32 != Pose::Drop as u32 && r[8] as u32 != Pose::Drop as u32, "the shader never sees the drop");
         }
         assert!(seen > 20);
+    }
+
+    #[test]
+    fn procedural_figures_step_at_the_procedural_stride() {
+        // The commander is still the procedural figure: his legs must cycle at its stride, not the clips'.
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.procedural = true;
+        d.vel = (0.0, 1.2);
+        d.want = Some(d.vel);
+        let mut f = a.step(&d);
+        for _ in 0..40 { d.ts += d.dt; f = a.step(&d); }
+        assert_eq!(f.pose, Pose::Walk);
+        let before = f.phase;
+        d.ts += d.dt;
+        let after = a.step(&d).phase;
+        let expected = (before + d.dt * 1.2 / pose::stride_m_dir(Pose::Walk, f.dir)).fract();
+        assert!((after - expected).abs() < 1e-4, "{after} vs {expected}");
     }
 
     #[test]
