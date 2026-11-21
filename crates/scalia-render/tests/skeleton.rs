@@ -1,6 +1,6 @@
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of, Part};
-use scalia_render::pose::{blend, idle, layer, params, pose_vertex, Pose};
+use scalia_render::pose::{blend, idle, layer, params, pose_rigid, Pose};
 use scalia_render::skeleton::{bone_of, gpu_rows, skin_matrices, BONES};
 
 /// A vertex bound wholly to one bone lands exactly where the rigid rig puts it, for every part and pose.
@@ -28,7 +28,7 @@ fn bones_reproduce_the_rigid_rig_exactly() {
     for p in &cases {
         let m = skin_matrices(p);
         for (part, v) in &verts {
-            let want = pose_vertex(*v, *part, p);
+            let want = pose_rigid(*v, *part, p);
             let got = m[bone_of(*part) as usize].transform_point3(*v);
             assert!((want - got).length() < 1e-4, "{part:?}: rig {want:?}, bone {got:?} in {p:?}");
         }
