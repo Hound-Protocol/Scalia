@@ -428,7 +428,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::Prone | Pose::Crawl | Pose::ProneAim => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::Prone | Pose::ProneAim => 1.0,
         _ => 0.0,
     }
 }
@@ -770,6 +770,11 @@ pub fn crawl_alternate(d: [f32; 3], t: [f32; 3], dh: [f32; 3], th: [f32; 3], dra
     let mirror = |x: [f32; 3]| [x[0], x[1], -x[2]];
     (mix(mirror(th), d, w(d[1])), mix(t, mirror(dh), w(dh[1])))
 }
+/// The low crawl's elbows (shoulder angle, rad): pulled back under the chest, and how much further a reach goes;
+/// and how much of the reference legs' side swing is kept (the full swing splays the legs out like a frog's).
+pub const CRAWL_ELBOW_BACK: f32 = 1.2;
+pub const CRAWL_ELBOW_REACH: f32 = 1.1;
+pub const CRAWL_SIDE: f32 = 0.55;
 /// Knee ranges over which a crawling leg goes from trailing to drawing up (rad): forward, backward.
 pub const CRAWL_FWD_DRAW: [f32; 2] = [1.1, 1.9];
 pub const CRAWL_BACK_DRAW: [f32; 2] = [0.5, 1.2];
@@ -1302,6 +1307,20 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.reach[1] = mb(p.reach[1], k[8]);
             p.abduct[1] = mb(p.abduct[1], k[9]);
             p.twist = mb(p.twist, k[10]);
+            // AN-03-S8 low crawl (the aimed crawl takes its arms from the ProneAim layer): the rifle lies across the
+            // forearms in the right hand, the left hand free; the elbows reach ahead and pull back under the chest
+            // in turn, the left reaching as the right knee draws up; the legs stay closer in.
+            let reach = [0.5 - 0.5 * c, 0.5 + 0.5 * c];
+            p.shoulder = [CRAWL_ELBOW_BACK + CRAWL_ELBOW_REACH * reach[0], CRAWL_ELBOW_BACK + CRAWL_ELBOW_REACH * reach[1]];
+            p.elbow = [2.5 - 1.4 * reach[0], 2.5 - 1.4 * reach[1]];
+            p.reach = [0.0, 0.0];
+            p.abduct = [0.0, 0.0];
+            p.rifle = 0.0;
+            p.rifle_yaw = std::f32::consts::FRAC_PI_2;
+            p.twist = 0.08 * s;
+            p.look = -0.08 * s;
+            p.head = 0.75;
+            p.side = [p.side[0] * CRAWL_SIDE, p.side[1] * CRAWL_SIDE];
         }
         Pose::Drop => return drop_params(phase),
         Pose::DropReach => return drop_reach(),
