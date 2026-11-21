@@ -580,6 +580,9 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
     v.gpu.upload("enemy", enemy_kit(figure()).bytes());
     v.gpu.upload("enemy_lo", enemy_kit(figure_lo()).bytes());
     v.gpu.upload("enemy_far", enemy_kit(figure_far()).bytes());
+    // AN-03: the rigged soldier, posed on the GPU from the baked clips (near and mid detail).
+    v.gpu.upload_skinned("skin", &scalia_render::skin::mesh_bytes(&|p| p));
+    v.gpu.upload_skinned("skin_enemy", &scalia_render::skin::mesh_bytes(&|p| if matches!(p as u8, scalia_render::mesh::kit::VEST | scalia_render::mesh::kit::HELMET) { ENEMY_RED as u32 } else { p }));
     v.gpu.upload("tuft", grass_tuft().bytes());
     Ok(v)
 }
@@ -2618,7 +2621,7 @@ impl Viewer {
             let (mesh, tris, detail) = match self.model_detail {
                 1 => ("figure_lo", figure_lo().vertices.len() / 3, "mid detail, 70-250 m"),
                 2 => ("figure_far", figure_far().vertices.len() / 3, "far detail, beyond 250 m"),
-                _ => ("figure", figure().vertices.len() / 3, "full detail, up to 70 m"),
+                _ => ("skin", scalia_render::skin::load_mesh(scalia_render::skin::SKIN_BYTES).len() / 3, "rigged soldier, baked clips (AN-03)"),
             };
             instanced.push((mesh.into(), "figure1".into()));
             let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
@@ -3011,14 +3014,11 @@ impl Viewer {
         self.gpu.upload_instances("assaulters", bytes(&assaulters));
         // Three levels of detail. Past 250 m a soldier is a few pixels tall: the 24-triangle figure, and no
         // shadow pass for it (its shadow would be smaller than a pixel).
-        if self.ground_view <= 70.0 {
-            instanced.push(("figure".into(), "soldiers".into()));
-            instanced.push(("enemy".into(), "enemies".into()));
-            instanced.push(("figure".into(), "assaulters".into()));
-        } else if self.ground_view <= 250.0 {
-            instanced.push(("figure_lo".into(), "soldiers".into()));
-            instanced.push(("enemy_lo".into(), "enemies".into()));
-            instanced.push(("figure_lo".into(), "assaulters".into()));
+        // AN-03: up to 250 m soldiers are the rigged soldier playing the baked clips (skin_cs.wgsl).
+        if self.ground_view <= 250.0 {
+            instanced.push(("skin".into(), "soldiers".into()));
+            instanced.push(("skin_enemy".into(), "enemies".into()));
+            instanced.push(("skin".into(), "assaulters".into()));
         } else {
             decor.push(("figure_far".into(), "soldiers".into()));
             decor.push(("enemy_far".into(), "enemies".into()));

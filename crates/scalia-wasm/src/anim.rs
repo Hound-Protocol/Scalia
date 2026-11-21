@@ -462,8 +462,10 @@ impl Animator {
     }
 
     /// His muzzle and bore in the world (mm and unit vector), posed exactly as drawn; None when he cannot fire.
+    /// AN-03: drawn by the skeletal animation, so posed from the same instance record the GPU gets.
     pub fn barrel(&self, f: &Frame, at_mm: (f32, f32)) -> (Option<[f32; 3]>, [f32; 3]) {
-        let (q, b) = pose::barrel_with_phases(pose::RIFLE, f.pose, f.upper, f.phase, self.reload_phase, f.dir);
+        let rec = self.record(f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
+        let (q, b) = scalia_render::skin::muzzle(scalia_render::skin::anims(), &rec, self.clock);
         let (roll, pitch) = pose::unpack_tilt(9.0 + f.lean);
         let bore = pose::figure_to_world(b, glam::Vec3::ZERO, f.heading, roll, pitch).to_array();
         let armed = pose::two_handed(f.upper.unwrap_or(f.pose)) > 0.0;

@@ -1,0 +1,54 @@
+# Clips baked for the skinned soldier (scripts/skin_bake.py): name | path under the packs directory | loop or once.
+# Names are what crates/scalia-render/src/skin.rs maps game poses to. Raw packs stay out of the repo.
+idle            | 1821ae22-Pro_Rifle_Pack/x/idle.fbx | loop
+idle_aim        | 1821ae22-Pro_Rifle_Pack/x/idle aiming.fbx | loop
+crouch          | 1821ae22-Pro_Rifle_Pack/x/idle crouching.fbx | loop
+crouch_aim      | 1821ae22-Pro_Rifle_Pack/x/idle crouching aiming.fbx | loop
+walk_f          | 1821ae22-Pro_Rifle_Pack/x/walk forward.fbx | loop
+walk_fl         | 1821ae22-Pro_Rifle_Pack/x/walk forward left.fbx | loop
+walk_l          | 1821ae22-Pro_Rifle_Pack/x/walk left.fbx | loop
+walk_bl         | 1821ae22-Pro_Rifle_Pack/x/walk backward left.fbx | loop
+walk_b          | 1821ae22-Pro_Rifle_Pack/x/walk backward.fbx | loop
+walk_br         | 1821ae22-Pro_Rifle_Pack/x/walk backward right.fbx | loop
+walk_r          | 1821ae22-Pro_Rifle_Pack/x/walk right.fbx | loop
+walk_fr         | 1821ae22-Pro_Rifle_Pack/x/walk forward right.fbx | loop
+run_f           | 1821ae22-Pro_Rifle_Pack/x/run forward.fbx | loop
+run_fl          | 1821ae22-Pro_Rifle_Pack/x/run forward left.fbx | loop
+run_l           | 1821ae22-Pro_Rifle_Pack/x/run left.fbx | loop
+run_bl          | 1821ae22-Pro_Rifle_Pack/x/run backward left.fbx | loop
+run_b           | 1821ae22-Pro_Rifle_Pack/x/run backward.fbx | loop
+run_br          | 1821ae22-Pro_Rifle_Pack/x/run backward right.fbx | loop
+run_r           | 1821ae22-Pro_Rifle_Pack/x/run right.fbx | loop
+run_fr          | 1821ae22-Pro_Rifle_Pack/x/run forward right.fbx | loop
+sprint_f        | 1821ae22-Pro_Rifle_Pack/x/sprint forward.fbx | loop
+sprint_fl       | 1821ae22-Pro_Rifle_Pack/x/sprint forward left.fbx | loop
+sprint_l        | 1821ae22-Pro_Rifle_Pack/x/sprint left.fbx | loop
+sprint_bl       | 1821ae22-Pro_Rifle_Pack/x/sprint backward left.fbx | loop
+sprint_b        | 1821ae22-Pro_Rifle_Pack/x/sprint backward.fbx | loop
+sprint_br       | 1821ae22-Pro_Rifle_Pack/x/sprint backward right.fbx | loop
+sprint_r        | 1821ae22-Pro_Rifle_Pack/x/sprint right.fbx | loop
+sprint_fr       | 1821ae22-Pro_Rifle_Pack/x/sprint forward right.fbx | loop
+cwalk_f         | 1821ae22-Pro_Rifle_Pack/x/walk crouching forward.fbx | loop
+cwalk_fl        | 1821ae22-Pro_Rifle_Pack/x/walk crouching forward left.fbx | loop
+cwalk_l         | 1821ae22-Pro_Rifle_Pack/x/walk crouching left.fbx | loop
+cwalk_bl        | 1821ae22-Pro_Rifle_Pack/x/walk crouching backward left.fbx | loop
+cwalk_b         | 1821ae22-Pro_Rifle_Pack/x/walk crouching backward.fbx | loop
+cwalk_br        | 1821ae22-Pro_Rifle_Pack/x/walk crouching backward right.fbx | loop
+cwalk_r         | 1821ae22-Pro_Rifle_Pack/x/walk crouching right.fbx | loop
+cwalk_fr        | 1821ae22-Pro_Rifle_Pack/x/walk crouching forward right.fbx | loop
+prone           | prone_batch/baaf5d6b-Prone_Idle.fbx | loop
+prone_fire      | prone_batch/f2950f24-Prone_Firing_Rifle.fbx | loop
+prone_reload    | prone_batch/b4f4a3e0-Prone_Reloading.fbx | once
+crawl_f         | prone_batch/52ac8a9b-Prone_Forward.fbx | loop
+crawl_b         | prone_batch/9a73c415-Moving_Backward_In_Prone_Position.fbx | loop
+crouch_to_prone | prone_batch/52473f50-Crouch_To_Prone1.fbx | once
+prone_to_crouch | prone_batch/426e60df-Prone_To_Crouch_Transition1.fbx | once
+prone_death     | prone_batch/d5d96ca4-Prone_Death.fbx | once
+reload          | b2188526-Basic_Shooter_Pack/x/reloading.fbx | once
+fire            | b2188526-Basic_Shooter_Pack/x/firing rifle.fbx | loop
+throw           | b2188526-Basic_Shooter_Pack/x/toss grenade.fbx | once
+cover           | cover_batch/e2395402-Cover_Idle.fbx | loop
+death_front     | 1821ae22-Pro_Rifle_Pack/x/death from the front.fbx | once
+death_back      | 1821ae22-Pro_Rifle_Pack/x/death from the back.fbx | once
+wounded         | cover_batch/06acc306-Fallen_Idle.fbx | loop
+brake           | cover_batch/action_pack/x/run to stop.fbx | once

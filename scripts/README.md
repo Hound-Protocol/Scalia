@@ -18,6 +18,7 @@
 | `filmstrip.py`, `stance_sheet.py` | Render pose sheets for review (use these to check poses without a browser) |
 | `ref_fk.py`, `fit_crawl_legs.py` | Reference clip joint positions, and fitting our leg params to them |
 | `clip_ref.py`, `clip_table.py` | Any Mixamo clip to fit targets (with `examples/fit_clip`), and the baked table plus its GPU registry |
+| `skin_bake.py`, `skin_clips.txt` | Bakes the rigged soldier and its Mixamo clips for skeletal animation (AN-03) |
 | `bake_gaits.sh` | Re-bakes the rifle gaits (walk, run, sprint; 8 directions) from the Pro Rifle Pack |
 | `gun_sounds_split.py`, `radio_voices.py` | Audio asset preparation |
 

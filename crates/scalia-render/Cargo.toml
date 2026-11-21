@@ -10,3 +10,6 @@ wgpu = { version = "30", default-features = false, features = ["webgpu", "wgsl"]
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }
 regex = "1"
+# AN-03: tests/skin_gpu.rs runs the skinning compute pass on a software Vulkan adapter (lavapipe) when one exists.
+wgpu = { version = "30", default-features = false, features = ["webgpu", "wgsl", "vulkan"] }
+pollster = "0.4"
