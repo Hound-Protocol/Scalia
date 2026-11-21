@@ -528,7 +528,7 @@ pub fn leg_roll_angle(p: &PoseParams, i: usize) -> f32 {
     // against 30 cm turning outward).
     if i == 0 { r } else { -r }
 }
-pub const LEG_ROLL_FROM: f32 = 0.1;
+pub const LEG_ROLL_FROM: f32 = 0.2;
 pub const LEG_ROLL_FULL: f32 = 0.4;
 
 /// A leg point turned by `leg_roll_angle` about the vertical through its hip (the leg's own axis when straight).
@@ -755,6 +755,25 @@ pub const CRAWL_FWD_LEGS: [[f32; 6]; 24] = [
 ];
 
 /// Interpolates `CRAWL_FWD_LEGS` at `phase` (one loop, wraps at 1.0).
+/// Both legs in turn from a reference crawl that draws only one knee up. `d` and `t` are the drawing and the
+/// trailing leg (hip, knee, side) at this phase, `dh` and `th` half a stride later; `draw` is the knee range over
+/// which a leg goes from trailing to drawing. The drawing side follows the draw and, out of it, trails like the
+/// mirrored trailing leg; the other side mirrors the draw half a stride later and otherwise trails as the
+/// reference does (so an extended leg is always the reference's, flat on the ground). Returns (drawing side,
+/// other side). common.wgsl `crawl_alternate` mirrors this.
+pub fn crawl_alternate(d: [f32; 3], t: [f32; 3], dh: [f32; 3], th: [f32; 3], draw: [f32; 2]) -> ([f32; 3], [f32; 3]) {
+    let w = |k: f32| {
+        let x = ((k - draw[0]) / (draw[1] - draw[0])).clamp(0.0, 1.0);
+        x * x * (3.0 - 2.0 * x)
+    };
+    let mix = |a: [f32; 3], b: [f32; 3], u: f32| -> [f32; 3] { std::array::from_fn(|i| a[i] + (b[i] - a[i]) * u) };
+    let mirror = |x: [f32; 3]| [x[0], x[1], -x[2]];
+    (mix(mirror(th), d, w(d[1])), mix(t, mirror(dh), w(dh[1])))
+}
+/// Knee ranges over which a crawling leg goes from trailing to drawing up (rad): forward, backward.
+pub const CRAWL_FWD_DRAW: [f32; 2] = [1.1, 1.9];
+pub const CRAWL_BACK_DRAW: [f32; 2] = [0.5, 1.2];
+
 fn crawl_legs(phase: f32) -> [f32; 6] {
     let x = phase.rem_euclid(1.0) * 24.0;
     let i0 = (x.floor() as usize) % 24;
@@ -792,12 +811,36 @@ pub fn clip_at<const F: usize>(t: &[[f32; F]], phase: f32) -> [f32; F] {
 pub const GAIT_ROWS: usize = 48;
 type GaitLoop = [[f32; 11]; GAIT_ROWS];
 fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
-    Some(match pose {
-        Pose::Walk => [&WALK_F, &WALK_FL, &WALK_L, &WALK_BL, &WALK_B, &WALK_BR, &WALK_R, &WALK_FR],
-        Pose::Run => [&RUN_F, &RUN_FL, &RUN_L, &RUN_BL, &RUN_B, &RUN_BR, &RUN_R, &RUN_FR],
-        Pose::Sprint => [&SPRINT_F, &SPRINT_FL, &SPRINT_L, &SPRINT_BL, &SPRINT_B, &SPRINT_BR, &SPRINT_R, &SPRINT_FR],
+    static WALK: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
+    static RUN: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
+    static SPRINT: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
+    let (cell, raw) = match pose {
+        Pose::Walk => (&WALK, [&WALK_F, &WALK_FL, &WALK_L, &WALK_BL, &WALK_B, &WALK_BR, &WALK_R, &WALK_FR]),
+        Pose::Run => (&RUN, [&RUN_F, &RUN_FL, &RUN_L, &RUN_BL, &RUN_B, &RUN_BR, &RUN_R, &RUN_FR]),
+        Pose::Sprint => (&SPRINT, [&SPRINT_F, &SPRINT_FL, &SPRINT_L, &SPRINT_BL, &SPRINT_B, &SPRINT_BR, &SPRINT_R, &SPRINT_FR]),
         _ => return None,
-    })
+    };
+    let loops = cell.get_or_init(|| raw.map(|l| smooth_lift(l)));
+    Some(std::array::from_fn(|i| &loops[i]))
+}
+
+/// A baked loop with its body lift (field 10) smoothed round the cycle. The clips' lift steps up for the airborne
+/// part of a stride and down again at landing between one row and the next; under the procedural legs that is a
+/// 6 cm pop on every step. Both the CPU (`gait_bake`) and the shader (`clip_buffer`) read the smoothed loops.
+fn smooth_lift(l: &GaitLoop) -> GaitLoop {
+    const SIGMA_ROWS: f32 = 1.5;
+    let n = l.len() as i32;
+    let mut out = *l;
+    for (i, row) in out.iter_mut().enumerate() {
+        let (mut sum, mut wsum) = (0.0, 0.0);
+        for k in -4i32..=4 {
+            let w = (-0.5 * (k as f32 / SIGMA_ROWS).powi(2)).exp();
+            sum += w * l[(i as i32 + k).rem_euclid(n) as usize][10];
+            wsum += w;
+        }
+        row[10] = sum / wsum;
+    }
+    out
 }
 
 /// Ground covered per cycle by each baked loop (m), in `gait_loops` order, rows Walk, Run, Sprint:
@@ -829,6 +872,13 @@ pub fn gait_bake(pose: Pose, phase: f32, dir: f32) -> Option<[f32; 11]> {
 /// Puts a baked gait on the pose: legs and pelvis from the clip; the upper body keeps the pose's carry and lean
 /// and takes the clip's sway; the head turns against the shoulders as before. Body height comes from the legs
 /// (`ground_drop_side`, boots flat) or, in the flight of a run, from the clip's lift; the procedural bob is dropped.
+/// How much of the baked sprint's torso twist is kept (common.wgsl `SPRINT_TWIST`): the Mixamo sprint swings a
+/// one-handed rifle a third of a turn each way, which on the soldier reads as the body buzzing side to side.
+pub const SPRINT_TWIST: f32 = 0.35;
+/// How much of the baked run and sprint upper-body side lean is kept (common.wgsl `RUN_TILT`): in full it sways
+/// the head 13 cm each stride, which reads as the body rocking from side to side at speed.
+pub const RUN_TILT: f32 = 0.4;
+
 fn apply_gait(p: &mut PoseParams, g: [f32; 11]) {
     p.hip = [g[0], g[1]];
     p.knee = [g[2], g[3]];
@@ -1115,7 +1165,8 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.hip = [0.18, 0.16];
             // Per-leg knee draw (AN-02-S04, reference clips): the right knee draws further than the left, as in
             // the reference forward crawl (right knee swing about 91 deg, left about 18 deg).
-            p.knee = [0.05 + (0.55 - 0.14 * lat_abs) * draw[0], 0.05 + (0.95 - 0.22 * lat_abs) * draw[1]];
+            // Both legs work in turn, each drawing its knee up in its half of the stride.
+            p.knee = [0.05 + (0.95 - 0.22 * lat_abs) * draw[0], 0.05 + (0.95 - 0.22 * lat_abs) * draw[1]];
             let (lead_l, lead_r) = ((-lateral).max(0.0), lateral.max(0.0));
             p.side = [
                 -0.14 - (1.08 - 0.18 * lat_abs) * draw[0] - 0.24 * lead_l + 0.08 * lead_r,
@@ -1133,10 +1184,14 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             let w = fwd.max(0.0);
             let b = crawl_bake(phase);
             let m = |a: f32, t: f32| a + (t - a) * w;
+            // The reference draws only the right knee (the left leg drags); the left plays the right's draw
+            // mirrored, half a stride later, so both legs work in turn.
             let l = crawl_legs(phase);
-            p.hip = [m(p.hip[0], l[0]), m(p.hip[1], l[1])];
-            p.knee = [m(p.knee[0], l[2]), m(p.knee[1], l[3])];
-            p.side = [m(p.side[0], l[4]), m(p.side[1], l[5])];
+            let o = crawl_legs(phase + 0.5);
+            let (r, lf) = crawl_alternate([l[1], l[3], l[5]], [l[0], l[2], l[4]], [o[1], o[3], o[5]], [o[0], o[2], o[4]], CRAWL_FWD_DRAW);
+            p.hip = [m(p.hip[0], lf[0]), m(p.hip[1], r[0])];
+            p.knee = [m(p.knee[0], lf[1]), m(p.knee[1], r[1])];
+            p.side = [m(p.side[0], lf[2]), m(p.side[1], r[2])];
             p.shoulder = [m(p.shoulder[0], b[4]), m(p.shoulder[1], b[5])];
             p.elbow = [m(p.elbow[0], b[6]), m(p.elbow[1], b[7])];
             p.twist = m(p.twist, b[8]);
@@ -1144,11 +1199,14 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             // AN-02-S12: crawling backwards follows the baked reference loop the same way (weight = backward
             // component). The right arm carries the rifle; grip() keeps the left hand on the handguard.
             let wb = (-fwd).max(0.0);
+            // Its reference draws only the left knee: the right plays the left's draw mirrored, half a stride later.
             let k = clip_at(&CRAWL_BACK, phase);
+            let kb = clip_at(&CRAWL_BACK, phase + 0.5);
+            let (lf, r) = crawl_alternate([k[0], k[2], k[4]], [k[1], k[3], k[5]], [kb[0], kb[2], kb[4]], [kb[1], kb[3], kb[5]], CRAWL_BACK_DRAW);
             let mb = |a: f32, t: f32| a + (t - a) * wb;
-            p.hip = [mb(p.hip[0], k[0]), mb(p.hip[1], k[1])];
-            p.knee = [mb(p.knee[0], k[2]), mb(p.knee[1], k[3])];
-            p.side = [mb(p.side[0], k[4]), mb(p.side[1], k[5])];
+            p.hip = [mb(p.hip[0], lf[0]), mb(p.hip[1], r[0])];
+            p.knee = [mb(p.knee[0], lf[1]), mb(p.knee[1], r[1])];
+            p.side = [mb(p.side[0], lf[2]), mb(p.side[1], r[2])];
             p.shoulder[1] = mb(p.shoulder[1], k[6]);
             p.elbow[1] = mb(p.elbow[1], k[7]);
             p.reach[1] = mb(p.reach[1], k[8]);
@@ -1205,7 +1263,13 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = -READY_LEAN;
         }
     }
-    let lift = gait_bake(pose, phase, dir).map_or(f32::MIN, |g| {
+    let lift = gait_bake(pose, phase, dir).map_or(f32::MIN, |mut g| {
+        if pose == Pose::Sprint {
+            g[8] *= SPRINT_TWIST;
+        }
+        if matches!(pose, Pose::Run | Pose::Sprint) {
+            g[9] *= RUN_TILT;
+        }
         apply_gait(&mut p, g);
         g[10]
     });
@@ -2016,30 +2080,11 @@ pub const CLIP_FLOATS: u32 = 12936;
 pub fn clip_buffer() -> Vec<f32> {
     let mut v = Vec::with_capacity(12936);
     v.extend(CRAWL_BACK.iter().flatten());
-    v.extend(WALK_F.iter().flatten());
-    v.extend(WALK_FL.iter().flatten());
-    v.extend(WALK_L.iter().flatten());
-    v.extend(WALK_BL.iter().flatten());
-    v.extend(WALK_B.iter().flatten());
-    v.extend(WALK_BR.iter().flatten());
-    v.extend(WALK_R.iter().flatten());
-    v.extend(WALK_FR.iter().flatten());
-    v.extend(RUN_F.iter().flatten());
-    v.extend(RUN_FL.iter().flatten());
-    v.extend(RUN_L.iter().flatten());
-    v.extend(RUN_BL.iter().flatten());
-    v.extend(RUN_B.iter().flatten());
-    v.extend(RUN_BR.iter().flatten());
-    v.extend(RUN_R.iter().flatten());
-    v.extend(RUN_FR.iter().flatten());
-    v.extend(SPRINT_F.iter().flatten());
-    v.extend(SPRINT_FL.iter().flatten());
-    v.extend(SPRINT_L.iter().flatten());
-    v.extend(SPRINT_BL.iter().flatten());
-    v.extend(SPRINT_B.iter().flatten());
-    v.extend(SPRINT_BR.iter().flatten());
-    v.extend(SPRINT_R.iter().flatten());
-    v.extend(SPRINT_FR.iter().flatten());
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        for l in gait_loops(pose).expect("a baked gait") {
+            v.extend(l.iter().flatten());
+        }
+    }
     v
 }
 // CLIP REGISTRY END

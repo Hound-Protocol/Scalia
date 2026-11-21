@@ -19,6 +19,13 @@ const RUN_UP: f32 = 2.4;
 const RUN_DOWN: f32 = 2.1;
 const WALK_UP: f32 = 0.2;
 const WALK_DOWN: f32 = 0.05;
+/// How quickly the momentum lean follows his acceleration (1/s): a sustained push or brake leans him, quick
+/// taps back and forth average out instead of rocking him on every one.
+const ACCEL_FOLLOW: f32 = 2.5;
+/// How fast his legs' travel direction (relative to his body) can swing round (rad/s).
+const DIR_RATE: f32 = 20.0;
+/// Coming to a stop, below this pace (m/s) he settles into his standing pose.
+const STOP_SETTLE: f32 = 0.3;
 /// Turning on the spot faster than this (rad/s), his feet step him round instead of sliding.
 const SHUFFLE_SPIN: f32 = 1.3;
 /// A body turns with weight: angular acceleration (rad/s²).
@@ -124,6 +131,8 @@ pub struct Frame {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Animator {
+    /// Drawn as the procedural figure (from the last `Drive`): its barrel is the procedural rifle's.
+    pub procedural: bool,
     pub heading: f32,
     pub spin: f32,
     /// How far he still has to turn (rad), and how long he has been turning hard one way (s): small corrections
@@ -173,6 +182,7 @@ fn wrap(mut d: f32) -> f32 {
 impl Animator {
     pub fn new(heading: f32) -> Animator {
         Animator {
+            procedural: false,
             heading,
             spin: 0.0,
             gap: 0.0,
@@ -241,14 +251,21 @@ impl Animator {
     pub fn step(&mut self, d: &Drive) -> Frame {
         let dt = d.dt.clamp(0.0, 0.1);
         self.clock = d.ts;
+        self.procedural = d.procedural;
         let alive_up = !d.dead && !d.down;
         let speed = (d.vel.0 * d.vel.0 + d.vel.1 * d.vel.1).sqrt();
         if dt > 0.0 {
-            self.accel += ((speed - self.speed) / dt - self.accel) * (dt * 8.0).min(1.0);
+            self.accel += ((speed - self.speed) / dt - self.accel) * (dt * ACCEL_FOLLOW).min(1.0);
         }
         let was_still = self.speed < WALK_DOWN;
         self.speed = speed;
         let moving = speed > WALK_DOWN;
+        let gait = |p: Pose| matches!(p, Pose::Walk | Pose::Run | Pose::Sprint);
+        // Still pushing (a reversal passes through a standstill) or let go and coming to a stop.
+        let wants = d.want.is_some_and(|w| w.0 * w.0 + w.1 * w.1 > 0.01);
+        let stopping = d.want.is_some() && !wants && moving;
+        // Through a quick reversal his feet keep going: no drop to standing, no fresh first step.
+        let pressing_on = wants && gait(self.legs);
         let skid = if alive_up && d.stance == Stance::Stand { d.want.map_or(Skid::None, |w| skidding(d.vel, w)) } else { Skid::None };
         if alive_up {
             self.steer(d.face, dt);
@@ -262,7 +279,12 @@ impl Animator {
         let crawl_blending = self.shown.0 == Pose::Crawl
             || (self.shown.1 == Pose::Crawl && d.ts - self.shown.2 < pose::BLEND_S);
         self.dir = if moving {
-            wrap(travel - self.heading)
+            let target = wrap(travel - self.heading);
+            // Setting off he steps straight that way; on the move (a reversal included) his legs swing round to
+            // the new direction over a few frames rather than swapping a forward stride for a backward one.
+            if self.legs == Pose::Stand { target } else { wrap(self.dir + wrap(target - self.dir).clamp(-DIR_RATE * dt, DIR_RATE * dt)) }
+        } else if pressing_on {
+            self.dir
         } else if shuffling {
             self.spin.signum() * std::f32::consts::FRAC_PI_2
         } else if d.stance == Stance::Prone && crawl_blending {
@@ -274,7 +296,7 @@ impl Animator {
         // Legs by real pace, with hysteresis.
         let was = self.legs;
         let fast = matches!(was, Pose::Run | Pose::Sprint);
-        self.legs = if d.sprint && speed > if was == Pose::Sprint { SPRINT_DOWN } else { SPRINT_UP } {
+        let paced = if d.sprint && speed > if was == Pose::Sprint { SPRINT_DOWN } else { SPRINT_UP } {
             Pose::Sprint
         } else if speed > if fast { RUN_DOWN } else { RUN_UP } {
             Pose::Run
@@ -283,8 +305,18 @@ impl Animator {
         } else {
             Pose::Stand
         };
+        // Coming to a stop he keeps the stride he has (slowing) and settles once, not stepping down through each
+        // gait (each change restarts a blend, and a chain of them jerks); pushing on through a reversal he keeps
+        // walking.
+        self.legs = if stopping && gait(was) {
+            if speed > STOP_SETTLE { was } else { Pose::Stand }
+        } else if pressing_on && paced == Pose::Stand {
+            Pose::Walk
+        } else {
+            paced
+        };
         // Setting off from still, he steps out with a foot straight away (not from the middle of a stride).
-        if was_still && moving && !(d.stance == Stance::Prone && crawl_blending) {
+        if was_still && was == Pose::Stand && moving && !(d.stance == Stance::Prone && crawl_blending) {
             self.phase = 0.12;
         }
         let aim = d.rifle == Rifle::Aim;
@@ -367,7 +399,7 @@ impl Animator {
                 (Stance::Prone, false) => (Pose::Prone, aim.then_some(Pose::ProneAim), 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
-                (Stance::Stand, _) if skid == Skid::Stop => (Pose::Brake, None, 0.0),
+                (Stance::Stand, _) if skid == Skid::Stop || stopping && self.shown.0 == Pose::Brake && speed > STOP_SETTLE => (Pose::Brake, None, 0.0),
                 // In a cut he drops low to pivot while his body still slides the old way.
                 (Stance::Stand, _) if skid == Skid::Cut => (Pose::Crouch, None, 0.0),
                 (Stance::Stand, _) if self.legs == Pose::Stand && shuffling => (Pose::Walk, carried(Pose::Stand), (self.spin.abs() * 0.45).clamp(0.8, 1.8)),
@@ -469,8 +501,12 @@ impl Animator {
     /// His muzzle and bore in the world (mm and unit vector), posed exactly as drawn; None when he cannot fire.
     /// AN-03: drawn by the skeletal animation, so posed from the same instance record the GPU gets.
     pub fn barrel(&self, f: &Frame, at_mm: (f32, f32)) -> (Option<[f32; 3]>, [f32; 3]) {
-        let rec = self.record(f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
-        let (q, b) = scalia_render::skin::muzzle(scalia_render::skin::anims(), &rec, self.clock);
+        let (q, b) = if self.procedural {
+            pose::barrel_with_phases(pose::RIFLE, f.pose, f.upper, f.phase, self.reload_phase, f.dir)
+        } else {
+            let rec = self.record(f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
+            scalia_render::skin::muzzle(scalia_render::skin::anims(), &rec, self.clock)
+        };
         let (roll, pitch) = pose::unpack_tilt(9.0 + f.lean);
         let bore = pose::figure_to_world(b, glam::Vec3::ZERO, f.heading, roll, pitch).to_array();
         let armed = pose::two_handed(f.upper.unwrap_or(f.pose)) > 0.0;
@@ -779,6 +815,23 @@ mod tests {
             assert!(r[7] as u32 != Pose::Drop as u32 && r[8] as u32 != Pose::Drop as u32, "the shader never sees the drop");
         }
         assert!(seen > 20);
+    }
+
+    #[test]
+    fn procedural_figures_fire_from_the_procedural_rifle() {
+        // The commander is drawn procedurally: his rounds and flash must leave the barrel that is drawn.
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.procedural = true;
+        d.rifle = Rifle::Aim;
+        let mut f = a.step(&d);
+        for _ in 0..60 { d.ts += d.dt; f = a.step(&d); }
+        let (tip, _) = a.barrel(&f, (0.0, 0.0));
+        let (q, _) = pose::barrel_with_phases(pose::RIFLE, f.pose, f.upper, f.phase, a.reload_phase, f.dir);
+        let (roll, pitch) = pose::unpack_tilt(9.0 + f.lean);
+        let want = pose::figure_to_world(q * 1000.0, glam::Vec3::ZERO, f.heading, roll, pitch);
+        let got = glam::Vec3::from_array(tip.expect("armed"));
+        assert!((got - want).length() < 1.0, "{got} vs {want}");
     }
 
     #[test]

@@ -167,20 +167,10 @@ const STEP_FIELD_MAX: usize = 2;
 /// rounds behind the 30 in the rifle; later the inventory decides).
 const COMMANDER_SQUAD: u16 = 1_000;
 const COMMANDER_MAGS: i32 = 5;
-const CMD_WALK: f32 = 1.7;
-const CMD_AIM_WALK: f32 = 1.2;
-const CMD_CROUCH: f32 = 1.4;
-const CMD_CRAWL: f32 = 0.55;
-const CMD_CRAWL_FAST: f32 = 1.05;
-const CMD_SPRINT: f32 = 4.6;
-/// His usual pace on foot (WASD): a jog. Alt held walks (CMD_WALK), Shift sprints.
-const CMD_JOG: f32 = 3.0;
-/// The commander winds up (m/s²) and brakes.
+use crate::motion::{CMD_AIM_WALK, CMD_CRAWL, CMD_CRAWL_FAST, CMD_CROUCH, CMD_FEET, CMD_JOG, CMD_SPRINT, CMD_WALK};
 /// Selection tag on an instance's colour (the shader outlines tagged figures): +64 stable, +128 wounded or
 /// incapacitated, +192 killed.
 const SEL_STABLE: f32 = 64.0;
-/// His feet (motion.rs): sharp up to a jog, a build-up into a sprint, a quick stop, a gentle ease off a sprint.
-const CMD_FEET: crate::motion::Footing = crate::motion::Footing { push: 10.0, kick: 3.0, brake: 10.0, coast: 3.0, cruise: CMD_JOG, top: CMD_SPRINT };
 
 /// How quickly the camera glides to the next step (time constant, ms).
 const GLIDE_MS: f64 = 90.0;
@@ -4646,3 +4636,4 @@ mod audio_spatial_tests {
     }
 
 }
+

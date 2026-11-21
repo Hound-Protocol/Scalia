@@ -825,13 +825,13 @@ fn crawl_draws_the_knee_up_sideways_without_lifting_the_shin() {
 
 #[test]
 fn forward_crawl_legs_follow_the_reference_not_a_splay() {
-    // AN-02-S11: one knee draws out and tucks while the other trails nearly straight; the legs never both swing
-    // wide (the old side-swing formula splayed both out to about 60 deg).
+    // AN-02-S11: the legs never both swing wide (the old side-swing formula splayed both out to about 60 deg);
+    // each leg draws out in its own half of the stride (both legs work in turn), never both at once.
     use scalia_render::pose::params_dir;
     for k in 0..24 {
         let p = params_dir(Pose::Crawl, k as f32 / 24.0, 0.0);
-        assert!(p.knee[0] < 0.4, "left leg trails nearly straight: knee {:.2}", p.knee[0]);
-        assert!(p.side[0].abs() < 0.7 && p.side[1].abs() < 0.9, "no splay: side {:?}", p.side);
+        assert!(p.side[0].abs() < 0.9 && p.side[1].abs() < 0.9, "no splay: side {:?}", p.side);
+        assert!(p.side[0].abs() + p.side[1].abs() < 1.2, "both legs out wide at once: side {:?}", p.side);
     }
 }
 
@@ -858,4 +858,62 @@ fn baked_backward_crawl_holds_the_rifle_and_stays_on_the_ground() {
     assert!(miss < 0.05, "support hand off the handguard by {miss:.3} m");
     assert!(low > -0.03, "a leg sinks {:.3} m into the ground", -low);
     assert!(shin_top < 0.30, "a shin rises to {shin_top:.2} m");
+}
+
+/// A sprint swings the shoulders, but not the whole upper body a third of a turn each way: that reads as the body
+/// buzzing from side to side at full speed (the baked Mixamo sprint swings a one-handed rifle).
+#[test]
+fn sprint_keeps_its_torso_twist_to_a_run_like_swing() {
+    let most = (0..48).map(|i| scalia_render::pose::params_dir(Pose::Sprint, i as f32 / 48.0, 0.0).twist.abs()).fold(0.0, f32::max);
+    assert!(most <= 0.25, "sprint twist reaches {most:.3} rad");
+}
+
+/// Running and sprinting carry the head nearly level from side to side: a 13 cm sway each stride (the baked
+/// Mixamo upper-body side lean) reads as the body rocking left and right at speed.
+#[test]
+fn running_and_sprinting_keep_the_head_steady_sideways() {
+    let fig = figure();
+    for pose in [Pose::Run, Pose::Sprint] {
+        let xs: Vec<f32> = (0..48)
+            .map(|i| {
+                let p = scalia_render::pose::params_dir(pose, i as f32 / 48.0, 0.0);
+                let (mut h, mut n) = (0.0, 0.0);
+                for v in fig.vertices.iter().filter(|v| v.pos[2] > 1.55) {
+                    h += pose_vertex(Vec3::from_array(v.pos), part_of(v.color), &p).x;
+                    n += 1.0;
+                }
+                h / n
+            })
+            .collect();
+        let range = xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(range <= 0.06, "{pose:?} head sways {range:.3} m");
+    }
+}
+
+/// Landing and taking off at a run the body sinks and rises over a few hundredths of a second, not in one table
+/// row: a 6 cm drop between two rows is a pop on every step (the baked lift against the procedural legs).
+#[test]
+fn running_body_height_has_no_step_at_landing_or_take_off() {
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        let n = 240;
+        let d: Vec<f32> = (0..n).map(|i| scalia_render::pose::params_dir(pose, i as f32 / n as f32, 0.0).drop).collect();
+        let most = (0..n).map(|i| (d[(i + 1) % n] - d[i]).abs()).fold(0.0, f32::max);
+        assert!(most <= 0.006, "{pose:?} body height jumps {most:.4} m in 1/{n} of a stride");
+    }
+}
+
+/// Crawling, both legs work in turn: each knee draws up in its half of the stride (the reference clip only drew
+/// one, the other leg dragged along straight).
+#[test]
+fn crawling_draws_up_both_knees_in_turn() {
+    for dir in [0.0, std::f32::consts::PI, std::f32::consts::FRAC_PI_2] {
+        let k: Vec<[f32; 2]> = (0..48).map(|i| scalia_render::pose::params_dir(Pose::Crawl, i as f32 / 48.0, dir).knee).collect();
+        let peak = |s: usize| (0..48).max_by(|&a, &b| k[a][s].total_cmp(&k[b][s])).unwrap();
+        for s in 0..2 {
+            let most = k.iter().map(|x| x[s]).fold(0.0, f32::max);
+            assert!(most >= 0.7, "dir {dir:.2}: knee {s} only reaches {most:.2} rad");
+        }
+        let apart = (peak(0) as i32 - peak(1) as i32).rem_euclid(48);
+        assert!((18..=30).contains(&apart), "dir {dir:.2}: knees peak {apart}/48 of a stride apart");
+    }
 }
