@@ -917,3 +917,13 @@ fn crawling_draws_up_both_knees_in_turn() {
         assert!((18..=30).contains(&apart), "dir {dir:.2}: knees peak {apart}/48 of a stride apart");
     }
 }
+
+/// Walking and running the legs point where he goes: the rifle clips turn the hips a third of the way to the right
+/// (towards the rifle side), which on our figure reads as legs tilted off to one side.
+#[test]
+fn gait_legs_point_ahead_on_average() {
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        let mean = (0..48).map(|i| scalia_render::pose::params_dir(pose, i as f32 / 48.0, 0.0).yaw).sum::<f32>() / 48.0;
+        assert!(mean.abs() <= 0.05, "{pose:?} legs turned {mean:.3} rad on average");
+    }
+}

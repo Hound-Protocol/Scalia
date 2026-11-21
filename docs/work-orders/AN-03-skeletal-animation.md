@@ -50,3 +50,10 @@ procedural rig (AN-02-S12/S13). Built for scale: one compute pass poses every so
 ## Next action
 
 Look at it in the browser; then M5 measurements.
+
+## Round 2: the procedural commander as the reference for every soldier (user plan, 2026-11-21)
+S6 legs straight in the gaits, kneeling crouch aim, prone turns about the hips (commander) · S7 prone rifle states
+(unaimed: rifle across in front; aiming raises it) · S8 low crawl rebuilt (elbows pull in turn, rifle across the
+forearms, opposite knee drives, legs close) · S9 crouch/prone transitions (left hand plants going down and pushes
+up; control locked, momentum carries; AI soldiers in a separate battle change) · S10 sprint effort (big rifle swing,
+arm pump, head steady) · S11 soft joints (vertices near a joint blend between both parts: no gaps).

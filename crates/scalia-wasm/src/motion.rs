@@ -220,6 +220,15 @@ mod tests {
     }
 }
 
+/// Prone, a soldier turns about his hips, not his boots: his position (the feet, where the figure stands) moves
+/// round so the hips stay put as his heading goes from `from` to `to` (radians, 0 facing +y, positive to the
+/// left). `hips` is how far ahead of the feet they lie (m).
+pub fn prone_turn(pos: (f64, f64), from: f32, to: f32, hips: f32) -> (f64, f64) {
+    let ahead = |h: f32| (-(h.sin() * hips) as f64, (h.cos() * hips) as f64);
+    let (a, b) = (ahead(from), ahead(to));
+    (pos.0 + a.0 - b.0, pos.1 + a.1 - b.1)
+}
+
 // The commander's paces (m/s) and feet (viewer.rs `update_commander`).
 pub const CMD_WALK: f32 = 1.7;
 pub const CMD_AIM_WALK: f32 = 1.2;
@@ -387,6 +396,15 @@ mod commander_motion_tests {
         assert!(most >= 0.08, "banks only {most:.3} rad");
         let step = s.windows(2).map(|v| (v[1].roll - v[0].roll).abs()).fold(0.0, f32::max);
         assert!(step <= 0.02, "bank jumps {step:.4} rad in a frame");
+    }
+
+    #[test]
+    fn prone_he_turns_about_his_hips() {
+        let hips_at = |p: (f64, f64), h: f32| (p.0 - (h.sin() * 0.95) as f64, p.1 + (h.cos() * 0.95) as f64);
+        let (p0, h0, h1) = ((3.0, 4.0), 0.3f32, 1.9f32);
+        let p1 = prone_turn(p0, h0, h1, 0.95);
+        let (a, b) = (hips_at(p0, h0), hips_at(p1, h1));
+        assert!((a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4, "hips moved from {a:?} to {b:?}");
     }
 
     #[test]
