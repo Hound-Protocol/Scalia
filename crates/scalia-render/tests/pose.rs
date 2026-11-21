@@ -822,3 +822,28 @@ fn forward_crawl_legs_follow_the_reference_not_a_splay() {
         assert!(p.side[0].abs() < 0.7 && p.side[1].abs() < 0.9, "no splay: side {:?}", p.side);
     }
 }
+
+#[test]
+fn baked_backward_crawl_holds_the_rifle_and_stays_on_the_ground() {
+    // AN-02-S12: crawling backwards follows the reference loop (CRAWL_BACK) through every phase: the support hand
+    // on the handguard, no part of the legs below the ground, the drawn-up shin kept low.
+    use scalia_render::pose::params_dir;
+    let f = figure();
+    let (mut miss, mut low, mut shin_top) = (0.0f32, f32::MAX, 0.0f32);
+    for k in 0..96 {
+        let p = grip(&params_dir(Pose::Crawl, k as f32 / 96.0, std::f32::consts::PI), 1.0);
+        miss = miss.max(hand(&p, Side::Left).distance(held(RIFLE_GUARD, &p)));
+        for v in &f.vertices {
+            let part = part_of(v.color);
+            if matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot) {
+                let q = pose_vertex(Vec3::from(v.pos), part, &p);
+                low = low.min(q.z);
+                if matches!(part, Part::LeftShin | Part::RightShin) { shin_top = shin_top.max(q.z); }
+            }
+        }
+    }
+    eprintln!("backward crawl: hand miss {miss:.3} m, lowest leg point {low:.3} m, shin top {shin_top:.3} m");
+    assert!(miss < 0.05, "support hand off the handguard by {miss:.3} m");
+    assert!(low > -0.03, "a leg sinks {:.3} m into the ground", -low);
+    assert!(shin_top < 0.30, "a shin rises to {shin_top:.2} m");
+}
