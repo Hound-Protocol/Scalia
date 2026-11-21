@@ -370,12 +370,34 @@ mod commander_motion_tests {
     }
 
     #[test]
+    fn a_steady_sprint_at_an_angle_does_not_buzz_from_side_to_side() {
+        for s in [run(4.0, |_| (0.37, 1.0, true)), run(4.0, |t| ((0.05 * t).sin(), (0.05 * t).cos(), true))] {
+            let w: Vec<f32> = s.iter().filter(|x| x.t > 2.0).map(|x| x.roll).collect();
+            let flips = w.windows(3).filter(|v| (v[1] - v[0]) * (v[2] - v[1]) < 0.0).count();
+            let step = w.windows(2).map(|v| (v[1] - v[0]).abs()).fold(0.0, f32::max);
+            assert!(flips <= 4, "roll changes direction {flips} times in 2 s");
+            assert!(step <= 0.01, "roll jumps {step:.4} rad in a frame");
+        }
+    }
+
+    #[test]
+    fn a_turn_at_a_sprint_still_banks_him_into_it() {
+        let s = run(3.5, |t| if t < 2.0 { (0.0, 1.0, true) } else { (1.0, 0.0, true) });
+        let most = s.iter().filter(|x| x.t > 2.0).map(|x| x.roll.abs()).fold(0.0, f32::max);
+        assert!(most >= 0.08, "banks only {most:.3} rad");
+        let step = s.windows(2).map(|v| (v[1].roll - v[0].roll).abs()).fold(0.0, f32::max);
+        assert!(step <= 0.02, "bank jumps {step:.4} rad in a frame");
+    }
+
+    #[test]
     #[ignore]
     fn dump() {
         let which = std::env::var("CASE").unwrap_or_default();
         let s = match which.as_str() {
             "ad" => run(3.0, |t| (if (t / 0.18) as i32 % 2 == 0 { -1.0 } else { 1.0 }, 0.0, false)),
             "sprint" => run(4.0, |_| (0.0, 1.0, true)),
+            "diag" => run(4.0, |_| (0.37, 1.0, true)),
+            "drift" => run(4.0, |t| ((0.05 * t).sin(), (0.05 * t).cos(), true)),
             "stop" => run(4.0, |t| (0.0, if t < 2.5 { 1.0 } else { 0.0 }, true)),
             _ => run(4.0, |t| (0.0, if t < 2.5 { 1.0 } else { 0.0 }, false)),
         };
