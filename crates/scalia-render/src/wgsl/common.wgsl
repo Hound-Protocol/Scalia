@@ -317,8 +317,8 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
-const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.231580), vec2f(0.500000, 1.582422), 0.600000, -0.140875, 0.718250, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.336720, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
+const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
 
 // AN-02-S11 forward crawl legs (mirrors CRAWL_FWD_LEGS in pose.rs): hip L, hip R, knee L, knee R, side L, side R.
 // Both crawling legs in turn (pose.rs `crawl_alternate`): d/t the drawing and trailing leg (hip, knee, side), dh/th
@@ -951,12 +951,64 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
   if (p.prone != 0.0) {
     // Positive onto his front, negative onto his back (pose.rs PRONE_LIFT 0.14, SUPINE_LIFT 0.16).
     q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
-    let ap = abs(p.prone);
-    // Prone keeps the transition lift 0.23 until the end, then settles to 0.14 (pose.rs PRONE_LIFT_MID, prone_settle).
-    let lift = select(0.16 * ap, 0.23 * ap - 0.09 * pow(ap, 12.0), p.prone > 0.0);
-    q.z = q.z + lift + 0.12 * sin(3.1415927 * ap);
+    q.z = q.z + prone_lift(p.prone);
   }
   return q;
+}
+
+// How far the body is lifted at a prone amount (pose.rs `prone_lift`). Prone keeps the transition lift 0.23 until
+// the end, then settles to 0.14 (pose.rs PRONE_LIFT_MID, prone_settle).
+fn prone_lift(prone: f32) -> f32 {
+  let ap = abs(prone);
+  let lift = select(0.16 * ap, 0.23 * ap - 0.09 * pow(ap, 12.0), prone > 0.0);
+  return lift + 0.12 * sin(3.1415927 * ap);
+}
+
+// pose_vertex's upper-body chain and its inverse (pose.rs `pose_upper`, `unpose_upper`).
+fn tilt_hips(q: vec3f, a: f32) -> vec3f {
+  let ts = sin(a);
+  let tc = cos(a);
+  let tz = q.z - 0.88;
+  return vec3f(q.x * tc + tz * ts, q.y, 0.88 - q.x * ts + tz * tc);
+}
+fn pose_upper(v: vec3f, p: PP) -> vec3f {
+  var q = tilt_hips(rot(turn(v, p.twist), 0.0, 0.88, -p.lean), p.tilt);
+  q.z = q.z + p.drop + p.bob;
+  if (p.prone != 0.0) {
+    q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
+    q.z = q.z + prone_lift(p.prone);
+  }
+  return q;
+}
+fn unpose_upper(w: vec3f, p: PP) -> vec3f {
+  var q = w;
+  if (p.prone != 0.0) {
+    q.z = q.z - prone_lift(p.prone);
+    q = rot(q, 0.0, 0.0, 1.5707963 * p.prone);
+  }
+  q.z = q.z - p.drop - p.bob;
+  return turn(rot(tilt_hips(q, -p.tilt), 0.0, 0.88, p.lean), -p.twist);
+}
+
+// The drop's left palm (pose.rs DROP_HAND, DROP_HAND_REACH, DROP_HAND_SLIDE, `drop_hand`): planted on the ground,
+// the body coming down over it, then slid along the ground into the prone rest.
+const DROP_HAND: vec3f = vec3f(-0.28, 0.8, 0.04);
+const DROP_HAND_REACH: vec2f = vec2f(0.38, 0.5);
+const DROP_HAND_SLIDE: vec2f = vec2f(0.8, 1.0);
+fn drop_hand(p: PP, t: f32) -> PP {
+  let w = smoothstep(DROP_HAND_REACH.x, DROP_HAND_REACH.y, t);
+  if (w <= 0.0) { return p; }
+  let own = pose_upper(hand_l(p), p);
+  let s = smoothstep(DROP_HAND_SLIDE.x, DROP_HAND_SLIDE.y, t);
+  return reach_left(p, unpose_upper(mix(DROP_HAND, own, s), p), w, 2.0);
+}
+// Where on the drop he is, from the two keys he was handed and the blend between them (pose.rs `drop_keys`,
+// DROP_KNEEL 0.35, DROP_REACH 0.55, DROP_PLANT 0.78); -1 off the drop. These key pairs only occur on it.
+fn drop_t(prev: u32, pose: u32, w: f32) -> f32 {
+  if (prev == 3u && pose == 34u) { return 0.35 + 0.2 * w; }
+  if (prev == 34u && pose == 35u) { return 0.55 + 0.23 * w; }
+  if (prev == 35u && pose == 5u) { return 0.78 + 0.22 * w; }
+  return -1.0;
 }
 
 fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: bool) -> vec3f {
@@ -1036,6 +1088,9 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
       let hold = select(two_handed(u32(b.w)), two_handed(upper_id), layer >= 1.0);
       let gw = select(hold, grip_weight(u32(d.x), u32(b.w), w), w < 1.0 && layer < 1.0);
       pp = grip(pp, gw);
+      // On the drop the left palm goes to the ground and takes the weight.
+      let on_drop = drop_t(u32(d.x), u32(b.w), w);
+      if (on_drop >= 0.0) { pp = drop_hand(pp, on_drop); }
       var reload_weight = 0.0;
       if (layer < 1.0) {
         if (u32(b.w) == 18u) {

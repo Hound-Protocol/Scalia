@@ -46,6 +46,19 @@ pub fn step_velocity(vel: (f32, f32), want: (f32, f32), dt: f32, f: Footing) -> 
     (vel.0 + dx * k, vel.1 + dy * k)
 }
 
+/// Going down to prone or getting up (m/s²): his feet are planted and he takes no new direction, but the body
+/// keeps the momentum it had and slides on, a body length from a run (Battlefield 3's drop to prone mid-run).
+pub const DROP_SLIDE: f32 = 5.0;
+
+/// One step of his velocity while he goes down or gets up: straight on, slowing at `DROP_SLIDE`.
+pub fn drop_slide(vel: (f32, f32), dt: f32) -> (f32, f32) {
+    let speed = (vel.0 * vel.0 + vel.1 * vel.1).sqrt();
+    if speed < 1e-5 {
+        return (0.0, 0.0);
+    }
+    let k = (speed - DROP_SLIDE * dt).max(0.0) / speed;
+    (vel.0 * k, vel.1 * k)
+}
 /// The share of grip left at top speed.
 pub const GRIP_AT_TOP: f32 = 0.55;
 
@@ -424,5 +437,29 @@ mod commander_motion_tests {
             o += &format!("{:.4},{:.4},{:.4},{:?},{:.3},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}\n", x.t, x.roll, x.pitch, x.pose, x.speed, x.heading, x.lean, x.head.x, x.head.y, x.head.z, x.hips.x, x.hips.y, x.hips.z, x.feet[0].x, x.feet[0].y, x.feet[0].z, x.feet[1].x, x.feet[1].y, x.feet[1].z);
         }
         std::fs::write(format!("/tmp/cmd_{which}.csv"), o).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod drop_slide_tests {
+    use super::*;
+
+    /// How far he slides from `speed` while going down (the whole way from standing to flat takes about 0.9 s).
+    fn slid(speed: f32) -> (f32, f32) {
+        let (dt, mut v, mut d) = (1.0 / 60.0, (0.0, speed), 0.0);
+        for _ in 0..54 {
+            v = drop_slide(v, dt);
+            d += v.1 * dt;
+        }
+        (d, v.1)
+    }
+
+    #[test]
+    fn dropping_mid_run_he_slides_on_about_a_body_length_and_comes_to_rest() {
+        let (run, left) = slid(CMD_JOG);
+        assert!((0.8..1.5).contains(&run), "from a run he slid {run:.2} m");
+        assert!(left < 0.3, "still going {left:.2} m/s at the end of the drop");
+        let (sprint, _) = slid(CMD_SPRINT);
+        assert!(sprint > run && sprint < 2.3, "from a sprint he slid {sprint:.2} m");
     }
 }

@@ -165,3 +165,13 @@ fn baked_clip_registry_matches() {
     assert_eq!(at, CLIP_FLOATS);
     assert_eq!(clip_buffer().len() as u32, CLIP_FLOATS);
 }
+
+/// The drop's hand plant constants (pose.rs DROP_HAND*) are written into the shader by hand.
+#[test]
+fn drop_hand_constants_match() {
+    use scalia_render::pose::{DROP_HAND, DROP_HAND_REACH, DROP_HAND_SLIDE};
+    let get = |name: &str| nums(WGSL.lines().find(|l| l.starts_with(&format!("const {name}:"))).unwrap_or("").split_once('(').map_or("", |x| x.1));
+    assert_eq!(get("DROP_HAND"), DROP_HAND.to_vec());
+    assert_eq!(get("DROP_HAND_REACH"), DROP_HAND_REACH.to_vec());
+    assert_eq!(get("DROP_HAND_SLIDE"), DROP_HAND_SLIDE.to_vec());
+}

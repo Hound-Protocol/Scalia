@@ -3257,7 +3257,9 @@ impl Viewer {
         let ready = (self.gun.aim || self.gun.trigger) && !self.gun.slung && !holding && self.gun.toward.is_some();
         // His man on the field battle: shot down or killed, he no longer moves or fires.
         let (down, dead) = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)).map_or((false, false), |s| (s.down(), !s.alive()));
-        let wants = len > 0.01 && t >= self.radio_until && !holding && !down && !dead;
+        // Going down or getting up he takes no new direction: he slides on with what he had (motion.rs `drop_slide`).
+        let dropping = self.cmd_fig.dropping();
+        let wants = len > 0.01 && t >= self.radio_until && !holding && !down && !dead && !dropping;
         // Like a person, not a cursor: about half a second up to a walk, a second up to a sprint, and a few
         // steps to brake (GTA-style). Changing direction keeps most of the pace. Low he goes slower; on his
         // belly he crawls; with the rifle up he walks, never sprints.
@@ -3279,8 +3281,8 @@ impl Viewer {
         // sprint bends round in an arc; reversing (A then D) is a skid to a stop, then a push off the other way.
         let want = if wants { (vx / len * target, vy / len * target) } else { (0.0, 0.0) };
         let vel = (self.cmd_dir.0 * self.cmd_speed, self.cmd_dir.1 * self.cmd_speed);
-        self.cmd_skid = crate::motion::skidding(vel, want);
-        let vel = crate::motion::step_velocity(vel, want, dt, CMD_FEET);
+        self.cmd_skid = if dropping { crate::motion::Skid::None } else { crate::motion::skidding(vel, want) };
+        let vel = if dropping { crate::motion::drop_slide(vel, dt) } else { crate::motion::step_velocity(vel, want, dt, CMD_FEET) };
         let was_still = self.cmd_speed < 0.05;
         self.cmd_speed = (vel.0 * vel.0 + vel.1 * vel.1).sqrt();
         if self.cmd_speed > 1e-3 {
