@@ -409,7 +409,7 @@ impl Animator {
                 (Stance::Prone, true) => (Pose::Crawl, aim.then_some(Pose::ProneAim), speed / stride_m_dir(Pose::Crawl, self.dir)),
                 (Stance::Prone, false) => (Pose::Prone, aim.then_some(Pose::ProneAim), 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
-                (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
+                (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { Pose::CoverAim /* aimed from a kneel, in cover or not; the half crouch is only the moving layer */ } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
                 (Stance::Stand, _) if skid == Skid::Stop || stopping && self.shown.0 == Pose::Brake && speed > STOP_SETTLE => (Pose::Brake, None, 0.0),
                 // In a cut he drops low to pivot while his body still slides the old way.
                 (Stance::Stand, _) if skid == Skid::Cut => (Pose::Crouch, None, 0.0),
@@ -829,6 +829,19 @@ mod tests {
             assert!(r[7] as u32 != Pose::Drop as u32 && r[8] as u32 != Pose::Drop as u32, "the shader never sees the drop");
         }
         assert!(seen > 20);
+    }
+
+    #[test]
+    fn crouched_and_still_he_aims_from_a_kneel() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.stance = Stance::Crouch;
+        d.rifle = Rifle::Aim;
+        let mut f = a.step(&d);
+        for _ in 0..60 { d.ts += d.dt; f = a.step(&d); }
+        let (legs, kneel) = (pose::params(f.pose, 0.0), pose::params(Pose::Crouch, 0.0));
+        assert_eq!((legs.hip, legs.knee), (kneel.hip, kneel.knee), "{:?} does not kneel", f.pose);
+        assert!(pose::two_handed(f.upper.unwrap_or(f.pose)) > 0.0, "still aiming");
     }
 
     #[test]

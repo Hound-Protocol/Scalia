@@ -3341,6 +3341,10 @@ impl Viewer {
         d.dead = dead;
         d.action = if holding { Some((Pose::Tablet, 0.0, None)) } else if t < self.radio_until { Some((Pose::Radio, 0.0, None)) } else { None };
         let f = self.cmd_fig.step(&d);
+        // Lying down he turns about his hips: his feet (his position) swing round them.
+        if matches!(f.pose, Pose::Prone | Pose::Crawl) && self.cmd_pose.0 == f.pose {
+            self.cmd = crate::motion::prone_turn(self.cmd, self.cmd_heading, f.heading, scalia_render::pose::HIP_Z);
+        }
         self.cmd_heading = f.heading;
         self.cmd_spin = self.cmd_fig.spin;
         self.cmd_pose.0 = f.pose;

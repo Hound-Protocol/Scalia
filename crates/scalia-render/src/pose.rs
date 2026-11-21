@@ -820,13 +820,103 @@ fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
         Pose::Sprint => (&SPRINT, [&SPRINT_F, &SPRINT_FL, &SPRINT_L, &SPRINT_BL, &SPRINT_B, &SPRINT_BR, &SPRINT_R, &SPRINT_FR]),
         _ => return None,
     };
-    let loops = cell.get_or_init(|| raw.map(|l| smooth_lift(l)));
+    // Ahead and back the legs are straightened; the strafes keep their hip turn (it is how they step sideways).
+    let loops = cell.get_or_init(|| {
+        let mut i = 0;
+        raw.map(|l| {
+            let straight = i % 4 == 0;
+            i += 1;
+            if straight { centre_leg_yaw(&smooth_lift(l)) } else { smooth_lift(l) }
+        })
+    });
     Some(std::array::from_fn(|i| &loops[i]))
 }
 
 /// A baked loop with its body lift (field 10) smoothed round the cycle. The clips' lift steps up for the airborne
 /// part of a stride and down again at landing between one row and the next; under the procedural legs that is a
 /// 6 cm pop on every step. Both the CPU (`gait_bake`) and the shader (`clip_buffer`) read the smoothed loops.
+/// A baked loop with the legs' average turn (field 6) taken out, keeping its swing, and each foot kept exactly where
+/// the clip puts it: the rifle clips walk and run with the hips turned about 35 degrees towards the rifle side, which
+/// on our figure reads as legs tilted off to the right. With the turn gone, each row's hip swing and side swing
+/// (fields 0..1, 4..5) are solved again so the boot lands in the same place (knee kept): straight legs, no slide.
+/// How much of the rifle clips' average leg turn is taken out (the rest keeps the longest strides within reach).
+const LEG_YAW_REMOVED: f32 = 1.0;
+fn centre_leg_yaw(l: &GaitLoop) -> GaitLoop {
+    let mean = l.iter().map(|r| r[6]).sum::<f32>() / l.len() as f32;
+    let boot = |hip: f32, knee: f32, side: f32, yaw: f32, px: f32| {
+        // The ankle: a planted boot pivots about it.
+        turn(sideways(leg(Vec3::new(px, 0.0, ANKLE_Z), hip, knee), side, px), yaw)
+    };
+    let mut out = *l;
+    for row in out.iter_mut() {
+        let yaw = row[6] - LEG_YAW_REMOVED * mean;
+        for i in 0..2 {
+            let px = if i == 0 { -HIP_X } else { HIP_X };
+            let want = boot(row[i], row[2 + i], row[4 + i], row[6], px);
+            let solved = solve_boot(&boot, want, Vec3::new(row[i], row[2 + i], row[4 + i]), yaw, px);
+            row[i] = solved.x;
+            row[2 + i] = solved.y;
+            row[4 + i] = solved.z;
+        }
+        row[6] = yaw;
+    }
+    out
+}
+
+/// (hip, knee, side) close to `start` that put the boot at `want` with the legs turned `yaw`: first hip and side
+/// for the ground position (always solvable), then all three in small checked steps for the height too. Steps that
+/// do not help are refused, and a knee left nearly straight (no say over the height) keeps the first solution.
+fn solve_boot(boot: &dyn Fn(f32, f32, f32, f32, f32) -> Vec3, want: Vec3, start: Vec3, yaw: f32, px: f32) -> Vec3 {
+    let at = |v: Vec3| boot(v.x, v.y, v.z, yaw, px);
+    let e = 1e-3;
+    let mut v = start;
+    for _ in 0..12 {
+        let p = at(v);
+        let (ex, ey) = (want.x - p.x, want.y - p.y);
+        if ex * ex + ey * ey < 1e-10 {
+            break;
+        }
+        let dh = (at(v + Vec3::X * e) - p) / e;
+        let ds = (at(v + Vec3::Z * e) - p) / e;
+        let det = dh.x * ds.y - ds.x * dh.y;
+        if det.abs() < 1e-6 {
+            break;
+        }
+        v.x += ((ex * ds.y - ds.x * ey) / det).clamp(-0.2, 0.2);
+        v.z += ((dh.x * ey - ex * dh.y) / det).clamp(-0.2, 0.2);
+    }
+    let ground = v;
+    for _ in 0..16 {
+        let p = at(v);
+        let err = want - p;
+        if err.length_squared() < 1e-10 {
+            break;
+        }
+        let j = glam::Mat3::from_cols((at(v + Vec3::X * e) - p) / e, (at(v + Vec3::Y * e) - p) / e, (at(v + Vec3::Z * e) - p) / e);
+        if j.determinant().abs() < 1e-5 {
+            break;
+        }
+        let mut step = j.inverse() * err;
+        step *= (0.1 / step.abs().max_element().max(1e-9)).min(1.0);
+        let mut improved = false;
+        for _ in 0..6 {
+            let mut next = v + step;
+            // Never straighter than the clip's own knee or 0.35 rad (a planted knee stays bent at a run).
+            next.y = next.y.clamp(start.y.min(0.35), 2.6);
+            if (want - at(next)).length_squared() < err.length_squared() {
+                v = next;
+                improved = true;
+                break;
+            }
+            step *= 0.5;
+        }
+        if !improved {
+            break;
+        }
+    }
+    if (v - ground).abs().max_element() > 1.2 { ground } else { v }
+}
+
 fn smooth_lift(l: &GaitLoop) -> GaitLoop {
     const SIGMA_ROWS: f32 = 1.5;
     let n = l.len() as i32;
