@@ -51,10 +51,17 @@ for i, spec in enumerate(specs):
             polys.append(p[t][:, xy]); cols.append(np.clip(base * shade * 1.6, 0, 1))
         ax = axs[row, i]
         ax.add_collection(PolyCollection(polys, facecolors=cols, edgecolors='none'))
-        if yaw is None:
+        if yaw is not None:
+            ax.axhline(0, color='#7a6a48', lw=1)
+        if os.environ.get('FIT'):
+            # FIT=1 frames each figure on itself (lying or crawling figures run off the standing frame).
+            q = p[:, :, xy].reshape(-1, 2); lo, hi = q.min(axis=0), q.max(axis=0); c = (lo + hi) / 2
+            h = max(1.1, (hi - lo).max() / 2 + 0.1)
+            ax.set_xlim(c[0] - h, c[0] + h); ax.set_ylim(c[1] - h * 0.6, c[1] + h * 0.6)
+        elif yaw is None:
             ax.set_xlim(-1.1, 1.1); ax.set_ylim(-1.0, 1.4)
         else:
-            ax.axhline(0, color='#7a6a48', lw=1); ax.set_xlim(-1.1, 1.1); ax.set_ylim(-0.05, 1.95)
+            ax.set_xlim(-1.1, 1.1); ax.set_ylim(-0.05, 1.95)
         ax.set_aspect('equal'); ax.axis('off')
         if row == 0: ax.set_title(spec, fontsize=9)
         if i == 0: ax.text(-1.05, 1.85 if yaw is not None else 1.3, view, fontsize=8)

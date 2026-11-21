@@ -318,7 +318,7 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
 const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.858064, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.231580), vec2f(0.500000, 1.582422), 0.600000, -0.140875, 0.718250, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.336720, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
 
 // AN-02-S11 forward crawl legs (mirrors CRAWL_FWD_LEGS in pose.rs): hip L, hip R, knee L, knee R, side L, side R.
 // Both crawling legs in turn (pose.rs `crawl_alternate`): d/t the drawing and trailing leg (hip, knee, side), dh/th
@@ -456,22 +456,26 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.twist = -0.55;
     // Chest up on the elbows, hips flat (pose.rs PRONE_LEAN -0.28, PRONE_AIM_LEAN -0.30); rifle and head take back
     // the extra lean over the old -0.1.
-    p.lean = select(-0.28, -0.30, pose == 36u);
+    p.lean = select(-0.30, -0.28, pose == 36u);
     let arch = p.lean + 0.1;
     p.rifle = p.rifle + arch;
     p.look = 0.55;
     if (pose == 36u) {
-      p.sh = vec2f(1.965, 0.559);
-      p.el = vec2f(0.905, 1.791);
-      p.reach = vec2f(0.07, 0.522);
-      p.abd = vec2f(-0.015, 0.45);
-      p.head = 0.82 + arch;
-    } else {
+      // Aiming: shouldered, pointed ahead (pose.rs).
       p.sh = vec2f(2.8, 1.571);
       p.el = vec2f(1.3, 2.084);
       p.reach = vec2f(0.0, 0.401);
       p.abd = vec2f(0.0, 0.604);
       p.head = 1.0 + arch;
+    } else {
+      // At rest: elbows down, forearms ahead, the rifle across in front (pose.rs).
+      p.rifle = 0.0;
+      p.ryaw = 1.5707963;
+      p.twist = 0.0;
+      p.look = 0.0;
+      p.sh = vec2f(1.75);
+      p.el = vec2f(1.45);
+      p.head = 0.8 + arch;
     }
   } else if (pose == 6u) {
     // On the athletic base (pose.rs `athletic`), leaning in by AIM_LEAN 0.1 with the rifle and head taking it back.

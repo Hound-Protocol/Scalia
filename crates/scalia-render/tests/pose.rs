@@ -132,7 +132,8 @@ fn going_prone_never_sinks_into_the_ground() {
 
 #[test]
 fn prone_soldier_lifts_his_head_rests_on_his_elbows_and_shoulders_the_rifle() {
-    let v = posed(Pose::Prone, 0.0);
+    // Aiming (AN-03-S6: at rest he lays the rifle across instead, see prone_rests_the_rifle_across_and_aims_it_ahead).
+    let v = posed(Pose::ProneAim, 0.0);
     let of = |part: Part| v.iter().filter(move |p| p.0 == part).map(|p| p.1).collect::<Vec<Vec3>>();
     let max = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
     let min = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MAX), |a, b| a.min(*b));
@@ -926,4 +927,14 @@ fn gait_legs_point_ahead_on_average() {
         let mean = (0..48).map(|i| scalia_render::pose::params_dir(pose, i as f32 / 48.0, 0.0).yaw).sum::<f32>() / 48.0;
         assert!(mean.abs() <= 0.05, "{pose:?} legs turned {mean:.3} rad on average");
     }
+}
+
+/// Prone and not aiming he rests the rifle across in front of him; aiming, he shoulders it and points it ahead along
+/// the ground (the two were the other way round).
+#[test]
+fn prone_rests_the_rifle_across_and_aims_it_ahead() {
+    let (_, rest) = barrel_with_phases(RIFLE, Pose::Prone, None, 0.0, 0.0, 0.0);
+    let (_, aim) = barrel_with_phases(RIFLE, Pose::Prone, Some(Pose::ProneAim), 0.0, 0.0, 0.0);
+    assert!(rest.x.abs() > 0.8, "resting rifle should lie across the body: bore {rest:?}");
+    assert!(aim.y > 0.9 && aim.z.abs() < 0.3, "aimed rifle should point ahead, level: bore {aim:?}");
 }

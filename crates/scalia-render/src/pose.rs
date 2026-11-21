@@ -1316,21 +1316,26 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.look = 0.55;
             // Chest up on the elbows, hips and legs flat on the ground (AN-02-S09); rifle and head take back the
             // extra lean so the aim and the eyes stay where they were.
-            p.lean = if pose == Pose::ProneAim { PRONE_AIM_LEAN } else { PRONE_LEAN };
+            p.lean = if pose == Pose::ProneAim { PRONE_LEAN } else { PRONE_AIM_LEAN };
             let arch = p.lean - PRONE_LEAN_OLD;
             p.rifle += arch;
             if pose == Pose::ProneAim {
-                p.shoulder = [1.965, 0.559];
-                p.elbow = [0.905, 1.791];
-                p.reach = [0.07, 0.522];
-                p.abduct = [-0.015, 0.45];
-                p.head = 0.82 + arch;
-            } else {
+                // Aiming: the rifle shouldered and pointed ahead along the ground.
                 p.shoulder = [2.8, 1.571];
                 p.elbow = [1.3, 2.084];
                 p.reach = [0.0, 0.401];
                 p.abduct = [0.0, 0.604];
                 p.head = 1.0 + arch;
+            } else {
+                // At rest: elbows down under the chest, forearms ahead on the ground, the rifle lying across in front
+                // (muzzle to his left; grip() keeps the left hand on the handguard), head down.
+                p.rifle = 0.0;
+                p.rifle_yaw = std::f32::consts::FRAC_PI_2;
+                p.twist = 0.0;
+                p.look = 0.0;
+                p.shoulder = [1.75, 1.75];
+                p.elbow = [1.45, 1.45];
+                p.head = 0.8 + arch;
             }
         }
         Pose::StandAim => {
