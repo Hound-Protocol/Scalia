@@ -79,7 +79,8 @@ fn crawling_has_continuous_directional_cycles_forward_backward_and_sideways() {
     use scalia_render::pose::params_dir;
     let dirs = [0.0f32, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
     let poses: Vec<_> = dirs.iter().map(|&dir| params_dir(Pose::Crawl, 0.23, dir)).collect();
-    assert!(poses.iter().all(|p| p.prone == 1.0 && p.rifle > 1.5), "crawl stays low with the rifle carried forward");
+    // AN-03-S8: the low crawl carries the rifle across the forearms (aiming, the ProneAim layer points it ahead).
+    assert!(poses.iter().all(|p| p.prone == 1.0 && p.rifle_yaw > 1.5), "crawl stays low with the rifle carried across");
     assert_ne!(poses[0].knee, poses[1].knee, "backwards crawl reverses the diagonal limb phase");
     assert_ne!(poses[2].side, poses[3].side, "left and right crawl use opposite support patterns");
     for &dir in &dirs {
@@ -157,12 +158,16 @@ fn prone_soldier_lifts_his_head_rests_on_his_elbows_and_shoulders_the_rifle() {
 fn prone_and_crawl_keep_the_rifle_in_both_hands() {
     use scalia_render::pose::params_dir;
     let dirs = [0.0, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
-    for pose in [Pose::Prone, Pose::Crawl] {
-        assert_eq!(two_handed(pose), 1.0, "{pose:?} must use the support-hand IK");
+    // AN-03-S8: the unaimed low crawl frees the left hand to crawl; crawling aimed (ProneAim over the crawl's legs)
+    // keeps both hands on the rifle.
+    for (pose, upper) in [(Pose::Prone, None), (Pose::Crawl, Some(Pose::ProneAim))] {
+        let held_by = upper.unwrap_or(pose);
+        assert_eq!(two_handed(held_by), 1.0, "{held_by:?} must use the support-hand IK");
         for &dir in &dirs {
             for phase in [0.0, 0.25, 0.5, 0.75] {
-                let base = params_dir(pose, phase, dir);
-                let held_pose = grip(&base, two_handed(pose));
+                let legs = params_dir(pose, phase, dir);
+                let base = upper.map_or(legs, |u| scalia_render::pose::layer(&legs, &params_dir(u, phase, 0.0)));
+                let held_pose = grip(&base, two_handed(held_by));
                 let miss = hand(&held_pose, Side::Left).distance(held(RIFLE_GUARD, &held_pose));
                 assert!(miss < 0.05, "{pose:?} dir={dir:.2} phase={phase:.2}: support hand misses handguard by {miss:.3} m");
             }
@@ -937,4 +942,22 @@ fn prone_rests_the_rifle_across_and_aims_it_ahead() {
     let (_, aim) = barrel_with_phases(RIFLE, Pose::Prone, Some(Pose::ProneAim), 0.0, 0.0, 0.0);
     assert!(rest.x.abs() > 0.8, "resting rifle should lie across the body: bore {rest:?}");
     assert!(aim.y > 0.9 && aim.z.abs() < 0.3, "aimed rifle should point ahead, level: bore {aim:?}");
+}
+
+/// The low crawl (not aiming): the elbows reach ahead and pull back in turn, half a stride apart, the left reaching
+/// as the right knee draws up; the legs stay close to the body; the rifle lies across the forearms, so the left hand
+/// is free (no support grip).
+#[test]
+fn low_crawl_pulls_with_the_elbows_in_turn_against_the_opposite_knee() {
+    use scalia_render::pose::params_dir;
+    let ps: Vec<PoseParams> = (0..48).map(|i| params_dir(Pose::Crawl, i as f32 / 48.0, 0.0)).collect();
+    let peak = |f: &dyn Fn(&PoseParams) -> f32| (0..48).max_by(|&a, &b| f(&ps[a]).total_cmp(&f(&ps[b]))).unwrap() as i32;
+    let (l, r) = (peak(&|p| p.shoulder[0]), peak(&|p| p.shoulder[1]));
+    let swing = ps.iter().map(|p| p.shoulder[0]).fold(f32::MIN, f32::max) - ps.iter().map(|p| p.shoulder[0]).fold(f32::MAX, f32::min);
+    assert!(swing > 0.6, "left elbow barely reaches: {swing:.2} rad");
+    assert!((18..=30).contains(&(l - r).rem_euclid(48)), "elbows reach {} / 48 apart", (l - r).rem_euclid(48));
+    let knee_r = peak(&|p| p.knee[1]);
+    assert!((l - knee_r).rem_euclid(48) <= 6 || (knee_r - l).rem_euclid(48) <= 6, "left elbow {l} and right knee {knee_r} out of step");
+    assert!(ps.iter().all(|p| p.side[0].abs() <= 0.5 && p.side[1].abs() <= 0.5), "legs splay out");
+    assert_eq!(two_handed(Pose::Crawl), 0.0, "the left hand crawls");
 }

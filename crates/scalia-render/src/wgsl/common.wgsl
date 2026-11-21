@@ -735,6 +735,18 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.reach.y = mix(p.reach.y, clip_get(k, 8u), wb);
     p.abd.y = mix(p.abd.y, clip_get(k, 9u), wb);
     p.twist = mix(p.twist, clip_get(k, 10u), wb);
+    // AN-03-S8 low crawl (pose.rs): rifle across the forearms, the elbows reach and pull in turn, legs closer in.
+    let reach = vec2f(0.5 - 0.5 * c, 0.5 + 0.5 * c);
+    p.sh = vec2f(1.2) + 1.1 * reach;
+    p.el = vec2f(2.5) - 1.4 * reach;
+    p.reach = vec2f(0.0);
+    p.abd = vec2f(0.0);
+    p.rifle = 0.0;
+    p.ryaw = 1.5707963;
+    p.twist = 0.08 * s;
+    p.look = -0.08 * s;
+    p.head = 0.75;
+    p.side = p.side * 0.55;
   }
 
  else if (pose == 28u) {
@@ -793,7 +805,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 32u || pose == 36u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
