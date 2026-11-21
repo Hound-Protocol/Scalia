@@ -444,10 +444,10 @@ mod commander_motion_tests {
 mod drop_slide_tests {
     use super::*;
 
-    /// How far he slides from `speed` while going down (the whole way from standing to flat takes about 0.9 s).
+    /// How far he slides from `speed` while going down (the whole way from standing to flat takes about 1.6 s).
     fn slid(speed: f32) -> (f32, f32) {
         let (dt, mut v, mut d) = (1.0 / 60.0, (0.0, speed), 0.0);
-        for _ in 0..54 {
+        for _ in 0..96 {
             v = drop_slide(v, dt);
             d += v.1 * dt;
         }

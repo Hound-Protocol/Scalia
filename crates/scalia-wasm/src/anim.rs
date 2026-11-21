@@ -39,8 +39,11 @@ pub const TURN_ACCEL: f32 = 28.0;
 const FALL_BACK_S: f32 = 1.1;
 const FALL_FORWARD_S: f32 = 0.95;
 /// Getting down to prone or back up: how fast he moves along the drop (`Pose::Drop` phase per second), so the
-/// whole way from standing to flat takes about 0.9 s and from a knee about 0.6 s.
-const DROP_RATE: f32 = 1.1;
+/// whole way from standing to flat takes about 1.6 s, eased at both ends.
+const DROP_RATE: f32 = 0.8;
+/// The drop eases in and out: its pace is this share of `DROP_RATE` at the ends, full in the middle (a body
+/// that starts and finishes its fall slowly reads as a person, not a snap).
+const DROP_EASE_ENDS: f32 = 0.4;
 /// One magazine manipulation is paced over the nominal reload duration, independently of gait.
 const RELOAD_ANIMATION_S: f32 = 2.5;
 /// Where on the drop each stance sits.
@@ -372,7 +375,10 @@ impl Animator {
         let mut landed = None;
         if let Some(at) = self.drop {
             let to = drop_at(d.stance);
-            let next = if at < to { (at + DROP_RATE * dt).min(to) } else { (at - DROP_RATE * dt).max(to) };
+            let x = at.clamp(0.0, 1.0);
+            let ease = DROP_EASE_ENDS + (1.0 - DROP_EASE_ENDS) * 4.0 * x * (1.0 - x);
+            let step = DROP_RATE * ease * dt;
+            let next = if at < to { (at + step).min(to) } else { (at - step).max(to) };
             if next == to {
                 self.drop = None;
                 landed = Some(match d.stance { Stance::Stand => Pose::Ready, Stance::Crouch => Pose::Crouch, Stance::Prone => Pose::Prone });
@@ -555,15 +561,21 @@ mod tests {
         let mut a = Animator::new(0.0);
         let mut ts = 0.0;
         hold(&mut a, &mut ts, Stance::Stand, 1.0);
-        let down = hold(&mut a, &mut ts, Stance::Prone, 1.5);
+        let down = hold(&mut a, &mut ts, Stance::Prone, 2.2);
         let drop: Vec<f32> = down.iter().filter(|(p, _)| *p == Pose::Drop).map(|(_, t)| *t).collect();
         let secs = drop.len() as f32 / 60.0;
-        assert!((0.7..1.1).contains(&secs), "stand to flat in about 0.9 s: {secs}");
+        assert!((1.4..1.9).contains(&secs), "stand to flat in about 1.6 s, not a snap: {secs}");
+        // Eased: the first and last tenth of the drop move slower than the middle.
+        let step: Vec<f32> = drop.windows(2).map(|w| w[1] - w[0]).collect();
+        let n = step.len();
+        let mid = step[n / 2 - 5..n / 2 + 5].iter().sum::<f32>() / 10.0;
+        let start = step[..n / 10].iter().sum::<f32>() / (n / 10) as f32;
+        assert!(start < 0.8 * mid, "the drop starts eased: start {start:.4} mid {mid:.4}");
         assert!(drop.windows(2).all(|w| w[1] > w[0]), "down the drop, never back");
         assert_eq!(down.last().unwrap().0, Pose::Prone);
         // Landing blends on from prone itself, not from the drop at some other phase.
         assert_eq!(a.shown.1, Pose::Prone);
-        let up = hold(&mut a, &mut ts, Stance::Stand, 1.5);
+        let up = hold(&mut a, &mut ts, Stance::Stand, 2.2);
         let rise: Vec<f32> = up.iter().filter(|(p, _)| *p == Pose::Drop).map(|(_, t)| *t).collect();
         assert!(rise.windows(2).all(|w| w[1] < w[0]), "up the drop backwards");
         assert!(!rise.is_empty() && rise[0] > 0.9);
@@ -606,7 +618,7 @@ mod tests {
     fn prone_aim_and_fire_work_at_rest_and_over_the_crawl_gait() {
         let mut a = Animator::new(0.0);
         let mut ts = 0.0;
-        hold(&mut a, &mut ts, Stance::Prone, 1.5);
+        hold(&mut a, &mut ts, Stance::Prone, 2.2);
 
         let mut d = drive(ts);
         d.stance = Stance::Prone;
@@ -629,7 +641,7 @@ mod tests {
     fn aimed_crawl_stops_and_restarts_without_switching_its_upper_body_or_resetting_its_stride() {
         let mut a = Animator::new(0.0);
         let mut ts = 0.0;
-        hold(&mut a, &mut ts, Stance::Prone, 1.5);
+        hold(&mut a, &mut ts, Stance::Prone, 2.2);
         let mut d = drive(ts);
         d.stance = Stance::Prone;
         d.rifle = Rifle::Aim;
@@ -658,7 +670,7 @@ mod tests {
     fn reversing_prone_aim_mid_blend_preserves_the_rifle_raise() {
         let mut a = Animator::new(0.0);
         let mut ts = 0.0;
-        hold(&mut a, &mut ts, Stance::Prone, 1.5);
+        hold(&mut a, &mut ts, Stance::Prone, 2.2);
         let mut d = drive(ts);
         d.stance = Stance::Prone;
         d.rifle = Rifle::Aim;
