@@ -6,7 +6,7 @@
 //! `pose::pose_vertex` puts it (the tests check this for every part), and vertices shared between bones blend.
 
 use crate::mesh::Part;
-use crate::pose::{ankle_flat, prone_settle, ANKLE_Z, hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, PRONE_LIFT_MID, PRONE_POINT, SHOULDER_X, SHOULDER_Z};
+use crate::pose::{ankle_flat, leg_roll_angle, prone_settle, HIP_X, ANKLE_Z, hand, slung, PoseParams, Side, ELBOW_Z, HIP_Z, RIFLE_GRIP, KNEE_Z, NECK_Z, PRONE_LIFT, PRONE_LIFT_MID, PRONE_POINT, SHOULDER_X, SHOULDER_Z};
 use glam::{Affine3A, Mat3A, Vec3, Vec3A};
 
 /// The bones, in the order of `skin_matrices`.
@@ -105,11 +105,18 @@ fn slung_affine() -> Affine3A {
     Affine3A { matrix3: Mat3A::from_cols(Vec3A::from(x), Vec3A::from(y), Vec3A::from(z)), translation: Vec3A::from(o) }
 }
 
+/// A rotation by `a` about the axis `axis` through `pivot`.
+fn about(pivot: Vec3, rot: Affine3A) -> Affine3A {
+    Affine3A::from_translation(pivot) * rot * Affine3A::from_translation(-pivot)
+}
+
 /// Per bone, the map from a rest-pose vertex to where the pose puts it.
 pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     let body = posture(p);
     // Above the hips: turned, then leaned forward around the hip line.
-    let spine = body * pitch_at(HIP_Z, -p.lean) * Affine3A::from_rotation_z(p.twist);
+    // pose.rs `tilt` (sideways around the front-to-back line through the hips) comes after the lean.
+    let tilt = about(Vec3::new(0.0, 0.0, HIP_Z), Affine3A::from_rotation_y(p.tilt));
+    let spine = body * tilt * pitch_at(HIP_Z, -p.lean) * Affine3A::from_rotation_z(p.twist);
     let head = spine * Affine3A::from_rotation_z(p.look) * pitch_at(NECK_Z, p.head);
     let h = hand(p, Side::Right);
     let g = Vec3::new(0.0, RIFLE_GRIP.y, RIFLE_GRIP.z);
@@ -117,8 +124,16 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     let held = Affine3A::from_translation(h) * Affine3A::from_rotation_z(p.rifle_yaw) * Affine3A::from_translation(-RIFLE_GRIP)
         * Affine3A::from_translation(g) * Affine3A::from_rotation_x(p.rifle) * Affine3A::from_translation(-g);
     let rifle = if p.sling > 0.0 { lerp_affine(held, slung_affine(), p.sling) } else { held };
-    let thigh = |i: usize| body * pitch_at(HIP_Z, p.hip[i]);
-    let shin = |i: usize| body * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);
+    // Each leg, as pose_vertex moves it: hinge, roll about its own vertical (lying down), swing out to the side,
+    // then the pelvis turn around the vertical through the hips.
+    let hip = |i: usize| {
+        let x0 = if i == 0 { -HIP_X } else { HIP_X };
+        body * Affine3A::from_rotation_z(p.yaw)
+            * about(Vec3::new(x0, 0.0, HIP_Z), Affine3A::from_rotation_y(-p.side[i]))
+            * about(Vec3::new(x0, 0.0, 0.0), Affine3A::from_rotation_z(leg_roll_angle(p, i)))
+    };
+    let thigh = |i: usize| hip(i) * pitch_at(HIP_Z, p.hip[i]);
+    let shin = |i: usize| hip(i) * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);
     let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle_flat(p.hip[i], p.knee[i], p.flat) + PRONE_POINT * prone_settle(p.prone.max(0.0)));
     [
         body,

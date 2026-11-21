@@ -34,7 +34,16 @@ fn feet_stay_on_the_ground_in_every_pose_and_phase() {
         for k in 0..16 {
             let v = posed(pose, k as f32 / 16.0);
             let b = bottom(&v);
-            assert!((-0.04..=0.06).contains(&b), "{pose:?} phase {k}: lowest point {b}");
+            // AN-02-S13: the baked run and sprint leave the ground before each foot strike (the reference flight).
+            let top = match pose { Pose::Sprint => 0.15, Pose::Run => 0.12, _ => 0.06 };
+            assert!((-0.04..=top).contains(&b), "{pose:?} phase {k}: lowest point {b}");
+        }
+    }
+    // ...but they come back down: each half of the cycle has a boot on the ground.
+    for pose in [Pose::Run, Pose::Sprint] {
+        for half in 0..2 {
+            let low = (0..16).map(|k| bottom(&posed(pose, (half * 16 + k) as f32 / 32.0))).fold(f32::MAX, f32::min);
+            assert!(low < 0.02, "{pose:?}: no boot on the ground in half {half} (lowest {low})");
         }
     }
 }
@@ -429,10 +438,13 @@ fn the_rifle_sways_with_the_stride() {
 fn the_body_bobs_and_twists_against_the_legs_when_moving() {
     for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
         let pp: Vec<_> = (0..8).map(|k| params(pose, k as f32 / 8.0)).collect();
-        let bob = pp.iter().map(|p| p.bob).fold(f32::MIN, f32::max) - pp.iter().map(|p| p.bob).fold(f32::MAX, f32::min);
+        // AN-02-S13: the baked gaits carry their rise and fall in the legs and the lift, not in `bob`: measure the hips.
+        let hz: Vec<f32> = (0..16).map(|k| hip_height(pose, k as f32 / 16.0)).collect();
+        let bob = hz.iter().fold(f32::MIN, |a, &b| a.max(b)) - hz.iter().fold(f32::MAX, |a, &b| a.min(b));
         let twist = pp.iter().map(|p| p.twist.abs()).fold(0.0f32, f32::max);
-        assert!(bob > 0.01 && bob < 0.08, "{pose:?}: bob {bob}");
-        assert!(twist > 0.03 && twist < 0.35, "{pose:?}: twist {twist}");
+        assert!(bob > 0.01 && bob < 0.10, "{pose:?}: hips rise and fall {bob}");
+        // AN-02-S13: the baked sprint swings the shoulders as hard as the reference (about 0.57 rad).
+        assert!(twist > 0.03 && twist < 0.62, "{pose:?}: twist {twist}");
     }
     let still = params(Pose::Stand, 0.0);
     assert_eq!((still.bob, still.twist), (0.0, 0.0), "no stride, no bob");

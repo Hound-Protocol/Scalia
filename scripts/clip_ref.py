@@ -1,12 +1,14 @@
 """Reference targets for scalia-render's examples/fit_clip, from a Mixamo FBX (skinned or not):
-scripts/clip_ref.py <clip.fbx> <out.txt> [samples=24] [--once] [--start s] [--end s]
+scripts/clip_ref.py <clip.fbx> <out.txt> [samples=24] [--once] [--start s] [--end s] [--strike]
 
 The FBX goes through libassimp's glTF exporter (pyassimp crashes on skinned clips), then forward kinematics.
-Each sample is a line of 13 unit segment directions in the figure frame (x right, y forward, z up), so the
+Each sample is a line of 14 unit segment directions in the figure frame (x right, y forward, z up), so the
 fit does not depend on the reference skeleton's proportions: thigh L, shin L, thigh R, shin R, spine, shoulder
-line (left to right), upper arm L, forearm L, upper arm R, forearm R, head, foot L, foot R; then the hip
-height over the leg length. A loop is sampled over [start, end) and closes on itself; --once samples
-[start, end] inclusive. Raw clips stay out of the repo (CONTRIBUTING: third-party assets)."""
+line (left to right), upper arm L, forearm L, upper arm R, forearm R, head, foot L, foot R, pelvis (left hip to right); then the hip
+height over the leg length; then each ankle's offset from its hip joint over the leg length (left, right). A loop is sampled over [start, end) and closes on itself; --once samples
+[start, end] inclusive. `--strike` starts a loop where the left foot comes down (our gaits put the left heel
+strike at phase 0). The header gives samples, kind, seconds, then the root travel over the sampled span in metres
+scaled to our leg (x right, y forward). Raw clips stay out of the repo (CONTRIBUTING: third-party assets)."""
 import base64, ctypes, ctypes.util, json, os, struct, sys, tempfile
 import numpy as np
 
@@ -76,7 +78,7 @@ class Clip:
 SEGMENTS = [('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftFoot'), ('RightUpLeg', 'RightLeg'), ('RightLeg', 'RightFoot'),
             ('HIPS', 'Neck'), ('LeftArm', 'RightArm'), ('LeftArm', 'LeftForeArm'), ('LeftForeArm', 'LeftHand'),
             ('RightArm', 'RightForeArm'), ('RightForeArm', 'RightHand'), ('Neck', 'HeadTop_End'),
-            ('LeftFoot', 'LeftToeBase'), ('RightFoot', 'RightToeBase')]
+            ('LeftFoot', 'LeftToeBase'), ('RightFoot', 'RightToeBase'), ('LeftUpLeg', 'RightUpLeg')]
 
 def main():
     a = sys.argv[1:]; once = '--once' in a
@@ -85,15 +87,33 @@ def main():
     fbx, out = pos[0], pos[1]; n = int(pos[2]) if len(pos) > 2 else 24
     tmp = tempfile.mkdtemp(); gl = os.path.join(tmp, 'clip.gltf'); export_gltf(fbx, gl); c = Clip(gl)
     t0, t1 = opt('--start', 0.0), opt('--end', c.duration)
-    times = [t0 + (t1-t0)*k/(n-1 if once else n) for k in range(n)]
     j0 = c.joints(t0)
     leg = np.mean([np.linalg.norm(j0[s+'Leg']-j0[s+'UpLeg'])+np.linalg.norm(j0[s+'Foot']-j0[s+'Leg']) for s in ('Left', 'Right')])
+    span = t1 - t0
+    if '--strike' in a:
+        # The left ankle's lowest stretch is its stance; the strike is where the longest one begins.
+        grid = np.linspace(t0, t1, 240, endpoint=False)
+        h = np.array([c.joints(t)['LeftFoot'][2] for t in grid])
+        down = h < h.min() + 0.15 * (h.max() - h.min())
+        starts = [k for k in range(240) if down[k] and not down[k-1]]
+        def run(k):
+            m = 0
+            while down[(k+m) % 240] and m < 240: m += 1
+            return m
+        t0 = grid[max(starts, key=run)] if starts else t0
+    times = [t0 + span*k/(n-1 if once else n) for k in range(n)]
+    root = lambda t: c.joints(t)['Hips']
+    travel = root(t1) - root(t1 - span)
+    travel = travel / leg * 0.795
     rows = []
     for t in times:
+        if t > t1: t -= span
         j = c.joints(t); j['HIPS'] = (j['LeftUpLeg']+j['RightUpLeg'])/2
         dirs = [(j[b]-j[a])/np.linalg.norm(j[b]-j[a]) for a, b in SEGMENTS]
-        rows.append(' '.join(f'{v:.5f}' for d in dirs for v in d) + f' {j["HIPS"][2]/leg:.5f}')
-    open(out, 'w').write(f'{n} {"once" if once else "loop"} {t1-t0:.4f}\n' + '\n'.join(rows) + '\n')
-    print(f'{os.path.basename(fbx)}: {c.duration:.2f} s, sampled {t0:.2f}-{t1:.2f} s at {n}, leg {leg:.1f} units')
+        ankles = [(j[s+'Foot'] - j[s+'UpLeg']) / leg for s in ('Left', 'Right')]
+        rows.append(' '.join(f'{v:.5f}' for d in dirs for v in d) + f' {j["HIPS"][2]/leg:.5f} '
+                    + ' '.join(f'{v:.5f}' for a in ankles for v in a))
+    open(out, 'w').write(f'{n} {"once" if once else "loop"} {span:.4f} {travel[0]:.4f} {travel[1]:.4f}\n' + '\n'.join(rows) + '\n')
+    print(f'{os.path.basename(fbx)}: {span:.2f} s from {t0:.2f} s at {n}, travel x {travel[0]:+.2f} y {travel[1]:+.2f} m')
 
 main()

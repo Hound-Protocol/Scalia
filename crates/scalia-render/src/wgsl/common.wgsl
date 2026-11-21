@@ -5,7 +5,7 @@ struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: v
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
-struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32 };
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32, yaw: f32 };
 
 fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
   let s = sin(ang);
@@ -185,6 +185,35 @@ fn carry(p: ptr<function, PP>, c: u32) {
 }
 
 // The stride's life (port of pose.rs `stride`): rise and fall, upper body turning against the legs, rifle sway.
+// AN-02-S13 baked rifle gaits (pose.rs `gait_bake`/`apply_gait`): the 8 direction loops of a gait sit back to
+// back in the clip buffer from `at0` (WALK_F_AT, RUN_F_AT, SPRINT_F_AT), WALK_F_N rows of 11 fields.
+// Returns the body lift (the drop never goes below it).
+fn bake_gait(p: ptr<function, PP>, at0: u32, phase: f32, dir: f32) -> f32 {
+  let x = (dir - floor(dir / 6.2831853) * 6.2831853) / 0.78539816;
+  let i = u32(floor(x)) % 8u;
+  let w = x - floor(x);
+  let n = WALK_F_N;
+  let a = clip_pos(at0 + i * 11u * n, 11u, n, phase);
+  let b = clip_pos(at0 + ((i + 1u) % 8u) * 11u * n, 11u, n, phase);
+  let g = gait_mix(a, b, w);
+  (*p).hip = vec2f(g[0], g[1]);
+  (*p).knee = vec2f(g[2], g[3]);
+  (*p).side = vec2f(g[4], g[5]);
+  (*p).yaw = g[6];
+  (*p).lean = (*p).lean + g[7];
+  (*p).look = (*p).look + 0.8 * ((*p).twist - g[8]);
+  (*p).twist = g[8];
+  (*p).tilt = (*p).tilt + g[9];
+  (*p).bob = 0.0;
+  (*p).flat = 1.0;
+  return g[10];
+}
+fn gait_mix(a: ClipPos, b: ClipPos, w: f32) -> array<f32, 11> {
+  var o: array<f32, 11>;
+  for (var k = 0u; k < 11u; k++) { o[k] = mix(clip_get(a, k), clip_get(b, k), w); }
+  return o;
+}
+
 fn stride(p: ptr<function, PP>, phase: f32, bob: f32, twist: f32, arms: f32, rifle: f32, swing: f32) {
   let t = phase * 6.2831853;
   (*p).bob = bob * cos(2.0 * t);
@@ -283,8 +312,8 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
-const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.858064, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000);
+const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, -0.500000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.858064, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
 
 // AN-02-S11 forward crawl legs (mirrors CRAWL_FWD_LEGS in pose.rs): hip L, hip R, knee L, knee R, side L, side R.
 fn crawl_legs(phase: f32) -> array<f32, 6> {
@@ -368,7 +397,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
   if (pose == 35u) { return DROP_PLANT_P; }
   let sw = sin(phase * 6.2831853);
-  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0);
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0, 0.0);
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
@@ -672,15 +701,15 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.head = mix(p.head, b[9], wf);
     // AN-02-S12: crawling backwards follows its baked loop (mirrors pose.rs).
     let wb = max(-fwd, 0.0);
-    let k = crawl_back(phase);
-    p.hip = mix(p.hip, vec2f(k[0], k[1]), wb);
-    p.knee = mix(p.knee, vec2f(k[2], k[3]), wb);
-    p.side = mix(p.side, vec2f(k[4], k[5]), wb);
-    p.sh.y = mix(p.sh.y, k[6], wb);
-    p.el.y = mix(p.el.y, k[7], wb);
-    p.reach.y = mix(p.reach.y, k[8], wb);
-    p.abd.y = mix(p.abd.y, k[9], wb);
-    p.twist = mix(p.twist, k[10], wb);
+    let k = clip_pos(CRAWL_BACK_AT, CRAWL_BACK_F, CRAWL_BACK_N, phase);
+    p.hip = mix(p.hip, vec2f(clip_get(k, 0u), clip_get(k, 1u)), wb);
+    p.knee = mix(p.knee, vec2f(clip_get(k, 2u), clip_get(k, 3u)), wb);
+    p.side = mix(p.side, vec2f(clip_get(k, 4u), clip_get(k, 5u)), wb);
+    p.sh.y = mix(p.sh.y, clip_get(k, 6u), wb);
+    p.el.y = mix(p.el.y, clip_get(k, 7u), wb);
+    p.reach.y = mix(p.reach.y, clip_get(k, 8u), wb);
+    p.abd.y = mix(p.abd.y, clip_get(k, 9u), wb);
+    p.twist = mix(p.twist, clip_get(k, 10u), wb);
   }
 
  else if (pose == 28u) {
@@ -694,7 +723,12 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.reach.x = 1.05;
     p.head = 0.1;
   }
-  p.drop = ground_drop(p.hip, p.knee, p.side, p.flat);
+  // AN-02-S13: the rifle gaits follow their baked loops (pose.rs `params_dir`).
+  var lift = -1e9;
+  if (pose == 1u) { lift = bake_gait(&p, WALK_F_AT, phase, dir); }
+  else if (pose == 2u) { lift = bake_gait(&p, RUN_F_AT, phase, dir); }
+  else if (pose == 7u) { lift = bake_gait(&p, SPRINT_F_AT, phase, dir); }
+  p.drop = max(ground_drop(p.hip, p.knee, p.side, p.flat), lift);
   return p;
 }
 
@@ -714,7 +748,7 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0,
              mix(a.reach, b.reach, w), mix(a.sling, b.sling, w), mix(a.bob, b.bob, w), mix(a.twist, b.twist, w),
-             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w));
+             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w), mix(a.yaw, b.yaw, w));
   p.side = mix(a.side, b.side, w);
   p.flat = mix(a.flat, b.flat, w);
   p.drop = select(select(ground_drop(p.hip, p.knee, p.side, p.flat), b.drop, w >= 1.0), a.drop, w <= 0.0);
@@ -866,7 +900,9 @@ fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
     q = held(v, p);
     if (p.sling > 0.0) { q = mix(q, slung(v), p.sling); }
   }
-  if (part != 1u && part != 2u && part != 6u && part != 7u && part != 13u && part != 14u) {
+  let is_leg = part == 1u || part == 2u || part == 6u || part == 7u || part == 13u || part == 14u;
+  if (is_leg) { q = turn(q, p.yaw); }
+  if (!is_leg) {
     q = rot(turn(q, p.twist), 0.0, 0.88, -p.lean);
     // Sideways lean around the hips (pose.rs `tilt`), positive to +x.
     let ts = sin(p.tilt);
@@ -1062,41 +1098,90 @@ fn bend_point(p: vec3f, b: vec4f, lat_y: f32) -> vec3f {
                p.z - rr * (2.0 * sha * sha + cl * cos(lat0) * vers));
 }
 
-// CLIP CRAWL_BACK BEGIN
-// AN-02-S12: crawling backwards, solved by examples/fit_clip from the reference clip Moving Backward In Prone Position. Mirrors CRAWL_BACK in pose.rs (scripts/clip_table.py); fields: hipL, hipR, kneeL, kneeR, sideL, sideR, shR, elR, reachR, abR, twist.
-fn crawl_back(phase: f32) -> array<f32, 11> {
-  let t = array<array<f32, 11>, 24>(
-    array<f32, 11>(0.2645, 0.0426, 0.8719, 0.1368, -0.4950, -0.0577, 1.2028, 2.2348, -0.6000, 1.2023, 0.2202),
-    array<f32, 11>(0.0779, 0.0442, 0.4143, 0.1373, -0.4051, -0.0008, 1.0541, 2.3439, -0.5965, 0.9637, 0.1368),
-    array<f32, 11>(0.0139, 0.0383, 0.2016, 0.1263, -0.3133, 0.0612, 0.8051, 2.4810, -0.5699, 0.6932, 0.0676),
-    array<f32, 11>(0.0049, 0.0334, 0.1367, 0.1244, -0.2545, 0.1180, 0.6169, 2.5370, -0.5292, 0.5071, 0.0380),
-    array<f32, 11>(0.0136, 0.0356, 0.1115, 0.1388, -0.2262, 0.1638, 0.5764, 2.5279, -0.5347, 0.4211, 0.0716),
-    array<f32, 11>(0.0385, 0.0402, 0.1260, 0.1516, -0.2236, 0.1962, 0.6146, 2.5113, -0.5789, 0.4074, 0.1310),
-    array<f32, 11>(0.0970, 0.0458, 0.1855, 0.1564, -0.2268, 0.2139, 0.6597, 2.4701, -0.5546, 0.4123, 0.1400),
-    array<f32, 11>(0.1977, 0.0462, 0.3705, 0.1496, -0.2422, 0.2086, 0.7048, 2.4070, -0.4099, 0.4149, 0.0874),
-    array<f32, 11>(0.3029, 0.0480, 0.7048, 0.1337, -0.3092, 0.1760, 0.7887, 2.3258, -0.2238, 0.4348, 0.0228),
-    array<f32, 11>(0.3853, 0.0541, 1.0213, 0.1257, -0.3929, 0.1253, 0.9274, 2.2093, -0.0973, 0.4740, -0.0223),
-    array<f32, 11>(0.4462, 0.0396, 1.2252, 0.1305, -0.4529, 0.0718, 1.0746, 2.1256, -0.0694, 0.5288, -0.0178),
-    array<f32, 11>(0.5029, 0.0128, 1.3762, 0.1383, -0.5068, 0.0205, 1.2100, 2.1335, -0.1293, 0.5897, 0.0342),
-    array<f32, 11>(0.5655, 0.0014, 1.5169, 0.1405, -0.5668, -0.0326, 1.3648, 2.1619, -0.2402, 0.6514, 0.0858),
-    array<f32, 11>(0.6274, -0.0002, 1.6550, 0.1363, -0.6294, -0.0805, 1.5464, 2.1421, -0.3829, 0.7294, 0.1255),
-    array<f32, 11>(0.6848, 0.0129, 1.7848, 0.1297, -0.6895, -0.1146, 1.6960, 2.0836, -0.5195, 0.8161, 0.1737),
-    array<f32, 11>(0.7392, 0.0474, 1.9018, 0.1235, -0.7469, -0.1327, 1.7511, 2.0163, -0.5882, 0.8878, 0.2340),
-    array<f32, 11>(0.7940, 0.0567, 2.0075, 0.1150, -0.8041, -0.1356, 1.7440, 1.9626, -0.6000, 0.9352, 0.2872),
-    array<f32, 11>(0.8538, 0.0231, 2.1044, 0.1081, -0.8633, -0.1296, 1.7409, 1.9387, -0.6000, 0.9466, 0.3081),
-    array<f32, 11>(0.9073, -0.0062, 2.1722, 0.1070, -0.9142, -0.1249, 1.7279, 1.9445, -0.6000, 0.9427, 0.3066),
-    array<f32, 11>(0.9256, -0.0121, 2.1737, 0.1093, -0.9305, -0.1256, 1.6274, 1.9770, -0.6000, 1.0049, 0.3162),
-    array<f32, 11>(0.8915, -0.0035, 2.0992, 0.1129, -0.8965, -0.1284, 1.4339, 2.0568, -0.6000, 1.1531, 0.3394),
-    array<f32, 11>(0.8083, 0.0158, 1.9595, 0.1164, -0.8151, -0.1275, 1.2599, 2.1583, -0.6000, 1.2871, 0.3608),
-    array<f32, 11>(0.6854, 0.0325, 1.7343, 0.1209, -0.6938, -0.1184, 1.2016, 2.2024, -0.6000, 1.3327, 0.3585),
-    array<f32, 11>(0.5051, 0.0389, 1.3759, 0.1283, -0.5780, -0.0970, 1.2218, 2.2025, -0.6000, 1.3113, 0.3058)
-  );
-  let x = fract(phase) * 24.0;
-  let i0 = u32(floor(x)) % 24u;
-  let i1 = (i0 + 1u) % 24u;
-  let w = x - floor(x);
-  var o: array<f32, 11>;
-  for (var k = 0u; k < 11u; k++) { o[k] = mix(t[i0][k], t[i1][k], w); }
-  return o;
+// CLIP REGISTRY BEGIN
+// Generated by scripts/clip_table.py: baked clip tables (pose.rs `clip_buffer`), read-only on the GPU.
+@group(0) @binding(3) var<storage, read> clips: array<f32>;
+const CRAWL_BACK_AT: u32 = 0u;
+const CRAWL_BACK_F: u32 = 11u;
+const CRAWL_BACK_N: u32 = 24u;
+const WALK_F_AT: u32 = 264u;
+const WALK_F_F: u32 = 11u;
+const WALK_F_N: u32 = 48u;
+const WALK_FL_AT: u32 = 792u;
+const WALK_FL_F: u32 = 11u;
+const WALK_FL_N: u32 = 48u;
+const WALK_L_AT: u32 = 1320u;
+const WALK_L_F: u32 = 11u;
+const WALK_L_N: u32 = 48u;
+const WALK_BL_AT: u32 = 1848u;
+const WALK_BL_F: u32 = 11u;
+const WALK_BL_N: u32 = 48u;
+const WALK_B_AT: u32 = 2376u;
+const WALK_B_F: u32 = 11u;
+const WALK_B_N: u32 = 48u;
+const WALK_BR_AT: u32 = 2904u;
+const WALK_BR_F: u32 = 11u;
+const WALK_BR_N: u32 = 48u;
+const WALK_R_AT: u32 = 3432u;
+const WALK_R_F: u32 = 11u;
+const WALK_R_N: u32 = 48u;
+const WALK_FR_AT: u32 = 3960u;
+const WALK_FR_F: u32 = 11u;
+const WALK_FR_N: u32 = 48u;
+const RUN_F_AT: u32 = 4488u;
+const RUN_F_F: u32 = 11u;
+const RUN_F_N: u32 = 48u;
+const RUN_FL_AT: u32 = 5016u;
+const RUN_FL_F: u32 = 11u;
+const RUN_FL_N: u32 = 48u;
+const RUN_L_AT: u32 = 5544u;
+const RUN_L_F: u32 = 11u;
+const RUN_L_N: u32 = 48u;
+const RUN_BL_AT: u32 = 6072u;
+const RUN_BL_F: u32 = 11u;
+const RUN_BL_N: u32 = 48u;
+const RUN_B_AT: u32 = 6600u;
+const RUN_B_F: u32 = 11u;
+const RUN_B_N: u32 = 48u;
+const RUN_BR_AT: u32 = 7128u;
+const RUN_BR_F: u32 = 11u;
+const RUN_BR_N: u32 = 48u;
+const RUN_R_AT: u32 = 7656u;
+const RUN_R_F: u32 = 11u;
+const RUN_R_N: u32 = 48u;
+const RUN_FR_AT: u32 = 8184u;
+const RUN_FR_F: u32 = 11u;
+const RUN_FR_N: u32 = 48u;
+const SPRINT_F_AT: u32 = 8712u;
+const SPRINT_F_F: u32 = 11u;
+const SPRINT_F_N: u32 = 48u;
+const SPRINT_FL_AT: u32 = 9240u;
+const SPRINT_FL_F: u32 = 11u;
+const SPRINT_FL_N: u32 = 48u;
+const SPRINT_L_AT: u32 = 9768u;
+const SPRINT_L_F: u32 = 11u;
+const SPRINT_L_N: u32 = 48u;
+const SPRINT_BL_AT: u32 = 10296u;
+const SPRINT_BL_F: u32 = 11u;
+const SPRINT_BL_N: u32 = 48u;
+const SPRINT_B_AT: u32 = 10824u;
+const SPRINT_B_F: u32 = 11u;
+const SPRINT_B_N: u32 = 48u;
+const SPRINT_BR_AT: u32 = 11352u;
+const SPRINT_BR_F: u32 = 11u;
+const SPRINT_BR_N: u32 = 48u;
+const SPRINT_R_AT: u32 = 11880u;
+const SPRINT_R_F: u32 = 11u;
+const SPRINT_R_N: u32 = 48u;
+const SPRINT_FR_AT: u32 = 12408u;
+const SPRINT_FR_F: u32 = 11u;
+const SPRINT_FR_N: u32 = 48u;
+// Where a loop of `n` rows of `f` fields at `at` is at `phase`: the two rows around it and the weight.
+struct ClipPos { a: u32, b: u32, w: f32 }
+fn clip_pos(at: u32, f: u32, n: u32, phase: f32) -> ClipPos {
+  let x = fract(phase) * f32(n);
+  let i0 = u32(floor(x)) % n;
+  return ClipPos(at + i0 * f, at + ((i0 + 1u) % n) * f, x - floor(x));
 }
-// CLIP CRAWL_BACK END
+fn clip_get(c: ClipPos, k: u32) -> f32 { return mix(clips[c.a + k], clips[c.b + k], c.w); }
+// CLIP REGISTRY END
