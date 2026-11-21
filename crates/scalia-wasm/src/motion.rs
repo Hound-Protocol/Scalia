@@ -219,3 +219,170 @@ mod tests {
         assert!(top <= AIM_TOP + 1e-3, "{top}");
     }
 }
+
+// The commander's paces (m/s) and feet (viewer.rs `update_commander`).
+pub const CMD_WALK: f32 = 1.7;
+pub const CMD_AIM_WALK: f32 = 1.2;
+pub const CMD_CROUCH: f32 = 1.4;
+pub const CMD_CRAWL: f32 = 0.55;
+pub const CMD_CRAWL_FAST: f32 = 1.05;
+pub const CMD_SPRINT: f32 = 4.6;
+/// His usual pace on foot (WASD): a jog. Alt held walks (CMD_WALK), Shift sprints.
+pub const CMD_JOG: f32 = 3.0;
+/// His feet: sharp up to a jog, a build-up into a sprint, a quick stop, a gentle ease off a sprint.
+pub const CMD_FEET: Footing = Footing { push: 10.0, kick: 3.0, brake: 10.0, coast: 3.0, cruise: CMD_JOG, top: CMD_SPRINT };
+
+/// The commander's movement and animation chain off the page (as `update_commander`, standing, rifle carried, camera
+/// yaw 0), with the drawn figure evaluated on the CPU as common.wgsl `animate` does (no idle life, no grip).
+#[cfg(test)]
+mod commander_motion_tests {
+    use crate::motion::*;
+    use glam::Vec3;
+    use scalia_render::pose::Pose;
+    use crate::anim::{Animator, Drive, Face, Rifle, Stance};
+    use scalia_render::mesh::{figure, part_of};
+    use scalia_render::pose::{self, PoseParams};
+
+    pub struct Sample { pub t: f32, pub pose: Pose, pub dir: f32, pub roll: f32, pub pitch: f32, pub speed: f32, pub heading: f32, pub lean: f32, pub head: Vec3, pub hips: Vec3, pub feet: [Vec3; 2] }
+
+    /// Runs `input(t) -> (ix, iy, sprint)` at 60 fps for `secs`.
+    pub fn run(secs: f32, input: impl Fn(f32) -> (f32, f32, bool)) -> Vec<Sample> {
+        let fig = figure();
+        let dt = 1.0 / 60.0;
+        let mut a = Animator::new(0.0);
+        let (mut dir, mut speed) = ((0.0f32, 1.0f32), 0.0f32);
+        let mut pos = (0.0f32, 0.0f32);
+        let mut out = Vec::new();
+        for k in 0..(secs / dt) as usize {
+            let t = k as f32 * dt;
+            let ts = 100.0 + t;
+            let (ix, iy, sprint) = input(t);
+            let len = (ix * ix + iy * iy).sqrt();
+            let wants = len > 0.01;
+            let pace = if sprint { CMD_SPRINT } else { CMD_JOG };
+            let target = if wants { pace } else { 0.0 };
+            let want = if wants { (ix / len * target, iy / len * target) } else { (0.0, 0.0) };
+            let vel = (dir.0 * speed, dir.1 * speed);
+            let skid = crate::motion::skidding(vel, want);
+            let vel = crate::motion::step_velocity(vel, want, dt, CMD_FEET);
+            speed = (vel.0 * vel.0 + vel.1 * vel.1).sqrt();
+            if speed > 1e-3 { dir = (vel.0 / speed, vel.1 / speed); } else if wants { dir = (ix / len, iy / len); }
+            let moving = speed > 0.05;
+            if moving { pos.0 += dir.0 * speed * dt; pos.1 += dir.1 * speed * dt; }
+            let travel = (-dir.0).atan2(dir.1);
+            let mut d = Drive::new(dt, ts);
+            d.procedural = true;
+            d.vel = (dir.0 * speed, dir.1 * speed);
+            d.want = Some(want);
+            d.face = if skid == crate::motion::Skid::Cut && len > 0.01 { Face::Turn { heading: (-ix).atan2(iy), top: 8.0 } } else if moving { Face::Turn { heading: travel, top: 6.0 - 2.0 * (speed / CMD_SPRINT).min(1.0) } } else { Face::Keep };
+            d.stance = Stance::Stand;
+            d.rifle = Rifle::Ready;
+            d.sprint = true;
+            let f = a.step(&d);
+            let rec = a.record(&f, (pos.0, pos.1, 0.0), 9.0, 0.0, 0.0, 0.0);
+            let pp = mirror(&rec, ts);
+            let (roll, pitch) = pose::unpack_tilt(rec[3]);
+            let at = Vec3::new(pos.0, pos.1, 0.0);
+            let (mut head, mut hn, mut hips, mut hpn) = (Vec3::ZERO, 0.0, Vec3::ZERO, 0.0);
+            let mut feet = [Vec3::ZERO; 2];
+            let mut fz = [f32::MAX; 2];
+            for v in &fig.vertices {
+                let part = part_of(v.color);
+                let p = pose::figure_to_world(pose::pose_vertex(Vec3::from_array(v.pos), part, &pp), at, rec[4], roll, pitch);
+                let o = Vec3::from_array(v.pos);
+                if o.z > 1.55 { head += p; hn += 1.0; }
+                if (0.85..1.05).contains(&o.z) { hips += p; hpn += 1.0; }
+                if o.z < 0.12 { let s = (o.x > 0.0) as usize; if p.z < fz[s] { fz[s] = p.z; feet[s] = p; } }
+            }
+            out.push(Sample { t, pose: f.pose, dir: f.dir, roll, pitch, speed, heading: f.heading, lean: f.lean, head: head / hn, hips: hips / hpn, feet });
+        }
+        out
+    }
+
+    /// The shader's pose parameters for a record at `time` (common.wgsl `animate`, moving soldiers).
+    fn mirror(r: &[f32; 12], time: f32) -> PoseParams {
+        let (b, d) = ([r[4], r[5], r[6], r[7]], [r[8], r[9], r[10], r[11]]);
+        let phase = if b[2] > 0.0 { (time * b[2] + b[1]).fract() } else if b[2] < 0.0 { b[1].fract() } else { 0.0 };
+        let reload = (-b[2] - 1.0).clamp(0.0, 1.0);
+        let w = ((time - d[1]) / 0.35).clamp(0.0, 1.0);
+        let layer = d[2].floor();
+        let turn = d[2].fract() * std::f32::consts::TAU;
+        let dirn = if turn > std::f32::consts::PI { turn - std::f32::consts::TAU } else { turn };
+        let id = b[3].floor() as u32;
+        let ph = |p: u32| if p == 18 { reload } else { phase };
+        let mut pp = pose::params_dir(Pose::from_id(id), ph(id), dirn);
+        if w < 1.0 { let prev = d[0].floor() as u32; pp = pose::blend(&pose::params_dir(Pose::from_id(prev), ph(prev), dirn), &pp, w); }
+        let base = pp;
+        if layer >= 1.0 { let u = (layer - 1.0) as u32; pp = pose::layer(&base, &pose::params_dir(Pose::from_id(u), ph(u), 0.0)); }
+        let (was, lw) = pose::unpack_layer(d[3]);
+        let _ = (was, lw);
+        if b[2] == 0.0 { pp = pose::idle(&pp, Pose::from_id(id), time + b[1] * 97.0, b[1]); }
+        pp
+    }
+
+    /// The distinct poses he shows from `from` seconds on, in order.
+    fn poses_after(s: &[Sample], from: f32) -> Vec<Pose> {
+        let mut v: Vec<Pose> = Vec::new();
+        for x in s.iter().filter(|x| x.t >= from) {
+            if v.last() != Some(&x.pose) { v.push(x.pose); }
+        }
+        v
+    }
+
+    #[test]
+    fn stopping_from_a_sprint_brakes_then_settles_without_stepping_down_through_the_gaits() {
+        let s = run(4.0, |t| (0.0, if t < 2.5 { 1.0 } else { 0.0 }, true));
+        assert_eq!(poses_after(&s, 2.4), vec![Pose::Sprint, Pose::Brake, Pose::Ready]);
+    }
+
+    #[test]
+    fn stopping_from_a_run_settles_straight_to_ready() {
+        let s = run(4.0, |t| (0.0, if t < 2.5 { 1.0 } else { 0.0 }, false));
+        assert_eq!(poses_after(&s, 2.4), vec![Pose::Run, Pose::Ready]);
+    }
+
+    #[test]
+    fn tapping_left_and_right_keeps_him_on_his_feet_in_one_gait() {
+        let s = run(3.0, |t| (if (t / 0.18) as i32 % 2 == 0 { -1.0 } else { 1.0 }, 0.0, false));
+        let p = poses_after(&s, 0.3);
+        assert!(!p.contains(&Pose::Ready) && !p.contains(&Pose::Stand), "{p:?}");
+        assert!(p.len() <= 2, "{p:?}");
+    }
+
+    #[test]
+    fn quick_taps_do_not_rock_him_but_setting_off_still_leans_him_in() {
+        let taps = run(3.0, |t| (if (t / 0.18) as i32 % 2 == 0 { -1.0 } else { 1.0 }, 0.0, false));
+        let rock = taps.iter().filter(|x| x.t > 0.6).map(|x| x.pitch.abs()).fold(0.0, f32::max);
+        assert!(rock <= 0.1, "tapping pitches him {rock:.3} rad");
+        let start = run(1.0, |_| (0.0, 1.0, true));
+        let lean = start.iter().map(|x| x.pitch).fold(0.0, f32::max);
+        assert!(lean >= 0.12, "setting off leans him only {lean:.3} rad");
+    }
+
+    #[test]
+    fn reversing_swings_his_legs_round_rather_than_swapping_them() {
+        let s = run(3.0, |t| (if (t / 0.18) as i32 % 2 == 0 { -1.0 } else { 1.0 }, 0.0, false));
+        let jump = s.windows(2).map(|w| {
+            let d = (w[1].dir - w[0].dir + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            d.abs()
+        }).fold(0.0, f32::max);
+        assert!(jump <= 0.35, "travel direction jumps {jump:.2} rad in a frame");
+    }
+
+    #[test]
+    #[ignore]
+    fn dump() {
+        let which = std::env::var("CASE").unwrap_or_default();
+        let s = match which.as_str() {
+            "ad" => run(3.0, |t| (if (t / 0.18) as i32 % 2 == 0 { -1.0 } else { 1.0 }, 0.0, false)),
+            "sprint" => run(4.0, |_| (0.0, 1.0, true)),
+            "stop" => run(4.0, |t| (0.0, if t < 2.5 { 1.0 } else { 0.0 }, true)),
+            _ => run(4.0, |t| (0.0, if t < 2.5 { 1.0 } else { 0.0 }, false)),
+        };
+        let mut o = String::from("t,roll,pitch,pose,speed,heading,lean,hx,hy,hz,px,py,pz,lx,ly,lz,rx,ry,rz\n");
+        for x in &s {
+            o += &format!("{:.4},{:.4},{:.4},{:?},{:.3},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}\n", x.t, x.roll, x.pitch, x.pose, x.speed, x.heading, x.lean, x.head.x, x.head.y, x.head.z, x.hips.x, x.hips.y, x.hips.z, x.feet[0].x, x.feet[0].y, x.feet[0].z, x.feet[1].x, x.feet[1].y, x.feet[1].z);
+        }
+        std::fs::write(format!("/tmp/cmd_{which}.csv"), o).unwrap();
+    }
+}

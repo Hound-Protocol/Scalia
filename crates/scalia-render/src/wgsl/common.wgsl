@@ -135,7 +135,7 @@ fn crouch_gait(p: ptr<function, PP>, phase: f32, reach: f32, height: f32, lift: 
 // Leg roll lying prone (pose.rs leg_roll_angle, AN-02-S10): up to a quarter turn about the leg's own axis as the
 // knee draws from 0.1 to 0.4, only once settled prone; inward, so the foot tucks behind the knee (AN-02-S11).
 fn leg_roll(q: vec3f, p: PP, knee: f32, px: f32) -> vec3f {
-  let t = clamp((knee - 0.1) / 0.3, 0.0, 1.0);
+  let t = clamp((knee - 0.2) / 0.2, 0.0, 1.0); // pose.rs LEG_ROLL_FROM, LEG_ROLL_FULL
   let a = 1.5707963 * pow(max(p.prone, 0.0), 12.0) * t * t * (3.0 - 2.0 * t) * -sign(px);
   if (a == 0.0) { return q; }
   let s = sin(a);
@@ -188,7 +188,11 @@ fn carry(p: ptr<function, PP>, c: u32) {
 // AN-02-S13 baked rifle gaits (pose.rs `gait_bake`/`apply_gait`): the 8 direction loops of a gait sit back to
 // back in the clip buffer from `at0` (WALK_F_AT, RUN_F_AT, SPRINT_F_AT), WALK_F_N rows of 11 fields.
 // Returns the body lift (the drop never goes below it).
-fn bake_gait(p: ptr<function, PP>, at0: u32, phase: f32, dir: f32) -> f32 {
+// pose.rs `SPRINT_TWIST`: the part of the baked sprint's torso twist that is kept.
+const SPRINT_TWIST: f32 = 0.35;
+// pose.rs `RUN_TILT`: the part of the baked run and sprint upper-body side lean that is kept.
+const RUN_TILT: f32 = 0.4;
+fn bake_gait(p: ptr<function, PP>, at0: u32, phase: f32, dir: f32, twist_k: f32, tilt_k: f32) -> f32 {
   let x = (dir - floor(dir / 6.2831853) * 6.2831853) / 0.78539816;
   let i = u32(floor(x)) % 8u;
   let w = x - floor(x);
@@ -201,9 +205,10 @@ fn bake_gait(p: ptr<function, PP>, at0: u32, phase: f32, dir: f32) -> f32 {
   (*p).side = vec2f(g[4], g[5]);
   (*p).yaw = g[6];
   (*p).lean = (*p).lean + g[7];
-  (*p).look = (*p).look + 0.8 * ((*p).twist - g[8]);
-  (*p).twist = g[8];
-  (*p).tilt = (*p).tilt + g[9];
+  let twist = g[8] * twist_k;
+  (*p).look = (*p).look + 0.8 * ((*p).twist - twist);
+  (*p).twist = twist;
+  (*p).tilt = (*p).tilt + g[9] * tilt_k;
   (*p).bob = 0.0;
   (*p).flat = 1.0;
   return g[10];
@@ -316,6 +321,16 @@ const DROP_REACH_P: PP = PP(1.100000, vec2f(1.550000, -0.100000), vec2f(1.800000
 const DROP_PLANT_P: PP = PP(0.900000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 1.103013), vec2f(0.500000, 2.037793), 0.600000, 0.858064, 0.718250, -0.143823, vec2f(0.100000, 0.533141), 0.000000, 0.000000, 0.000000, 0.395037, vec2f(0.150000, 0.583150), 0.603533, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
 
 // AN-02-S11 forward crawl legs (mirrors CRAWL_FWD_LEGS in pose.rs): hip L, hip R, knee L, knee R, side L, side R.
+// Both crawling legs in turn (pose.rs `crawl_alternate`): d/t the drawing and trailing leg (hip, knee, side), dh/th
+// half a stride later. Returns (drawing side, other side).
+const CRAWL_FWD_DRAW: vec2f = vec2f(1.1, 1.9);
+const CRAWL_BACK_DRAW: vec2f = vec2f(0.5, 1.2);
+fn crawl_alternate(d: vec3f, t: vec3f, dh: vec3f, th: vec3f, draw: vec2f) -> array<vec3f, 2> {
+  let wd = smoothstep(draw.x, draw.y, d.y);
+  let wo = smoothstep(draw.x, draw.y, dh.y);
+  let m = vec3f(1.0, 1.0, -1.0);
+  return array<vec3f, 2>(mix(th * m, d, wd), mix(t, dh * m, wo));
+}
 fn crawl_legs(phase: f32) -> array<f32, 6> {
   let t = array<array<f32, 6>, 24>(
     array<f32, 6>(0.0608, 0.0918, 0.1294, 1.0186, -0.4782, 0.1925),
@@ -676,7 +691,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     // Hips stay at the prone value (AN-02-S09, mirrors pose.rs).
     p.hip = vec2f(0.18, 0.16);
     // Per-leg knee draw (AN-02-S04): mirrors pose.rs.
-    p.knee = vec2f(0.05) + vec2f(0.55 - 0.14 * lat_abs, 0.95 - 0.22 * lat_abs) * draw;
+    p.knee = vec2f(0.05) + vec2f(0.95 - 0.22 * lat_abs) * draw;
     let lead_l = max(-lateral, 0.0);
     let lead_r = max(lateral, 0.0);
     p.side = vec2f(-0.14 - (1.08 - 0.18 * lat_abs) * draw.x - 0.24 * lead_l + 0.08 * lead_r,
@@ -691,10 +706,13 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     // AN-02-S06: straight-ahead crawl follows the baked loop, blending out as the direction turns.
     let wf = max(fwd, 0.0);
     let b = crawl_bake(phase);
+    // Both legs in turn (mirrors pose.rs): the left plays the right's draw mirrored, half a stride later.
     let lg = crawl_legs(phase);
-    p.hip = mix(p.hip, vec2f(lg[0], lg[1]), wf);
-    p.knee = mix(p.knee, vec2f(lg[2], lg[3]), wf);
-    p.side = mix(p.side, vec2f(lg[4], lg[5]), wf);
+    let og = crawl_legs(phase + 0.5);
+    let fa = crawl_alternate(vec3f(lg[1], lg[3], lg[5]), vec3f(lg[0], lg[2], lg[4]), vec3f(og[1], og[3], og[5]), vec3f(og[0], og[2], og[4]), CRAWL_FWD_DRAW);
+    p.hip = mix(p.hip, vec2f(fa[1].x, fa[0].x), wf);
+    p.knee = mix(p.knee, vec2f(fa[1].y, fa[0].y), wf);
+    p.side = mix(p.side, vec2f(fa[1].z, fa[0].z), wf);
     p.sh = mix(p.sh, vec2f(b[4], b[5]), wf);
     p.el = mix(p.el, vec2f(b[6], b[7]), wf);
     p.twist = mix(p.twist, b[8], wf);
@@ -702,9 +720,12 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     // AN-02-S12: crawling backwards follows its baked loop (mirrors pose.rs).
     let wb = max(-fwd, 0.0);
     let k = clip_pos(CRAWL_BACK_AT, CRAWL_BACK_F, CRAWL_BACK_N, phase);
-    p.hip = mix(p.hip, vec2f(clip_get(k, 0u), clip_get(k, 1u)), wb);
-    p.knee = mix(p.knee, vec2f(clip_get(k, 2u), clip_get(k, 3u)), wb);
-    p.side = mix(p.side, vec2f(clip_get(k, 4u), clip_get(k, 5u)), wb);
+    let kb = clip_pos(CRAWL_BACK_AT, CRAWL_BACK_F, CRAWL_BACK_N, phase + 0.5);
+    let ba = crawl_alternate(vec3f(clip_get(k, 0u), clip_get(k, 2u), clip_get(k, 4u)), vec3f(clip_get(k, 1u), clip_get(k, 3u), clip_get(k, 5u)),
+                             vec3f(clip_get(kb, 0u), clip_get(kb, 2u), clip_get(kb, 4u)), vec3f(clip_get(kb, 1u), clip_get(kb, 3u), clip_get(kb, 5u)), CRAWL_BACK_DRAW);
+    p.hip = mix(p.hip, vec2f(ba[0].x, ba[1].x), wb);
+    p.knee = mix(p.knee, vec2f(ba[0].y, ba[1].y), wb);
+    p.side = mix(p.side, vec2f(ba[0].z, ba[1].z), wb);
     p.sh.y = mix(p.sh.y, clip_get(k, 6u), wb);
     p.el.y = mix(p.el.y, clip_get(k, 7u), wb);
     p.reach.y = mix(p.reach.y, clip_get(k, 8u), wb);
@@ -725,9 +746,9 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   }
   // AN-02-S13: the rifle gaits follow their baked loops (pose.rs `params_dir`).
   var lift = -1e9;
-  if (pose == 1u) { lift = bake_gait(&p, WALK_F_AT, phase, dir); }
-  else if (pose == 2u) { lift = bake_gait(&p, RUN_F_AT, phase, dir); }
-  else if (pose == 7u) { lift = bake_gait(&p, SPRINT_F_AT, phase, dir); }
+  if (pose == 1u) { lift = bake_gait(&p, WALK_F_AT, phase, dir, 1.0, 1.0); }
+  else if (pose == 2u) { lift = bake_gait(&p, RUN_F_AT, phase, dir, 1.0, RUN_TILT); }
+  else if (pose == 7u) { lift = bake_gait(&p, SPRINT_F_AT, phase, dir, SPRINT_TWIST, RUN_TILT); }
   p.drop = max(ground_drop(p.hip, p.knee, p.side, p.flat), lift);
   return p;
 }
