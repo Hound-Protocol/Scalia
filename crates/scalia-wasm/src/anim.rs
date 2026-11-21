@@ -22,6 +22,12 @@ const WALK_DOWN: f32 = 0.05;
 /// How quickly the momentum lean follows his acceleration (1/s): a sustained push or brake leans him, quick
 /// taps back and forth average out instead of rocking him on every one.
 const ACCEL_FOLLOW: f32 = 2.5;
+/// Within this, steering closes on its heading proportionally (1/s): no chatter about the target.
+const STEER_SETTLE: f32 = 12.0;
+/// How quickly the bank follows the turn (1/s), and the fastest it may change (rad/s): the body cannot flick from
+/// one side to the other, whatever the steering does.
+const BANK_FOLLOW: f32 = 8.0;
+const BANK_RATE: f32 = 1.0;
 /// How fast his legs' travel direction (relative to his body) can swing round (rad/s).
 const DIR_RATE: f32 = 20.0;
 /// Coming to a stop, below this pace (m/s) he settles into his standing pose.
@@ -143,6 +149,8 @@ pub struct Animator {
     speed: f32,
     dir: f32,
     accel: f32,
+    /// The bank into turns as drawn (rad): it follows the turn smoothly and at a limited rate.
+    bank: f32,
     phase: f32,
     /// Magazine manipulation progress (0..1), deliberately independent of the leg stride phase.
     reload_phase: f32,
@@ -191,6 +199,7 @@ impl Animator {
             speed: 0.0,
             dir: 0.0,
             accel: 0.0,
+            bank: 0.0,
             phase: 0.0,
             reload_phase: 0.0,
             reloading: false,
@@ -234,8 +243,10 @@ impl Animator {
                     Face::Turn { heading, top } => {
                         let d = wrap(heading - self.heading);
                         self.gap = d;
-                        // The rate that would stop exactly on the target at full deceleration, capped.
-                        (d.signum() * (2.0 * TURN_ACCEL * d.abs()).sqrt()).clamp(-top, top)
+                        // The rate that would stop exactly on the target at full deceleration, capped; the last few
+                        // degrees close smoothly (the square root alone is so steep near zero that, stepped per
+                        // frame, it overshoots both ways every frame: a buzz, banked by speed squared at a sprint).
+                        (d.signum() * (2.0 * TURN_ACCEL * d.abs()).sqrt().min(STEER_SETTLE * d.abs())).clamp(-top, top)
                     }
                     _ => {
                         self.gap = 0.0;
@@ -447,7 +458,10 @@ impl Animator {
         };
         let up = alive_up && falling.is_none();
         // Upright momentum tilt pivots around the feet; on the ground it would lift or sink the whole rig.
-        let lean = if up && d.stance != Stance::Prone && dropping.is_none() { pose::pack_tilt(pose::bank(speed, self.spin), pose::accel_pitch(self.accel)) } else { 0.0 };
+        let tilting = up && d.stance != Stance::Prone && dropping.is_none();
+        let bank_to = if tilting { pose::bank(speed, self.spin) } else { 0.0 };
+        self.bank += ((bank_to - self.bank) * (dt * BANK_FOLLOW).min(1.0)).clamp(-BANK_RATE * dt, BANK_RATE * dt);
+        let lean = if tilting { pose::pack_tilt(self.bank, pose::accel_pitch(self.accel)) } else { 0.0 };
         Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall }
     }
 
