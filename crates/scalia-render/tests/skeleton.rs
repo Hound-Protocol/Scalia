@@ -13,6 +13,14 @@ fn bones_reproduce_the_rigid_rig_exactly() {
             cases.push(params(Pose::from_id(id), k as f32 / 4.0));
         }
     }
+    // AN-02-S13: the crawl (legs rolled lying down) and gaits at angles (legs swung out, pelvis turned).
+    for k in 0..4 {
+        cases.push(params(Pose::Crawl, k as f32 / 4.0));
+        for dir in [0.8f32, 1.6, -2.4] {
+            cases.push(scalia_render::pose::params_dir(Pose::Run, k as f32 / 4.0, dir));
+            cases.push(scalia_render::pose::params_dir(Pose::CrouchWalk, k as f32 / 4.0, dir));
+        }
+    }
     cases.push(idle(&params(Pose::Stand, 0.0), Pose::Stand, 7.3, 0.4));
     cases.push(blend(&params(Pose::Stand, 0.0), &params(Pose::Prone, 0.0), 0.5));
     cases.push(blend(&params(Pose::Stand, 0.0), &params(Pose::Tablet, 0.0), 0.4));

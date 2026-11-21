@@ -143,23 +143,25 @@ fn crawl_directional_terms_match_in_rust_and_wgsl() {
 }
 
 #[test]
-fn baked_clip_tables_match() {
-    // AN-02-S12: every table scripts/clip_table.py writes into pose.rs has the same numbers in its WGSL mirror.
+fn baked_clip_registry_matches() {
+    // AN-02-S12: the baked clip tables live only in pose.rs and reach the shader through the clip buffer; the
+    // offsets, field counts and row counts the shader indexes with must be the ones pose.rs lays out.
+    use scalia_render::pose::{clip_buffer, CLIP_FLOATS};
+    let table = Regex::new(r"pub const (\w+): \[\[f32; (\d+)\]; (\d+)\] = \[").unwrap();
+    let mut at = 0u32;
     let mut seen = 0;
-    for (at, _) in RS.match_indices("// CLIP ") {
-        let line = &RS[at..RS[at..].find('\n').unwrap() + at];
-        let Some(name) = line.strip_prefix("// CLIP ").and_then(|l| l.strip_suffix(" BEGIN")) else { continue };
-        let block = |src: &str| {
-            let a = src.find(&format!("// CLIP {name} BEGIN")).unwrap_or_else(|| panic!("{name} missing"));
-            let b = src[a..].find(&format!("// CLIP {name} END")).unwrap() + a;
-            src[a..b].to_string()
-        };
-        let (rs, wg) = (block(RS), block(WGSL));
-        let rs_nums = nums(&rs[rs.find("= [").unwrap()..]);
-        let wg_body = &wg[wg.find("array<array").unwrap()..];
-        let wg_nums = nums(&wg_body[wg_body.find('(').unwrap()..wg_body.find(");").unwrap()]);
-        assert_eq!(rs_nums, wg_nums, "{name}: Rust and WGSL tables differ");
+    for c in table.captures_iter(RS) {
+        let (name, f, n): (&str, u32, u32) = (&c[1], c[2].parse().unwrap(), c[3].parse().unwrap());
+        if !RS.contains(&format!("// CLIP {name} BEGIN")) { continue; }
+        for (k, v) in [("AT", at), ("F", f), ("N", n)] {
+            let want = format!("const {name}_{k}: u32 = {v}u;");
+            assert!(WGSL.contains(&want), "common.wgsl lacks `{want}` (run scripts/clip_table.py --registry)");
+        }
+        assert!(RS.contains(&format!("pub const {name}_AT: u32 = {at};")), "{name}_AT out of date");
+        at += f * n;
         seen += 1;
     }
     assert!(seen >= 1, "no baked clip tables found");
+    assert_eq!(at, CLIP_FLOATS);
+    assert_eq!(clip_buffer().len() as u32, CLIP_FLOATS);
 }

@@ -24,6 +24,35 @@ fn feet(p: &PoseParams, pts: &[[(Vec3, Part); 2]; 2]) -> [[Vec3; 2]; 2] {
     o
 }
 
+/// Planted boot against the ground over a cycle at `speed` in direction `dir`, with the game's cadence: each step
+/// the lower boot (heel and toe midpoint) counts while it is down (within 1.5 cm of its lowest). Returns the
+/// mean and worst slide (m/s) and the stride the legs cover (m per cycle, median of the planted boot's sweep).
+fn planted_slide(pose: Pose, dir: f32, speed: f32, pts: &[[(Vec3, Part); 2]; 2]) -> (f32, f32, f32) {
+    let travel = Vec3::new(-dir.sin(), dir.cos(), 0.0);
+    let hz = speed / stride_m_dir(pose, dir);
+    let dt = 1.0 / hz / N as f32;
+    let f: Vec<[[Vec3; 2]; 2]> = (0..=N).map(|k| feet(&params_dir(pose, k as f32 / N as f32, dir), pts)).collect();
+    let floor: [f32; 2] = std::array::from_fn(|i| (0..N).map(|k| f[k][i][0].z.max(f[k][i][1].z)).fold(f32::MAX, f32::min));
+    let (mut slides, mut sweeps) = (Vec::new(), Vec::new());
+    for k in 0..N {
+        // The sample points sit a little above the sole: count a boot as down within 1.5 cm of its own lowest.
+        let low = |i: usize, k: usize| f[k][i][0].z.max(f[k][i][1].z) - floor[i];
+        let i = if low(0, k) <= low(1, k) { 0 } else { 1 };
+        if low(i, k) < 0.015 && low(i, k + 1) < 0.015 {
+            let c = |k: usize| (f[k][i][0] + f[k][i][1]) * 0.5;
+            let v = (c(k + 1) - c(k)) / dt + travel * speed;
+            slides.push(Vec3::new(v.x, v.y, 0.0).length());
+            sweeps.push(-(c(k + 1) - c(k)).dot(travel) * N as f32);
+        }
+    }
+    if slides.is_empty() { return (f32::MAX, f32::MAX, 0.0); }
+    sweeps.sort_by(f32::total_cmp);
+    slides.sort_by(f32::total_cmp);
+    // The worst 10 % are the moments a boot lands or lifts; the mean and the 90th percentile tell the slide.
+    let mean = slides.iter().sum::<f32>() / slides.len() as f32;
+    (mean, slides[slides.len() * 9 / 10], sweeps[sweeps.len() / 2])
+}
+
 fn main() {
     let fig = figure();
     let shins: Vec<(Vec3, Part)> = fig.vertices.iter().map(|v| (Vec3::from(v.pos), part_of(v.color))).filter(|(_, p)| matches!(p, Part::LeftFoot | Part::RightFoot)).collect();
@@ -41,49 +70,30 @@ fn main() {
         // The game sets the cadence from the speed: cycles per second = speed / stride.
         let hz = speed / stride_m(pose);
         let dt = 1.0 / hz / N as f32;
-        let f: Vec<[[Vec3; 2]; 2]> = ps.iter().map(|p| feet(p, &pts)).collect();
-        // Foot slide: the left boot (heel strike at phase 0) through the middle of its stance, against the ground.
-        let c = |k: usize| (f[k][0][0].y + f[k][0][1].y) * 0.5;
-        let (k0, k1) = ((0.08 * N as f32) as usize, ((stance - 0.08) * N as f32) as usize);
-        let measured = -(c(k1) - c(k0)) / ((k1 - k0) as f32 / N as f32); // metres per cycle
-        let (mut sum, mut max, mut n, mut vs) = (0.0f32, 0.0f32, 0, 0.0f32);
-        for k in k0..k1 {
-            let v = -(c(k + 1) - c(k)) / dt;
-            let s = (v - speed).abs();
-            sum += s; max = max.max(s); n += 1; vs += v;
-        }
+        let _ = stance;
+        let (avg, max, measured) = planted_slide(pose, 0.0, speed, &pts);
         if (measured - stride_m(pose)).abs() > 0.05 * measured {
             println!("  !! {pose:?}: stride_m says {:.2} m but the legs cover {measured:.2} m per cycle", stride_m(pose));
             bad += 1;
         }
-        if sum / n.max(1) as f32 > 0.15 { println!("  !! {pose:?} at {speed} m/s: the planted foot slides {:.2} m/s", sum / n.max(1) as f32); bad += 1; }
+        if avg > 0.15 { println!("  !! {pose:?} at {speed} m/s: the planted foot slides {avg:.2} m/s"); bad += 1; }
         let seam = angles(&ps[0]).iter().zip(angles(&ps[N])).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
         let a: Vec<Vec<f32>> = ps.iter().map(angles).collect();
         let mut jerk = 0.0f32;
         for k in 1..N - 1 { for j in 0..a[k].len() { jerk = jerk.max(((a[k + 1][j] - 2.0 * a[k][j] + a[k - 1][j]) / (dt * dt)).abs()); } }
-        println!("{:<10} {:>6.1}m/s {:>8.2}m/s {:>8.2}m/s {:>9.3}r {:>9.0}   stride {measured:.2} m/cycle, {hz:.2} cycles/s (foot {:.2} m/s)", format!("{pose:?}"), speed, sum / n.max(1) as f32, max, seam, jerk, vs / n.max(1) as f32);
+        println!("{:<10} {:>6.1}m/s {:>8.2}m/s {:>8.2}m/s {:>9.3}r {:>9.0}   stride {measured:.2} m/cycle, {hz:.2} cycles/s", format!("{pose:?}"), speed, avg, max, seam, jerk);
         if seam > 0.01 { println!("  !! loop seam {seam:.3} rad: the cycle jumps where it restarts"); bad += 1; }
     }
     // Walking any direction while facing ahead (strafe, backpedal): the planted foot against the ground, in 2D.
-    println!("\nWalk by direction (facing ahead): planted-foot slide (m/s)");
-    for deg in [0.0f32, 45.0, 90.0, 135.0, 180.0, -90.0, -45.0] {
-        let dir = deg.to_radians();
-        let speed = 1.5f32;
-        let mv = Vec3::new(-dir.sin(), dir.cos(), 0.0) * speed;
-        let ps: Vec<PoseParams> = (0..=N).map(|k| params_dir(Pose::Walk, k as f32 / N as f32, dir)).collect();
-        let hz = speed / stride_m_dir(Pose::Walk, dir);
-        let dt = 1.0 / hz / N as f32;
-        let f: Vec<[[Vec3; 2]; 2]> = ps.iter().map(|p| feet(p, &pts)).collect();
-        let c = |k: usize| (f[k][0][0] + f[k][0][1]) * 0.5;
-        let (k0, k1) = ((0.08 * N as f32) as usize, ((0.6 - 0.08) * N as f32) as usize);
-        let (mut sum, mut n) = (0.0f32, 0);
-        for k in k0..k1 {
-            let v = (c(k + 1) - c(k)) / dt + mv; // foot velocity over the ground
-            sum += Vec3::new(v.x, v.y, 0.0).length(); n += 1;
+    println!("\nGaits by direction (facing ahead): planted-boot slide, mean and 90th percentile (m/s)");
+    for (pose, speed) in [(Pose::Walk, 1.5f32), (Pose::Run, 3.0), (Pose::Sprint, 4.6), (Pose::CrouchWalk, 1.0)] {
+        for deg in [0.0f32, 45.0, 90.0, 135.0, 180.0, -135.0, -90.0, -45.0] {
+            let (avg, p90, stride) = planted_slide(pose, deg.to_radians(), speed, &pts);
+            println!("  {:<10} {deg:>6.0} deg  slide {avg:.2} / {p90:.2}  stride {stride:.2} (table {:.2})", format!("{pose:?}"), stride_m_dir(pose, deg.to_radians()));
+            // Faster gaits get a limit in proportion: what the eye catches is the slide against the speed.
+            let limit = (0.055 * speed).max(0.2);
+            if avg > limit { println!("  !! {pose:?} at {deg} deg: the planted foot slides {avg:.2} m/s"); bad += 1; }
         }
-        let avg = sum / n as f32;
-        println!("  {deg:>6.0} deg  slide {avg:.2}");
-        if avg > 0.2 { println!("  !! walking at {deg} deg: the planted foot slides {avg:.2} m/s"); bad += 1; }
     }
 
     // Prone crawl cycles in each cardinal direction: no limb/torso seam when the cycle wraps.

@@ -201,6 +201,12 @@ impl Gpu {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // Baked animation clips (pose.rs `clip_buffer`): uploaded once, read by every figure vertex (common.wgsl).
+        let clips = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("animation clips"),
+            contents: f32_bytes(&crate::pose::clip_buffer()),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let one_instance = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("identity instance"),
             contents: f32_bytes(&[0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1000.0, 0.0, 0.0]),
@@ -294,12 +300,16 @@ impl Gpu {
                 wgpu::BindGroupEntry { binding: 0, resource: uni.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&cmp) },
+                wgpu::BindGroupEntry { binding: 3, resource: clips.as_entire_binding() },
             ],
         });
         let shadow_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shadow"),
             layout: &shadow_pipe.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: uni.as_entire_binding() }],
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uni.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: clips.as_entire_binding() },
+            ],
         });
 
         let timing = device.features().contains(wgpu::Features::TIMESTAMP_QUERY).then(|| Timing {
