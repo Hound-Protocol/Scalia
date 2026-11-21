@@ -6,6 +6,8 @@ pub mod mesh;
 pub mod pose;
 pub mod shaders;
 pub mod skeleton;
+pub mod skin;
+pub mod skin_gpu;
 pub mod sky;
 pub mod gpu;
 

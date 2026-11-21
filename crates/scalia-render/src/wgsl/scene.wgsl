@@ -30,6 +30,16 @@ struct VO { @builtin(position) pos: vec4f, @location(0) w: vec3f, @location(1) @
   if (o.fade > 0.0) { o.pos.z = o.pos.z - 0.0005 * o.pos.w; }
   return o;
 }
+// AN-03: a skinned soldier (rigged.skin) posed by skin_cs.wgsl; everything after the pose as in `vs`.
+@vertex fn vs_skin(@location(0) p: vec3f, @location(1) c: f32, @location(5) j: vec4u, @location(6) wt: vec4f, @location(2) ia: vec4f, @location(3) ib: vec4f, @location(4) ic: vec4f, @builtin(instance_index) ii: u32) -> VO {
+  let w = bend_point(place_figure(tilt_figure(skin_point(p, j, wt, ii), ia), ia, ib), u.bend, u.bend2.x);
+  var o: VO; o.pos = u.m * vec4f(w, 1.0); o.w = w;
+  o.ci = palette_index(c, ia);
+  o.fade = fade_of(ic.w);
+  o.sel = select_level(ia);
+  if (o.fade > 0.0) { o.pos.z = o.pos.z - 0.0005 * o.pos.w; }
+  return o;
+}
 struct FO { @location(0) c: vec4f, @location(1) n: vec4f };
 @fragment fn fs(i: VO) -> FO {
   var n = normalize(cross(dpdx(i.w), dpdy(i.w)));

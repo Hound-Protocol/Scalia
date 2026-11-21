@@ -116,4 +116,5 @@ def main():
     open(out, 'w').write(f'{n} {"once" if once else "loop"} {span:.4f} {travel[0]:.4f} {travel[1]:.4f}\n' + '\n'.join(rows) + '\n')
     print(f'{os.path.basename(fbx)}: {span:.2f} s from {t0:.2f} s at {n}, travel x {travel[0]:+.2f} y {travel[1]:+.2f} m')
 
-main()
+if __name__ == "__main__":
+    main()

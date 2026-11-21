@@ -26,6 +26,9 @@ Merged to `main`:
 
 - AN-02-S13 (this PR): rifle walk, run and sprint baked from the Pro Rifle Pack, 8 directions each, blended by travel direction (`gait_bake`). Baked tables now live only in pose.rs and reach the GPU in one storage buffer (`clip_buffer`, binding 3, uploaded once) instead of per-call WGSL arrays. New rig param `yaw`: the pelvis and legs turn about the vertical (the reference walks with the hips turned to its steps, chest on the aim); the bone rig (`skeleton.rs`) now also has side, leg roll, yaw and tilt. The fitter plants boots (second pass) and sets body lift from the reference contact (`height`), so the planted boot sweeps evenly and runs have a flight phase. `GAIT_STRIDE` is the pinned sweep. Audit: planted-boot slide 0.03 to 0.25 m/s (limit 0.2 or 5.5 % of speed); `scripts/bake_gaits.sh <pack>` reproduces the tables exactly. Crouched walk stays procedural (the reference's deep long steps slid or popped on our rig).
 
+- AN-03 (this PR): skeletal animation, see `docs/work-orders/AN-03-skeletal-animation.md`. Soldiers up to 250 m
+  are the Mixamo-rigged soldier playing the baked clips on the GPU; this replaces the S12/S13 fits for what you see.
+
 Not verified: the in-game look. On 2026-11-18 the project lead reported the forward crawl looked unchanged in the model viewer after #71. The deploy for `ffcd47e` succeeded and the page referenced that build, so a cached page is the likely cause, but this was not confirmed. Visual QA is outstanding.
 
 Known issues to fix next: crouched walk is procedural (try a shorter-stride crouch clip or fit with a stride limit); left and right crawl still use the procedural legs (no reference clip; to be built by hand); the rolled boot lies on its side. Also: the table also overrides the left shoulder and elbow (support hand may look wrong); other crawl directions are still procedural. Measured on 2026-11-20: hips and upper body sit at flat-prone height; only the shin was an outlier.

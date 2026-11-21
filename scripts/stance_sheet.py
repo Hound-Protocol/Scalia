@@ -12,7 +12,8 @@ from matplotlib.collections import PolyCollection
 out, specs = sys.argv[1], sys.argv[2:]
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 raw = '/tmp/stance.bin'
-subprocess.run(['cargo', 'run', '-q', '--release', '-p', 'scalia-render', '--example', 'stance_dump', '--', raw, *specs], cwd=root, check=True)
+# DUMP=skin_dump draws the skinned soldier from clip@seconds specs instead (AN-03).
+subprocess.run(['cargo', 'run', '-q', '--release', '-p', 'scalia-render', '--example', os.environ.get('DUMP', 'stance_dump'), '--', raw, *specs], cwd=root, check=True)
 d = np.fromfile(raw, dtype='<f4').reshape(len(specs), -1, 4)
 def col(c):
     k = int(c) % 32

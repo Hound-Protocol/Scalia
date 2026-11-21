@@ -1017,21 +1017,50 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
         pp = reach_left(pp, reload_target(pp, reload_phase), reload_weight, 2.0);
       }
     }
-    q = pose_vertex(v, part, pp);
     // Banking into a turn and leaning with acceleration.
-    let k = tilt_of(a);
-    if (k.x != 0.0 || k.y != 0.0) {
-      let cb = cos(k.x);
-      let sb = sin(k.x);
-      q = vec3f(q.x * cb - q.z * sb, q.y, q.x * sb + q.z * cb);
-      let cp = cos(k.y);
-      let sp = sin(k.y);
-      q = vec3f(q.x, q.y * cp + q.z * sp, -q.y * sp + q.z * cp);
-    }
+    q = tilt_figure(pose_vertex(v, part, pp), a);
   }
+  return place_figure(q, a, b);
+}
+
+// The figure's momentum tilt (instance a.w fraction) around its feet.
+fn tilt_figure(p: vec3f, a: vec4f) -> vec3f {
+  var q = p;
+  let k = tilt_of(a);
+  if (k.x != 0.0 || k.y != 0.0) {
+    let cb = cos(k.x);
+    let sb = sin(k.x);
+    q = vec3f(q.x * cb - q.z * sb, q.y, q.x * sb + q.z * cb);
+    let cp = cos(k.y);
+    let sp = sin(k.y);
+    q = vec3f(q.x, q.y * cp + q.z * sp, -q.y * sp + q.z * cp);
+  }
+  return q;
+}
+
+// From the figure frame to the world: turned to the heading (b.x) and set at the instance position.
+fn place_figure(q: vec3f, a: vec4f, b: vec4f) -> vec3f {
   let ch = cos(b.x);
   let sh = sin(b.x);
   return vec3f(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + a.xyz;
+}
+
+// AN-03 skinned soldiers: the joint transforms skin_cs.wgsl wrote for this instance (group 1, 2 vec4 per joint:
+// rotation, position; binding 1 holds the joint count), applied with up to four weights.
+@group(1) @binding(0) var<storage, read> palette: array<vec4f>;
+@group(1) @binding(1) var<uniform> skin_joints: vec4u;
+fn skin_point(p: vec3f, joints: vec4u, weights: vec4f, inst: u32) -> vec3f {
+  var o = vec3f(0.0);
+  for (var k = 0u; k < 4u; k++) {
+    let w = weights[k];
+    if (w > 0.0) {
+      let at = (inst * skin_joints.x + joints[k]) * 2u;
+      let q = palette[at];
+      let t = 2.0 * cross(q.xyz, p);
+      o = o + w * (p + q.w * t + cross(q.xyz, t) + palette[at + 1u].xyz);
+    }
+  }
+  return o;
 }
 
 // An upper-body stance laid over the legs' pose (pose.rs `layer`).

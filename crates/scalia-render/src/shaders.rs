@@ -3,4 +3,6 @@
 
 pub const SCENE_WGSL: &str = concat!(include_str!("wgsl/common.wgsl"), include_str!("wgsl/scene.wgsl"));
 pub const SHADOW_WGSL: &str = concat!(include_str!("wgsl/common.wgsl"), include_str!("wgsl/shadow.wgsl"));
+/// AN-03: the skeletal animation compute pass.
+pub const SKIN_CS_WGSL: &str = include_str!("wgsl/skin_cs.wgsl");
 pub const BLIT_WGSL: &str = include_str!("wgsl/blit.wgsl");
