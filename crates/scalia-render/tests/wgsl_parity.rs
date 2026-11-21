@@ -141,3 +141,25 @@ fn crawl_directional_terms_match_in_rust_and_wgsl() {
         assert_eq!(rust, shader, "crawl directional parameter parity for {term}");
     }
 }
+
+#[test]
+fn baked_clip_tables_match() {
+    // AN-02-S12: every table scripts/clip_table.py writes into pose.rs has the same numbers in its WGSL mirror.
+    let mut seen = 0;
+    for (at, _) in RS.match_indices("// CLIP ") {
+        let line = &RS[at..RS[at..].find('\n').unwrap() + at];
+        let Some(name) = line.strip_prefix("// CLIP ").and_then(|l| l.strip_suffix(" BEGIN")) else { continue };
+        let block = |src: &str| {
+            let a = src.find(&format!("// CLIP {name} BEGIN")).unwrap_or_else(|| panic!("{name} missing"));
+            let b = src[a..].find(&format!("// CLIP {name} END")).unwrap() + a;
+            src[a..b].to_string()
+        };
+        let (rs, wg) = (block(RS), block(WGSL));
+        let rs_nums = nums(&rs[rs.find("= [").unwrap()..]);
+        let wg_body = &wg[wg.find("array<array").unwrap()..];
+        let wg_nums = nums(&wg_body[wg_body.find('(').unwrap()..wg_body.find(");").unwrap()]);
+        assert_eq!(rs_nums, wg_nums, "{name}: Rust and WGSL tables differ");
+        seen += 1;
+    }
+    assert!(seen >= 1, "no baked clip tables found");
+}
