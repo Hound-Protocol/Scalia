@@ -17,11 +17,13 @@ fn bottom(v: &[(Part, Vec3)]) -> f32 {
 
 #[test]
 fn standing_legs_and_body_are_the_mesh_itself() {
-    // Standing changes only the arms and rifle (safe hang); legs, torso and head stay as modelled.
+    // Standing changes only the arms and rifle (safe hang); legs, torso and head stay as modelled (the torso's
+    // shoulder caps follow the arms, soft joints).
     let pp = params(Pose::Stand, 0.0);
     for v in figure().vertices {
         let part = part_of(v.color);
-        if matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot | Part::Torso | Part::Head) {
+        let arm_seam = matches!(scalia_render::pose::soft_joint(Vec3::from(v.pos), part), Some((Part::LeftArm | Part::RightArm, _)));
+        if !arm_seam && matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot | Part::Torso | Part::Head) {
             let p = Vec3::from(v.pos);
             assert!((pose_vertex(p, part, &pp) - p).length() < 1e-5, "{part:?} moved");
         }
@@ -1029,4 +1031,30 @@ fn sprinting_drives_the_rifle_across_the_body_with_the_shoulders() {
     };
     let ((run, _), (sprint, _)) = (sweep(Pose::Run), sweep(Pose::Sprint));
     assert!(sprint > 0.4 && sprint > 2.5 * run, "sprint muzzle sweeps {sprint:.3} m, run {run:.3} m");
+}
+
+/// S11: soft joints. Where two parts meet (hips, knees, shoulders, elbows), a point on the seam is drawn in the
+/// same place whichever part it belongs to, so bending a joint opens no gap in the mesh. Measured as the
+/// distance between the two parts' placements of each vertex within 1 cm of the joint.
+#[test]
+fn joints_close_their_seams_in_every_pose() {
+    use scalia_render::pose::{HIP_Z, KNEE_Z, ELBOW_Z};
+    let fig = figure();
+    let seams: [(Part, Part, f32); 6] = [
+        (Part::LeftThigh, Part::LeftShin, KNEE_Z), (Part::RightThigh, Part::RightShin, KNEE_Z),
+        (Part::LeftArm, Part::LeftForearm, ELBOW_Z), (Part::RightArm, Part::RightForearm, ELBOW_Z),
+        (Part::LeftThigh, Part::Torso, HIP_Z), (Part::RightThigh, Part::Torso, HIP_Z),
+    ];
+    for pose in [Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::StandAim, Pose::Prone, Pose::Crawl] {
+        for k in 0..4 {
+            let pp = params(pose, k as f32 / 4.0);
+            for (a, b, z) in seams {
+                for v in fig.vertices.iter().filter(|v| part_of(v.color) == a && (v.pos[2] - z).abs() < 0.01) {
+                    let at = Vec3::from(v.pos);
+                    let gap = pose_vertex(at, a, &pp).distance(pose_vertex(at, b, &pp));
+                    assert!(gap < 0.02, "{pose:?}@{k}: {a:?}/{b:?} seam open {gap:.3} m at {at}");
+                }
+            }
+        }
+    }
 }

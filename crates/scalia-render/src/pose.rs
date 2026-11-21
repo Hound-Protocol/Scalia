@@ -1706,8 +1706,50 @@ pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32
     -low
 }
 
-/// Moves one vertex of a figure part into the pose (in the figure's frame, before heading and position).
+/// Soft joints: how far either side of a joint (m, in the rest pose) a vertex is drawn partly with the part
+/// across it, so bending the joint stretches the skin instead of opening a gap (common.wgsl `SOFT_BAND`).
+pub const SOFT_BAND: f32 = 0.06;
+/// The shoulder seam's height and band (the deltoid cap over the shoulder pivot), and how far out from the centre
+/// line the torso's side of it starts (common.wgsl `SOFT_SHOULDER`).
+pub const SOFT_SHOULDER: [f32; 3] = [1.43, 0.08, 0.17];
+
+/// The part across the nearest joint from a vertex and how much of it the vertex takes (0.5 on the joint itself,
+/// none beyond the band): knees, hips, elbows and shoulders. common.wgsl `soft_joint` mirrors it.
+pub fn soft_joint(v: Vec3, part: Part) -> Option<(Part, f32)> {
+    let w = |joint: f32, band: f32| 0.5 * (1.0 - { let x = ((v.z - joint).abs() / band).clamp(0.0, 1.0); x * x * (3.0 - 2.0 * x) });
+    let left = v.x <= 0.0;
+    let (other, joint, band) = match part {
+        Part::LeftThigh | Part::RightThigh if v.z > (KNEE_Z + HIP_Z) * 0.5 => (Part::Torso, HIP_Z, SOFT_BAND),
+        Part::LeftThigh => (Part::LeftShin, KNEE_Z, SOFT_BAND),
+        Part::RightThigh => (Part::RightShin, KNEE_Z, SOFT_BAND),
+        Part::LeftShin => (Part::LeftThigh, KNEE_Z, SOFT_BAND),
+        Part::RightShin => (Part::RightThigh, KNEE_Z, SOFT_BAND),
+        Part::LeftArm | Part::RightArm if v.z > (ELBOW_Z + SOFT_SHOULDER[0]) * 0.5 => (Part::Torso, SOFT_SHOULDER[0], SOFT_SHOULDER[1]),
+        Part::LeftArm => (Part::LeftForearm, ELBOW_Z, SOFT_BAND),
+        Part::RightArm => (Part::RightForearm, ELBOW_Z, SOFT_BAND),
+        Part::LeftForearm => (Part::LeftArm, ELBOW_Z, SOFT_BAND),
+        Part::RightForearm => (Part::RightArm, ELBOW_Z, SOFT_BAND),
+        Part::Torso if v.z < HIP_Z + SOFT_BAND => (if left { Part::LeftThigh } else { Part::RightThigh }, HIP_Z, SOFT_BAND),
+        Part::Torso if v.x.abs() > SOFT_SHOULDER[2] && (v.z - SOFT_SHOULDER[0]).abs() < SOFT_SHOULDER[1] =>
+            (if left { Part::LeftArm } else { Part::RightArm }, SOFT_SHOULDER[0], SOFT_SHOULDER[1]),
+        _ => return None,
+    };
+    let k = w(joint, band);
+    (k > 0.0).then_some((other, k))
+}
+
+/// Moves one vertex of a figure part into the pose (in the figure's frame, before heading and position), blended
+/// with the part across a joint near it (`soft_joint`).
 pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
+    let q = pose_rigid(v, part, p);
+    match soft_joint(v, part) {
+        Some((other, k)) => q.lerp(pose_rigid(v, other, p), k),
+        None => q,
+    }
+}
+
+/// `pose_vertex` with the vertex carried by its own part alone.
+pub fn pose_rigid(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
     let mut q = match part {
         Part::Body | Part::Sway | Part::Glow => return v,
         Part::LeftThigh => sideways(leg_roll(rot(v, 0.0, HIP_Z, p.hip[0]), p, 0), p.side[0], -HIP_X),

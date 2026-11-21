@@ -919,7 +919,41 @@ fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
   return out;
 }
 
+// Soft joints (pose.rs SOFT_BAND, SOFT_SHOULDER, `soft_joint`): near a knee, hip, elbow or shoulder a vertex is
+// drawn partly with the part across the joint (half on the joint itself), so bending it opens no gap.
+const SOFT_BAND: f32 = 0.06;
+const SOFT_SHOULDER: vec3f = vec3f(1.43, 0.08, 0.17);
+// The part across the joint (x, as f32) and how much of it the vertex takes (y); y = 0 for none.
+fn soft_joint(v: vec3f, part: u32) -> vec2f {
+  let left = v.x <= 0.0;
+  var other = 0u;
+  var joint = 0.0;
+  var band = SOFT_BAND;
+  if ((part == 1u || part == 2u) && v.z > 0.67) { other = 8u; joint = 0.88; }
+  else if (part == 1u) { other = 6u; joint = 0.46; }
+  else if (part == 2u) { other = 7u; joint = 0.46; }
+  else if (part == 6u) { other = 1u; joint = 0.46; }
+  else if (part == 7u) { other = 2u; joint = 0.46; }
+  else if ((part == 3u || part == 4u) && v.z > (1.09 + SOFT_SHOULDER.x) * 0.5) { other = 8u; joint = SOFT_SHOULDER.x; band = SOFT_SHOULDER.y; }
+  else if (part == 3u) { other = 11u; joint = 1.09; }
+  else if (part == 4u) { other = 12u; joint = 1.09; }
+  else if (part == 11u) { other = 3u; joint = 1.09; }
+  else if (part == 12u) { other = 4u; joint = 1.09; }
+  else if (part == 8u && v.z < 0.88 + SOFT_BAND) { other = select(2u, 1u, left); joint = 0.88; }
+  else if (part == 8u && abs(v.x) > SOFT_SHOULDER.z && abs(v.z - SOFT_SHOULDER.x) < SOFT_SHOULDER.y) { other = select(4u, 3u, left); joint = SOFT_SHOULDER.x; band = SOFT_SHOULDER.y; }
+  else { return vec2f(0.0); }
+  let x = clamp(abs(v.z - joint) / band, 0.0, 1.0);
+  return vec2f(f32(other), 0.5 * (1.0 - x * x * (3.0 - 2.0 * x)));
+}
+
 fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
+  let q = pose_rigid(v, part, p);
+  let s = soft_joint(v, part);
+  if (s.y <= 0.0) { return q; }
+  return mix(q, pose_rigid(v, u32(s.x), p), s.y);
+}
+
+fn pose_rigid(v: vec3f, part: u32, p: PP) -> vec3f {
   var q = v;
   if (part == 1u) { q = sideways(leg_roll(rot(v, 0.0, 0.88, p.hip.x), p, p.knee.x, -0.1), p.side.x, -0.1); }
   else if (part == 2u) { q = sideways(leg_roll(rot(v, 0.0, 0.88, p.hip.y), p, p.knee.y, 0.1), p.side.y, 0.1); }
