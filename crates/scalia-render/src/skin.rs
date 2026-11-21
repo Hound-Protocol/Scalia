@@ -735,3 +735,27 @@ pub fn muzzle(an: &Anims, rec: &[f32; 12], time: f32) -> (Vec3, Vec3) {
     let (tip, breech) = (at(crate::pose::RIFLE.muzzle), at(crate::pose::RIFLE.breech));
     (tip, (tip - breech).normalize_or_zero())
 }
+
+/// Ground one cycle of `pose` covers moving in `dir` (m): the clips' own travel, between the two nearest direction
+/// clips (AN-03). The game sets cadence from it (speed / stride), so the planted feet keep pace with the ground.
+/// Poses without moving clips fall back to the procedural stride.
+pub fn stride_m_dir(pose: crate::pose::Pose, dir: f32) -> f32 {
+    let an = anims();
+    let (_, ids) = &an.poses[(pose as u32 as usize).min(an.poses.len() - 1)];
+    let len = |i: usize| an.clips[ids[i]].travel.length();
+    match ids.len() {
+        8 => {
+            let x = dir.rem_euclid(std::f32::consts::TAU) / (std::f32::consts::TAU / 8.0);
+            let i = (x.floor() as usize) % 8;
+            len(i) + (len((i + 1) % 8) - len(i)) * (x - x.floor())
+        }
+        2 => len(if dir.cos() < 0.0 { 1 } else { 0 }),
+        _ if len(0) > 0.1 => len(0),
+        _ => crate::pose::stride_m_dir(pose, dir),
+    }
+}
+
+/// Metres one cycle of `pose`'s clip carries a soldier walking straight ahead (see `stride_m_dir`).
+pub fn stride_m(pose: crate::pose::Pose) -> f32 {
+    stride_m_dir(pose, 0.0)
+}

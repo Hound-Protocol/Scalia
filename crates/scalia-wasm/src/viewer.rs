@@ -93,7 +93,7 @@ use scalia_core::world::World;
 use scalia_render::bend::{globe_point, Bend};
 use scalia_render::gpu::{FrameDesc, Gpu};
 use scalia_render::mesh::{figure, figure_far, figure_lo, grass_tuft, MeshBuilder};
-use scalia_render::pose::stride_m;
+use scalia_render::skin::stride_m;
 use scalia_render::pose::Pose;
 use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
@@ -2243,7 +2243,9 @@ impl Viewer {
         };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev, lights: &self.fx_lights };
+        // The lab's soldiers are stamped in lab time (see `ts` where they are drawn); skin them on that clock.
+        let anim_s = if self.assault.is_some() { ((self.lab_t / 1000.0) % 86_400.0) as f32 } else { time_s };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, anim_s, bend, elev, lights: &self.fx_lights };
         let drawn = if second { self.gpu.frame_second(&desc) } else { self.gpu.frame(&desc) };
         drawn?;
         self.last_internal = internal;
@@ -2574,7 +2576,7 @@ impl Viewer {
             // combinations the AI will use (checking a corner: crouched sidestep with the aim on top; dynamic entry:
             // combat-run legs under the aim).
             use std::f32::consts::{FRAC_PI_2, PI};
-            use scalia_render::pose::stride_m_dir;
+            use scalia_render::skin::stride_m_dir;
             let walk = |dir: f32| 1.2 / stride_m_dir(Pose::Walk, dir);
             let aimed_crawl = |dir| (Pose::Crawl, 0.55 / stride_m_dir(Pose::Crawl, dir), Some(Pose::ProneAim), dir);
             let combo: Option<(Pose, f32, Option<Pose>, f32)> = match self.preview_pose {
@@ -3238,6 +3240,17 @@ impl Viewer {
     fn update_commander(&mut self, t: f64, ts: f32, instanced: &mut Vec<(String, String)>) {
         if !self.gpu.has("commander") {
             self.gpu.upload("commander", commander_figure().bytes());
+            // AN-03: his rigged version, in his own kit colours (as `commander_figure`).
+            {
+                use scalia_render::mesh::kit;
+                let to = |p: u32| match p as u8 {
+                    kit::UNIFORM => kit::BALACLAVA as u32,
+                    kit::UNIFORM_DARK | kit::PACK | kit::HELMET => kit::PAD as u32,
+                    kit::STRAP | kit::GLOVE => kit::METAL as u32,
+                    _ => p,
+                };
+                self.gpu.upload_skinned("commander_skin", &scalia_render::skin::mesh_bytes(&to));
+            }
         }
         let dt = ((t - self.cmd_ms).clamp(0.0, 100.0) / 1000.0) as f32;
         self.cmd_ms = t;
@@ -3371,7 +3384,10 @@ impl Viewer {
         self.cmd_rec = rec;
         let me = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, flinch, self.cine_fade(self.frame_ms));
         self.gpu.upload_instances("commander_at", bytes(&me));
-        instanced.push(("commander".into(), "commander_at".into()));
+        // AN-03: the rigged commander plays the clips; with the tablet or radio up (no clips yet, and the tablet
+        // sits in the procedural hands) he is the procedural figure.
+        let props = [f.pose, f.upper.unwrap_or(f.pose)].iter().any(|p| matches!(p, Pose::Tablet | Pose::Radio));
+        instanced.push((if props { "commander" } else { "commander_skin" }.into(), "commander_at".into()));
         // The tablet appears in his hands once they have come up to hold it.
         // The tablet itself is the page's close-up, which slides up once the camera is in place: the 3D model
         // is not drawn (it would show behind the close-up whenever that moves).
