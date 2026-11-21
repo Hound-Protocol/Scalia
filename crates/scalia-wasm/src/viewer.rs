@@ -3240,17 +3240,6 @@ impl Viewer {
     fn update_commander(&mut self, t: f64, ts: f32, instanced: &mut Vec<(String, String)>) {
         if !self.gpu.has("commander") {
             self.gpu.upload("commander", commander_figure().bytes());
-            // AN-03: his rigged version, in his own kit colours (as `commander_figure`).
-            {
-                use scalia_render::mesh::kit;
-                let to = |p: u32| match p as u8 {
-                    kit::UNIFORM => kit::BALACLAVA as u32,
-                    kit::UNIFORM_DARK | kit::PACK | kit::HELMET => kit::PAD as u32,
-                    kit::STRAP | kit::GLOVE => kit::METAL as u32,
-                    _ => p,
-                };
-                self.gpu.upload_skinned("commander_skin", &scalia_render::skin::mesh_bytes(&to));
-            }
         }
         let dt = ((t - self.cmd_ms).clamp(0.0, 100.0) / 1000.0) as f32;
         self.cmd_ms = t;
@@ -3344,6 +3333,7 @@ impl Viewer {
         let travel = (-self.cmd_dir.0).atan2(self.cmd_dir.1);
         let reloading = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)).is_some_and(|s| s.reloading_ms > 0);
         let mut d = crate::anim::Drive::new(dt, ts);
+        d.procedural = true;
         d.vel = (self.cmd_dir.0 * self.cmd_speed, self.cmd_dir.1 * self.cmd_speed);
         d.want = Some(want);
         // A body turns with weight: towards where the rifle points while it is up (keeping pace with the cursor),
@@ -3384,10 +3374,7 @@ impl Viewer {
         self.cmd_rec = rec;
         let me = self.cmd_fig.record(&f, (rx, ry, z), 9.0, kick, flinch, self.cine_fade(self.frame_ms));
         self.gpu.upload_instances("commander_at", bytes(&me));
-        // AN-03: the rigged commander plays the clips; with the tablet or radio up (no clips yet, and the tablet
-        // sits in the procedural hands) he is the procedural figure.
-        let props = [f.pose, f.upper.unwrap_or(f.pose)].iter().any(|p| matches!(p, Pose::Tablet | Pose::Radio));
-        instanced.push((if props { "commander" } else { "commander_skin" }.into(), "commander_at".into()));
+        instanced.push(("commander".into(), "commander_at".into()));
         // The tablet appears in his hands once they have come up to hold it.
         // The tablet itself is the page's close-up, which slides up once the camera is in place: the 3D model
         // is not drawn (it would show behind the close-up whenever that moves).
