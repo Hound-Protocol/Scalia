@@ -47,6 +47,9 @@ pub struct FrameDesc<'a> {
     pub atmosphere: bool,
     /// Seconds for animation; keep it small (wrap it) so f32 stays precise.
     pub time_s: f32,
+    /// Seconds on the clock the skinned figures were stamped with (pose changes, gait phases): the battle lab's own
+    /// clock, which pauses and changes speed, or `time_s` when nothing else is playing.
+    pub anim_s: f32,
     /// Camera elevation above the horizon (radians); the game uses `camera::ELEV`.
     pub elev: f32,
     /// How far the flat planet map is bent into a globe (see `bend`).
@@ -595,7 +598,7 @@ impl Gpu {
                     continue;
                 }
                 if let Some(ib) = buffers.get(ik) {
-                    skin.update(&self.device, &self.queue, &mut enc, ik, &ib.buf, ib.generation, ib.count, f.time_s);
+                    skin.update(&self.device, &self.queue, &mut enc, ik, &ib.buf, ib.generation, ib.count, f.anim_s);
                     done.push(ik);
                 }
             }

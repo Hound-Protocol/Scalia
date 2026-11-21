@@ -8,7 +8,9 @@
 //! Nothing about how a figure looks is decided anywhere else.
 
 use crate::motion::{skidding, AimTrack, Skid};
-use scalia_render::pose::{self, stride_m_dir, Pose, LAYER_BLEND_S};
+use scalia_render::pose::{self, Pose, LAYER_BLEND_S};
+// AN-03: cadence from the clips the soldier plays.
+use scalia_render::skin::stride_m_dir;
 
 /// Pace lines (m/s) for the legs, with a little give either way so easing off near a line does not flick poses.
 const SPRINT_UP: f32 = 4.0;
@@ -358,7 +360,7 @@ impl Animator {
             }
         } else {
             match (d.stance, moving) {
-                (Stance::Prone, true) => (Pose::Crawl, aim.then_some(Pose::ProneAim), speed / pose::stride_m_dir(Pose::Crawl, self.dir)),
+                (Stance::Prone, true) => (Pose::Crawl, aim.then_some(Pose::ProneAim), speed / stride_m_dir(Pose::Crawl, self.dir)),
                 (Stance::Prone, false) => (Pose::Prone, aim.then_some(Pose::ProneAim), 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { if d.in_cover { Pose::CoverAim } else { Pose::CrouchAim } } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
@@ -633,7 +635,8 @@ mod tests {
         a.rifle = Rifle::Reload;
         b.rifle = Rifle::Reload;
         a.vel = (0.0, 1.0);
-        b.vel = (0.0, 3.0);
+        // AN-03: at 3 m/s the clip strides happen to bring both cycles to the same phase at the check.
+        b.vel = (0.0, 2.5);
         let (mut fa, mut fb) = (slow.step(&a), fast.step(&b));
         for k in 1..90 {
             a.ts = k as f32 / 60.0;
