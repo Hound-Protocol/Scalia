@@ -465,6 +465,11 @@ impl Animator {
         Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall }
     }
 
+    /// Going down to prone or getting up from it (on the drop): his feet are planted.
+    pub fn dropping(&self) -> bool {
+        self.drop.is_some()
+    }
+
     /// The shader's instance record for this frame (scene.wgsl): `colour` is the palette index with the leader
     /// (+32) and selection (+64 per level) flags; `kick` is the recoil pressure, `flinch` how hard he is flinching
     /// from fire (both 0 to 1); `fade` dissolves
@@ -924,5 +929,47 @@ mod tests {
             let pose = a.step(&d).pose;
             assert_eq!(pose, Pose::Run, "run hysteresis holds above the down threshold at {speed}");
         }
+    }
+}
+
+/// S9: going down to prone from a run. His feet stop stepping at once (the drop is planted, no stride), but his
+/// body keeps the momentum it had and slides on while he goes down, as a man does who drops mid-stride.
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+
+    #[test]
+    fn going_prone_from_a_run_plants_his_feet_but_keeps_his_momentum_through_the_drop() {
+        let dt = 1.0 / 60.0;
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0f32;
+        let mut speed = 3.0f32;
+        let mut dir = (0.0f32, 1.0f32);
+        let mut slid = 0.0f32;
+        let mut drop_frames = 0;
+        for k in 0..(2.0 / dt) as usize {
+            let prone = k as f32 * dt >= 1.0;
+            let mut d = Drive::new(dt, ts);
+            d.stance = if prone { Stance::Prone } else { Stance::Stand };
+            d.vel = (dir.0 * speed, dir.1 * speed);
+            d.want = Some(if prone { (0.0, 0.0) } else { (0.0, 3.0) });
+            d.face = Face::Keep;
+            let f = a.step(&d);
+            if prone && f.pose == Pose::Drop {
+                drop_frames += 1;
+                assert!(f.cadence < 0.0, "the drop is planted: no stride cadence while he goes down");
+                assert!(f.footfall.is_none(), "no footfall while he goes down");
+            }
+            if prone {
+                // Momentum: his feet can only brake him so fast, towards the crawl pace he is aiming for.
+                let vel = if a.dropping() { crate::motion::drop_slide((dir.0 * speed, dir.1 * speed), dt) } else { crate::motion::step_velocity((dir.0 * speed, dir.1 * speed), (0.0, 0.0), dt, crate::motion::CMD_FEET) };
+                speed = (vel.0 * vel.0 + vel.1 * vel.1).sqrt();
+                if speed > 1e-3 { dir = (vel.0 / speed, vel.1 / speed); }
+                if f.pose == Pose::Drop { slid += speed * dt; }
+            }
+            ts += dt;
+        }
+        assert!(drop_frames > 10, "the drop lasted {drop_frames} frames");
+        assert!(slid > 0.8, "he slid only {slid:.2} m while going down: the momentum was lost at once");
     }
 }

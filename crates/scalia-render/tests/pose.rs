@@ -961,3 +961,48 @@ fn low_crawl_pulls_with_the_elbows_in_turn_against_the_opposite_knee() {
     assert!(ps.iter().all(|p| p.side[0].abs() <= 0.5 && p.side[1].abs() <= 0.5), "legs splay out");
     assert_eq!(two_handed(Pose::Crawl), 0.0, "the left hand crawls");
 }
+
+/// S9: going down and getting up share one drop; through the plant window the left palm must be on the ground
+/// (it takes the weight), the way the reference drop works in Battlefield 3: hand down first, then over.
+#[test]
+fn going_down_plants_the_left_hand_on_the_ground_and_pushes_up_with_it() {
+    use scalia_render::pose::{drop_hand, drop_params};
+    let hand_low = |t: f32| {
+        let pp = drop_hand(&grip(&drop_params(t), two_handed(Pose::Drop)), t);
+        figure().vertices.iter().filter(|v| matches!(part_of(v.color), Part::LeftForearm))
+            .map(|v| pose_vertex(Vec3::from(v.pos), part_of(v.color), &pp).z)
+            .fold(f32::MAX, f32::min)
+    };
+    for k in 0..=10 {
+        let t = 0.62 + (1.0 - 0.62) * k as f32 / 10.0;
+        let low = hand_low(t);
+        assert!(low < 0.06, "drop at {t:.3}: left hand {low:.3} m above the ground, not taking the weight");
+    }
+}
+
+/// S9: the rifle stays in the right hand, clear of the dirt, the whole way down and back up.
+#[test]
+fn the_rifle_never_digs_into_the_ground_on_the_drop() {
+    use scalia_render::pose::{drop_hand, drop_params};
+    for k in 0..=40 {
+        let t = k as f32 / 40.0;
+        let pp = drop_hand(&grip(&drop_params(t), two_handed(Pose::Drop)), t);
+        let low = figure().vertices.iter().filter(|v| part_of(v.color) == Part::Rifle)
+            .map(|v| pose_vertex(Vec3::from(v.pos), Part::Rifle, &pp).z).fold(f32::MAX, f32::min);
+        assert!(low > 0.0, "drop at {t:.3}: rifle {low:.3} m, in the ground");
+    }
+}
+
+/// The hand plant's ground spot is turned into the arm's frame by undoing the upper-body chain exactly.
+#[test]
+fn unposing_the_upper_body_undoes_posing_it() {
+    use scalia_render::pose::{drop_params, pose_upper, unpose_upper};
+    for t in [0.0, 0.4, 0.6, 0.8, 0.95, 1.0] {
+        let mut p = drop_params(t);
+        (p.twist, p.tilt, p.bob) = (0.2, -0.1, 0.03);
+        for v in [Vec3::new(-0.3, 0.5, 0.8), Vec3::new(0.2, -0.1, 1.4)] {
+            let back = unpose_upper(pose_upper(v, &p), &p);
+            assert!(back.distance(v) < 1e-4, "at {t}: {v} came back as {back}");
+        }
+    }
+}

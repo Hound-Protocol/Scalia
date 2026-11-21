@@ -1552,6 +1552,32 @@ pub fn drop_keys(t: f32) -> (Pose, Pose, f32) {
     }
 }
 
+/// The left palm's plant on the drop (figure frame, feet at the origin, facing +y): Battlefield 3's way down is
+/// contact first, the hand goes to a spot on the ground and the body comes down over it, then the arm slides
+/// forward along the ground into the prone rest. Found by search.
+pub const DROP_HAND: [f32; 3] = [-0.28, 0.8, 0.04];
+/// On the drop phase: the hand reaches for the spot from here to here, holds it until the slide.
+pub const DROP_HAND_REACH: [f32; 2] = [0.38, 0.5];
+/// The slide forward into the prone rest, along the ground.
+pub const DROP_HAND_SLIDE: [f32; 2] = [0.8, 1.0];
+
+fn smooth(a: f32, b: f32, x: f32) -> f32 {
+    let u = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    u * u * (3.0 - 2.0 * u)
+}
+
+/// The drop's left hand at phase `t` (after the grip, as common.wgsl `animate` applies it): planted on the ground
+/// (`DROP_HAND`), then slid along it into wherever the pose's own hand is by the end (the prone rest).
+pub fn drop_hand(p: &PoseParams, t: f32) -> PoseParams {
+    let w = smooth(DROP_HAND_REACH[0], DROP_HAND_REACH[1], t);
+    if w <= 0.0 {
+        return *p;
+    }
+    let own = pose_upper(hand(p, Side::Left), p);
+    let s = smooth(DROP_HAND_SLIDE[0], DROP_HAND_SLIDE[1], t);
+    reach_left(p, unpose_upper(Vec3::from(DROP_HAND).lerp(own, s), p), w)
+}
+
 /// Most of the way over, the chest kept well down (so the head never rises as the body pivots from the knee to the
 /// boots), the left palm on the ground ahead taking the weight (found by search: 4 cm up, 0.8 m ahead of the
 /// boots); the rifle stays in the right hand.
@@ -1560,7 +1586,14 @@ fn drop_plant() -> PoseParams {
     let mut plant = blend(&kneel, &flat, 0.65);
     // The prone rifle-support rig adds a torso twist for aiming; the drop plant is a separate hand-braced
     // transition and must stay square to the planted palm.
-    plant.lean = 0.9;
+    plant.lean = 1.1;
+    plant.prone = 0.65;
+    // The rifle in the right hand tucked to the chest and turned across (searched: clear of the ground all the
+    // way into the prone rest, which has it across).
+    plant.shoulder[1] = 0.6;
+    plant.elbow[1] = 2.2;
+    plant.rifle = 0.0;
+    plant.rifle_yaw = 1.5;
     plant.twist = 0.0;
     // On both knees under him (search: knees about 20 cm up as drawn, boots on the ground), not floating.
     plant.hip = [0.9, 0.9];
@@ -1578,7 +1611,8 @@ fn drop_plant() -> PoseParams {
 /// ahead (search: about 15 cm up, 45 cm ahead), so he goes over onto the hand instead of rising off the knee.
 fn drop_reach() -> PoseParams {
     let mut reach = params(Pose::Crouch, 0.0);
-    reach.lean = 1.1;
+    reach.lean = 1.55;
+    reach.rifle = 0.9;
     reach.shoulder[0] = 1.0;
     reach.elbow[0] = 0.1;
     reach.reach[0] = 0.1;
@@ -1707,10 +1741,40 @@ pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         let a = p.prone.abs();
         // Onto his front the body keeps the transition height (PRONE_LIFT_MID) until the very end, then settles
         // flat (PRONE_LIFT): hips and legs on the ground only once he is fully down.
-        let lift = if p.prone > 0.0 { PRONE_LIFT_MID * a - (PRONE_LIFT_MID - PRONE_LIFT) * prone_settle(a) } else { SUPINE_LIFT * a };
-        q.z += lift + 0.12 * (std::f32::consts::PI * a).sin();
+        q.z += prone_lift(p.prone);
     }
     q
+}
+
+/// How far the body is lifted at prone amount `prone` (`pose_vertex`).
+fn prone_lift(prone: f32) -> f32 {
+    let a = prone.abs();
+    let lift = if prone > 0.0 { PRONE_LIFT_MID * a - (PRONE_LIFT_MID - PRONE_LIFT) * prone_settle(a) } else { SUPINE_LIFT * a };
+    lift + 0.12 * (std::f32::consts::PI * a).sin()
+}
+
+/// `pose_vertex`'s upper-body chain: a point posed in the arms' frame to the figure's frame.
+pub fn pose_upper(v: Vec3, p: &PoseParams) -> Vec3 {
+    let mut q = tilt(rot(turn(v, p.twist), 0.0, HIP_Z, -p.lean), p.tilt);
+    q.z += p.drop + p.bob;
+    if p.prone != 0.0 {
+        q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2 * p.prone);
+        q.z += prone_lift(p.prone);
+    }
+    q
+}
+
+/// The inverse of `pose_vertex`'s upper-body chain: where a point in the figure's frame (feet at the origin) is in
+/// the frame the arms are posed in, before twist, lean, tilt, drop and prone. common.wgsl `unpose_upper` mirrors it.
+pub fn unpose_upper(w: Vec3, p: &PoseParams) -> Vec3 {
+    let mut q = w;
+    if p.prone != 0.0 {
+        q.z -= prone_lift(p.prone);
+        q = rot(q, 0.0, 0.0, std::f32::consts::FRAC_PI_2 * p.prone);
+    }
+    q.z -= p.drop + p.bob;
+    q = tilt(q, -p.tilt);
+    turn(rot(q, 0.0, HIP_Z, p.lean), -p.twist)
 }
 
 /// Turns a point around the vertical through the figure's centre line (positive to the left).

@@ -22,6 +22,8 @@ fn main() {
             p = layer(&p, &params(u, phase));
         }
         let p = grip(&p, two_handed(upper.unwrap_or(legs)));
+        // The drop's left hand plants on the ground, as the shader does (pose.rs `drop_hand`).
+        let p = if legs == Pose::Drop { scalia_render::pose::drop_hand(&p, phase) } else { p };
         for v in &fig.vertices {
             let q = pose_vertex(Vec3::from(v.pos), part_of(v.color), &p);
             for f in [q.x, q.y, q.z, v.color] {
