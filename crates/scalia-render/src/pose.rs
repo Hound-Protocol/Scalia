@@ -1816,46 +1816,134 @@ pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32
     -low
 }
 
-/// Soft joints: how far either side of a joint (m, in the rest pose) a vertex is drawn partly with the part
-/// across it, so bending the joint stretches the skin instead of opening a gap (common.wgsl `SOFT_BAND`).
-pub const SOFT_BAND: f32 = 0.06;
-/// The shoulder seam's height and band (the deltoid cap over the shoulder pivot), and how far out from the centre
-/// line the torso's side of it starts (common.wgsl `SOFT_SHOULDER`).
-pub const SOFT_SHOULDER: [f32; 3] = [1.43, 0.08, 0.17];
+/// Seams: the soldier is one mesh cut into rigid parts, so each cut is a ring of vertices that belong to triangles
+/// of two parts. Posed rigidly with either part, a ring vertex lands in two places and the cut opens (gaps at the
+/// ankle, seat and crotch). `bake_seams` gives every vertex near a cut the part across it and a blend weight that
+/// depends only on where the vertex is: 0.5 on the cut, easing to none `SEAM_REACH` away, so all copies of a cut
+/// vertex land in one place. The thighs' shared seam at the crotch goes wholly with the pelvis. The blend rides in
+/// the colour code's fraction: `SEAM_SCALE` * fraction = other part * 256 + weight * 254 (254, so a cut's 0.5 is exact).
+pub const SEAM_SCALE: f32 = 4096.0;
+/// How far from a cut (m) its blend reaches: ankle, knee, hip, crotch, elbow, shoulder, neck. The ankle's stops short
+/// of the sole, which stays flat on the ground.
+pub const SEAM_REACH: [f32; 7] = [0.045, 0.07, 0.08, 0.06, 0.06, 0.07, 0.05];
 
-/// The part across the nearest joint from a vertex and how much of it the vertex takes (0.5 on the joint itself,
-/// none beyond the band): knees, hips, elbows and shoulders. common.wgsl `soft_joint` mirrors it.
-pub fn soft_joint(v: Vec3, part: Part) -> Option<(Part, f32)> {
-    let w = |joint: f32, band: f32| 0.5 * (1.0 - { let x = ((v.z - joint).abs() / band).clamp(0.0, 1.0); x * x * (3.0 - 2.0 * x) });
-    let left = v.x <= 0.0;
-    let (other, joint, band) = match part {
-        Part::LeftThigh | Part::RightThigh if v.z > (KNEE_Z + HIP_Z) * 0.5 => (Part::Torso, HIP_Z, SOFT_BAND),
-        Part::LeftThigh => (Part::LeftShin, KNEE_Z, SOFT_BAND),
-        Part::RightThigh => (Part::RightShin, KNEE_Z, SOFT_BAND),
-        Part::LeftShin => (Part::LeftThigh, KNEE_Z, SOFT_BAND),
-        Part::RightShin => (Part::RightThigh, KNEE_Z, SOFT_BAND),
-        Part::LeftArm | Part::RightArm if v.z > (ELBOW_Z + SOFT_SHOULDER[0]) * 0.5 => (Part::Torso, SOFT_SHOULDER[0], SOFT_SHOULDER[1]),
-        Part::LeftArm => (Part::LeftForearm, ELBOW_Z, SOFT_BAND),
-        Part::RightArm => (Part::RightForearm, ELBOW_Z, SOFT_BAND),
-        Part::LeftForearm => (Part::LeftArm, ELBOW_Z, SOFT_BAND),
-        Part::RightForearm => (Part::RightArm, ELBOW_Z, SOFT_BAND),
-        Part::Torso if v.z < HIP_Z + SOFT_BAND => (if left { Part::LeftThigh } else { Part::RightThigh }, HIP_Z, SOFT_BAND),
-        Part::Torso if v.x.abs() > SOFT_SHOULDER[2] && (v.z - SOFT_SHOULDER[0]).abs() < SOFT_SHOULDER[1] =>
-            (if left { Part::LeftArm } else { Part::RightArm }, SOFT_SHOULDER[0], SOFT_SHOULDER[1]),
+/// The joint pivot (rest pose) between two parts, and which `SEAM_REACH` applies; None if they share no joint.
+pub fn seam_joint(a: Part, b: Part) -> Option<(Vec3, usize)> {
+    use Part::*;
+    let x = |p: Part| if matches!(p, LeftThigh | LeftShin | LeftFoot) { -HIP_X } else if matches!(p, RightThigh | RightShin | RightFoot) { HIP_X } else if matches!(p, LeftArm | LeftForearm) { -SHOULDER_X } else { SHOULDER_X };
+    let (a, b) = if (a as u32) < (b as u32) { (a, b) } else { (b, a) };
+    Some(match (a, b) {
+        (LeftShin, LeftFoot) | (RightShin, RightFoot) => (Vec3::new(x(a), 0.0, ANKLE_Z), 0),
+        (LeftThigh, LeftShin) | (RightThigh, RightShin) => (Vec3::new(x(a), 0.0, KNEE_Z), 1),
+        (LeftThigh, Torso) | (RightThigh, Torso) => (Vec3::new(x(a), 0.0, HIP_Z), 2),
+        (LeftArm, LeftForearm) | (RightArm, RightForearm) => (Vec3::new(x(a), 0.0, ELBOW_Z), 4),
+        (LeftArm, Torso) | (RightArm, Torso) => (Vec3::new(x(a), 0.0, SHOULDER_Z), 5),
+        (Torso, Head) => (Vec3::new(0.0, 0.0, NECK_Z), 6),
         _ => return None,
-    };
-    let k = w(joint, band);
-    (k > 0.0).then_some((other, k))
+    })
 }
 
-/// Moves one vertex of a figure part into the pose (in the figure's frame, before heading and position), blended
-/// with the part across a joint near it (`soft_joint`).
-pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
-    let q = pose_rigid(v, part, p);
-    match soft_joint(v, part) {
-        Some((other, k)) => q.lerp(pose_rigid(v, other, p), k),
-        None => q,
+/// The part across the nearest cut and its blend weight, as `bake_seams` packed them into a colour code.
+pub fn seam_of(code: f32) -> Option<(Part, f32)> {
+    if code < 0.0 {
+        return None;
     }
+    let packed = ((code - code.floor()) * SEAM_SCALE).round() as u32;
+    let w = (packed & 255) as f32 / 254.0;
+    (w > 0.0).then(|| (crate::mesh::part_of((packed >> 8) as f32 * crate::mesh::PALETTE_SIZE as f32), w))
+}
+
+/// Works out the seam blends of a cut-up figure and packs them into its colour codes (see `SEAM_SCALE`).
+pub fn bake_seams(vertices: &mut [crate::mesh::Vertex]) {
+    use crate::mesh::part_of;
+    use std::collections::HashMap;
+    let key = |p: [f32; 3]| p.map(|c| (c * 1e4).round() as i32);
+    let mut parts: HashMap<[i32; 3], (Vec3, Vec<Part>)> = HashMap::new();
+    for v in vertices.iter() {
+        if v.color < 0.0 {
+            continue;
+        }
+        let e = parts.entry(key(v.pos)).or_insert((Vec3::from(v.pos), Vec::new()));
+        let part = part_of(v.color);
+        if !e.1.contains(&part) {
+            e.1.push(part);
+        }
+    }
+    // Cut vertices per pair of parts; a vertex both thighs share is the crotch, which the pelvis owns.
+    let crotch: Vec<Vec3> = parts.values().filter(|(_, ps)| ps.contains(&Part::LeftThigh) && ps.contains(&Part::RightThigh)).map(|(p, _)| *p).collect();
+    let mut cuts: HashMap<(u32, u32), (Part, Part, Vec<Vec3>)> = HashMap::new();
+    for (p, ps) in parts.values() {
+        if ps.contains(&Part::LeftThigh) && ps.contains(&Part::RightThigh) {
+            continue;
+        }
+        for &a in ps {
+            for &b in ps {
+                if a != b && seam_joint(a, b).is_some() {
+                    cuts.entry((a as u32, b as u32)).or_insert((a, b, Vec::new())).2.push(*p);
+                }
+            }
+        }
+    }
+    let near = |set: &[Vec3], at: Vec3| set.iter().map(|c| c.distance(at)).fold(f32::MAX, f32::min);
+    for v in vertices.iter_mut() {
+        if v.color < 0.0 {
+            continue;
+        }
+        let (at, part) = (Vec3::from(v.pos), part_of(v.color));
+        // (score: distance over reach, the part across, the weight on the cut itself)
+        let mut best: Option<(f32, Part, f32)> = None;
+        let mut take = |score: f32, other: Part, on_cut: f32| {
+            if score < 1.0 && best.map_or(true, |b| score < b.0) {
+                best = Some((score, other, on_cut));
+            }
+        };
+        for (a, b, set) in cuts.values() {
+            if *a == part {
+                take(near(set, at) / SEAM_REACH[seam_joint(*a, *b).unwrap().1], *b, 0.5);
+            }
+        }
+        if !crotch.is_empty() {
+            let d = near(&crotch, at) / SEAM_REACH[3];
+            match part {
+                Part::LeftThigh | Part::RightThigh => take(d, Part::Torso, 1.0),
+                Part::Torso => take(d, Part::Torso, 0.0),
+                _ => {}
+            }
+        }
+        if let Some((score, other, on_cut)) = best {
+            let w = on_cut * (1.0 - smooth(0.0, 1.0, score));
+            let q = (w * 254.0).round() as u32;
+            if q > 0 && other != part {
+                v.color = v.color.floor() + ((other as u32) * 256 + q) as f32 / SEAM_SCALE;
+            }
+        }
+    }
+}
+
+/// A figure vertex in the pose: its own part's motion, blended across a nearby cut as `bake_seams` packed into its
+/// colour code. The blend is a turn about the joint part way from one part's turn to the other's (each part's turn
+/// read off three posed points: the pivot and a step along x and y), so the skin round a bent knee, hip or shoulder
+/// keeps its shape: averaging the two positions instead pinches a deeply bent joint (the rubbery look).
+/// common.wgsl `pose_mesh_vertex` mirrors it.
+pub fn pose_mesh_vertex(v: Vec3, code: f32, p: &PoseParams) -> Vec3 {
+    let part = crate::mesh::part_of(code);
+    let Some((other, w)) = seam_of(code) else { return pose_rigid(v, part, p) };
+    let Some((j, _)) = seam_joint(part, other) else { return pose_rigid(v, part, p) };
+    let frame = |q: Part| {
+        let o = pose_rigid(j, q, p);
+        let x = (pose_rigid(j + Vec3::X * 0.1, q, p) - o).normalize();
+        let y = (pose_rigid(j + Vec3::Y * 0.1, q, p) - o).reject_from_normalized(x).normalize();
+        (o, glam::Quat::from_mat3(&glam::Mat3::from_cols(x, y, x.cross(y))))
+    };
+    let ((oa, qa), (ob, qb)) = (frame(part), frame(other));
+    let qb = if qa.dot(qb) < 0.0 { -qb } else { qb };
+    oa.lerp(ob, w) + qa.lerp(qb, w).normalize() * (v - j)
+}
+
+/// Moves a point carried by one figure part into the pose (in the figure's frame, before heading and position).
+/// Mesh vertices go through `pose_mesh_vertex`, which also closes the cuts between parts.
+pub fn pose_vertex(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
+    pose_rigid(v, part, p)
 }
 
 /// `pose_vertex` with the vertex carried by its own part alone.

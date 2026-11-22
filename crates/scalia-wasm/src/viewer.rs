@@ -4371,10 +4371,10 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
 
 /// The enemy's outfit: the same soldier with a red helmet and red plate carrier, readable at any distance.
 fn enemy_kit(mut f: MeshBuilder) -> MeshBuilder {
-    use scalia_render::mesh::{code, kit, palette_of, part_of};
+    use scalia_render::mesh::{kit, palette_of, recolour};
     for v in &mut f.vertices {
         if v.color >= 0.0 && matches!(palette_of(v.color) as u8, kit::HELMET | kit::VEST) {
-            v.color = code(ENEMY_RED, part_of(v.color));
+            v.color = recolour(v.color, ENEMY_RED);
         }
     }
     f
@@ -4397,7 +4397,7 @@ const ENEMY_POSTS: [((f32, f32), (f32, f32), Pose); 8] = [
 
 /// The commander's figure: the soldier in black, with the armband patches in the instance (team) colour.
 fn commander_figure() -> MeshBuilder {
-    use scalia_render::mesh::{code, kit, palette_of, part_of};
+    use scalia_render::mesh::{kit, palette_of, recolour};
     let mut f = figure();
     for v in &mut f.vertices {
         let to = match palette_of(v.color) as u8 {
@@ -4408,7 +4408,7 @@ fn commander_figure() -> MeshBuilder {
         };
         if let Some(p) = to {
             if v.color >= 0.0 {
-                v.color = code(p, part_of(v.color));
+                v.color = recolour(v.color, p);
             }
         }
     }

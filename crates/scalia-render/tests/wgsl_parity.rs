@@ -176,16 +176,22 @@ fn drop_hand_constants_match() {
     assert_eq!(get("DROP_HAND_SLIDE"), DROP_HAND_SLIDE.to_vec());
 }
 
-/// Soft joints: the shader's seams are the Rust ones (pose.rs `soft_joint`), constants and joint heights.
+/// Seams: the shader reads the blend as `bake_seams` packed it and turns about the same joint pivots
+/// (pose.rs `SEAM_SCALE`, `seam_joint`).
 #[test]
-fn soft_joint_constants_match() {
-    use scalia_render::pose::{SOFT_BAND, SOFT_SHOULDER, HIP_Z, KNEE_Z, ELBOW_Z};
+fn seam_constants_match() {
+    use scalia_render::mesh::part_of;
+    use scalia_render::pose::{seam_joint, SEAM_SCALE};
     let get = |name: &str| nums(WGSL.lines().find(|l| l.starts_with(&format!("const {name}:"))).unwrap_or("").split_once('=').map_or("", |x| x.1));
-    assert_eq!(get("SOFT_BAND"), vec![SOFT_BAND]);
-    assert_eq!(get("SOFT_SHOULDER"), SOFT_SHOULDER.to_vec());
-    let body = &WGSL[WGSL.find("fn soft_joint(").unwrap()..];
-    let body = &body[..body.find("\n}\n").unwrap()];
-    for (name, z) in [("HIP_Z", HIP_Z), ("KNEE_Z", KNEE_Z), ("ELBOW_Z", ELBOW_Z), ("thigh split", (KNEE_Z + HIP_Z) * 0.5)] {
-        assert!(nums(body).iter().any(|n| (n - z).abs() < 1e-4), "soft_joint is missing {name} {z}");
+    assert_eq!(get("SEAM_SCALE"), vec![SEAM_SCALE]);
+    let body = &WGSL[WGSL.find("fn seam_joint(").unwrap()..WGSL.find("fn quat_of(").unwrap()];
+    let re = Regex::new(r"a == (\d+)u && b == (\d+)u\) \{ return vec4f\(([^)]*)\)").unwrap();
+    let mut n = 0;
+    for c in re.captures_iter(body) {
+        let part = |i: usize| part_of(c[i].parse::<f32>().unwrap() * 32.0);
+        let (j, _) = seam_joint(part(1), part(2)).expect("a joint the Rust side knows");
+        assert_eq!(nums(&c[3])[..3], j.to_array(), "pivot between {:?} and {:?}", part(1), part(2));
+        n += 1;
     }
+    assert_eq!(n, 11, "every joint");
 }

@@ -2,7 +2,7 @@
 //! Per frame, per vertex: x, y, z, colour code (f32 little-endian), figure frame (facing +y).
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of};
-use scalia_render::pose::{params, pose_vertex, Pose};
+use scalia_render::pose::{params, pose_mesh_vertex, Pose};
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
@@ -13,7 +13,7 @@ fn main() {
     for k in 0..frames {
         let p = params(pose, k as f32 / frames as f32);
         for v in &fig.vertices {
-            let q = pose_vertex(Vec3::from(v.pos), part_of(v.color), &p);
+            let q = pose_mesh_vertex(Vec3::from(v.pos), v.color, &p);
             for f in [q.x, q.y, q.z, v.color] { out.extend_from_slice(&f.to_le_bytes()); }
         }
     }

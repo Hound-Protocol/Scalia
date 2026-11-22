@@ -4,7 +4,7 @@
 //! x, y, z, colour code (f32 little-endian), figure frame (facing +y).
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of};
-use scalia_render::pose::{grip, layer, params, params_dir, pose_vertex, two_handed, Pose};
+use scalia_render::pose::{grip, layer, params, params_dir, pose_mesh_vertex, two_handed, Pose};
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
@@ -25,7 +25,7 @@ fn main() {
         // The drop's left hand plants on the ground, as the shader does (pose.rs `drop_hand`).
         let p = if legs == Pose::Drop { scalia_render::pose::drop_hand(&p, phase) } else { p };
         for v in &fig.vertices {
-            let q = pose_vertex(Vec3::from(v.pos), part_of(v.color), &p);
+            let q = pose_mesh_vertex(Vec3::from(v.pos), v.color, &p);
             for f in [q.x, q.y, q.z, v.color] {
                 out.extend_from_slice(&f.to_le_bytes());
             }

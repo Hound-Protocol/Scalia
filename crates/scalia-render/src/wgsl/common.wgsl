@@ -919,38 +919,80 @@ fn reach_left(p: PP, goal: vec3f, w: f32, cap: f32) -> PP {
   return out;
 }
 
-// Soft joints (pose.rs SOFT_BAND, SOFT_SHOULDER, `soft_joint`): near a knee, hip, elbow or shoulder a vertex is
-// drawn partly with the part across the joint (half on the joint itself), so bending it opens no gap.
-const SOFT_BAND: f32 = 0.06;
-const SOFT_SHOULDER: vec3f = vec3f(1.43, 0.08, 0.17);
-// The part across the joint (x, as f32) and how much of it the vertex takes (y); y = 0 for none.
-fn soft_joint(v: vec3f, part: u32) -> vec2f {
-  let left = v.x <= 0.0;
-  var other = 0u;
-  var joint = 0.0;
-  var band = SOFT_BAND;
-  if ((part == 1u || part == 2u) && v.z > 0.67) { other = 8u; joint = 0.88; }
-  else if (part == 1u) { other = 6u; joint = 0.46; }
-  else if (part == 2u) { other = 7u; joint = 0.46; }
-  else if (part == 6u) { other = 1u; joint = 0.46; }
-  else if (part == 7u) { other = 2u; joint = 0.46; }
-  else if ((part == 3u || part == 4u) && v.z > (1.09 + SOFT_SHOULDER.x) * 0.5) { other = 8u; joint = SOFT_SHOULDER.x; band = SOFT_SHOULDER.y; }
-  else if (part == 3u) { other = 11u; joint = 1.09; }
-  else if (part == 4u) { other = 12u; joint = 1.09; }
-  else if (part == 11u) { other = 3u; joint = 1.09; }
-  else if (part == 12u) { other = 4u; joint = 1.09; }
-  else if (part == 8u && v.z < 0.88 + SOFT_BAND) { other = select(2u, 1u, left); joint = 0.88; }
-  else if (part == 8u && abs(v.x) > SOFT_SHOULDER.z && abs(v.z - SOFT_SHOULDER.x) < SOFT_SHOULDER.y) { other = select(4u, 3u, left); joint = SOFT_SHOULDER.x; band = SOFT_SHOULDER.y; }
-  else { return vec2f(0.0); }
-  let x = clamp(abs(v.z - joint) / band, 0.0, 1.0);
-  return vec2f(f32(other), 0.5 * (1.0 - x * x * (3.0 - 2.0 * x)));
+// Seams (pose.rs `bake_seams`, `seam_of`, `seam_joint`, `pose_mesh_vertex`): the soldier is one mesh cut into rigid
+// parts; a vertex near a cut carries, in its colour code's fraction, the part across it and a blend (0.5 on the cut),
+// and is turned part way from its own part's turn to the other's about the joint, so no cut opens and bent joints
+// keep their thickness.
+const SEAM_SCALE: f32 = 4096.0;
+// The part across the cut (x, as f32) and the blend (y; 0 for none).
+fn seam_of(c: f32) -> vec2f {
+  if (c < 0.0) { return vec2f(0.0); }
+  let packed = u32(round((c - floor(c)) * SEAM_SCALE));
+  return vec2f(f32(packed >> 8u), f32(packed & 255u) / 254.0);
+}
+// The joint pivot (rest pose) between two parts in xyz; w = 0 when they share none.
+fn seam_joint(p0: u32, p1: u32) -> vec4f {
+  let a = min(p0, p1);
+  let b = max(p0, p1);
+  if (a == 6u && b == 13u) { return vec4f(-0.1, 0.0, 0.085, 1.0); }
+  if (a == 7u && b == 14u) { return vec4f(0.1, 0.0, 0.085, 1.0); }
+  if (a == 1u && b == 6u) { return vec4f(-0.1, 0.0, 0.46, 1.0); }
+  if (a == 2u && b == 7u) { return vec4f(0.1, 0.0, 0.46, 1.0); }
+  if (a == 1u && b == 8u) { return vec4f(-0.1, 0.0, 0.88, 1.0); }
+  if (a == 2u && b == 8u) { return vec4f(0.1, 0.0, 0.88, 1.0); }
+  if (a == 3u && b == 11u) { return vec4f(-0.238, 0.0, 1.09, 1.0); }
+  if (a == 4u && b == 12u) { return vec4f(0.238, 0.0, 1.09, 1.0); }
+  if (a == 3u && b == 8u) { return vec4f(-0.238, 0.0, 1.4, 1.0); }
+  if (a == 4u && b == 8u) { return vec4f(0.238, 0.0, 1.4, 1.0); }
+  if (a == 8u && b == 10u) { return vec4f(0.0, 0.0, 1.46, 1.0); }
+  return vec4f(0.0);
+}
+// A rotation matrix's quaternion (xyz, w), as glam's Quat::from_mat3.
+fn quat_of(m: mat3x3f) -> vec4f {
+  if (m[2].z <= 0.0) {
+    let dif10 = m[1].y - m[0].x;
+    let omm22 = 1.0 - m[2].z;
+    if (dif10 <= 0.0) {
+      let f = omm22 - dif10; let i = 0.5 / sqrt(f);
+      return vec4f(f * i, (m[0].y + m[1].x) * i, (m[0].z + m[2].x) * i, (m[1].z - m[2].y) * i);
+    }
+    let f = omm22 + dif10; let i = 0.5 / sqrt(f);
+    return vec4f((m[0].y + m[1].x) * i, f * i, (m[1].z + m[2].y) * i, (m[2].x - m[0].z) * i);
+  }
+  let sum10 = m[1].y + m[0].x;
+  let opm22 = 1.0 + m[2].z;
+  if (sum10 <= 0.0) {
+    let f = opm22 - sum10; let i = 0.5 / sqrt(f);
+    return vec4f((m[0].z + m[2].x) * i, (m[1].z + m[2].y) * i, f * i, (m[0].y - m[1].x) * i);
+  }
+  let f = opm22 + sum10; let i = 0.5 / sqrt(f);
+  return vec4f((m[1].z - m[2].y) * i, (m[2].x - m[0].z) * i, (m[0].y - m[1].x) * i, f * i);
+}
+fn quat_rotate(q: vec4f, v: vec3f) -> vec3f {
+  return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+// A part's turn about a pivot, read off three posed points: (posed pivot, quaternion).
+struct Frame { o: vec3f, q: vec4f };
+fn part_frame(j: vec3f, part: u32, p: PP) -> Frame {
+  let o = pose_rigid(j, part, p);
+  let x = normalize(pose_rigid(j + vec3f(0.1, 0.0, 0.0), part, p) - o);
+  let y0 = pose_rigid(j + vec3f(0.0, 0.1, 0.0), part, p) - o;
+  let y = normalize(y0 - x * dot(y0, x));
+  return Frame(o, quat_of(mat3x3f(x, y, cross(x, y))));
 }
 
-fn pose_vertex(v: vec3f, part: u32, p: PP) -> vec3f {
-  let q = pose_rigid(v, part, p);
-  let s = soft_joint(v, part);
-  if (s.y <= 0.0) { return q; }
-  return mix(q, pose_rigid(v, u32(s.x), p), s.y);
+// A figure vertex in the pose, blended across a nearby cut (pose.rs `pose_mesh_vertex`).
+fn pose_mesh_vertex(v: vec3f, c: f32, part: u32, p: PP) -> vec3f {
+  let s = seam_of(c);
+  if (s.y <= 0.0) { return pose_rigid(v, part, p); }
+  let other = u32(s.x);
+  let j = seam_joint(part, other);
+  if (j.w <= 0.0) { return pose_rigid(v, part, p); }
+  let fa = part_frame(j.xyz, part, p);
+  let fb = part_frame(j.xyz, other, p);
+  let qb = select(fb.q, -fb.q, dot(fa.q, fb.q) < 0.0);
+  let q = normalize(mix(fa.q, qb, s.y));
+  return mix(fa.o, fb.o, s.y) + quat_rotate(q, v - j.xyz);
 }
 
 fn pose_rigid(v: vec3f, part: u32, p: PP) -> vec3f {
@@ -998,7 +1040,7 @@ fn prone_lift(prone: f32) -> f32 {
   return lift + 0.12 * sin(3.1415927 * ap);
 }
 
-// pose_vertex's upper-body chain and its inverse (pose.rs `pose_upper`, `unpose_upper`).
+// pose_rigid's upper-body chain and its inverse (pose.rs `pose_upper`, `unpose_upper`).
 fn tilt_hips(q: vec3f, a: f32) -> vec3f {
   let ts = sin(a);
   let tc = cos(a);
@@ -1144,7 +1186,7 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
       }
     }
     // Banking into a turn and leaning with acceleration.
-    q = tilt_figure(pose_vertex(v, part, pp), a);
+    q = tilt_figure(pose_mesh_vertex(v, c, part, pp), a);
   }
   return place_figure(q, a, b);
 }
@@ -1223,7 +1265,9 @@ fn tilt_of(a: vec4f) -> vec2f {
 fn select_level(a: vec4f) -> f32 {
   return select(0.0, floor(a.w / 64.0), a.w >= 64.0);
 }
-fn palette_index(c: f32, a0: vec4f) -> u32 {
+fn palette_index(c0: f32, a0: vec4f) -> u32 {
+  // The fraction carries the seam blend (pose.rs `bake_seams`), not colour.
+  let c = select(floor(c0), c0, c0 < 0.0);
   var a = a0;
   a.w = a.w - 64.0 * select_level(a0);
   // A squad leader (instance colour flagged +32): his helmet is drawn as a red beret.
