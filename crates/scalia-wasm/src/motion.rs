@@ -327,8 +327,7 @@ mod commander_motion_tests {
         let reload = (-b[2] - 1.0).clamp(0.0, 1.0);
         let w = ((time - d[1]) / 0.35).clamp(0.0, 1.0);
         let layer = d[2].floor();
-        let turn = d[2].fract() * std::f32::consts::TAU;
-        let dirn = if turn > std::f32::consts::PI { turn - std::f32::consts::TAU } else { turn };
+        let (_, dirn, lag) = pose::unpack_layer_lag(d[2]);
         let id = b[3].floor() as u32;
         let ph = |p: u32| if p == 18 { reload } else { phase };
         let mut pp = pose::params_dir(Pose::from_id(id), ph(id), dirn);
@@ -338,6 +337,7 @@ mod commander_motion_tests {
         let (was, lw) = pose::unpack_layer(d[3]);
         let _ = (was, lw);
         if b[2] == 0.0 { pp = pose::idle(&pp, Pose::from_id(id), time + b[1] * 97.0, b[1]); }
+        if pp.prone == 0.0 { pp.yaw += lag; }
         pp
     }
 

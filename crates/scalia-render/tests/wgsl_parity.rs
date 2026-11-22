@@ -133,12 +133,9 @@ fn idle_animation_constants_match_between_rust_and_wgsl() {
 
 #[test]
 fn crawl_directional_terms_match_in_rust_and_wgsl() {
-    assert!(RS.contains("phase * std::f32::consts::TAU + dir"), "Rust crawl phase uses travel direction");
-    assert!(WGSL.contains("phase * 6.2831853 + dir"), "WGSL crawl phase uses travel direction");
-    for term in ["0.16 * lateral", "0.12 * lateral", "0.08 * lateral", "0.04 * lateral"] {
-        let rust = RS.contains(term);
-        let shader = WGSL.contains(term);
-        assert_eq!(rust, shader, "crawl directional parameter parity for {term}");
+    // The high crawl reads HIGH_CRAWL in both; its direction terms are written by hand in each.
+    for term in ["(-0.2 - fwd) * 5.0", "0.3 * lateral", "0.4 * lateral", "-phase"] {
+        assert!(RS.contains(term) && WGSL.contains(term), "crawl direction term `{term}` must be in pose.rs and common.wgsl");
     }
 }
 
@@ -162,7 +159,10 @@ fn baked_clip_registry_matches() {
         seen += 1;
     }
     assert!(seen >= 1, "no baked clip tables found");
-    assert_eq!(at, CLIP_FLOATS);
+    // After the tables: the gaits' boot roll, built from the polished loops (pose.rs `clip_buffer`).
+    assert!(WGSL.contains(&format!("const GAIT_TOE_AT: u32 = {at}u;")), "GAIT_TOE_AT out of date");
+    assert_eq!(at, scalia_render::pose::GAIT_TOE_AT);
+    assert_eq!(at + scalia_render::pose::GAIT_TOE_FLOATS, CLIP_FLOATS);
     assert_eq!(clip_buffer().len() as u32, CLIP_FLOATS);
 }
 
@@ -203,4 +203,28 @@ fn blend_times_match() {
     let get = |name: &str| nums(WGSL.lines().find(|l| l.starts_with(&format!("const {name}:"))).unwrap_or("").split_once('=').map_or("", |x| x.1));
     assert_eq!(get("BLEND_S"), vec![BLEND_S]);
     assert_eq!(get("KNEEL_BLEND_S"), vec![KNEEL_BLEND_S]);
+}
+
+/// The arms' push-out (pose.rs `clear_arms`) is written into the shader by hand.
+#[test]
+fn clear_arms_constants_match() {
+    use scalia_render::pose::{ARM_R, ELBOW_X, ELBOW_Z, PALM, SHOULDER_X, SHOULDER_Z, TORSO_RX, TORSO_RY, TORSO_Z};
+    let body = &WGSL[WGSL.find("fn clear_arms(").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    for (what, v) in [
+        ("elbow x", ELBOW_X), ("elbow z", ELBOW_Z), ("palm z", PALM.z), ("mid forearm z", (ELBOW_Z + PALM.z) * 0.5), ("shoulder x", SHOULDER_X),
+        ("shoulder z", SHOULDER_Z), ("waist", TORSO_RX[0]), ("chest - waist", TORSO_RX[1] - TORSO_RX[0]), ("span", TORSO_Z[1] - TORSO_Z[0]),
+        ("low", TORSO_Z[0]), ("low - 0.05", TORSO_Z[0] - 0.05), ("top", TORSO_Z[1]), ("arm", ARM_R), ("depth", TORSO_RY + ARM_R),
+    ] {
+        assert!(nums(body).iter().any(|x| (x - v).abs() < 1e-4), "clear_arms in common.wgsl lacks {what} = {v}");
+    }
+    assert!((PALM.x - ELBOW_X).abs() < 1e-6 && PALM.y == 0.0, "the shader samples the hand at the elbow's x");
+}
+
+/// Rifle first: the shader unpacks the legs' lag with the same limit (pose.rs LEG_LAG_MAX).
+#[test]
+fn leg_lag_unpacks_the_same() {
+    use scalia_render::pose::LEG_LAG_MAX;
+    assert!(WGSL.contains(&format!("/ 127.0 * {LEG_LAG_MAX}")), "common.wgsl must scale the lag by LEG_LAG_MAX {LEG_LAG_MAX}");
+    assert!(WGSL.contains("round(fract(d.z) * 262144.0)"), "common.wgsl unpacks 18 bits of the layer fraction");
 }

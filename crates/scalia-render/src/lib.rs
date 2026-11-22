@@ -2,8 +2,11 @@
 
 pub mod bend;
 pub mod camera;
+pub mod contact;
+pub mod crawl;
 pub mod mesh;
 pub mod pose;
+pub mod prims;
 pub mod shaders;
 pub mod skeleton;
 pub mod skin;

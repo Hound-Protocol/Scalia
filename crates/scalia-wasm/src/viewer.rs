@@ -2609,7 +2609,8 @@ impl Viewer {
             use std::f32::consts::{FRAC_PI_2, PI};
             use scalia_render::pose::stride_m_dir;
             let walk = |dir: f32| 1.2 / stride_m_dir(Pose::Walk, dir);
-            let aimed_crawl = |dir| (Pose::Crawl, 0.55 / stride_m_dir(Pose::Crawl, dir), Some(Pose::ProneAim), dir);
+            // The high crawl in four directions (aiming, he stops and goes flat: anim.rs).
+            let aimed_crawl = |dir| (Pose::Crawl, 0.55 / stride_m_dir(Pose::Crawl, dir), None, dir);
             let combo: Option<(Pose, f32, Option<Pose>, f32)> = match self.preview_pose {
                 Some(9) => Some((Pose::Walk, walk(0.0), Some(Pose::StandAim), 0.0)),
                 Some(10) => Some((Pose::Walk, walk(FRAC_PI_2), Some(Pose::StandAim), FRAC_PI_2)),

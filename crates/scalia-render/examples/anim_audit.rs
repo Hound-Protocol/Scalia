@@ -25,21 +25,23 @@ fn feet(p: &PoseParams, pts: &[[(Vec3, Part); 2]; 2]) -> [[Vec3; 2]; 2] {
 }
 
 /// Planted boot against the ground over a cycle at `speed` in direction `dir`, with the game's cadence: each step
-/// the lower boot (heel and toe midpoint) counts while it is down (within 1.5 cm of its lowest). Returns the
+/// the lower boot counts while it is down (its lower end within 1.5 cm of its lowest), by the point it stands on
+/// (heel or toe, whichever is lower: a rolling boot pivots on it, so its middle moves even though nothing slides). Returns the
 /// mean and worst slide (m/s) and the stride the legs cover (m per cycle, median of the planted boot's sweep).
 fn planted_slide(pose: Pose, dir: f32, speed: f32, pts: &[[(Vec3, Part); 2]; 2]) -> (f32, f32, f32) {
     let travel = Vec3::new(-dir.sin(), dir.cos(), 0.0);
     let hz = speed / stride_m_dir(pose, dir);
     let dt = 1.0 / hz / N as f32;
     let f: Vec<[[Vec3; 2]; 2]> = (0..=N).map(|k| feet(&params_dir(pose, k as f32 / N as f32, dir), pts)).collect();
-    let floor: [f32; 2] = std::array::from_fn(|i| (0..N).map(|k| f[k][i][0].z.max(f[k][i][1].z)).fold(f32::MAX, f32::min));
+    let floor: [f32; 2] = std::array::from_fn(|i| (0..N).map(|k| f[k][i][0].z.min(f[k][i][1].z)).fold(f32::MAX, f32::min));
     let (mut slides, mut sweeps) = (Vec::new(), Vec::new());
     for k in 0..N {
         // The sample points sit a little above the sole: count a boot as down within 1.5 cm of its own lowest.
-        let low = |i: usize, k: usize| f[k][i][0].z.max(f[k][i][1].z) - floor[i];
+        let low = |i: usize, k: usize| f[k][i][0].z.min(f[k][i][1].z) - floor[i];
         let i = if low(0, k) <= low(1, k) { 0 } else { 1 };
         if low(i, k) < 0.015 && low(i, k + 1) < 0.015 {
-            let c = |k: usize| (f[k][i][0] + f[k][i][1]) * 0.5;
+            let j = if f[k][i][0].z <= f[k][i][1].z { 0 } else { 1 };
+            let c = |k: usize| f[k][i][j];
             let v = (c(k + 1) - c(k)) / dt + travel * speed;
             slides.push(Vec3::new(v.x, v.y, 0.0).length());
             sweeps.push(-(c(k + 1) - c(k)).dot(travel) * N as f32);

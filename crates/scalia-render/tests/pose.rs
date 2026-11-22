@@ -160,9 +160,8 @@ fn prone_soldier_lifts_his_head_rests_on_his_elbows_and_shoulders_the_rifle() {
 fn prone_and_crawl_keep_the_rifle_in_both_hands() {
     use scalia_render::pose::params_dir;
     let dirs = [0.0, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
-    // AN-03-S8: the unaimed low crawl frees the left hand to crawl; crawling aimed (ProneAim over the crawl's legs)
-    // keeps both hands on the rifle.
-    for (pose, upper) in [(Pose::Prone, None), (Pose::Crawl, Some(Pose::ProneAim))] {
+    // Prone at rest and aiming keep both hands on the rifle (moving aimed, he goes flat on the prone legs).
+    for (pose, upper) in [(Pose::Prone, None), (Pose::Prone, Some(Pose::ProneAim))] {
         let held_by = upper.unwrap_or(pose);
         assert_eq!(two_handed(held_by), 1.0, "{held_by:?} must use the support-hand IK");
         for &dir in &dirs {
@@ -195,26 +194,11 @@ fn prone_aim_is_flat_supported_and_points_the_rifle_forward() {
 }
 
 #[test]
-fn prone_aim_keeps_the_same_legs_at_rest_and_an_independent_upper_body_in_motion() {
-    use scalia_render::pose::{layer, params_dir};
+fn prone_aim_keeps_the_prone_legs() {
+    // Aiming prone (also while moving: anim.rs keeps the prone legs under the aim) keeps the prone legs.
     let rest = params(Pose::Prone, 0.0);
     let aim = params(Pose::ProneAim, 0.0);
     assert_eq!((rest.hip, rest.knee, rest.side, rest.drop), (aim.hip, aim.knee, aim.side, aim.drop));
-
-    let (tip_at_rest, bore_at_rest) = barrel_with_phases(RIFLE, Pose::ProneAim, None, 0.0, 0.0, 0.0);
-    for dir in [0.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, -std::f32::consts::FRAC_PI_2] {
-        for i in 0..24 {
-            let phase = i as f32 / 24.0;
-            let crawl = params_dir(Pose::Crawl, phase, dir);
-            let p = layer(&crawl, &aim);
-            assert_eq!((p.hip, p.knee, p.side, p.drop), (crawl.hip, crawl.knee, crawl.side, crawl.drop));
-            let (tip, bore) = barrel_with_phases(RIFLE, Pose::Crawl, Some(Pose::ProneAim), phase, 0.0, dir);
-            // The leg grounding offset acts fore-aft once the rig is horizontal; it must not tilt the rifle.
-            let expected_tip = tip_at_rest + Vec3::Y * (crawl.drop - rest.drop);
-            assert!(tip.distance(expected_tip) < 0.001, "muzzle drifts during aimed crawl at {dir:.2}/{phase:.2}: {tip:?}");
-            assert!(bore.distance(bore_at_rest) < 0.001, "bore drifts during aimed crawl at {dir:.2}/{phase:.2}: {bore:?}");
-        }
-    }
 }
 
 #[test]
@@ -611,14 +595,19 @@ fn crouched_walk_stays_low_and_holds_the_rifle() {
 
 #[test]
 fn layer_and_direction_share_one_instance_value() {
-    use scalia_render::pose::{pack_layer, unpack_layer};
-    for upper in [None, Some(Pose::StandAim), Some(Pose::CrouchWalk)] {
+    use scalia_render::pose::{pack_layer, pack_layer_lag, unpack_layer, unpack_layer_lag, LEG_LAG_MAX};
+    for upper in [None, Some(Pose::StandAim), Some(Pose::CrouchWalk), Some(Pose::ProneAim)] {
         for dir in [0.0f32, 1.5707964, -1.5707964, 3.1, -3.1, 0.3] {
             let (whole, d) = unpack_layer(pack_layer(upper, dir));
             assert_eq!(whole, upper.map_or(0.0, |p| p as u32 as f32 + 1.0));
-            assert!((d - dir).abs() < 1e-3, "{upper:?} {dir} -> {d}");
+            assert!((d - dir).abs() < 4e-3, "{upper:?} {dir} -> {d}");
+            for lag in [0.0f32, 0.5, -0.5, LEG_LAG_MAX, -LEG_LAG_MAX, 0.01] {
+                let (w, d2, l) = unpack_layer_lag(pack_layer_lag(upper, dir, lag));
+                assert!(w == whole && (d2 - d).abs() < 1e-6 && (l - lag).abs() < 4e-3, "{upper:?} {dir} {lag} -> {w} {d2} {l}");
+            }
         }
     }
+    assert_eq!(unpack_layer_lag(pack_layer(None, 1.0)).2, 0.0, "no lag reads back as exactly none");
     // A plain whole number (what instances without a direction carry) means straight ahead.
     assert_eq!(unpack_layer(7.0), (7.0, 0.0));
 }
@@ -760,29 +749,6 @@ fn baked_forward_crawl_loops_without_a_seam() {
     }
 }
 
-/// AN-02-S05: through the whole crawl cycle the elbows stay on the ground, the head stays up off it, and the
-/// rifle stays out in front, so the crawl never lifts its elbows or drags its face.
-#[test]
-fn crawl_keeps_elbows_on_the_ground_and_head_up_through_the_cycle() {
-    let (mut worst_elbow, mut worst_at) = (f32::MIN, 0.0);
-    let (mut low_face, mut low_head) = (f32::MAX, f32::MAX);
-    for k in 0..32 {
-        let phase = k as f32 / 32.0;
-        let v = posed(Pose::Crawl, phase);
-        let of = |part: Part| v.iter().filter(move |p| p.0 == part).map(|p| p.1).collect::<Vec<Vec3>>();
-        let min = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MAX), |a, b| a.min(*b));
-        let max = |pts: &[Vec3]| pts.iter().fold(Vec3::splat(f32::MIN), |a, b| a.max(*b));
-        for arm in [Part::LeftArm, Part::RightArm] {
-            let z = min(&of(arm)).z;
-            if z > worst_elbow { worst_elbow = z; worst_at = phase; }
-        }
-        low_face = low_face.min(min(&of(Part::Head)).z);
-        low_head = low_head.min(max(&of(Part::Head)).z);
-    }
-    assert!(worst_elbow < 0.1, "worst elbow {worst_elbow:.3} m at phase {worst_at:.3}");
-    assert!(low_face > 0.03, "face in the ground ({low_face:.3} m)");
-    assert!(low_head > 0.2, "head too low ({low_head:.3} m)");
-}
 
 #[test]
 fn crawl_keeps_both_shins_near_the_ground() {
@@ -814,59 +780,7 @@ fn prone_hips_and_legs_rest_on_the_ground() {
     }
 }
 
-#[test]
-fn crawl_draws_the_knee_up_sideways_without_lifting_the_shin() {
-    // AN-02-S10: with the full knee draw from the reference, leg roll keeps the drawn shin low (0.32 m without it).
-    let mut worst = 0.0f32;
-    let mut drawn = 0.0f32;
-    for k in 0..48 {
-        let ph = k as f32 / 48.0;
-        drawn = drawn.max(params(Pose::Crawl, ph).knee[1]);
-        let v = posed(Pose::Crawl, ph);
-        for shin in [Part::LeftShin, Part::RightShin] {
-            worst = worst.max(v.iter().filter(|p| p.0 == shin).map(|p| p.1.z).fold(f32::MIN, f32::max));
-        }
-    }
-    assert!(drawn > 2.0, "the right knee tucks up fully as in the reference ({drawn:.2})");
-    assert!(worst < 0.28, "a shin rises to {worst:.2} m in the crawl (reference trailing ankle: 17-21 cm)");
-}
 
-#[test]
-fn forward_crawl_legs_follow_the_reference_not_a_splay() {
-    // AN-02-S11: the legs never both swing wide (the old side-swing formula splayed both out to about 60 deg);
-    // each leg draws out in its own half of the stride (both legs work in turn), never both at once.
-    use scalia_render::pose::params_dir;
-    for k in 0..24 {
-        let p = params_dir(Pose::Crawl, k as f32 / 24.0, 0.0);
-        assert!(p.side[0].abs() < 0.9 && p.side[1].abs() < 0.9, "no splay: side {:?}", p.side);
-        assert!(p.side[0].abs() + p.side[1].abs() < 1.2, "both legs out wide at once: side {:?}", p.side);
-    }
-}
-
-#[test]
-fn baked_backward_crawl_holds_the_rifle_and_stays_on_the_ground() {
-    // AN-02-S12: crawling backwards follows the reference loop (CRAWL_BACK) through every phase: the support hand
-    // on the handguard, no part of the legs below the ground, the drawn-up shin kept low.
-    use scalia_render::pose::params_dir;
-    let f = figure();
-    let (mut miss, mut low, mut shin_top) = (0.0f32, f32::MAX, 0.0f32);
-    for k in 0..96 {
-        let p = grip(&params_dir(Pose::Crawl, k as f32 / 96.0, std::f32::consts::PI), 1.0);
-        miss = miss.max(hand(&p, Side::Left).distance(held(RIFLE_GUARD, &p)));
-        for v in &f.vertices {
-            let part = part_of(v.color);
-            if matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot) {
-                let q = pose_vertex(Vec3::from(v.pos), part, &p);
-                low = low.min(q.z);
-                if matches!(part, Part::LeftShin | Part::RightShin) { shin_top = shin_top.max(q.z); }
-            }
-        }
-    }
-    eprintln!("backward crawl: hand miss {miss:.3} m, lowest leg point {low:.3} m, shin top {shin_top:.3} m");
-    assert!(miss < 0.05, "support hand off the handguard by {miss:.3} m");
-    assert!(low > -0.03, "a leg sinks {:.3} m into the ground", -low);
-    assert!(shin_top < 0.30, "a shin rises to {shin_top:.2} m");
-}
 
 /// A sprint swings the shoulders, but not the whole upper body a third of a turn each way: that reads as the body
 /// buzzing from side to side at full speed (the baked Mixamo sprint swings a one-handed rifle).
@@ -946,23 +860,6 @@ fn prone_rests_the_rifle_across_and_aims_it_ahead() {
     assert!(aim.y > 0.9 && aim.z.abs() < 0.3, "aimed rifle should point ahead, level: bore {aim:?}");
 }
 
-/// The low crawl (not aiming): the elbows reach ahead and pull back in turn, half a stride apart, the left reaching
-/// as the right knee draws up; the legs stay close to the body; the rifle lies across the forearms, so the left hand
-/// is free (no support grip).
-#[test]
-fn low_crawl_pulls_with_the_elbows_in_turn_against_the_opposite_knee() {
-    use scalia_render::pose::params_dir;
-    let ps: Vec<PoseParams> = (0..48).map(|i| params_dir(Pose::Crawl, i as f32 / 48.0, 0.0)).collect();
-    let peak = |f: &dyn Fn(&PoseParams) -> f32| (0..48).max_by(|&a, &b| f(&ps[a]).total_cmp(&f(&ps[b]))).unwrap() as i32;
-    let (l, r) = (peak(&|p| p.shoulder[0]), peak(&|p| p.shoulder[1]));
-    let swing = ps.iter().map(|p| p.shoulder[0]).fold(f32::MIN, f32::max) - ps.iter().map(|p| p.shoulder[0]).fold(f32::MAX, f32::min);
-    assert!(swing > 0.6, "left elbow barely reaches: {swing:.2} rad");
-    assert!((18..=30).contains(&(l - r).rem_euclid(48)), "elbows reach {} / 48 apart", (l - r).rem_euclid(48));
-    let knee_r = peak(&|p| p.knee[1]);
-    assert!((l - knee_r).rem_euclid(48) <= 6 || (knee_r - l).rem_euclid(48) <= 6, "left elbow {l} and right knee {knee_r} out of step");
-    assert!(ps.iter().all(|p| p.side[0].abs() <= 0.5 && p.side[1].abs() <= 0.5), "legs splay out");
-    assert_eq!(two_handed(Pose::Crawl), 0.0, "the left hand crawls");
-}
 
 /// S9: going down and getting up share one drop; through the plant window the left palm must be on the ground
 /// (it takes the weight), the way the reference drop works in Battlefield 3: hand down first, then over.

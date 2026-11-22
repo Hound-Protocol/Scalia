@@ -402,6 +402,9 @@ impl Assault {
             if let Some(loud) = f.footfall.filter(|_| placed.is_some()) {
                 self.sounds.push(Sound { x: x / 1000.0, y: y / 1000.0, blast: false, step: Some(loud), at: self.now, cue: Cue::None });
             }
+            // Lying prone he turns about his hips: drawn shifted from his position (anim `Frame::shift`).
+            let (x, y) = (x + f.shift.0 as f64 * 1000.0, y + f.shift.1 as f64 * 1000.0);
+            let placed = if f.shift == (0.0, 0.0) { placed } else { placed.and_then(|_| place(x / 1000.0, y / 1000.0)) };
             let Some((rx, ry, z)) = placed else { continue };
             // The squad's leader is flagged (+32 on the colour) so the shader gives him his red beret.
             let leader = if self.battle.leader_of(s.squad as usize) == Some(i) { 32.0 } else { 0.0 };

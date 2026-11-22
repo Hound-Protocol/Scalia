@@ -187,6 +187,15 @@ pub struct PoseParams {
     /// left), the upper body and the rifle staying on the facing. Riflemen walk and strafe with the hips turned
     /// towards their steps and the chest on the aim (AN-02-S13, from the reference clips).
     pub yaw: f32,
+    /// Height added after the body tips prone (metres): the high crawl holds the body off the ground on elbows and
+    /// knees. Applied to every part; 0 in every other pose.
+    pub raise: f32,
+    /// Extra turn of each leg about its hip, on top of `leg_roll_angle`'s (radians, as that angle): the high crawl
+    /// turns a thigh out while its shin runs back along the ground. 0 in every other pose.
+    pub roll: [f32; 2],
+    /// Each boot's roll about its ankle (radians, positive lifts the toe): heel strike, toe-off and the toe hanging
+    /// in the swing (Patch: Animations 2). The baked gaits carry it with their legs solved to match (`polish_loop`).
+    pub toe: [f32; 2],
 }
 
 /// The rifle slung on the back: rolled flat (magazine inwards), muzzle down, hung diagonally from the right
@@ -523,13 +532,17 @@ pub fn prone_settle(a: f32) -> f32 {
 /// kneeling and the drop are unchanged; straight prone legs (knee under `LEG_ROLL_FROM`) are not rolled.
 pub fn leg_roll_angle(p: &PoseParams, i: usize) -> f32 {
     let t = ((p.knee[i] - LEG_ROLL_FROM) / (LEG_ROLL_FULL - LEG_ROLL_FROM)).clamp(0.0, 1.0);
-    let r = std::f32::consts::FRAC_PI_2 * prone_settle(p.prone.max(0.0)) * t * t * (3.0 - 2.0 * t);
+    // Only lying flat: raised on the knees (the high crawl, `raise`) the legs kneel straight down.
+    let flat = 1.0 - (p.raise / LEG_ROLL_RAISE).clamp(0.0, 1.0);
+    let r = std::f32::consts::FRAC_PI_2 * prone_settle(p.prone.max(0.0)) * t * t * (3.0 - 2.0 * t) * flat;
     // Inward: the bent knee tucks the foot in behind it, as in the reference crawl (fits the reference to 7 cm,
     // against 30 cm turning outward).
-    if i == 0 { r } else { -r }
+    (if i == 0 { r } else { -r }) + p.roll[i]
 }
 pub const LEG_ROLL_FROM: f32 = 0.2;
 pub const LEG_ROLL_FULL: f32 = 0.4;
+/// Body raise (m) at which the leg roll is gone (`leg_roll_angle`).
+pub const LEG_ROLL_RAISE: f32 = 0.1;
 
 /// A leg point turned by `leg_roll_angle` about the vertical through its hip (the leg's own axis when straight).
 fn leg_roll(q: Vec3, p: &PoseParams, i: usize) -> Vec3 {
@@ -542,8 +555,8 @@ fn leg_roll(q: Vec3, p: &PoseParams, i: usize) -> Vec3 {
 }
 
 /// A foot point: ankle bend, then the leg. `prone` points the foot back (`PRONE_POINT`) as he lies down.
-fn foot(q: Vec3, hip: f32, knee: f32, flat: f32, prone: f32) -> Vec3 {
-    leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat) + PRONE_POINT * prone_settle(prone.max(0.0))), hip, knee)
+fn foot(q: Vec3, hip: f32, knee: f32, flat: f32, prone: f32, toe: f32) -> Vec3 {
+    leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat) + PRONE_POINT * prone_settle(prone.max(0.0)) + toe), hip, knee)
 }
 
 /// Crouched gait in any direction (see `gait_dir`): each foot's target moves in a straight line at an even speed
@@ -630,16 +643,37 @@ pub fn stride_scale(dir: f32) -> f32 {
 /// and the way the soldier moves from his facing (fractional part: `dir` as a share of a turn). Every instance
 /// slot is taken, so the two share one float; a whole number alone still means "moving straight ahead".
 pub fn pack_layer(upper: Option<Pose>, dir: f32) -> f32 {
+    pack_layer_lag(upper, dir, 0.0)
+}
+
+/// How far the legs may trail the upper body when he turns on the spot (rad, `pack_layer_lag`).
+pub const LEG_LAG_MAX: f32 = 0.9;
+
+/// `pack_layer` with the legs' lag behind the upper body (rad, within `LEG_LAG_MAX`; positive: legs turned to the
+/// left of the chest). Patch: Animations 2, rifle first: the chest and rifle turn and the feet follow. The fraction
+/// holds the direction in 1/1024 turns and the lag in 127ths of `LEG_LAG_MAX` (signed, 0 being none), 18 bits in all,
+/// which an f32 keeps exactly for any upper pose id. common.wgsl `animate` unpacks it.
+pub fn pack_layer_lag(upper: Option<Pose>, dir: f32, lag: f32) -> f32 {
     let whole = upper.map_or(0.0, |p| p as u32 as f32 + 1.0);
-    let turn = (dir / std::f32::consts::TAU).rem_euclid(1.0);
-    whole + if turn >= 0.9999 { 0.0 } else { turn }
+    let dq = ((dir / std::f32::consts::TAU).rem_euclid(1.0) * 1024.0).round() as i32 % 1024;
+    let lq = ((lag / LEG_LAG_MAX).clamp(-1.0, 1.0) * 127.0).round() as i32;
+    whole + (dq + lq.rem_euclid(256) * 1024) as f32 / 262144.0
+}
+
+/// The inverse of `pack_layer_lag`: (upper pose id + 1 or 0, dir in -pi..pi, legs' lag).
+pub fn unpack_layer_lag(v: f32) -> (f32, f32, f32) {
+    let whole = v.floor();
+    let f = ((v - whole) * 262144.0).round() as i32;
+    let (dq, lraw) = (f % 1024, f / 1024);
+    let d = dq as f32 / 1024.0 * std::f32::consts::TAU;
+    let lq = if lraw >= 128 { lraw - 256 } else { lraw };
+    (whole, if d > std::f32::consts::PI { d - std::f32::consts::TAU } else { d }, lq as f32 / 127.0 * LEG_LAG_MAX)
 }
 
 /// The inverse of `pack_layer` (as common.wgsl reads it): (upper pose id + 1 or 0, dir in -pi..pi).
 pub fn unpack_layer(v: f32) -> (f32, f32) {
-    let whole = v.floor();
-    let d = (v - whole) * std::f32::consts::TAU;
-    (whole, if d > std::f32::consts::PI { d - std::f32::consts::TAU } else { d })
+    let (whole, d, _) = unpack_layer_lag(v);
+    (whole, d)
 }
 
 /// Ground covered per gait cycle moving in direction `dir` (see `stride_m`); the cadence is speed / this.
@@ -681,7 +715,7 @@ pub fn stride_m(pose: Pose) -> f32 {
     }
 }
 /// One crawl cycle (both arms) moves him this far (m).
-pub const CRAWL_STRIDE: f32 = 0.6;
+pub const CRAWL_STRIDE: f32 = crate::crawl::STRIDE;
 pub const WALK_STRIDE: f32 = GAIT_STRIDE[0][0];
 pub const RUN_STRIDE: f32 = GAIT_STRIDE[1][0];
 pub const SPRINT_STRIDE: f32 = GAIT_STRIDE[2][0];
@@ -693,110 +727,6 @@ pub const CROUCH_STRIDE: f32 = 1.0;
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
 pub fn params(pose: Pose, phase: f32) -> PoseParams {
     params_dir(pose, phase, 0.0)
-}
-
-/// AN-02-S06: forward crawl baked from the reference clip (Prone Forward). One loop of 24 samples, fields in
-/// order: knee L, knee R, hip L, hip R, shoulder L, shoulder R, elbow L, elbow R, twist, head.
-pub const CRAWL_FWD_BAKE: [[f32; 10]; 24] = [
-    [0.5798, 0.9948, 0.2597, 0.2838, 1.4744, 1.7901, 2.1390, 1.8476, -0.2758, 0.9824],
-    [0.6183, 1.0000, 0.2583, 0.2694, 1.5024, 1.8133, 2.1131, 1.8261, -0.2900, 1.0000],
-    [0.5339, 0.8971, 0.2259, 0.2868, 1.4621, 1.8200, 2.1504, 1.8200, -0.2681, 0.9716],
-    [0.4700, 0.7691, 0.2150, 0.3070, 1.4168, 1.7356, 2.1922, 1.8979, -0.2443, 0.9485],
-    [0.4251, 0.6277, 0.2037, 0.3340, 1.4353, 1.6729, 2.1751, 1.9558, -0.2429, 0.9435],
-    [0.3523, 0.4203, 0.1800, 0.3703, 1.4865, 1.6490, 2.1279, 1.9778, -0.2517, 0.9472],
-    [0.2680, 0.2115, 0.1994, 0.3800, 1.5698, 1.6332, 2.0510, 1.9924, -0.2631, 0.9555],
-    [0.2576, 0.0812, 0.2616, 0.3270, 1.6807, 1.5950, 1.9486, 2.0277, -0.2721, 0.9584],
-    [0.2716, 0.0500, 0.3224, 0.2425, 1.7554, 1.4500, 1.8796, 2.1615, -0.2497, 0.9526],
-    [0.1984, 0.0765, 0.3800, 0.2188, 1.8156, 1.3000, 1.8240, 2.3000, -0.2101, 0.9322],
-    [0.1358, 0.0976, 0.2830, 0.2481, 1.8177, 1.3264, 1.8221, 2.2756, -0.1941, 0.9167],
-    [0.1004, 0.1041, 0.2791, 0.2563, 1.7981, 1.4088, 1.8402, 2.1996, -0.1904, 0.9051],
-    [0.1629, 0.1159, 0.2449, 0.2628, 1.7795, 1.4453, 1.8574, 2.1659, -0.1900, 0.8939],
-    [0.0701, 0.1483, 0.2741, 0.2368, 1.8091, 1.4147, 1.8300, 2.1941, -0.1918, 0.8800],
-    [0.0500, 0.1992, 0.3277, 0.2134, 1.8200, 1.3862, 1.8200, 2.2204, -0.2065, 0.8836],
-    [0.1978, 0.2755, 0.3670, 0.1995, 1.8189, 1.3832, 1.8210, 2.2232, -0.2146, 0.8947],
-    [0.3198, 0.3653, 0.3764, 0.1918, 1.8041, 1.4134, 1.8347, 2.1953, -0.2233, 0.9029],
-    [0.4111, 0.4641, 0.3774, 0.1963, 1.7213, 1.4387, 1.9111, 2.1719, -0.2275, 0.9065],
-    [0.5030, 0.5658, 0.3602, 0.1859, 1.5913, 1.5265, 2.0311, 2.0909, -0.2333, 0.9263],
-    [0.5990, 0.6772, 0.3329, 0.1800, 1.4203, 1.6669, 2.1889, 1.9614, -0.2447, 0.9480],
-    [0.6360, 0.8120, 0.3061, 0.2196, 1.3419, 1.7513, 2.2613, 1.8834, -0.2495, 0.9582],
-    [0.6009, 0.9125, 0.2866, 0.2493, 1.3698, 1.7780, 2.2356, 1.8587, -0.2551, 0.9673],
-    [0.5964, 0.9697, 0.2689, 0.2708, 1.4304, 1.7784, 2.1796, 1.8584, -0.2669, 0.9733],
-    [0.5681, 0.9912, 0.2614, 0.2812, 1.4646, 1.7884, 2.1480, 1.8492, -0.2733, 0.9778],
-];
-
-/// AN-02-S11: forward crawl legs solved from the reference clip by position: per sample, the hip, knee and
-/// side swing that put our knees and ankles where the reference's are (scaled to our leg length), fitted by
-/// least squares (knee error 7 cm, ankle 7 cm on average). Order: hip L, hip R, knee L, knee R, side L, side R.
-pub const CRAWL_FWD_LEGS: [[f32; 6]; 24] = [
-    [0.0608, 0.0918, 0.1294, 1.0186, -0.4782, 0.1925],
-    [0.0230, 0.0924, 0.1295, 1.0199, -0.4637, 0.1932],
-    [0.0341, 0.1271, 0.1442, 1.1766, -0.4322, 0.2278],
-    [0.0422, 0.1786, 0.1606, 1.3913, -0.3983, 0.2793],
-    [0.0385, 0.2532, 0.1651, 1.6404, -0.3612, 0.3539],
-    [0.0437, 0.3734, 0.1474, 1.9935, -0.3131, 0.4741],
-    [0.0517, 0.5165, 0.1298, 2.3391, -0.2728, 0.6172],
-    [0.0269, 0.6429, 0.1196, 2.4000, -0.2635, 0.7436],
-    [0.0081, 0.6909, 0.1159, 2.4000, -0.2753, 0.7916],
-    [0.0445, 0.6752, 0.1152, 2.4000, -0.2635, 0.7759],
-    [0.1132, 0.6635, 0.1204, 2.4000, -0.2230, 0.7642],
-    [0.1517, 0.6599, 0.1221, 2.4000, -0.2173, 0.7607],
-    [0.1684, 0.6442, 0.1240, 2.4000, -0.2103, 0.7450],
-    [0.2425, 0.6098, 0.1297, 2.4000, -0.2237, 0.7105],
-    [0.2888, 0.5472, 0.1383, 2.3986, -0.2640, 0.6480],
-    [0.2663, 0.4405, 0.1509, 2.2749, -0.3418, 0.5413],
-    [0.2249, 0.3272, 0.1580, 2.1198, -0.4478, 0.4279],
-    [0.1805, 0.2385, 0.1675, 1.9488, -0.5230, 0.3392],
-    [0.1434, 0.1705, 0.1790, 1.7718, -0.5775, 0.2712],
-    [0.1163, 0.1175, 0.1867, 1.5773, -0.6173, 0.2182],
-    [0.0967, 0.0859, 0.1734, 1.4184, -0.6369, 0.1866],
-    [0.1012, 0.0626, 0.1631, 1.2518, -0.6203, 0.1634],
-    [0.0914, 0.0677, 0.1616, 1.1299, -0.5644, 0.1685],
-    [0.1028, 0.0796, 0.1486, 1.0597, -0.5110, 0.1803],
-];
-
-/// Interpolates `CRAWL_FWD_LEGS` at `phase` (one loop, wraps at 1.0).
-/// Both legs in turn from a reference crawl that draws only one knee up. `d` and `t` are the drawing and the
-/// trailing leg (hip, knee, side) at this phase, `dh` and `th` half a stride later; `draw` is the knee range over
-/// which a leg goes from trailing to drawing. The drawing side follows the draw and, out of it, trails like the
-/// mirrored trailing leg; the other side mirrors the draw half a stride later and otherwise trails as the
-/// reference does (so an extended leg is always the reference's, flat on the ground). Returns (drawing side,
-/// other side). common.wgsl `crawl_alternate` mirrors this.
-pub fn crawl_alternate(d: [f32; 3], t: [f32; 3], dh: [f32; 3], th: [f32; 3], draw: [f32; 2]) -> ([f32; 3], [f32; 3]) {
-    let w = |k: f32| {
-        let x = ((k - draw[0]) / (draw[1] - draw[0])).clamp(0.0, 1.0);
-        x * x * (3.0 - 2.0 * x)
-    };
-    let mix = |a: [f32; 3], b: [f32; 3], u: f32| -> [f32; 3] { std::array::from_fn(|i| a[i] + (b[i] - a[i]) * u) };
-    let mirror = |x: [f32; 3]| [x[0], x[1], -x[2]];
-    (mix(mirror(th), d, w(d[1])), mix(t, mirror(dh), w(dh[1])))
-}
-/// The low crawl's elbows (shoulder angle, rad): pulled back under the chest, and how much further a reach goes;
-/// and how much of the reference legs' side swing is kept (the full swing splays the legs out like a frog's).
-pub const CRAWL_ELBOW_BACK: f32 = 1.2;
-pub const CRAWL_ELBOW_REACH: f32 = 1.1;
-pub const CRAWL_SIDE: f32 = 0.55;
-/// Knee ranges over which a crawling leg goes from trailing to drawing up (rad): forward, backward.
-pub const CRAWL_FWD_DRAW: [f32; 2] = [1.1, 1.9];
-pub const CRAWL_BACK_DRAW: [f32; 2] = [0.5, 1.2];
-
-fn crawl_legs(phase: f32) -> [f32; 6] {
-    let x = phase.rem_euclid(1.0) * 24.0;
-    let i0 = (x.floor() as usize) % 24;
-    let i1 = (i0 + 1) % 24;
-    let f = x - x.floor();
-    std::array::from_fn(|k| CRAWL_FWD_LEGS[i0][k] + (CRAWL_FWD_LEGS[i1][k] - CRAWL_FWD_LEGS[i0][k]) * f)
-}
-
-/// Interpolates the baked forward crawl at `phase` (one loop, wraps at 1.0).
-fn crawl_bake(phase: f32) -> [f32; 10] {
-    let x = phase.rem_euclid(1.0) * 24.0;
-    let i0 = (x.floor() as usize) % 24;
-    let i1 = (i0 + 1) % 24;
-    let f = x - x.floor();
-    std::array::from_fn(|k| {
-        let (a, b) = (CRAWL_FWD_BAKE[i0][k], CRAWL_FWD_BAKE[i1][k]);
-        a + (b - a) * f
-    })
 }
 
 /// Interpolates a baked clip table (`scripts/clip_table.py`) at `phase`: one loop, wrapping at 1.0.
@@ -816,9 +746,19 @@ pub fn clip_at<const F: usize>(t: &[[f32; F]], phase: f32) -> [f32; F] {
 pub const GAIT_ROWS: usize = 48;
 type GaitLoop = [[f32; 11]; GAIT_ROWS];
 fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
-    static WALK: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
-    static RUN: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
-    static SPRINT: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
+    gait_polished(pose).map(|l| std::array::from_fn(|i| &l[i].0))
+}
+
+/// The boot roll that goes with each of `gait_loops` (same order).
+fn gait_toes(pose: Pose) -> Option<[&'static ToeLoop; 8]> {
+    gait_polished(pose).map(|l| std::array::from_fn(|i| &l[i].1))
+}
+
+/// The baked loops, polished, with their boot roll.
+fn gait_polished(pose: Pose) -> Option<&'static [(GaitLoop, ToeLoop); 8]> {
+    static WALK: std::sync::OnceLock<[(GaitLoop, ToeLoop); 8]> = std::sync::OnceLock::new();
+    static RUN: std::sync::OnceLock<[(GaitLoop, ToeLoop); 8]> = std::sync::OnceLock::new();
+    static SPRINT: std::sync::OnceLock<[(GaitLoop, ToeLoop); 8]> = std::sync::OnceLock::new();
     let (cell, raw) = match pose {
         Pose::Walk => (&WALK, [&WALK_F, &WALK_FL, &WALK_L, &WALK_BL, &WALK_B, &WALK_BR, &WALK_R, &WALK_FR]),
         Pose::Run => (&RUN, [&RUN_F, &RUN_FL, &RUN_L, &RUN_BL, &RUN_B, &RUN_BR, &RUN_R, &RUN_FR]),
@@ -828,6 +768,7 @@ fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
     // Ahead and back the legs are straightened; the strafes keep their hip turn (it is how they step sideways).
     let rise = GAIT_RISE[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
     let strafe = PLANT_STRAFE[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
+    let roll = FOOT_ROLL[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
     let loops = cell.get_or_init(|| {
         let mut i = 0;
         raw.map(|l| {
@@ -835,10 +776,10 @@ fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
             // Only going ahead stands taller: backing up and the strafes reach the solver's knee limit with it.
             let up = if i == 0 { rise } else { 0.0 };
             i += 1;
-            if straight { polish_loop(&centre_leg_yaw(&smooth_lift(l)), true, PLANT_STRAIGHT, up) } else { polish_loop(&smooth_lift(l), false, strafe, 0.0) }
+            if straight { polish_loop(&centre_leg_yaw(&smooth_lift(l)), true, PLANT_STRAIGHT, up, roll) } else { polish_loop(&smooth_lift(l), false, strafe, 0.0, roll) }
         })
     });
-    Some(std::array::from_fn(|i| &loops[i]))
+    Some(loops)
 }
 
 /// Where a leg's boot is for a baked row (legs frame): the ankle, which a planted boot pivots about.
@@ -863,7 +804,7 @@ const PLANT_STRAFE: [[f32; 2]; 3] = [[0.2, 0.6], [0.4, 1.0], [0.6, 1.4]];
 /// legs differed by up to 0.6 rad). The work is done on where the boots are, then the legs are solved to put them
 /// there, so a planted boot stays planted. The body's sway follows suit: odd fields (legs turn, twist, tilt) mirror
 /// about their mean, even ones (lean, lift) average with half a cycle on.
-fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLoop {
+fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32, roll: [f32; 3]) -> (GaitLoop, ToeLoop) {
     let n = GAIT_ROWS;
     let h = n / 2;
     let px = [-HIP_X, HIP_X];
@@ -920,13 +861,15 @@ fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLo
             .collect();
         off
     };
+    let target: Vec<[Vec3; 2]> = (0..n).map(|k| [0, 1].map(|i| want[k][i] + (smoothed[k][i] - want[k][i]) * airborne[k][i])).collect();
+    let (toe, lift) = foot_roll(&target, &sway, roll, mirror);
     let mut out = *l;
     // Each row's solve starts from the row before (twice round, so the seam starts from the loop's own end): left
     // to start from the clip's own angles, the solver can land on another solution and the leg jumps.
     let mut prev = [0, 1].map(|i| Vec3::new(l[0][i], l[0][2 + i], l[0][4 + i]));
     for pass in 0..2 {
         for k in 0..n {
-            let foot = |i: usize| want[k][i] + (smoothed[k][i] - want[k][i]) * airborne[k][i];
+            let foot = |i: usize| target[k][i] + lift[k][i];
             let r = &mut out[k];
             if pass == 0 {
                 for f in 0..5 {
@@ -936,7 +879,10 @@ fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLo
             for i in 0..2 {
                 // Strafes keep the clip's own angles as the start (their legs cross, and chaining can drift).
                 let start = if mirror { prev[i] } else { Vec3::new(l[k][i], l[k][2 + i], l[k][4 + i]) };
-                let v = solve_boot(&gait_boot, foot(i), start, r[6], px[i]);
+                // The leg turns about its hip by the row's `roll` so the planted boot keeps its heading.
+                let tw = toe[k][2 + i];
+                let boot = |h: f32, kn: f32, sd: f32, yw: f32, x: f32| turn(sideways(roll_about(leg(Vec3::new(x, 0.0, ANKLE_Z), h, kn), tw, x), sd, x), yw);
+                let v = solve_boot(&boot, foot(i), start, r[6], px[i]);
                 prev[i] = v;
                 r[i] = v.x;
                 r[2 + i] = v.y;
@@ -944,7 +890,136 @@ fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLo
             }
         }
     }
-    out
+    (out, toe)
+}
+
+/// A baked loop's boot roll per row, left and right (radians, positive lifts the toe), then each leg's turn about
+/// its hip (`PoseParams::roll`) that keeps a planted boot's heading while the pelvis turns through the stride.
+pub type ToeLoop = [[f32; 4]; GAIT_ROWS];
+
+/// A leg point turned by `a` about the vertical through its hip at `x0` (as `leg_roll`).
+fn roll_about(q: Vec3, a: f32, x0: f32) -> Vec3 {
+    let (s, c) = a.sin_cos();
+    let dx = q.x - x0;
+    Vec3::new(x0 + dx * c - q.y * s, dx * s + q.y * c, q.z)
+}
+
+/// Where the boot pivots as the heel lifts, ahead of the ankle (m): its toe end. The boot is rigid, so rolling about
+/// the ball would push the toe end into the ground (and skid it).
+pub const BALL_Y: f32 = TOE_Y;
+/// Boot roll per gait (radians): toe up at heel strike, heel up at toe-off, toe hanging mid-swing; walk, run, sprint.
+/// Share of `FOOT_ROLL` the strafing loops get.
+pub const STRAFE_ROLL: f32 = 0.3;
+pub const FOOT_ROLL: [[f32; 3]; 3] = [[0.21, -0.61, -0.17], [0.14, -0.70, -0.26], [0.05, -0.30, -0.30]];
+
+/// Foot roll for a polished loop (Patch: Animations 2): per row, each boot's roll and how far its ankle must move so
+/// the point it rolls on stays where it is. Planted (the longest run of rows the boot holds still), it strikes on
+/// the heel toe-up and rolls flat, then lifts the heel and pivots on the ball to toe-off; in the air the toe hangs
+/// and comes up for the next strike. Going backwards the boot lands on the ball and leaves from the heel; stepping
+/// sideways it rolls less, by how far the step runs along the boot.
+fn foot_roll(target: &[[Vec3; 2]], sway: &[[f32; 5]], roll: [f32; 3], straight: bool) -> (ToeLoop, Vec<[Vec3; 2]>) {
+    let n = GAIT_ROWS;
+    let mut toe = [[0.0f32; 4]; GAIT_ROWS];
+    let mut lift = vec![[Vec3::ZERO; 2]; n];
+    let ease = |t: f32| {
+        let t = t.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    for i in 0..2 {
+        // Planted: the boot at its lowest (a runner's boot is in the air most of the time, so not its commonest speed).
+        let low = (0..n).map(|k| target[k][i].z).fold(f32::MAX, f32::min);
+        let planted: Vec<bool> = (0..n).map(|k| target[k][i].z < low + 0.03).collect();
+        // The longest planted run (round the loop): its first and last rows.
+        let mut best = (0, 0);
+        for s0 in 0..n {
+            if planted[s0] && !planted[(s0 + n - 1) % n] {
+                let len = (0..n).take_while(|d| planted[(s0 + d) % n]).count();
+                if len > best.1 {
+                    best = (s0, len);
+                }
+            }
+        }
+        let (s0, len) = best;
+        if len < 4 || len == n {
+            continue;
+        }
+        // Which way the planted boot sweeps against the way it points: back (walking ahead) or forward (backing up).
+        let sweep = target[(s0 + len - 1) % n][i] - target[s0][i];
+        let fwd = |_: usize| turn(Vec3::Y, sway[(s0 + len / 2) % n][0]);
+        let along = sweep.dot(fwd(s0)) / sweep.length().max(1e-4);
+        let (k_on, k_off) = (-along.min(0.0), along.max(0.0));
+        // Strafing steps (legs crossing) roll half as much: flatter-footed, and their plant is looser.
+        let gain = along.abs() * if straight { 1.0 } else { STRAFE_ROLL };
+        let (strike, off, hang) = (roll[0] * gain, roll[1] * gain, roll[2] * gain);
+        // Ahead: heel first, ball last. Backwards: ball first, heel last.
+        let (land_y, leave_y, land, leave) = if k_on >= k_off { (HEEL_Y, BALL_Y, strike, off) } else { (BALL_Y, HEEL_Y, off * 0.6, roll[0].max(0.2) * 1.5 * gain) };
+        let a = (0.15 * len as f32).max(1.0);
+        let b = (0.35 * len as f32).max(1.0);
+        let mut theta = vec![0.0f32; n];
+        let mut pivot_y = vec![0.0f32; n];
+        for d in 0..n {
+            let k = (s0 + d) % n;
+            let d = d as f32;
+            let l = len as f32;
+            theta[k] = if d < l {
+                if d < a {
+                    pivot_y[k] = land_y;
+                    land * (1.0 - ease(d / a))
+                } else if d > l - 1.0 - b {
+                    pivot_y[k] = leave_y;
+                    leave * ease((d - (l - 1.0 - b)) / b)
+                } else {
+                    0.0
+                }
+            } else {
+                // In the air: from the toe-off roll to the hang, then up to the next strike.
+                let t = (d - l + 1.0) / (n as f32 - l + 1.0);
+                if t < 0.5 { leave + (hang - leave) * ease(t * 2.0) } else { hang + (land - hang) * ease(t * 2.0 - 1.0) }
+            };
+        }
+        // Planted: the ankle moves so the rolling point stays put. In the air the move eases from lift-off's to
+        // the landing's.
+        let shift = |k: usize| {
+            let f = fwd(k);
+            let o = f * pivot_y[k] - Vec3::Z * ANKLE_Z;
+            let q = glam::Quat::from_axis_angle(f.cross(Vec3::Z).normalize(), theta[k]);
+            o + q * -o - Vec3::ZERO
+        };
+        // Heading: planted, the leg turns against the pelvis so the boot points where it landed pointing (mid-stance
+        // heading, so the hold is even either side); in the air it eases from lift-off's turn to the landing's.
+        let mid = sway[(s0 + len / 2) % n][0];
+        let hold = |k: usize| (mid - sway[k][0]) * gain;
+        let (h_end, h_land) = (hold((s0 + len - 1) % n), hold(s0));
+        for d in 0..n {
+            let k = (s0 + d) % n;
+            toe[k][2 + i] = if d < len {
+                hold(k)
+            } else {
+                let t = (d - len + 1) as f32 / (n - len + 1) as f32;
+                h_end + (h_land - h_end) * ease(t)
+            };
+        }
+        let (k_end, k_land) = ((s0 + len - 1) % n, (s0 + n) % n);
+        let (from, to) = (shift(k_end), shift(k_land));
+        for d in 0..n {
+            let k = (s0 + d) % n;
+            toe[k][i] = theta[k];
+            lift[k][i] = if d < len {
+                shift(k)
+            } else {
+                let t = (d - len + 1) as f32 / (n - len + 1) as f32;
+                from + (to - from) * ease(t)
+            };
+        }
+    }
+    // A light pass round the loop over both (the same weights, so the rolling point still stays put): the roll's
+    // starts and stops would otherwise kink the solved legs.
+    let k: Vec<f32> = (-3..=3).map(|d: i32| (-(d * d) as f32 / 2.0).exp()).collect();
+    let sum: f32 = k.iter().sum();
+    let at = |j: usize, d: usize| (j + n + d - 3) % n;
+    let toe_s: ToeLoop = std::array::from_fn(|j| [0, 1, 2, 3].map(|i| (0..7).map(|d| toe[at(j, d)][i] * k[d]).sum::<f32>() / sum));
+    let lift_s: Vec<[Vec3; 2]> = (0..n).map(|j| [0, 1].map(|i| (0..7).map(|d| lift[at(j, d)][i] * k[d]).sum::<Vec3>() / sum)).collect();
+    (toe_s, lift_s)
 }
 
 /// A baked loop with its body lift (field 10) smoothed round the cycle. The clips' lift steps up for the airborne
@@ -1052,9 +1127,9 @@ fn smooth_lift(l: &GaitLoop) -> GaitLoop {
 /// the sweep `examples/fit_clip` pins each planted boot to (its `plant: boots sweep` line; examples/gait_strides
 /// measures it back). The game sets the cadence from it, so the boot on the ground stays put.
 pub const GAIT_STRIDE: [[f32; 8]; 3] = [
-    [1.57, 1.58, 1.67, 1.81, 1.62, 1.69, 1.64, 1.63], // Walk
-    [1.91, 1.67, 1.64, 1.85, 1.84, 1.52, 1.91, 2.02], // Run
-    [2.70, 2.66, 3.18, 3.18, 3.20, 2.80, 2.85, 2.86], // Sprint
+    [1.53, 1.56, 1.63, 1.80, 1.56, 1.67, 1.60, 1.62], // Walk
+    [1.89, 1.67, 1.64, 1.84, 1.79, 1.53, 1.93, 2.02], // Run
+    [2.65, 2.65, 3.17, 3.18, 3.14, 2.78, 2.84, 2.85], // Sprint
 ];
 
 /// Which eighth-of-a-turn loop `dir` falls in and how far towards the next (0..1).
@@ -1067,6 +1142,15 @@ fn gait_sector(dir: f32) -> (usize, usize, f32) {
 /// The baked gait at `phase` moving in `dir`: the two nearest loops blended. Fields: hip L, R, knee L, R,
 /// side L, R, pelvis turn, then lean, twist, tilt as motion around the pose's own, then the body lift (the
 /// lowest the body may sit: it stands the reference's planted boot on the ground and lifts both clear in flight).
+/// The baked gaits' boot roll at `phase` moving in `dir` (left, right), blended as `gait_bake`; 0 for other poses.
+/// Fields: boot roll left, right, then each leg's heading turn (`PoseParams::roll`) left, right.
+pub fn gait_toe(pose: Pose, phase: f32, dir: f32) -> [f32; 4] {
+    let Some(toes) = gait_toes(pose) else { return [0.0; 4] };
+    let (i, j, w) = gait_sector(dir);
+    let (a, b) = (clip_at(toes[i], phase), clip_at(toes[j], phase));
+    std::array::from_fn(|f| a[f] + (b[f] - a[f]) * w)
+}
+
 pub fn gait_bake(pose: Pose, phase: f32, dir: f32) -> Option<[f32; 11]> {
     let loops = gait_loops(pose)?;
     let (i, j, w) = gait_sector(dir);
@@ -1346,91 +1430,31 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 0.12;
         }
         Pose::Crawl => {
-            let fwd = dir.cos();
-            let lateral = dir.sin();
-            let lat_abs = lateral.abs();
-            let s = (phase * std::f32::consts::TAU + dir).sin();
-            let c = (phase * std::f32::consts::TAU + dir).cos();
-            // Alternating left/right knee drive: left pulls on -c, right pulls on +c.
-            let draw = [0.5 - 0.5 * c, 0.5 + 0.5 * c];
+            // Patch: Animations 2 high crawl: on elbows and knees, the body off the ground, the rifle cradled across
+            // the forearms in the right hand (`HIGH_CRAWL`, solved by `crawl.rs`). Backwards plays the loop in
+            // reverse; sideways keeps the stroke and leans the knees and chest toward the side.
+            // common.wgsl mirrors this.
+            let (fwd, lateral) = (dir.cos(), dir.sin());
+            let wb = ((-0.2 - fwd) * 5.0).clamp(0.0, 1.0);
+            let (a, b) = (clip_at(&HIGH_CRAWL, phase), clip_at(&HIGH_CRAWL, -phase));
+            let r: [f32; 21] = std::array::from_fn(|k| a[k] + (b[k] - a[k]) * wb);
             p.prone = 1.0;
-            // Right arm and rifle surge fore-and-aft while grip() keeps the left support hand on the handguard,
-            // driving both elbows forward to plant and pull the chest along the ground.
-            // Arms follow the knee draw (reference: right forearm peaks within 0.03 s of the right knee), so the
-            // arms and the legs on each side move together instead of a quarter cycle apart.
-            let surge = c * (1.0 - 0.35 * lat_abs);
-            p.shoulder = [2.8, 1.56 + 0.26 * surge];
-            p.elbow = [1.3, 2.06 - 0.24 * surge];
-            p.reach = [0.0, 0.42 + 0.12 * c * (1.0 - 0.3 * lat_abs)];
-            p.abduct = [0.0, 0.62 + 0.16 * lat_abs + 0.12 * surge.abs()];
-            p.rifle_yaw = 0.52 - 0.10 * surge - 0.08 * lateral;
-            // Keep hip pitch near zero so knees never plunge underground, while swinging side outward (~65 deg)
-            // in proportion to knee bend so the bent shin and boot stay flat on the ground rather than rising.
-            // Hips stay at the prone value (AN-02-S09): lying down, more hip bend drives the knee into the ground.
-            p.hip = [0.18, 0.16];
-            // Per-leg knee draw (AN-02-S04, reference clips): the right knee draws further than the left, as in
-            // the reference forward crawl (right knee swing about 91 deg, left about 18 deg).
-            // Both legs work in turn, each drawing its knee up in its half of the stride.
-            p.knee = [0.05 + (0.95 - 0.22 * lat_abs) * draw[0], 0.05 + (0.95 - 0.22 * lat_abs) * draw[1]];
-            let (lead_l, lead_r) = ((-lateral).max(0.0), lateral.max(0.0));
-            p.side = [
-                -0.14 - (1.08 - 0.18 * lat_abs) * draw[0] - 0.24 * lead_l + 0.08 * lead_r,
-                0.14 + (1.08 - 0.18 * lat_abs) * draw[1] + 0.24 * lead_r - 0.08 * lead_l,
-            ];
-            p.bob = 0.0;
-            p.twist = -0.24 + (0.03 + 0.02 * fwd) * s + 0.18 * lateral;
-            p.tilt = 0.0;
-            p.lean = -0.08;
-            p.look = 0.24 - 0.16 * s - 0.18 * lateral;
-            p.rifle = std::f32::consts::FRAC_PI_2;
-            p.head = 0.94 + 0.06 * fwd.max(0.0);
-            // AN-02-S06: straight-ahead crawl follows the baked reference loop; turning out of line blends back
-            // to the procedural terms above (weight = forward component).
-            let w = fwd.max(0.0);
-            let b = crawl_bake(phase);
-            let m = |a: f32, t: f32| a + (t - a) * w;
-            // The reference draws only the right knee (the left leg drags); the left plays the right's draw
-            // mirrored, half a stride later, so both legs work in turn.
-            let l = crawl_legs(phase);
-            let o = crawl_legs(phase + 0.5);
-            let (r, lf) = crawl_alternate([l[1], l[3], l[5]], [l[0], l[2], l[4]], [o[1], o[3], o[5]], [o[0], o[2], o[4]], CRAWL_FWD_DRAW);
-            p.hip = [m(p.hip[0], lf[0]), m(p.hip[1], r[0])];
-            p.knee = [m(p.knee[0], lf[1]), m(p.knee[1], r[1])];
-            p.side = [m(p.side[0], lf[2]), m(p.side[1], r[2])];
-            p.shoulder = [m(p.shoulder[0], b[4]), m(p.shoulder[1], b[5])];
-            p.elbow = [m(p.elbow[0], b[6]), m(p.elbow[1], b[7])];
-            p.twist = m(p.twist, b[8]);
-            p.head = m(p.head, b[9]);
-            // AN-02-S12: crawling backwards follows the baked reference loop the same way (weight = backward
-            // component). The right arm carries the rifle; grip() keeps the left hand on the handguard.
-            let wb = (-fwd).max(0.0);
-            // Its reference draws only the left knee: the right plays the left's draw mirrored, half a stride later.
-            let k = clip_at(&CRAWL_BACK, phase);
-            let kb = clip_at(&CRAWL_BACK, phase + 0.5);
-            let (lf, r) = crawl_alternate([k[0], k[2], k[4]], [k[1], k[3], k[5]], [kb[0], kb[2], kb[4]], [kb[1], kb[3], kb[5]], CRAWL_BACK_DRAW);
-            let mb = |a: f32, t: f32| a + (t - a) * wb;
-            p.hip = [mb(p.hip[0], lf[0]), mb(p.hip[1], r[0])];
-            p.knee = [mb(p.knee[0], lf[1]), mb(p.knee[1], r[1])];
-            p.side = [mb(p.side[0], lf[2]), mb(p.side[1], r[2])];
-            p.shoulder[1] = mb(p.shoulder[1], k[6]);
-            p.elbow[1] = mb(p.elbow[1], k[7]);
-            p.reach[1] = mb(p.reach[1], k[8]);
-            p.abduct[1] = mb(p.abduct[1], k[9]);
-            p.twist = mb(p.twist, k[10]);
-            // AN-03-S8 low crawl (the aimed crawl takes its arms from the ProneAim layer): the rifle lies across the
-            // forearms in the right hand, the left hand free; the elbows reach ahead and pull back under the chest
-            // in turn, the left reaching as the right knee draws up; the legs stay closer in.
-            let reach = [0.5 - 0.5 * c, 0.5 + 0.5 * c];
-            p.shoulder = [CRAWL_ELBOW_BACK + CRAWL_ELBOW_REACH * reach[0], CRAWL_ELBOW_BACK + CRAWL_ELBOW_REACH * reach[1]];
-            p.elbow = [2.5 - 1.4 * reach[0], 2.5 - 1.4 * reach[1]];
-            p.reach = [0.0, 0.0];
-            p.abduct = [0.0, 0.0];
+            p.hip = [r[0], r[1]];
+            p.knee = [r[2], r[3]];
+            p.side = [r[4] + 0.3 * lateral, r[5] + 0.3 * lateral];
+            p.shoulder = [r[6], r[7]];
+            p.elbow = [r[8], r[9]];
+            p.abduct = [r[10], r[11]];
+            p.reach = [r[12], r[13]];
+            p.lean = r[14];
+            p.raise = r[15];
+            p.twist = r[16];
+            p.head = r[17];
+            p.yaw = r[18];
+            p.roll = [r[19], r[20]];
+            p.look = -0.4 * lateral;
             p.rifle = 0.0;
             p.rifle_yaw = std::f32::consts::FRAC_PI_2;
-            p.twist = 0.08 * s;
-            p.look = -0.08 * s;
-            p.head = 0.75;
-            p.side = [p.side[0] * CRAWL_SIDE, p.side[1] * CRAWL_SIDE];
         }
         Pose::Drop => return drop_params(phase),
         Pose::DropReach => return drop_reach(),
@@ -1495,9 +1519,18 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             g[9] *= RUN_TILT;
         }
         apply_gait(&mut p, g);
+        let t = gait_toe(pose, phase, dir);
+        p.toe = [t[0], t[1]];
+        p.roll = [t[2], t[3]];
         g[10]
     });
-    p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat).max(lift);
+    p.drop = ground_drop_toe(p.hip, p.knee, p.side, p.flat, p.toe).max(lift);
+    clear_arms(&mut p);
+    if pose == Pose::Crawl {
+        // Lying down the grounding offset runs fore and aft: the crawl keeps the prone legs' value so the body does
+        // not surge with the stroke, and nothing shifts between lying and crawling. common.wgsl mirrors this.
+        p.drop = ground_drop_side([0.18, 0.16], [0.06, 0.04], [0.0, 0.0], 0.0);
+    }
     p
 }
 
@@ -1736,9 +1769,9 @@ pub fn wgsl_literal(p: &PoseParams) -> String {
     let f = |x: f32| format!("{x:.6}");
     let v = |a: [f32; 2]| format!("vec2f({}, {})", f(a[0]), f(a[1]));
     format!(
-        "PP({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        "PP({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
         f(p.lean), v(p.hip), v(p.knee), v(p.shoulder), v(p.elbow), f(p.head), f(p.rifle), f(p.prone), f(p.drop),
-        v(p.reach), f(p.sling), f(p.bob), f(p.twist), f(p.look), v(p.abduct), f(p.rifle_yaw), v(p.side), f(p.flat), f(p.tilt), f(p.yaw)
+        v(p.reach), f(p.sling), f(p.bob), f(p.twist), f(p.look), v(p.abduct), f(p.rifle_yaw), v(p.side), f(p.flat), f(p.tilt), f(p.yaw), f(p.raise), v(p.roll), v(p.toe)
     )
 }
 
@@ -1806,11 +1839,16 @@ pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
 
 /// `ground_drop` with the legs swung out to the side and the boots held flat by `flat`.
 pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32) -> f32 {
+    ground_drop_toe(hip, knee, side, flat, [0.0; 2])
+}
+
+/// `ground_drop_side` with the boots rolled by `toe` (`PoseParams::toe`). common.wgsl `ground_drop` mirrors it.
+pub fn ground_drop_toe(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32, toe: [f32; 2]) -> f32 {
     let mut low = f32::MAX;
     for i in 0..2 {
         let px = if i == 0 { -HIP_X } else { HIP_X };
         for y in [HEEL_Y, TOE_Y] {
-            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i], flat, 0.0), side[i], px).z);
+            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i], flat, 0.0, toe[i]), side[i], px).z);
         }
     }
     -low
@@ -1954,8 +1992,8 @@ pub fn pose_rigid(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightThigh => sideways(leg_roll(rot(v, 0.0, HIP_Z, p.hip[1]), p, 1), p.side[1], HIP_X),
         Part::LeftShin => sideways(leg_roll(leg(v, p.hip[0], p.knee[0]), p, 0), p.side[0], -HIP_X),
         Part::RightShin => sideways(leg_roll(leg(v, p.hip[1], p.knee[1]), p, 1), p.side[1], HIP_X),
-        Part::LeftFoot => sideways(leg_roll(foot(v, p.hip[0], p.knee[0], p.flat, p.prone), p, 0), p.side[0], -HIP_X),
-        Part::RightFoot => sideways(leg_roll(foot(v, p.hip[1], p.knee[1], p.flat, p.prone), p, 1), p.side[1], HIP_X),
+        Part::LeftFoot => sideways(leg_roll(foot(v, p.hip[0], p.knee[0], p.flat, p.prone, p.toe[0]), p, 0), p.side[0], -HIP_X),
+        Part::RightFoot => sideways(leg_roll(foot(v, p.hip[1], p.knee[1], p.flat, p.prone, p.toe[1]), p, 1), p.side[1], HIP_X),
         Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
         Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
         Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
@@ -1980,7 +2018,7 @@ pub fn pose_rigid(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         // Mid-transition the bent knees would dip into the ground: lift a little, most at the halfway point.
         // Onto his front the body keeps the transition height (PRONE_LIFT_MID) until the very end, then settles
         // flat (PRONE_LIFT): hips and legs on the ground only once he is fully down.
-        q.z += prone_lift(p.prone);
+        q.z += prone_lift(p.prone) + p.raise;
     }
     q
 }
@@ -1998,7 +2036,7 @@ pub fn pose_upper(v: Vec3, p: &PoseParams) -> Vec3 {
     q.z += p.drop + p.bob;
     if p.prone != 0.0 {
         q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2 * p.prone);
-        q.z += prone_lift(p.prone);
+        q.z += prone_lift(p.prone) + p.raise;
     }
     q
 }
@@ -2008,7 +2046,7 @@ pub fn pose_upper(v: Vec3, p: &PoseParams) -> Vec3 {
 pub fn unpose_upper(w: Vec3, p: &PoseParams) -> Vec3 {
     let mut q = w;
     if p.prone != 0.0 {
-        q.z -= prone_lift(p.prone);
+        q.z -= prone_lift(p.prone) + p.raise;
         q = rot(q, 0.0, 0.0, std::f32::consts::FRAC_PI_2 * p.prone);
     }
     q.z -= p.drop + p.bob;
@@ -2041,7 +2079,8 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
     let (hip, knee) = (m2(a.hip, b.hip), m2(a.knee, b.knee));
     let side = m2(a.side, b.side);
     let flat = m(a.flat, b.flat);
-    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop_side(hip, knee, side, flat) };
+    let toe = m2(a.toe, b.toe);
+    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop_toe(hip, knee, side, flat, toe) };
     PoseParams {
         lean: m(a.lean, b.lean),
         hip,
@@ -2063,6 +2102,9 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         look: m(a.look, b.look),
         abduct: m2(a.abduct, b.abduct),
         yaw: m(a.yaw, b.yaw),
+        raise: m(a.raise, b.raise),
+        roll: m2(a.roll, b.roll),
+        toe,
     }
 }
 
@@ -2502,14 +2544,25 @@ pub const SPRINT_B_AT: u32 = 10824;
 pub const SPRINT_BR_AT: u32 = 11352;
 pub const SPRINT_R_AT: u32 = 11880;
 pub const SPRINT_FR_AT: u32 = 12408;
+pub const HIGH_CRAWL_AT: u32 = 12936;
+/// Where the gaits' boot roll starts (after the tables; 24 loops of 48 rows: roll left, right, turn left, right).
+pub const GAIT_TOE_AT: u32 = 13608;
+pub const GAIT_TOE_FLOATS: u32 = 24 * 48 * 4;
 /// Floats in the clip buffer.
-pub const CLIP_FLOATS: u32 = 12936;
+pub const CLIP_FLOATS: u32 = 13608 + GAIT_TOE_FLOATS;
 /// Every baked clip table back to back, rows in order (uploaded once; common.wgsl reads it as `clips`).
 pub fn clip_buffer() -> Vec<f32> {
-    let mut v = Vec::with_capacity(12936);
+    let mut v = Vec::with_capacity(CLIP_FLOATS as usize);
     v.extend(CRAWL_BACK.iter().flatten());
     for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
         for l in gait_loops(pose).expect("a baked gait") {
+            v.extend(l.iter().flatten());
+        }
+    }
+    v.extend(HIGH_CRAWL.iter().flatten());
+    // Patch: Animations 2: each gait loop's boot roll, in the same order as the loops (common.wgsl GAIT_TOE_AT).
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        for l in gait_toes(pose).expect("a baked gait") {
             v.extend(l.iter().flatten());
         }
     }
@@ -3837,3 +3890,128 @@ pub const SPRINT_FR: [[f32; 11]; 48] = [
 ];
 // CLIP SPRINT_FR END
 
+// CLIP HIGH_CRAWL BEGIN
+/// Patch: Animations 2: the high crawl (on elbows and knees, body off the ground, rifle cradled across the forearms),
+/// solved by `crawl::solve` (`cargo run -p scalia-render --example crawl_solve rows`); a test keeps them equal.
+/// 32 samples over one loop; fields: hipL, hipR, kneeL, kneeR, sideL, sideR, shL, shR, elL, elR, abL, abR, reachL,
+/// reachR, lean, raise, twist, head, hipRoll (yaw: lying prone it rolls the hips), rollL, rollR (thigh roll).
+pub const HIGH_CRAWL: [[f32; 21]; 32] = [
+    [1.8594, 1.3775, 1.8235, 1.3557, 0.0146, -0.0093, 1.1745, 2.2794, 1.8666, 1.1262, 2.1030, -0.7935, 0.0000, 0.0000, 0.1555, 0.2901, 0.0058, 1.1555, -0.0017, 0.4217, -0.4386],
+    [1.8350, 1.3483, 1.8059, 1.3245, 0.0121, -0.0101, 1.1780, 2.2690, 1.8766, 1.1436, 2.0015, -0.8256, 0.0000, 0.0000, 0.1555, 0.2886, 0.0059, 1.1555, -0.0009, 0.4306, -0.4393],
+    [1.8075, 1.3221, 1.7828, 1.2938, 0.0104, -0.0120, 1.1839, 2.2511, 1.8795, 1.1645, 1.9084, -0.8617, 0.0000, 0.0000, 0.1554, 0.2887, 0.0055, 1.1554, 0.0005, 0.4343, -0.4366],
+    [1.7777, 1.2993, 1.7552, 1.2643, 0.0095, -0.0146, 1.1919, 2.2269, 1.8760, 1.1885, 1.8248, -0.9019, 0.0000, 0.0000, 0.1551, 0.2901, 0.0048, 1.1551, 0.0015, 0.4344, -0.4301],
+    [1.7468, 1.2721, 1.7247, 1.2430, 0.0093, -0.0124, 1.1622, 2.1987, 1.9292, 1.2143, 1.7173, -0.9468, 0.0000, 0.0000, 0.1549, 0.2925, 0.0041, 1.1549, 0.0015, 0.4327, -0.4439],
+    [1.7156, 1.2664, 1.6930, 1.2497, 0.0094, -0.0075, 1.1243, 2.1688, 1.9840, 1.2401, 1.6957, -0.9964, 0.0000, 0.0000, 0.1548, 0.2952, 0.0034, 1.1548, 0.0006, 0.4306, -0.4657],
+    [1.6846, 1.2853, 1.6612, 1.2835, 0.0097, -0.0009, 1.0858, 2.1392, 2.0276, 1.2646, 1.7601, -1.0512, 0.0000, 0.0000, 0.1547, 0.2976, 0.0028, 1.1547, -0.0005, 0.4287, -0.4909],
+    [1.6539, 1.3298, 1.6299, 1.3437, 0.0099, 0.0069, 1.0417, 2.1108, 2.0645, 1.2870, 1.8990, -1.1117, 0.0000, 0.0000, 0.1546, 0.2995, 0.0021, 1.1546, -0.0012, 0.4272, -0.5187],
+    [1.6234, 1.4009, 1.5989, 1.4287, 0.0101, 0.0145, 0.9885, 2.0838, 2.0977, 1.3071, 2.0954, -1.1786, 0.0000, 0.0000, 0.1544, 0.3007, 0.0015, 1.1544, -0.0016, 0.4261, -0.5451],
+    [1.5932, 1.4959, 1.5681, 1.5322, 0.0103, 0.0194, 0.9299, 2.0581, 2.1271, 1.3247, 2.3119, -1.2526, 0.0000, 0.0000, 0.1541, 0.3016, 0.0009, 1.1541, -0.0018, 0.4252, -0.5628],
+    [1.5631, 1.6037, 1.5374, 1.6405, 0.0106, 0.0197, 0.8779, 2.0338, 2.1470, 1.3394, 2.5077, -1.3338, 0.0000, 0.0000, 0.1539, 0.3020, 0.0004, 1.1539, -0.0021, 0.4247, -0.5645],
+    [1.5331, 1.7068, 1.5069, 1.7357, 0.0108, 0.0151, 0.8397, 2.0117, 2.1541, 1.3506, 2.6591, -1.4222, 0.0000, 0.0000, 0.1537, 0.3020, -0.0001, 1.1537, -0.0024, 0.4248, -0.5491],
+    [1.5029, 1.7903, 1.4768, 1.8057, 0.0108, 0.0077, 0.8161, 1.9936, 2.1493, 1.3571, 2.7660, -1.5172, 0.0000, 0.0000, 0.1537, 0.3012, -0.0009, 1.1537, -0.0023, 0.4259, -0.5222],
+    [1.4722, 1.8476, 1.4471, 1.8476, 0.0104, -0.0001, 0.8056, 1.9806, 2.1351, 1.3583, 2.8372, -1.6179, 0.0000, 0.0000, 0.1540, 0.2992, -0.0021, 1.1540, -0.0015, 0.4283, -0.4922],
+    [1.4407, 1.8784, 1.4173, 1.8638, 0.0098, -0.0065, 0.8078, 1.9730, 2.1129, 1.3538, 2.8812, -1.7231, 0.0000, 0.0000, 0.1546, 0.2962, -0.0035, 1.1546, -0.0001, 0.4319, -0.4648],
+    [1.4087, 1.8827, 1.3868, 1.8561, 0.0093, -0.0113, 0.8251, 1.9696, 2.0807, 1.3442, 2.9042, -1.8316, 0.0000, 0.0000, 0.1551, 0.2929, -0.0048, 1.1551, 0.0012, 0.4357, -0.4416],
+    [1.3775, 1.8594, 1.3557, 1.8235, 0.0093, -0.0146, 0.8622, 1.9674, 2.0343, 1.3318, 2.9081, -1.9410, 0.0000, 0.0000, 0.1555, 0.2901, -0.0057, 1.1555, 0.0017, 0.4386, -0.4217],
+    [1.3483, 1.8350, 1.3245, 1.8059, 0.0102, -0.0121, 0.8724, 1.9638, 2.0347, 1.3188, 2.8824, -2.0492, 0.0000, 0.0000, 0.1556, 0.2886, -0.0059, 1.1556, 0.0009, 0.4393, -0.4306],
+    [1.3221, 1.8075, 1.2938, 1.7828, 0.0120, -0.0104, 0.8903, 1.9578, 2.0253, 1.3067, 2.8581, -2.1537, 0.0000, 0.0000, 0.1554, 0.2887, -0.0055, 1.1554, -0.0005, 0.4366, -0.4343],
+    [1.2993, 1.7777, 1.2643, 1.7552, 0.0146, -0.0095, 0.9146, 1.9498, 2.0075, 1.2955, 2.8349, -2.2533, 0.0000, 0.0000, 0.1551, 0.2901, -0.0048, 1.1551, -0.0015, 0.4301, -0.4344],
+    [1.2721, 1.7468, 1.2430, 1.7247, 0.0124, -0.0093, 0.9428, 1.9795, 1.9841, 1.2682, 2.8115, -2.3042, 0.0000, 0.0000, 0.1549, 0.2925, -0.0041, 1.1549, -0.0015, 0.4439, -0.4327],
+    [1.2664, 1.7156, 1.2497, 1.6930, 0.0075, -0.0094, 0.9727, 2.0175, 1.9583, 1.2499, 2.7868, -2.2634, 0.0000, 0.0000, 0.1548, 0.2952, -0.0034, 1.1548, -0.0006, 0.4657, -0.4306],
+    [1.2854, 1.6846, 1.2835, 1.6612, 0.0010, -0.0097, 1.0024, 2.0560, 1.9328, 1.2431, 2.7594, -2.1446, 0.0000, 0.0000, 0.1547, 0.2976, -0.0028, 1.1547, 0.0005, 0.4910, -0.4287],
+    [1.3299, 1.6539, 1.3437, 1.6299, -0.0068, -0.0099, 1.0308, 2.1001, 1.9093, 1.2411, 2.7279, -1.9523, 0.0000, 0.0000, 0.1546, 0.2995, -0.0021, 1.1546, 0.0012, 0.5189, -0.4272],
+    [1.4010, 1.6234, 1.4287, 1.5989, -0.0143, -0.0101, 1.0577, 2.1536, 1.8881, 1.2346, 2.6913, -1.7020, 0.0000, 0.0000, 0.1544, 0.3007, -0.0014, 1.1544, 0.0016, 0.5453, -0.4261],
+    [1.4960, 1.5932, 1.5322, 1.5681, -0.0193, -0.0103, 1.0835, 2.2118, 1.8686, 1.2164, 2.6493, -1.4360, 0.0000, 0.0000, 0.1541, 0.3016, -0.0009, 1.1541, 0.0018, 0.5629, -0.4252],
+    [1.6037, 1.5631, 1.6404, 1.5374, -0.0196, -0.0105, 1.1078, 2.2636, 1.8512, 1.1873, 2.6012, -1.2038, 0.0000, 0.0000, 0.1539, 0.3020, -0.0004, 1.1539, 0.0021, 0.5646, -0.4247],
+    [1.7067, 1.5331, 1.7356, 1.5069, -0.0150, -0.0108, 1.1299, 2.3020, 1.8371, 1.1536, 2.5457, -1.0289, 0.0000, 0.0000, 0.1537, 0.3020, 0.0001, 1.1537, 0.0024, 0.5491, -0.4248],
+    [1.7902, 1.5029, 1.8056, 1.4768, -0.0076, -0.0108, 1.1481, 2.3255, 1.8288, 1.1236, 2.4801, -0.9088, 0.0000, 0.0000, 0.1537, 0.3012, 0.0009, 1.1537, 0.0023, 0.5223, -0.4259],
+    [1.8476, 1.4722, 1.8475, 1.4471, 0.0001, -0.0104, 1.1612, 2.3360, 1.8288, 1.1019, 2.4020, -0.8321, 0.0000, 0.0000, 0.1540, 0.2992, 0.0021, 1.1540, 0.0015, 0.4922, -0.4283],
+    [1.8784, 1.4407, 1.8638, 1.4173, 0.0066, -0.0098, 1.1688, 2.3338, 1.8375, 1.0922, 2.3103, -0.7892, 0.0000, 0.0000, 0.1545, 0.2962, 0.0035, 1.1545, 0.0001, 0.4648, -0.4318],
+    [1.8827, 1.4087, 1.8561, 1.3868, 0.0114, -0.0093, 1.1722, 2.3165, 1.8520, 1.0989, 2.2082, -0.7756, 0.0000, 0.0000, 0.1551, 0.2929, 0.0049, 1.1551, -0.0012, 0.4416, -0.4357],
+];
+// CLIP HIGH_CRAWL END
+
+/// Patch: Animations 2, footsteps on contact: the phases (0..1) at which the left and right boot touch the ground in
+/// `pose`'s cycle moving in `dir`, found on the posed boots themselves (the moment the lower end of the boot comes
+/// down onto the ground and stays). Crawling, the knees. The game plays a step as the phase crosses one. Worked out
+/// once per gait and eighth of a turn (the nearest is used); `None` for poses that do not step.
+pub fn touchdowns(pose: Pose, dir: f32) -> Option<[f32; 2]> {
+    static CACHE: std::sync::OnceLock<Vec<(Pose, [[f32; 2]; 8])>> = std::sync::OnceLock::new();
+    let table = CACHE.get_or_init(|| {
+        [Pose::Walk, Pose::Run, Pose::Sprint, Pose::CrouchWalk, Pose::Crawl]
+            .iter()
+            .map(|&pose| (pose, std::array::from_fn(|s| touchdowns_at(pose, s as f32 * std::f32::consts::FRAC_PI_4))))
+            .collect()
+    });
+    let (_, sectors) = table.iter().find(|(p, _)| *p == pose)?;
+    let s = (dir.rem_euclid(std::f32::consts::TAU) / std::f32::consts::FRAC_PI_4).round() as usize % 8;
+    Some(sectors[s])
+}
+
+fn touchdowns_at(pose: Pose, dir: f32) -> [f32; 2] {
+    const N: usize = 96;
+    std::array::from_fn(|i| {
+        let g = if i == 0 { -1.0 } else { 1.0 };
+        let low = |k: usize| {
+            let p = params_dir(pose, k as f32 / N as f32, dir);
+            if pose == Pose::Crawl {
+                pose_rigid(Vec3::new(g * HIP_X, 0.0, KNEE_Z), if i == 0 { Part::LeftShin } else { Part::RightShin }, &p).z
+            } else {
+                let part = if i == 0 { Part::LeftFoot } else { Part::RightFoot };
+                [HEEL_Y, TOE_Y].map(|y| pose_rigid(Vec3::new(g * HIP_X, y, 0.0), part, &p).z).into_iter().fold(f32::MAX, f32::min)
+            }
+        };
+        let h: Vec<f32> = (0..N).map(low).collect();
+        let floor = h.iter().copied().fold(f32::MAX, f32::min);
+        let down: Vec<bool> = h.iter().map(|z| *z < floor + 0.01).collect();
+        // Of the moments a boot comes down, the one that starts its longest stay on the ground.
+        (0..N)
+            .filter(|&k| down[k] && !down[(k + N - 1) % N])
+            .max_by_key(|&k| (0..N).take_while(|d| down[(k + d) % N]).count())
+            .map_or(0.0, |k| k as f32 / N as f32)
+    })
+}
+
+/// Patch: Animations 2, arms clear of the body: the torso as an upright ellipse (half-width at the waist and the
+/// chest, half-depth, the heights it spans) and the arm's own thickness. common.wgsl `clear_arms` mirrors these.
+pub const TORSO_RX: [f32; 2] = [0.18, 0.22];
+pub const TORSO_RY: f32 = 0.16;
+pub const TORSO_Z: [f32; 2] = [0.85, 1.30];
+pub const ARM_R: f32 = 0.05;
+
+/// Swings an arm out (more `abduct`) just far enough that its elbow, forearm and hand stay outside the torso: the
+/// sprint's swing and the carries brought the forearm in through the vest. Upright poses only (lying, the arms rest
+/// on the ground). Points in front of or behind the torso (a rifle carried across the chest) are left alone, and so
+/// is the rifle arm unless the rifle is slung (its stock sits in the shoulder).
+pub fn clear_arms(p: &mut PoseParams) {
+    if p.prone != 0.0 {
+        return;
+    }
+    for i in 0..2 {
+        // The rifle hand is tied to the rifle and its stock to the shoulder: it moves only with the rifle slung.
+        if i == 1 && p.sling < 1.0 {
+            continue;
+        }
+        let (x0, g) = if i == 0 { (-SHOULDER_X, -1.0) } else { (SHOULDER_X, 1.0) };
+        for _ in 0..2 {
+            let mut need = 0.0f32;
+            for q in [Vec3::new(g * ELBOW_X, 0.0, ELBOW_Z), Vec3::new(g * ELBOW_X, 0.0, (ELBOW_Z + PALM.z) * 0.5), Vec3::new(g * PALM.x, PALM.y, PALM.z)] {
+                let w = arm(q, p.shoulder[i], p.elbow[i], p.reach[i], p.abduct[i], x0);
+                if w.z < TORSO_Z[0] - 0.05 || w.z > TORSO_Z[1] {
+                    continue;
+                }
+                let t = ((w.z - TORSO_Z[0]) / (TORSO_Z[1] - TORSO_Z[0])).clamp(0.0, 1.0);
+                let rx = TORSO_RX[0] + (TORSO_RX[1] - TORSO_RX[0]) * t * t * (3.0 - 2.0 * t) + ARM_R;
+                let yy = w.y / (TORSO_RY + ARM_R);
+                if yy.abs() >= 1.0 {
+                    continue;
+                }
+                let out = rx * (1.0 - yy * yy).sqrt() - w.x * g;
+                if out > 0.0 {
+                    need = need.max(out / (SHOULDER_Z - w.z).max(0.15));
+                }
+            }
+            p.abduct[i] += need;
+        }
+    }
+}
