@@ -2230,9 +2230,7 @@ impl Viewer {
         };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        // The lab's soldiers are stamped in lab time (see `ts` where they are drawn); skin them on that clock.
-        let anim_s = if self.assault.is_some() { ((self.lab_t / 1000.0) % 86_400.0) as f32 } else { time_s };
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, anim_s, bend, elev, lights: &self.fx_lights };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev, lights: &self.fx_lights };
         let drawn = if second { self.gpu.frame_second(&desc) } else { self.gpu.frame(&desc) };
         drawn?;
         self.last_internal = internal;

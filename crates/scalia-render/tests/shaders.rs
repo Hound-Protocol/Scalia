@@ -1,4 +1,4 @@
-use scalia_render::shaders::{BLIT_WGSL, SCENE_WGSL, SHADOW_WGSL, SKIN_CS_WGSL};
+use scalia_render::shaders::{BLIT_WGSL, SCENE_WGSL, SHADOW_WGSL};
 
 fn validate(name: &str, src: &str) {
     let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(src)));
@@ -12,5 +12,4 @@ fn all_shaders_parse_and_validate() {
     validate("scene", SCENE_WGSL);
     validate("shadow", SHADOW_WGSL);
     validate("blit", BLIT_WGSL);
-    validate("skin_cs", SKIN_CS_WGSL);
 }

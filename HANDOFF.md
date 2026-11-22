@@ -28,6 +28,10 @@ Merged to `main`:
 
 - AN-03 (this PR): skeletal animation, see `docs/work-orders/AN-03-skeletal-animation.md`. Soldiers up to 250 m
   are the Mixamo-rigged soldier playing the baked clips on the GPU; this replaces the S12/S13 fits for what you see.
+- AN-04 (2026-11-22): reverted. Every soldier uses the procedural commander animation (#94); Patch: Animations removed
+  the GPU skinning runtime (`skin_gpu.rs`, `skin_cs.wgsl`, the skinned draw path). `skin.rs`, `rigged.skin`,
+  `anims.bin` and the skin_* examples stay as reference tools. Same patch: the baked gaits are mirrored and smoothed
+  in foot space (`polish_loop`), and the figure's cuts are closed by `bake_seams` / `pose_mesh_vertex`.
 
 Not verified: the in-game look. On 2026-11-18 the project lead reported the forward crawl looked unchanged in the model viewer after #71. The deploy for `ffcd47e` succeeded and the page referenced that build, so a cached page is the likely cause, but this was not confirmed. Visual QA is outstanding.
 

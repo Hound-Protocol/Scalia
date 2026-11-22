@@ -1224,24 +1224,6 @@ fn place_figure(q: vec3f, a: vec4f, b: vec4f) -> vec3f {
   return vec3f(q.x * ch - q.y * sh, q.x * sh + q.y * ch, q.z) + a.xyz;
 }
 
-// AN-03 skinned soldiers: the joint transforms skin_cs.wgsl wrote for this instance (group 1, 2 vec4 per joint:
-// rotation, position; binding 1 holds the joint count), applied with up to four weights.
-@group(1) @binding(0) var<storage, read> palette: array<vec4f>;
-@group(1) @binding(1) var<uniform> skin_joints: vec4u;
-fn skin_point(p: vec3f, joints: vec4u, weights: vec4f, inst: u32) -> vec3f {
-  var o = vec3f(0.0);
-  for (var k = 0u; k < 4u; k++) {
-    let w = weights[k];
-    if (w > 0.0) {
-      let at = (inst * skin_joints.x + joints[k]) * 2u;
-      let q = palette[at];
-      let t = 2.0 * cross(q.xyz, p);
-      o = o + w * (p + q.w * t + cross(q.xyz, t) + palette[at + 1u].xyz);
-    }
-  }
-  return o;
-}
-
 // An upper-body stance laid over the legs' pose (pose.rs `layer`).
 fn upper_over(legs: PP, up: PP) -> PP {
   var pp = legs;
