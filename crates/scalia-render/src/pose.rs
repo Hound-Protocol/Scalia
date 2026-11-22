@@ -193,6 +193,9 @@ pub struct PoseParams {
     /// Extra turn of each leg about its hip, on top of `leg_roll_angle`'s (radians, as that angle): the high crawl
     /// turns a thigh out while its shin runs back along the ground. 0 in every other pose.
     pub roll: [f32; 2],
+    /// Each boot's roll about its ankle (radians, positive lifts the toe): heel strike, toe-off and the toe hanging
+    /// in the swing (Patch: Animations 2). The baked gaits carry it with their legs solved to match (`polish_loop`).
+    pub toe: [f32; 2],
 }
 
 /// The rifle slung on the back: rolled flat (magazine inwards), muzzle down, hung diagonally from the right
@@ -552,8 +555,8 @@ fn leg_roll(q: Vec3, p: &PoseParams, i: usize) -> Vec3 {
 }
 
 /// A foot point: ankle bend, then the leg. `prone` points the foot back (`PRONE_POINT`) as he lies down.
-fn foot(q: Vec3, hip: f32, knee: f32, flat: f32, prone: f32) -> Vec3 {
-    leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat) + PRONE_POINT * prone_settle(prone.max(0.0))), hip, knee)
+fn foot(q: Vec3, hip: f32, knee: f32, flat: f32, prone: f32, toe: f32) -> Vec3 {
+    leg(rot(q, 0.0, ANKLE_Z, ankle_flat(hip, knee, flat) + PRONE_POINT * prone_settle(prone.max(0.0)) + toe), hip, knee)
 }
 
 /// Crouched gait in any direction (see `gait_dir`): each foot's target moves in a straight line at an even speed
@@ -722,9 +725,19 @@ pub fn clip_at<const F: usize>(t: &[[f32; F]], phase: f32) -> [f32; F] {
 pub const GAIT_ROWS: usize = 48;
 type GaitLoop = [[f32; 11]; GAIT_ROWS];
 fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
-    static WALK: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
-    static RUN: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
-    static SPRINT: std::sync::OnceLock<[GaitLoop; 8]> = std::sync::OnceLock::new();
+    gait_polished(pose).map(|l| std::array::from_fn(|i| &l[i].0))
+}
+
+/// The boot roll that goes with each of `gait_loops` (same order).
+fn gait_toes(pose: Pose) -> Option<[&'static ToeLoop; 8]> {
+    gait_polished(pose).map(|l| std::array::from_fn(|i| &l[i].1))
+}
+
+/// The baked loops, polished, with their boot roll.
+fn gait_polished(pose: Pose) -> Option<&'static [(GaitLoop, ToeLoop); 8]> {
+    static WALK: std::sync::OnceLock<[(GaitLoop, ToeLoop); 8]> = std::sync::OnceLock::new();
+    static RUN: std::sync::OnceLock<[(GaitLoop, ToeLoop); 8]> = std::sync::OnceLock::new();
+    static SPRINT: std::sync::OnceLock<[(GaitLoop, ToeLoop); 8]> = std::sync::OnceLock::new();
     let (cell, raw) = match pose {
         Pose::Walk => (&WALK, [&WALK_F, &WALK_FL, &WALK_L, &WALK_BL, &WALK_B, &WALK_BR, &WALK_R, &WALK_FR]),
         Pose::Run => (&RUN, [&RUN_F, &RUN_FL, &RUN_L, &RUN_BL, &RUN_B, &RUN_BR, &RUN_R, &RUN_FR]),
@@ -734,6 +747,7 @@ fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
     // Ahead and back the legs are straightened; the strafes keep their hip turn (it is how they step sideways).
     let rise = GAIT_RISE[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
     let strafe = PLANT_STRAFE[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
+    let roll = FOOT_ROLL[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
     let loops = cell.get_or_init(|| {
         let mut i = 0;
         raw.map(|l| {
@@ -741,10 +755,10 @@ fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
             // Only going ahead stands taller: backing up and the strafes reach the solver's knee limit with it.
             let up = if i == 0 { rise } else { 0.0 };
             i += 1;
-            if straight { polish_loop(&centre_leg_yaw(&smooth_lift(l)), true, PLANT_STRAIGHT, up) } else { polish_loop(&smooth_lift(l), false, strafe, 0.0) }
+            if straight { polish_loop(&centre_leg_yaw(&smooth_lift(l)), true, PLANT_STRAIGHT, up, roll) } else { polish_loop(&smooth_lift(l), false, strafe, 0.0, roll) }
         })
     });
-    Some(std::array::from_fn(|i| &loops[i]))
+    Some(loops)
 }
 
 /// Where a leg's boot is for a baked row (legs frame): the ankle, which a planted boot pivots about.
@@ -769,7 +783,7 @@ const PLANT_STRAFE: [[f32; 2]; 3] = [[0.2, 0.6], [0.4, 1.0], [0.6, 1.4]];
 /// legs differed by up to 0.6 rad). The work is done on where the boots are, then the legs are solved to put them
 /// there, so a planted boot stays planted. The body's sway follows suit: odd fields (legs turn, twist, tilt) mirror
 /// about their mean, even ones (lean, lift) average with half a cycle on.
-fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLoop {
+fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32, roll: [f32; 3]) -> (GaitLoop, ToeLoop) {
     let n = GAIT_ROWS;
     let h = n / 2;
     let px = [-HIP_X, HIP_X];
@@ -826,13 +840,15 @@ fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLo
             .collect();
         off
     };
+    let target: Vec<[Vec3; 2]> = (0..n).map(|k| [0, 1].map(|i| want[k][i] + (smoothed[k][i] - want[k][i]) * airborne[k][i])).collect();
+    let (toe, lift) = foot_roll(&target, &sway, roll, mirror);
     let mut out = *l;
     // Each row's solve starts from the row before (twice round, so the seam starts from the loop's own end): left
     // to start from the clip's own angles, the solver can land on another solution and the leg jumps.
     let mut prev = [0, 1].map(|i| Vec3::new(l[0][i], l[0][2 + i], l[0][4 + i]));
     for pass in 0..2 {
         for k in 0..n {
-            let foot = |i: usize| want[k][i] + (smoothed[k][i] - want[k][i]) * airborne[k][i];
+            let foot = |i: usize| target[k][i] + lift[k][i];
             let r = &mut out[k];
             if pass == 0 {
                 for f in 0..5 {
@@ -842,7 +858,10 @@ fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLo
             for i in 0..2 {
                 // Strafes keep the clip's own angles as the start (their legs cross, and chaining can drift).
                 let start = if mirror { prev[i] } else { Vec3::new(l[k][i], l[k][2 + i], l[k][4 + i]) };
-                let v = solve_boot(&gait_boot, foot(i), start, r[6], px[i]);
+                // The leg turns about its hip by the row's `roll` so the planted boot keeps its heading.
+                let tw = toe[k][2 + i];
+                let boot = |h: f32, kn: f32, sd: f32, yw: f32, x: f32| turn(sideways(roll_about(leg(Vec3::new(x, 0.0, ANKLE_Z), h, kn), tw, x), sd, x), yw);
+                let v = solve_boot(&boot, foot(i), start, r[6], px[i]);
                 prev[i] = v;
                 r[i] = v.x;
                 r[2 + i] = v.y;
@@ -850,7 +869,136 @@ fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLo
             }
         }
     }
-    out
+    (out, toe)
+}
+
+/// A baked loop's boot roll per row, left and right (radians, positive lifts the toe), then each leg's turn about
+/// its hip (`PoseParams::roll`) that keeps a planted boot's heading while the pelvis turns through the stride.
+pub type ToeLoop = [[f32; 4]; GAIT_ROWS];
+
+/// A leg point turned by `a` about the vertical through its hip at `x0` (as `leg_roll`).
+fn roll_about(q: Vec3, a: f32, x0: f32) -> Vec3 {
+    let (s, c) = a.sin_cos();
+    let dx = q.x - x0;
+    Vec3::new(x0 + dx * c - q.y * s, dx * s + q.y * c, q.z)
+}
+
+/// Where the boot pivots as the heel lifts, ahead of the ankle (m): its toe end. The boot is rigid, so rolling about
+/// the ball would push the toe end into the ground (and skid it).
+pub const BALL_Y: f32 = TOE_Y;
+/// Boot roll per gait (radians): toe up at heel strike, heel up at toe-off, toe hanging mid-swing; walk, run, sprint.
+/// Share of `FOOT_ROLL` the strafing loops get.
+pub const STRAFE_ROLL: f32 = 0.5;
+pub const FOOT_ROLL: [[f32; 3]; 3] = [[0.21, -0.61, -0.17], [0.14, -0.70, -0.26], [0.05, -0.60, -0.30]];
+
+/// Foot roll for a polished loop (Patch: Animations 2): per row, each boot's roll and how far its ankle must move so
+/// the point it rolls on stays where it is. Planted (the longest run of rows the boot holds still), it strikes on
+/// the heel toe-up and rolls flat, then lifts the heel and pivots on the ball to toe-off; in the air the toe hangs
+/// and comes up for the next strike. Going backwards the boot lands on the ball and leaves from the heel; stepping
+/// sideways it rolls less, by how far the step runs along the boot.
+fn foot_roll(target: &[[Vec3; 2]], sway: &[[f32; 5]], roll: [f32; 3], straight: bool) -> (ToeLoop, Vec<[Vec3; 2]>) {
+    let n = GAIT_ROWS;
+    let mut toe = [[0.0f32; 4]; GAIT_ROWS];
+    let mut lift = vec![[Vec3::ZERO; 2]; n];
+    let ease = |t: f32| {
+        let t = t.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    for i in 0..2 {
+        // Planted: the boot at its lowest (a runner's boot is in the air most of the time, so not its commonest speed).
+        let low = (0..n).map(|k| target[k][i].z).fold(f32::MAX, f32::min);
+        let planted: Vec<bool> = (0..n).map(|k| target[k][i].z < low + 0.03).collect();
+        // The longest planted run (round the loop): its first and last rows.
+        let mut best = (0, 0);
+        for s0 in 0..n {
+            if planted[s0] && !planted[(s0 + n - 1) % n] {
+                let len = (0..n).take_while(|d| planted[(s0 + d) % n]).count();
+                if len > best.1 {
+                    best = (s0, len);
+                }
+            }
+        }
+        let (s0, len) = best;
+        if len < 4 || len == n {
+            continue;
+        }
+        // Which way the planted boot sweeps against the way it points: back (walking ahead) or forward (backing up).
+        let sweep = target[(s0 + len - 1) % n][i] - target[s0][i];
+        let fwd = |_: usize| turn(Vec3::Y, sway[(s0 + len / 2) % n][0]);
+        let along = sweep.dot(fwd(s0)) / sweep.length().max(1e-4);
+        let (k_on, k_off) = (-along.min(0.0), along.max(0.0));
+        // Strafing steps (legs crossing) roll half as much: flatter-footed, and their plant is looser.
+        let gain = along.abs() * if straight { 1.0 } else { STRAFE_ROLL };
+        let (strike, off, hang) = (roll[0] * gain, roll[1] * gain, roll[2] * gain);
+        // Ahead: heel first, ball last. Backwards: ball first, heel last.
+        let (land_y, leave_y, land, leave) = if k_on >= k_off { (HEEL_Y, BALL_Y, strike, off) } else { (BALL_Y, HEEL_Y, off * 0.6, strike * 1.5) };
+        let a = (0.15 * len as f32).max(1.0);
+        let b = (0.35 * len as f32).max(1.0);
+        let mut theta = vec![0.0f32; n];
+        let mut pivot_y = vec![0.0f32; n];
+        for d in 0..n {
+            let k = (s0 + d) % n;
+            let d = d as f32;
+            let l = len as f32;
+            theta[k] = if d < l {
+                if d < a {
+                    pivot_y[k] = land_y;
+                    land * (1.0 - ease(d / a))
+                } else if d > l - 1.0 - b {
+                    pivot_y[k] = leave_y;
+                    leave * ease((d - (l - 1.0 - b)) / b)
+                } else {
+                    0.0
+                }
+            } else {
+                // In the air: from the toe-off roll to the hang, then up to the next strike.
+                let t = (d - l + 1.0) / (n as f32 - l + 1.0);
+                if t < 0.5 { leave + (hang - leave) * ease(t * 2.0) } else { hang + (land - hang) * ease(t * 2.0 - 1.0) }
+            };
+        }
+        // Planted: the ankle moves so the rolling point stays put. In the air the move eases from lift-off's to
+        // the landing's.
+        let shift = |k: usize| {
+            let f = fwd(k);
+            let o = f * pivot_y[k] - Vec3::Z * ANKLE_Z;
+            let q = glam::Quat::from_axis_angle(f.cross(Vec3::Z).normalize(), theta[k]);
+            o + q * -o - Vec3::ZERO
+        };
+        // Heading: planted, the leg turns against the pelvis so the boot points where it landed pointing (mid-stance
+        // heading, so the hold is even either side); in the air it eases from lift-off's turn to the landing's.
+        let mid = sway[(s0 + len / 2) % n][0];
+        let hold = |k: usize| (mid - sway[k][0]) * gain;
+        let (h_end, h_land) = (hold((s0 + len - 1) % n), hold(s0));
+        for d in 0..n {
+            let k = (s0 + d) % n;
+            toe[k][2 + i] = if d < len {
+                hold(k)
+            } else {
+                let t = (d - len + 1) as f32 / (n - len + 1) as f32;
+                h_end + (h_land - h_end) * ease(t)
+            };
+        }
+        let (k_end, k_land) = ((s0 + len - 1) % n, (s0 + n) % n);
+        let (from, to) = (shift(k_end), shift(k_land));
+        for d in 0..n {
+            let k = (s0 + d) % n;
+            toe[k][i] = theta[k];
+            lift[k][i] = if d < len {
+                shift(k)
+            } else {
+                let t = (d - len + 1) as f32 / (n - len + 1) as f32;
+                from + (to - from) * ease(t)
+            };
+        }
+    }
+    // A light pass round the loop over both (the same weights, so the rolling point still stays put): the roll's
+    // starts and stops would otherwise kink the solved legs.
+    let k: Vec<f32> = (-3..=3).map(|d: i32| (-(d * d) as f32 / 2.0).exp()).collect();
+    let sum: f32 = k.iter().sum();
+    let at = |j: usize, d: usize| (j + n + d - 3) % n;
+    let toe_s: ToeLoop = std::array::from_fn(|j| [0, 1, 2, 3].map(|i| (0..7).map(|d| toe[at(j, d)][i] * k[d]).sum::<f32>() / sum));
+    let lift_s: Vec<[Vec3; 2]> = (0..n).map(|j| [0, 1].map(|i| (0..7).map(|d| lift[at(j, d)][i] * k[d]).sum::<Vec3>() / sum)).collect();
+    (toe_s, lift_s)
 }
 
 /// A baked loop with its body lift (field 10) smoothed round the cycle. The clips' lift steps up for the airborne
@@ -958,9 +1106,9 @@ fn smooth_lift(l: &GaitLoop) -> GaitLoop {
 /// the sweep `examples/fit_clip` pins each planted boot to (its `plant: boots sweep` line; examples/gait_strides
 /// measures it back). The game sets the cadence from it, so the boot on the ground stays put.
 pub const GAIT_STRIDE: [[f32; 8]; 3] = [
-    [1.57, 1.58, 1.67, 1.81, 1.62, 1.69, 1.64, 1.63], // Walk
-    [1.91, 1.67, 1.64, 1.85, 1.84, 1.52, 1.91, 2.02], // Run
-    [2.70, 2.66, 3.18, 3.18, 3.20, 2.80, 2.85, 2.86], // Sprint
+    [1.53, 1.56, 1.67, 1.79, 1.56, 1.67, 1.60, 1.61], // Walk
+    [1.89, 1.65, 1.65, 1.84, 1.81, 1.53, 1.92, 2.00], // Run
+    [2.63, 2.64, 3.17, 3.19, 3.18, 2.80, 2.84, 2.84], // Sprint
 ];
 
 /// Which eighth-of-a-turn loop `dir` falls in and how far towards the next (0..1).
@@ -973,6 +1121,15 @@ fn gait_sector(dir: f32) -> (usize, usize, f32) {
 /// The baked gait at `phase` moving in `dir`: the two nearest loops blended. Fields: hip L, R, knee L, R,
 /// side L, R, pelvis turn, then lean, twist, tilt as motion around the pose's own, then the body lift (the
 /// lowest the body may sit: it stands the reference's planted boot on the ground and lifts both clear in flight).
+/// The baked gaits' boot roll at `phase` moving in `dir` (left, right), blended as `gait_bake`; 0 for other poses.
+/// Fields: boot roll left, right, then each leg's heading turn (`PoseParams::roll`) left, right.
+pub fn gait_toe(pose: Pose, phase: f32, dir: f32) -> [f32; 4] {
+    let Some(toes) = gait_toes(pose) else { return [0.0; 4] };
+    let (i, j, w) = gait_sector(dir);
+    let (a, b) = (clip_at(toes[i], phase), clip_at(toes[j], phase));
+    std::array::from_fn(|f| a[f] + (b[f] - a[f]) * w)
+}
+
 pub fn gait_bake(pose: Pose, phase: f32, dir: f32) -> Option<[f32; 11]> {
     let loops = gait_loops(pose)?;
     let (i, j, w) = gait_sector(dir);
@@ -1341,9 +1498,12 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             g[9] *= RUN_TILT;
         }
         apply_gait(&mut p, g);
+        let t = gait_toe(pose, phase, dir);
+        p.toe = [t[0], t[1]];
+        p.roll = [t[2], t[3]];
         g[10]
     });
-    p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat).max(lift);
+    p.drop = ground_drop_toe(p.hip, p.knee, p.side, p.flat, p.toe).max(lift);
     if pose == Pose::Crawl {
         // Lying down the grounding offset runs fore and aft: the crawl keeps the prone legs' value so the body does
         // not surge with the stroke, and nothing shifts between lying and crawling. common.wgsl mirrors this.
@@ -1587,9 +1747,9 @@ pub fn wgsl_literal(p: &PoseParams) -> String {
     let f = |x: f32| format!("{x:.6}");
     let v = |a: [f32; 2]| format!("vec2f({}, {})", f(a[0]), f(a[1]));
     format!(
-        "PP({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        "PP({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
         f(p.lean), v(p.hip), v(p.knee), v(p.shoulder), v(p.elbow), f(p.head), f(p.rifle), f(p.prone), f(p.drop),
-        v(p.reach), f(p.sling), f(p.bob), f(p.twist), f(p.look), v(p.abduct), f(p.rifle_yaw), v(p.side), f(p.flat), f(p.tilt), f(p.yaw), f(p.raise), v(p.roll)
+        v(p.reach), f(p.sling), f(p.bob), f(p.twist), f(p.look), v(p.abduct), f(p.rifle_yaw), v(p.side), f(p.flat), f(p.tilt), f(p.yaw), f(p.raise), v(p.roll), v(p.toe)
     )
 }
 
@@ -1657,11 +1817,16 @@ pub fn ground_drop(hip: [f32; 2], knee: [f32; 2]) -> f32 {
 
 /// `ground_drop` with the legs swung out to the side and the boots held flat by `flat`.
 pub fn ground_drop_side(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32) -> f32 {
+    ground_drop_toe(hip, knee, side, flat, [0.0; 2])
+}
+
+/// `ground_drop_side` with the boots rolled by `toe` (`PoseParams::toe`). common.wgsl `ground_drop` mirrors it.
+pub fn ground_drop_toe(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32, toe: [f32; 2]) -> f32 {
     let mut low = f32::MAX;
     for i in 0..2 {
         let px = if i == 0 { -HIP_X } else { HIP_X };
         for y in [HEEL_Y, TOE_Y] {
-            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i], flat, 0.0), side[i], px).z);
+            low = low.min(sideways(foot(Vec3::new(px, y, 0.0), hip[i], knee[i], flat, 0.0, toe[i]), side[i], px).z);
         }
     }
     -low
@@ -1805,8 +1970,8 @@ pub fn pose_rigid(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         Part::RightThigh => sideways(leg_roll(rot(v, 0.0, HIP_Z, p.hip[1]), p, 1), p.side[1], HIP_X),
         Part::LeftShin => sideways(leg_roll(leg(v, p.hip[0], p.knee[0]), p, 0), p.side[0], -HIP_X),
         Part::RightShin => sideways(leg_roll(leg(v, p.hip[1], p.knee[1]), p, 1), p.side[1], HIP_X),
-        Part::LeftFoot => sideways(leg_roll(foot(v, p.hip[0], p.knee[0], p.flat, p.prone), p, 0), p.side[0], -HIP_X),
-        Part::RightFoot => sideways(leg_roll(foot(v, p.hip[1], p.knee[1], p.flat, p.prone), p, 1), p.side[1], HIP_X),
+        Part::LeftFoot => sideways(leg_roll(foot(v, p.hip[0], p.knee[0], p.flat, p.prone, p.toe[0]), p, 0), p.side[0], -HIP_X),
+        Part::RightFoot => sideways(leg_roll(foot(v, p.hip[1], p.knee[1], p.flat, p.prone, p.toe[1]), p, 1), p.side[1], HIP_X),
         Part::LeftArm => arm(v, p.shoulder[0], 0.0, p.reach[0], p.abduct[0], -SHOULDER_X),
         Part::RightArm => arm(v, p.shoulder[1], 0.0, p.reach[1], p.abduct[1], SHOULDER_X),
         Part::LeftForearm => arm(v, p.shoulder[0], p.elbow[0], p.reach[0], p.abduct[0], -SHOULDER_X),
@@ -1892,7 +2057,8 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
     let (hip, knee) = (m2(a.hip, b.hip), m2(a.knee, b.knee));
     let side = m2(a.side, b.side);
     let flat = m(a.flat, b.flat);
-    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop_side(hip, knee, side, flat) };
+    let toe = m2(a.toe, b.toe);
+    let drop = if w <= 0.0 { a.drop } else if w >= 1.0 { b.drop } else { ground_drop_toe(hip, knee, side, flat, toe) };
     PoseParams {
         lean: m(a.lean, b.lean),
         hip,
@@ -1916,6 +2082,7 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         yaw: m(a.yaw, b.yaw),
         raise: m(a.raise, b.raise),
         roll: m2(a.roll, b.roll),
+        toe,
     }
 }
 
@@ -2356,11 +2523,14 @@ pub const SPRINT_BR_AT: u32 = 11352;
 pub const SPRINT_R_AT: u32 = 11880;
 pub const SPRINT_FR_AT: u32 = 12408;
 pub const HIGH_CRAWL_AT: u32 = 12936;
+/// Where the gaits' boot roll starts (after the tables; 24 loops of 48 rows: roll left, right, turn left, right).
+pub const GAIT_TOE_AT: u32 = 13608;
+pub const GAIT_TOE_FLOATS: u32 = 24 * 48 * 4;
 /// Floats in the clip buffer.
-pub const CLIP_FLOATS: u32 = 13608;
+pub const CLIP_FLOATS: u32 = 13608 + GAIT_TOE_FLOATS;
 /// Every baked clip table back to back, rows in order (uploaded once; common.wgsl reads it as `clips`).
 pub fn clip_buffer() -> Vec<f32> {
-    let mut v = Vec::with_capacity(13608);
+    let mut v = Vec::with_capacity(CLIP_FLOATS as usize);
     v.extend(CRAWL_BACK.iter().flatten());
     for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
         for l in gait_loops(pose).expect("a baked gait") {
@@ -2368,6 +2538,12 @@ pub fn clip_buffer() -> Vec<f32> {
         }
     }
     v.extend(HIGH_CRAWL.iter().flatten());
+    // Patch: Animations 2: each gait loop's boot roll, in the same order as the loops (common.wgsl GAIT_TOE_AT).
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        for l in gait_toes(pose).expect("a baked gait") {
+            v.extend(l.iter().flatten());
+        }
+    }
     v
 }
 // CLIP REGISTRY END

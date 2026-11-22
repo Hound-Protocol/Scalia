@@ -625,13 +625,17 @@ mod tests {
         d.vel = (0.0, 1.0);
         d.want = Some(d.vel);
         let moving = run(&mut a, 5, d);
-        assert_eq!(moving.pose, Pose::Crawl);
-        assert_eq!(moving.upper, Some(Pose::ProneAim), "aim stays on the upper body while the legs crawl");
-        assert!(a.barrel(&moving, (0.0, 0.0)).0.is_some(), "the layered prone aim keeps its muzzle");
+        // Aiming, he does not high crawl: he stays flat on the prone legs under the aim.
+        assert_eq!((moving.pose, moving.upper), (Pose::Prone, Some(Pose::ProneAim)));
+        assert!(a.barrel(&moving, (0.0, 0.0)).0.is_some(), "the prone aim keeps its muzzle while he moves");
+        d.rifle = Rifle::Ready;
+        d.face = Face::Keep;
+        let crawling = run(&mut a, 5, d);
+        assert_eq!((crawling.pose, crawling.upper), (Pose::Crawl, None), "unaimed, he moves in the high crawl");
     }
 
     #[test]
-    fn aimed_crawl_stops_and_restarts_without_switching_its_upper_body_or_resetting_its_stride() {
+    fn moving_while_aiming_prone_keeps_the_prone_legs_and_the_aim_layer() {
         let mut a = Animator::new(0.0);
         let mut ts = 0.0;
         hold(&mut a, &mut ts, Stance::Prone, 2.2);
@@ -647,16 +651,10 @@ mod tests {
         let moving = advance(&mut a, &mut d);
         d.vel = (0.0, 0.0);
         let stopped = advance(&mut a, &mut d);
-        assert_eq!((moving.pose, stopped.pose), (Pose::Crawl, Pose::Prone));
+        assert_eq!((moving.pose, stopped.pose), (Pose::Prone, Pose::Prone));
         assert_eq!((moving.upper, stopped.upper), (Some(Pose::ProneAim), Some(Pose::ProneAim)));
-        assert_eq!((stopped.dir, stopped.phase), (moving.dir, moving.phase));
         assert_eq!((moving.lean, stopped.lean), (0.0, 0.0), "no standing momentum tilt on the ground");
-        assert_eq!(a.record(&stopped, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0)[11], 0.0, "legs stopping must not restart the aim layer");
-
-        d.vel = (1.05, 0.0);
-        let resumed = advance(&mut a, &mut d);
-        let expected = (stopped.phase + d.dt * 1.05 / pose::stride_m_dir(Pose::Crawl, stopped.dir)).fract();
-        assert!((resumed.phase - expected).abs() < 1e-5, "crawl resumes from the frozen stride, not a new step");
+        assert_eq!(a.record(&stopped, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0)[11], 0.0, "stopping must not restart the aim layer");
     }
 
     #[test]

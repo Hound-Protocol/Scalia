@@ -159,7 +159,10 @@ fn baked_clip_registry_matches() {
         seen += 1;
     }
     assert!(seen >= 1, "no baked clip tables found");
-    assert_eq!(at, CLIP_FLOATS);
+    // After the tables: the gaits' boot roll, built from the polished loops (pose.rs `clip_buffer`).
+    assert!(WGSL.contains(&format!("const GAIT_TOE_AT: u32 = {at}u;")), "GAIT_TOE_AT out of date");
+    assert_eq!(at, scalia_render::pose::GAIT_TOE_AT);
+    assert_eq!(at + scalia_render::pose::GAIT_TOE_FLOATS, CLIP_FLOATS);
     assert_eq!(clip_buffer().len() as u32, CLIP_FLOATS);
 }
 

@@ -134,7 +134,7 @@ pub fn skin_matrices(p: &PoseParams) -> [Affine3A; BONES] {
     };
     let thigh = |i: usize| hip(i) * pitch_at(HIP_Z, p.hip[i]);
     let shin = |i: usize| hip(i) * pitch_at(HIP_Z, p.hip[i]) * pitch_at(KNEE_Z, -p.knee[i]);
-    let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle_flat(p.hip[i], p.knee[i], p.flat) + PRONE_POINT * prone_settle(p.prone.max(0.0)));
+    let foot = |i: usize| shin(i) * pitch_at(ANKLE_Z, ankle_flat(p.hip[i], p.knee[i], p.flat) + PRONE_POINT * prone_settle(p.prone.max(0.0)) + p.toe[i]);
     [
         body,
         spine,

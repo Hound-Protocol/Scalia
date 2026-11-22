@@ -5,7 +5,7 @@ struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: v
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
-struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32, yaw: f32, raise: f32, roll: vec2f };
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32, yaw: f32, raise: f32, roll: vec2f, toe: vec2f };
 
 fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
   let s = sin(ang);
@@ -62,8 +62,9 @@ fn ankle_flat(hip: f32, knee: f32, flat: f32) -> f32 {
 }
 
 // prone points the foot back, boots flat, only once settled (pose.rs PRONE_POINT -1.2, prone_settle).
-fn foot(q: vec3f, hip: f32, knee: f32, flat: f32, prone: f32) -> vec3f {
-  return leg(rot(q, 0.0, 0.085, ankle_flat(hip, knee, flat) - 1.2 * pow(max(prone, 0.0), 12.0)), hip, knee);
+// toe: the boot's roll (pose.rs PoseParams::toe).
+fn foot(q: vec3f, hip: f32, knee: f32, flat: f32, prone: f32, toe: f32) -> vec3f {
+  return leg(rot(q, 0.0, 0.085, ankle_flat(hip, knee, flat) - 1.2 * pow(max(prone, 0.0), 12.0) + toe), hip, knee);
 }
 
 // Gait for both legs (port of pose.rs `gait`): x = left, y = right; the right leg is half a cycle behind.
@@ -202,6 +203,13 @@ fn bake_gait(p: ptr<function, PP>, at0: u32, phase: f32, dir: f32, twist_k: f32,
   let a = clip_pos(at0 + i * 11u * n, 11u, n, phase);
   let b = clip_pos(at0 + ((i + 1u) % 8u) * 11u * n, 11u, n, phase);
   let g = gait_mix(a, b, w);
+  // Patch: Animations 2: the boots' roll for these loops (pose.rs `gait_toe`, GAIT_TOE_AT).
+  let gs = (at0 - WALK_F_AT) / (8u * 11u * n);
+  // Four fields a row: boot roll left, right, then each leg's heading turn (roll) left, right.
+  let ta = clip_pos(GAIT_TOE_AT + (gs * 8u + i) * 4u * n, 4u, n, phase);
+  let tb = clip_pos(GAIT_TOE_AT + (gs * 8u + (i + 1u) % 8u) * 4u * n, 4u, n, phase);
+  (*p).toe = mix(vec2f(clip_get(ta, 0u), clip_get(ta, 1u)), vec2f(clip_get(tb, 0u), clip_get(tb, 1u)), w);
+  (*p).roll = mix(vec2f(clip_get(ta, 2u), clip_get(ta, 3u)), vec2f(clip_get(tb, 2u), clip_get(tb, 3u)), w);
   (*p).hip = vec2f(g[0], g[1]);
   (*p).knee = vec2f(g[2], g[3]);
   (*p).side = vec2f(g[4], g[5]);
@@ -319,14 +327,14 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
-const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000));
-const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000));
+const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
+const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
 
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
   if (pose == 35u) { return DROP_PLANT_P; }
   let sw = sin(phase * 6.2831853);
-  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0));
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), vec2f(0.0));
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
@@ -636,18 +644,19 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 1u) { lift = bake_gait(&p, WALK_F_AT, phase, dir, 1.0, 1.0); }
   else if (pose == 2u) { lift = bake_gait(&p, RUN_F_AT, phase, dir, 1.0, RUN_TILT); }
   else if (pose == 7u) { lift = bake_gait(&p, SPRINT_F_AT, phase, dir, SPRINT_TWIST, RUN_TILT); }
-  p.drop = max(ground_drop(p.hip, p.knee, p.side, p.flat), lift);
+  p.drop = max(ground_drop(p.hip, p.knee, p.side, p.flat, p.toe), lift);
   // The crawl keeps the prone legs' grounding offset (pose.rs): lying down it runs fore and aft.
-  if (pose == 32u) { p.drop = ground_drop(vec2f(0.18, 0.16), vec2f(0.06, 0.04), vec2f(0.0), 0.0); }
+  if (pose == 32u) { p.drop = ground_drop(vec2f(0.18, 0.16), vec2f(0.06, 0.04), vec2f(0.0), 0.0, vec2f(0.0)); }
   return p;
 }
 
-fn ground_drop(hip: vec2f, knee: vec2f, side: vec2f, flat: f32) -> f32 {
+// Port of pose.rs `ground_drop_toe` (boots rolled by `toe`).
+fn ground_drop(hip: vec2f, knee: vec2f, side: vec2f, flat: f32, toe: vec2f) -> f32 {
   var low = 1e9;
   for (var i = 0; i < 2; i++) {
     let px = select(0.1, -0.1, i == 0);
-    low = min(low, sideways(foot(vec3f(px, -0.09, 0.0), hip[i], knee[i], flat, 0.0), side[i], px).z);
-    low = min(low, sideways(foot(vec3f(px, 0.14, 0.0), hip[i], knee[i], flat, 0.0), side[i], px).z);
+    low = min(low, sideways(foot(vec3f(px, -0.09, 0.0), hip[i], knee[i], flat, 0.0, toe[i]), side[i], px).z);
+    low = min(low, sideways(foot(vec3f(px, 0.14, 0.0), hip[i], knee[i], flat, 0.0, toe[i]), side[i], px).z);
   }
   return -low;
 }
@@ -658,10 +667,10 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0,
              mix(a.reach, b.reach, w), mix(a.sling, b.sling, w), mix(a.bob, b.bob, w), mix(a.twist, b.twist, w),
-             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w), mix(a.yaw, b.yaw, w), mix(a.raise, b.raise, w), mix(a.roll, b.roll, w));
+             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w), mix(a.yaw, b.yaw, w), mix(a.raise, b.raise, w), mix(a.roll, b.roll, w), mix(a.toe, b.toe, w));
   p.side = mix(a.side, b.side, w);
   p.flat = mix(a.flat, b.flat, w);
-  p.drop = select(select(ground_drop(p.hip, p.knee, p.side, p.flat), b.drop, w >= 1.0), a.drop, w <= 0.0);
+  p.drop = select(select(ground_drop(p.hip, p.knee, p.side, p.flat, p.toe), b.drop, w >= 1.0), a.drop, w <= 0.0);
   return p;
 }
 
@@ -874,8 +883,8 @@ fn pose_rigid(v: vec3f, part: u32, p: PP) -> vec3f {
   else if (part == 2u) { q = sideways(leg_roll(rot(v, 0.0, 0.88, p.hip.y), p, p.knee.y, 0.1), p.side.y, 0.1); }
   else if (part == 6u) { q = sideways(leg_roll(leg(v, p.hip.x, p.knee.x), p, p.knee.x, -0.1), p.side.x, -0.1); }
   else if (part == 7u) { q = sideways(leg_roll(leg(v, p.hip.y, p.knee.y), p, p.knee.y, 0.1), p.side.y, 0.1); }
-  else if (part == 13u) { q = sideways(leg_roll(foot(v, p.hip.x, p.knee.x, p.flat, p.prone), p, p.knee.x, -0.1), p.side.x, -0.1); }
-  else if (part == 14u) { q = sideways(leg_roll(foot(v, p.hip.y, p.knee.y, p.flat, p.prone), p, p.knee.y, 0.1), p.side.y, 0.1); }
+  else if (part == 13u) { q = sideways(leg_roll(foot(v, p.hip.x, p.knee.x, p.flat, p.prone, p.toe.x), p, p.knee.x, -0.1), p.side.x, -0.1); }
+  else if (part == 14u) { q = sideways(leg_roll(foot(v, p.hip.y, p.knee.y, p.flat, p.prone, p.toe.y), p, p.knee.y, 0.1), p.side.y, 0.1); }
   else if (part == 3u) { q = arm(v, p.sh.x, 0.0, p.reach.x, p.abd.x, -0.238); }
   else if (part == 4u) { q = arm(v, p.sh.y, 0.0, p.reach.y, p.abd.y, 0.238); }
   else if (part == 11u) { q = arm(v, p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
@@ -1039,7 +1048,7 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
         pp.lean = pp.lean + 0.18 * fl;
         pp.hip = pp.hip + vec2f(0.2 * fl);
         pp.knee = pp.knee + vec2f(0.35 * fl);
-        pp.drop = ground_drop(pp.hip, pp.knee, pp.side, pp.flat);
+        pp.drop = ground_drop(pp.hip, pp.knee, pp.side, pp.flat, pp.toe);
       }
     }
     // Left palm onto the handguard or, while reloading, along the magazine path.
@@ -1244,6 +1253,8 @@ const SPRINT_FR_N: u32 = 48u;
 const HIGH_CRAWL_AT: u32 = 12936u;
 const HIGH_CRAWL_F: u32 = 21u;
 const HIGH_CRAWL_N: u32 = 32u;
+// The gaits' boot roll (pose.rs GAIT_TOE_AT): 24 loops of WALK_F_N rows: roll left, right, turn left, right.
+const GAIT_TOE_AT: u32 = 13608u;
 // Where a loop of `n` rows of `f` fields at `at` is at `phase`: the two rows around it and the weight.
 struct ClipPos { a: u32, b: u32, w: f32 }
 fn clip_pos(at: u32, f: u32, n: u32, phase: f32) -> ClipPos {
