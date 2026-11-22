@@ -182,3 +182,37 @@ fn pushing_knees_and_pulling_forearms_hold_their_place() {
         assert!(wander < limit, "{part:?} skates {wander:.3} m along the way he moves while it pushes");
     }
 }
+
+/// How far the left knee is drawn up less the right: 1 with the left knee fully up, -1 with the right.
+fn drawn(phase: f32) -> f32 {
+    let d = |u: f32| 1.0 - crawl::stroke(u).0 / crawl::PUSH;
+    d(phase) - d(phase + 0.5)
+}
+
+/// Patch: Animations 5: the body works with the stroke. The hip of the drawn knee comes up off the ground (the body
+/// rolls onto the other side) and the spine bends toward the drawn knee, swinging the shoulders that way; the head
+/// rides steadier than the shoulders, low, eyes ahead.
+#[test]
+fn the_body_rolls_and_bends_toward_the_drawn_knee() {
+    use scalia_render::pose::NECK_Z;
+    for k in 0..32 {
+        let phase = k as f32 / 32.0;
+        let p = params_dir(Pose::Crawl, phase, 0.0);
+        let s = drawn(phase);
+        let side = |x: f32, z: f32| (at(&p, Part::Torso, Vec3::new(-x, 0.0, z)), at(&p, Part::Torso, Vec3::new(x, 0.0, z)));
+        let ((hl, hr), (sl, sr)) = (side(HIP_X, HIP_Z), side(SHOULDER_X, SHOULDER_Z));
+        let (el, er) = (at(&p, Part::Head, Vec3::new(-0.05, 0.1, NECK_Z + 0.12)), at(&p, Part::Head, Vec3::new(0.05, 0.1, NECK_Z + 0.12)));
+        let (chest, head) = (((sl.z - sr.z) / sl.distance(sr)).asin(), ((el.z - er.z) / el.distance(er)).asin());
+        assert!(head.abs() <= 0.5 * chest.abs() + 0.01, "phase {k}/32: the head rolls {head:.3} rad with the chest's {chest:.3}");
+        let face = at(&p, Part::Head, Vec3::new(0.0, 0.1, NECK_Z + 0.12)) - at(&p, Part::Head, Vec3::new(0.0, 0.0, NECK_Z + 0.12));
+        let down = (-face.z / face.length()).asin();
+        assert!((0.3..0.7).contains(&down), "phase {k}/32: eyes {down:.3} rad below level, want the head low, eyes ahead");
+        if s.abs() < 0.8 {
+            continue;
+        }
+        let lift = (hl.z - hr.z) * s.signum();
+        assert!((0.02..0.06).contains(&lift), "phase {k}/32: the drawn knee's hip is up {lift:.3} m");
+        let swing = ((sl.x + sr.x) / 2.0 - (hl.x + hr.x) / 2.0) * -s.signum();
+        assert!((0.02..0.08).contains(&swing), "phase {k}/32: the shoulders swing {swing:.3} m toward the drawn knee");
+    }
+}

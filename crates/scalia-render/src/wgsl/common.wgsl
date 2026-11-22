@@ -607,8 +607,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let wb = clamp((-0.2 - fwd) * 5.0, 0.0, 1.0);
     let ca = clip_pos(HIGH_CRAWL_AT, HIGH_CRAWL_F, HIGH_CRAWL_N, phase);
     let cb = clip_pos(HIGH_CRAWL_AT, HIGH_CRAWL_F, HIGH_CRAWL_N, -phase);
-    var r: array<f32, 21>;
-    for (var k = 0u; k < 21u; k = k + 1u) { r[k] = mix(clip_get(ca, k), clip_get(cb, k), wb); }
+    var r: array<f32, 23>;
+    for (var k = 0u; k < 23u; k = k + 1u) { r[k] = mix(clip_get(ca, k), clip_get(cb, k), wb); }
+    // Patch: Animations 5: the legs' roll fades out crawling sideways (pose.rs).
+    r[18] = r[18] * abs(fwd);
     p.prone = 1.0;
     p.hip = vec2f(r[0], r[1]);
     p.knee = vec2f(r[2], r[3]);
@@ -623,7 +625,9 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.head = r[17];
     p.yaw = r[18];
     p.roll = vec2f(r[19], r[20]);
-    p.look = -0.4 * lateral;
+    // Patch: Animations 5: the spine bends toward the drawn knee; the head takes back most of the roll.
+    p.tilt = r[21];
+    p.look = r[22] - 0.4 * lateral;
     // The rifle along the right forearm, muzzle ahead, on its side (crawl.rs RIFLE_PITCH 1.5707963, RIFLE_ROLL -1.5707963).
     p.rifle = 1.5707963;
     p.ryaw = -1.5707963;
@@ -1287,10 +1291,10 @@ const SPRINT_FR_AT: u32 = 12408u;
 const SPRINT_FR_F: u32 = 11u;
 const SPRINT_FR_N: u32 = 48u;
 const HIGH_CRAWL_AT: u32 = 12936u;
-const HIGH_CRAWL_F: u32 = 21u;
+const HIGH_CRAWL_F: u32 = 23u;
 const HIGH_CRAWL_N: u32 = 32u;
 // The gaits' boot roll (pose.rs GAIT_TOE_AT): 24 loops of WALK_F_N rows: roll left, right, turn left, right.
-const GAIT_TOE_AT: u32 = 13608u;
+const GAIT_TOE_AT: u32 = 13672u;
 // Where a loop of `n` rows of `f` fields at `at` is at `phase`: the two rows around it and the weight.
 struct ClipPos { a: u32, b: u32, w: f32 }
 fn clip_pos(at: u32, f: u32, n: u32, phase: f32) -> ClipPos {
