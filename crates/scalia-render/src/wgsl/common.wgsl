@@ -137,8 +137,8 @@ fn crouch_gait(p: ptr<function, PP>, phase: f32, reach: f32, height: f32, lift: 
 // knee draws from 0.1 to 0.4, only once settled prone; inward, so the foot tucks behind the knee (AN-02-S11).
 fn leg_roll(q: vec3f, p: PP, knee: f32, px: f32) -> vec3f {
   let t = clamp((knee - 0.2) / 0.2, 0.0, 1.0); // pose.rs LEG_ROLL_FROM, LEG_ROLL_FULL
-  // Only lying flat: raised on the knees the legs kneel straight down (pose.rs LEG_ROLL_RAISE 0.1).
-  let flat = 1.0 - clamp(p.raise / 0.1, 0.0, 1.0);
+  // Only lying flat: raised at all (the crawl solves its own leg roll) it is gone (pose.rs LEG_ROLL_RAISE 0.025).
+  let flat = 1.0 - clamp(p.raise / 0.025, 0.0, 1.0);
   let a = 1.5707963 * pow(max(p.prone, 0.0), 12.0) * t * t * (3.0 - 2.0 * t) * flat * -sign(px) + select(p.roll.y, p.roll.x, px < 0.0);
   if (a == 0.0) { return q; }
   let s = sin(a);
@@ -600,7 +600,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.lean = -0.12;
     p.head = 0.12;
   } else if (pose == 32u) {
-    // Patch: Animations 2 high crawl (mirrors pose.rs): on elbows and knees, body off the ground, rifle cradled
+    // Patch: Animations 3 low crawl (mirrors pose.rs): body flat on the ground, rifle cradled
     // across the forearms. Backwards plays the loop in reverse; sideways leans the knees and chest to the side.
     let fwd = cos(dir);
     let lateral = sin(dir);
