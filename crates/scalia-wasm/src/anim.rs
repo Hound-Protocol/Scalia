@@ -54,8 +54,9 @@ fn drop_at(s: Stance) -> f32 {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum Stance {
+    #[default]
     Stand,
     Crouch,
     Prone,

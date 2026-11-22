@@ -16,6 +16,7 @@
   #bar .title { color: #f2d36b; margin-right: 6px; }
   #info { bottom: 8px; left: 8px; }
   #hint { bottom: 8px; right: 8px; color: #8b95a5; }
+  #keys { bottom: 40px; right: 8px; color: #c9d1d9; }
   #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 40px; text-align: center; }
 </style>
 </head>
@@ -28,6 +29,9 @@
     <select id="pose" title="Pose"></select>
     <select id="detail" title="Level of detail"><option value="0">full detail</option><option value="1">mid detail</option><option value="2">far detail</option></select>
     <select id="variant" title="Team colour"></select>
+    <label title="Drive him with the keys, as in the game"><input type="checkbox" id="commander"> commander</label>
+    <label title="Hold the pose still (Space)"><input type="checkbox" id="freeze"> freeze</label>
+    <label title="Joints blended as in the game (J); off shows the bare parts"><input type="checkbox" id="seams" checked> joints</label>
   </span>
   <label><input type="checkbox" id="spin" checked> turntable</label>
   <label>sun <input type="range" id="light" min="0.25" max="0.75" step="0.01" value="0.42"></label>
@@ -36,6 +40,7 @@
 </div>
 <div id="info" class="panel"></div>
 <div id="hint" class="panel">drag: orbit and tilt · wheel: zoom</div>
+<div id="keys" class="panel" hidden>WASD move · Shift sprint · G walk or jog · C crouch · Z prone · Q aim · Space freeze · J joints</div>
 <div id="error"></div>
 <script type="module" src="./models.js"></script>
 <p style="position:fixed;left:8px;bottom:6px;margin:0;color:#7f8b98;font-size:11px">Soldier: "low poly soldier" by Kolos Studios, CC BY 4.0 (changed). See CREDITS.md.</p>
