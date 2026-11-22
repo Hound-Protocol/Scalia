@@ -195,3 +195,12 @@ fn seam_constants_match() {
     }
     assert_eq!(n, 11, "every joint");
 }
+
+/// Pose changes: the shader's blend times are the Rust ones (pose.rs `BLEND_S`, `KNEEL_BLEND_S`).
+#[test]
+fn blend_times_match() {
+    use scalia_render::pose::{BLEND_S, KNEEL_BLEND_S};
+    let get = |name: &str| nums(WGSL.lines().find(|l| l.starts_with(&format!("const {name}:"))).unwrap_or("").split_once('=').map_or("", |x| x.1));
+    assert_eq!(get("BLEND_S"), vec![BLEND_S]);
+    assert_eq!(get("KNEEL_BLEND_S"), vec![KNEEL_BLEND_S]);
+}

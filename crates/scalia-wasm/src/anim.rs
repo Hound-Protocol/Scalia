@@ -38,8 +38,8 @@ pub const TURN_ACCEL: f32 = 28.0;
 const FALL_BACK_S: f32 = 1.1;
 const FALL_FORWARD_S: f32 = 0.95;
 /// Getting down to prone or back up: how fast he moves along the drop (`Pose::Drop` phase per second), so the
-/// whole way from standing to flat takes about 1.6 s, eased at both ends.
-const DROP_RATE: f32 = 0.8;
+/// whole way from standing to flat takes about 1.2 s, eased at both ends (Patch: Animations, 30% quicker).
+const DROP_RATE: f32 = 1.04;
 /// The drop eases in and out: its pace is this share of `DROP_RATE` at the ends, full in the middle (a body
 /// that starts and finishes its fall slowly reads as a person, not a snap).
 const DROP_EASE_ENDS: f32 = 0.4;
@@ -428,7 +428,7 @@ impl Animator {
                 // the phase) rather than from the drop.
                 (pose, end, d.ts)
             } else {
-                (pose, self.shown.0, pose::switch_start(self.shown.1, self.shown.2, pose, d.ts))
+                (pose, self.shown.0, pose::switch_start(self.shown.1, self.shown.2, pose, d.ts, pose::blend_s(self.shown.0, pose)))
             };
         }
         // Both prone bases share one raise/lower state: starting or stopping the feet must not restart it.
@@ -480,7 +480,7 @@ impl Animator {
         let (pose, prev, since) = match (f.pose, self.shown.1) {
             (Pose::Drop, _) => {
                 let (from, to, u) = pose::drop_keys(f.phase);
-                (to, from, self.clock - u * pose::BLEND_S)
+                (to, from, self.clock - u * pose::blend_s(from, to))
             }
             (p, Pose::Drop) => (p, Pose::Crouch, self.shown.2),
             (p, before) => (p, before, self.shown.2),
@@ -551,7 +551,8 @@ mod tests {
         let down = hold(&mut a, &mut ts, Stance::Prone, 2.2);
         let drop: Vec<f32> = down.iter().filter(|(p, _)| *p == Pose::Drop).map(|(_, t)| *t).collect();
         let secs = drop.len() as f32 / 60.0;
-        assert!((1.4..1.9).contains(&secs), "stand to flat in about 1.6 s, not a snap: {secs}");
+        // Patch: Animations: 30% quicker than the 1.6 s it was, still eased (not a snap).
+        assert!((1.1..1.35).contains(&secs), "stand to flat in about 1.2 s: {secs}");
         // Eased: the first and last tenth of the drop move slower than the middle.
         let step: Vec<f32> = drop.windows(2).map(|w| w[1] - w[0]).collect();
         let n = step.len();
@@ -565,6 +566,8 @@ mod tests {
         let up = hold(&mut a, &mut ts, Stance::Stand, 2.2);
         let rise: Vec<f32> = up.iter().filter(|(p, _)| *p == Pose::Drop).map(|(_, t)| *t).collect();
         assert!(rise.windows(2).all(|w| w[1] < w[0]), "up the drop backwards");
+        let up_secs = rise.len() as f32 / 60.0;
+        assert!((1.1..1.35).contains(&up_secs), "flat to standing in about 1.2 s: {up_secs}");
         assert!(!rise.is_empty() && rise[0] > 0.9);
         assert_eq!(up.last().unwrap().0, Pose::Ready);
     }
@@ -812,7 +815,7 @@ mod tests {
 
     #[test]
     fn the_drop_reaches_the_shader_as_two_keys_and_a_blend() {
-        use scalia_render::pose::{drop_keys, BLEND_S};
+        use scalia_render::pose::drop_keys;
         let mut a = Animator::new(0.0);
         run(&mut a, 3, drive(0.0));
         let mut d = drive(1.0);
@@ -828,7 +831,7 @@ mod tests {
             let r = a.record(&f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
             let (from, to, u) = drop_keys(f.phase);
             assert_eq!((r[7] as u32, r[8] as u32), (to as u32, from as u32));
-            assert!(((d.ts - r[9]) / BLEND_S - u).abs() < 1e-4, "the blend is how far between the keys");
+            assert!(((d.ts - r[9]) / pose::blend_s(from, to) - u).abs() < 1e-4, "the blend is how far between the keys (at the shader's pace for these keys)");
             assert!(r[7] as u32 != Pose::Drop as u32 && r[8] as u32 != Pose::Drop as u32, "the shader never sees the drop");
         }
         assert!(seen > 20);

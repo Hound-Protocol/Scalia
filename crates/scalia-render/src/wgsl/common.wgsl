@@ -1080,6 +1080,17 @@ fn drop_hand(p: PP, t: f32) -> PP {
 }
 // Where on the drop he is, from the two keys he was handed and the blend between them (pose.rs `drop_keys`,
 // DROP_KNEEL 0.35, DROP_REACH 0.55, DROP_PLANT 0.78); -1 off the drop. These key pairs only occur on it.
+// Seconds a pose change takes (pose.rs BLEND_S, KNEEL_BLEND_S, `blend_s`): quicker between standing (stand 0,
+// stand aim 6, ready 30) and kneeling (crouch 3, crouch aim 14).
+const BLEND_S: f32 = 0.35;
+const KNEEL_BLEND_S: f32 = 0.26923078;
+fn blend_s(a: u32, b: u32) -> f32 {
+  let sa = a == 0u || a == 6u || a == 30u;
+  let sb = b == 0u || b == 6u || b == 30u;
+  let ka = a == 3u || a == 14u;
+  let kb = b == 3u || b == 14u;
+  return select(BLEND_S, KNEEL_BLEND_S, (sa && kb) || (ka && sb));
+}
 fn drop_t(prev: u32, pose: u32, w: f32) -> f32 {
   if (prev == 3u && pose == 34u) { return 0.35 + 0.2 * w; }
   if (prev == 34u && pose == 35u) { return 0.55 + 0.23 * w; }
@@ -1098,7 +1109,7 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     // Negative b.z keeps the CPU-integrated leg phase in b.y. Values below -1 also carry reload progress.
     let phase = select(select(0.0, fract(time * b.z + b.y), b.z > 0.0), fract(b.y), b.z < 0.0);
     let reload_phase = clamp(-b.z - 1.0, 0.0, 1.0);
-    let w = clamp((time - d.y) / 0.35, 0.0, 1.0);
+    let w = clamp((time - d.y) / blend_s(u32(d.x), u32(b.w)), 0.0, 1.0);
     // Instance c.z: upper-body pose id + 1, with movement direction in its fractional part.
     let layer = floor(d.z);
     let turn = fract(d.z) * 6.2831853;

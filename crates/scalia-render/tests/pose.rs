@@ -1141,3 +1141,15 @@ fn bent_joints_keep_their_thickness() {
         }
     }
 }
+
+/// Patch: Animations: kneeling down and standing up from the knee take 30% less time than other pose changes.
+#[test]
+fn kneeling_and_standing_up_are_quicker_than_other_pose_changes() {
+    use scalia_render::pose::{blend_s, BLEND_S};
+    for (a, b) in [(Pose::Stand, Pose::Crouch), (Pose::Ready, Pose::Crouch), (Pose::StandAim, Pose::CrouchAim), (Pose::Crouch, Pose::Ready)] {
+        assert!((blend_s(a, b) - BLEND_S / 1.3).abs() < 1e-4, "{a:?} to {b:?}");
+    }
+    for (a, b) in [(Pose::Walk, Pose::Run), (Pose::Ready, Pose::StandAim), (Pose::Crouch, Pose::CrouchWalk)] {
+        assert_eq!(blend_s(a, b), BLEND_S, "{a:?} to {b:?}");
+    }
+}

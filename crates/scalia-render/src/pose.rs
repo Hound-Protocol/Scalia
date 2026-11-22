@@ -2068,14 +2068,25 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
 
 /// Seconds a pose change takes.
 pub const BLEND_S: f32 = 0.35;
+/// Seconds kneeling down or standing up from the knee takes: 30% quicker than other changes (Patch: Animations).
+pub const KNEEL_BLEND_S: f32 = BLEND_S / 1.3;
+
+/// Seconds the change from `a` to `b` takes: `KNEEL_BLEND_S` between standing and kneeling, else `BLEND_S`.
+/// common.wgsl `blend_s` mirrors it.
+pub fn blend_s(a: Pose, b: Pose) -> f32 {
+    let standing = |p: Pose| matches!(p, Pose::Stand | Pose::Ready | Pose::StandAim);
+    let kneeling = |p: Pose| matches!(p, Pose::Crouch | Pose::CrouchAim);
+    if (standing(a) && kneeling(b)) || (kneeling(a) && standing(b)) { KNEEL_BLEND_S } else { BLEND_S }
+}
 
 /// When a pose change should count as having started (shader clock, s), so the figure does not jump. Going back
 /// to `prev`, the pose it was blending away from since `since`, part way through starts the return as far along
 /// as the first blend had got: the eased blend is symmetric, so the body carries on from exactly where it was.
 /// Anything else starts `now`.
-pub fn switch_start<P: PartialEq>(prev: P, since: f32, new: P, now: f32) -> f32 {
-    let w = ((now - since) / BLEND_S).clamp(0.0, 1.0);
-    if new == prev && w < 1.0 { now - (1.0 - w) * BLEND_S } else { now }
+/// `secs` is how long the blend between the two takes (`blend_s`).
+pub fn switch_start<P: PartialEq>(prev: P, since: f32, new: P, now: f32, secs: f32) -> f32 {
+    let w = ((now - since) / secs).clamp(0.0, 1.0);
+    if new == prev && w < 1.0 { now - (1.0 - w) * secs } else { now }
 }
 
 #[cfg(test)]
@@ -2086,14 +2097,14 @@ mod switch_tests {
     fn turning_back_mid_blend_carries_on_from_where_the_body_was() {
         // Stand -> walk at 0, back to stand 0.1 s later: the stand weight just before equals the one just after.
         let before = 1.0 - eased(0.1 / BLEND_S);
-        let start = switch_start(0u8, 0.0, 0u8, 0.1);
+        let start = switch_start(0u8, 0.0, 0u8, 0.1, BLEND_S);
         let after = eased((0.1 - start) / BLEND_S);
         assert!((before - after).abs() < 1e-5, "{before} vs {after}");
     }
     #[test]
     fn a_settled_or_new_pose_starts_now() {
-        assert_eq!(switch_start(0u8, 0.0, 0u8, 1.0), 1.0);
-        assert_eq!(switch_start(0u8, 0.0, 2u8, 0.1), 0.1);
+        assert_eq!(switch_start(0u8, 0.0, 0u8, 1.0, BLEND_S), 1.0);
+        assert_eq!(switch_start(0u8, 0.0, 2u8, 0.1, BLEND_S), 0.1);
     }
 }
 
