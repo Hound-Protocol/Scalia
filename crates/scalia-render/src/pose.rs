@@ -832,8 +832,10 @@ fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
         let mut i = 0;
         raw.map(|l| {
             let straight = i % 4 == 0;
+            // Only going ahead stands taller: backing up and the strafes reach the solver's knee limit with it.
+            let up = if i == 0 { rise } else { 0.0 };
             i += 1;
-            if straight { polish_loop(&centre_leg_yaw(&smooth_lift(l)), true, PLANT_STRAIGHT, rise) } else { polish_loop(&smooth_lift(l), false, strafe, rise) }
+            if straight { polish_loop(&centre_leg_yaw(&smooth_lift(l)), true, PLANT_STRAIGHT, up) } else { polish_loop(&smooth_lift(l), false, strafe, 0.0) }
         })
     });
     Some(std::array::from_fn(|i| &loops[i]))
@@ -1050,7 +1052,7 @@ fn smooth_lift(l: &GaitLoop) -> GaitLoop {
 /// the sweep `examples/fit_clip` pins each planted boot to (its `plant: boots sweep` line; examples/gait_strides
 /// measures it back). The game sets the cadence from it, so the boot on the ground stays put.
 pub const GAIT_STRIDE: [[f32; 8]; 3] = [
-    [1.57, 1.57, 1.66, 1.81, 1.62, 1.68, 1.64, 1.63], // Walk
+    [1.57, 1.58, 1.67, 1.81, 1.62, 1.69, 1.64, 1.63], // Walk
     [1.91, 1.67, 1.64, 1.85, 1.84, 1.52, 1.91, 2.02], // Run
     [2.70, 2.66, 3.18, 3.18, 3.20, 2.80, 2.85, 2.86], // Sprint
 ];
