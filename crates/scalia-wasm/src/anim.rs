@@ -38,6 +38,8 @@ const SHUFFLE_SPIN: f32 = 1.3;
 pub const LEG_STEP: f32 = 0.78;
 /// How fast trailing legs come back in line once he steps round or moves off (1/s, exponential).
 const LEG_EASE: f32 = 6.0;
+/// How fast the prone turning shift eases out once he is off the ground (1/s, exponential).
+const SHIFT_EASE: f32 = 4.0;
 /// A body turns with weight: angular acceleration (rad/s²).
 pub const TURN_ACCEL: f32 = 28.0;
 const FALL_BACK_S: f32 = 1.1;
@@ -141,6 +143,9 @@ pub struct Frame {
     pub footfall: Option<f32>,
     /// How far his hips and legs trail his chest (rad, `pose::pack_layer_lag`): rifle first, the feet follow.
     pub lag: f32,
+    /// Where to draw him against his position (m, world x and y): lying prone he turns about his hips, so his boots
+    /// swing round; standing up it eases back to nothing. Whoever owns his position may move it instead.
+    pub shift: (f32, f32),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -154,6 +159,7 @@ pub struct Animator {
     /// Rifle first: how far the legs trail the chest, and whether he is stepping round to bring them under him.
     lag: f32,
     catching: bool,
+    shift: (f32, f32),
     aim: AimTrack,
     speed: f32,
     dir: f32,
@@ -205,6 +211,7 @@ impl Animator {
             turning: 0.0,
             lag: 0.0,
             catching: false,
+            shift: (0.0, 0.0),
             aim: AimTrack::new(heading, 0.0),
             speed: 0.0,
             dir: 0.0,
@@ -296,6 +303,15 @@ impl Animator {
         let travel = (-d.vel.0).atan2(d.vel.1);
         let hard = self.spin.abs() > SHUFFLE_SPIN;
         self.turning = if hard { self.turning + dt } else { 0.0 };
+        // Lying prone he turns about his hips: the boots swing round (`shift`). Off the ground the shift eases out.
+        if d.stance == Stance::Prone && self.drop.is_none() && alive_up {
+            let ahead = |h: f32| (-h.sin() * pose::HIP_Z, h.cos() * pose::HIP_Z);
+            let (a, b) = (ahead(heading_before), ahead(self.heading));
+            self.shift = (self.shift.0 + a.0 - b.0, self.shift.1 + a.1 - b.1);
+        } else if d.stance != Stance::Prone {
+            let k = (-SHIFT_EASE * dt).exp();
+            self.shift = (self.shift.0 * k, self.shift.1 * k);
+        }
         // Rifle first: standing or kneeling still, the chest and rifle turn and the feet stay where they are, the
         // legs trailing; past LEG_STEP he steps round (standing: a shuffle in place) until they are under him again.
         // Moving, acting or stepping round, any trail eases out (the legs swing into the gait, no snap).
@@ -499,7 +515,7 @@ impl Animator {
         let bank_to = if tilting { pose::bank(speed, self.spin) } else { 0.0 };
         self.bank += ((bank_to - self.bank) * (dt * BANK_FOLLOW).min(1.0)).clamp(-BANK_RATE * dt, BANK_RATE * dt);
         let lean = if tilting { pose::pack_tilt(self.bank, pose::accel_pitch(self.accel)) } else { 0.0 };
-        Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall, lag: self.lag }
+        Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall, lag: self.lag, shift: self.shift }
     }
 
     /// Going down to prone or getting up from it (on the drop): his feet are planted.
@@ -698,6 +714,33 @@ mod tests {
             last = g.lag.abs();
         }
         assert!(last < 0.05, "legs in line with the gait after half a second: {last:.3}");
+    }
+
+    /// Lying prone he turns about his hips, not his boots: drawn where his feet are plus `shift`, the hips (HIP_Z
+    /// ahead of the feet along his heading) stay put through the turn; standing up, the shift goes again.
+    #[test]
+    fn prone_turns_pivot_on_the_hips_and_rising_takes_the_shift_back() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Prone, 2.2);
+        let mut d = drive(ts);
+        d.stance = Stance::Prone;
+        let hips = |f: &Frame| (f.shift.0 - f.heading.sin() * pose::HIP_Z, f.shift.1 + f.heading.cos() * pose::HIP_Z);
+        let start = hips(&a.step(&d));
+        d.face = Face::Turn { heading: 1.6, top: 3.0 };
+        let mut f = a.step(&d);
+        for _ in 0..120 {
+            d.ts += d.dt;
+            f = a.step(&d);
+            let h = hips(&f);
+            assert!((h.0 - start.0).hypot(h.1 - start.1) < 0.03, "the hips moved {:?} -> {h:?} at heading {:.2}", start, f.heading);
+        }
+        assert!((f.heading - 1.6).abs() < 0.05);
+        assert!(f.shift.0.hypot(f.shift.1) > 0.5, "the boots swung round");
+        d.stance = Stance::Stand;
+        d.face = Face::Keep;
+        let f = run(&mut a, 180, d);
+        assert!(f.shift.0.hypot(f.shift.1) < 0.02, "standing up he is back on his feet: {:?}", f.shift);
     }
 
     #[test]
