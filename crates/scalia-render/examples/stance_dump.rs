@@ -3,7 +3,7 @@
 //! posed as common.wgsl poses it for drawing (upper-body layer, then the two-handed grip). Per pose, per vertex:
 //! x, y, z, colour code (f32 little-endian), figure frame (facing +y).
 use glam::Vec3;
-use scalia_render::mesh::{figure, part_of};
+use scalia_render::mesh::figure;
 use scalia_render::pose::{grip, layer, params, params_dir, pose_mesh_vertex, two_handed, Pose};
 
 fn main() {

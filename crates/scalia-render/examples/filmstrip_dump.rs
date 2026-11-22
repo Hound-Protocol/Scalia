@@ -1,7 +1,7 @@
 //! Dumps a gait cycle's posed figure for scripts/filmstrip.py: `filmstrip_dump <pose id> <frames> <out>`.
 //! Per frame, per vertex: x, y, z, colour code (f32 little-endian), figure frame (facing +y).
 use glam::Vec3;
-use scalia_render::mesh::{figure, part_of};
+use scalia_render::mesh::figure;
 use scalia_render::pose::{params, pose_mesh_vertex, Pose};
 
 fn main() {
