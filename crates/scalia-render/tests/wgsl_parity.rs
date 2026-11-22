@@ -228,3 +228,10 @@ fn leg_lag_unpacks_the_same() {
     assert!(WGSL.contains(&format!("/ 127.0 * {LEG_LAG_MAX}")), "common.wgsl must scale the lag by LEG_LAG_MAX {LEG_LAG_MAX}");
     assert!(WGSL.contains("round(fract(d.z) * 262144.0)"), "common.wgsl unpacks 18 bits of the layer fraction");
 }
+
+/// The prone leg roll gives way to the crawl's own once the body is raised (pose.rs LEG_ROLL_RAISE).
+#[test]
+fn leg_roll_raise_matches() {
+    use scalia_render::pose::LEG_ROLL_RAISE;
+    assert!(WGSL.contains(&format!("clamp(p.raise / {LEG_ROLL_RAISE}, 0.0, 1.0)")), "common.wgsl leg_roll must fade by LEG_ROLL_RAISE {LEG_ROLL_RAISE}");
+}

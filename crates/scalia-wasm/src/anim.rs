@@ -470,7 +470,7 @@ impl Animator {
             }
         } else {
             match (d.stance, moving) {
-                // The high crawl moves him; to aim he goes flat on the prone legs (no aiming from elbows and knees).
+                // The crawl moves him; to aim he holds still on the prone legs (no aiming mid-stroke from elbows and knees).
                 (Stance::Prone, true) if aim => (Pose::Prone, Some(Pose::ProneAim), 0.0),
                 (Stance::Prone, true) => (Pose::Crawl, None, speed / stride_m_dir(Pose::Crawl, self.dir)),
                 (Stance::Prone, false) => (Pose::Prone, aim.then_some(Pose::ProneAim), 0.0),
@@ -806,13 +806,13 @@ mod tests {
         d.vel = (0.0, 1.0);
         d.want = Some(d.vel);
         let moving = run(&mut a, 5, d);
-        // Aiming, he does not high crawl: he stays flat on the prone legs under the aim.
+        // Aiming, he does not crawl: he stays flat on the prone legs under the aim.
         assert_eq!((moving.pose, moving.upper), (Pose::Prone, Some(Pose::ProneAim)));
         assert!(a.barrel(&moving, (0.0, 0.0)).0.is_some(), "the prone aim keeps its muzzle while he moves");
         d.rifle = Rifle::Ready;
         d.face = Face::Keep;
         let crawling = run(&mut a, 5, d);
-        assert_eq!((crawling.pose, crawling.upper), (Pose::Crawl, None), "unaimed, he moves in the high crawl");
+        assert_eq!((crawling.pose, crawling.upper), (Pose::Crawl, None), "unaimed, he moves in the crawl");
     }
 
     #[test]
