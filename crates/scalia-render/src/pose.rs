@@ -187,6 +187,9 @@ pub struct PoseParams {
     /// left), the upper body and the rifle staying on the facing. Riflemen walk and strafe with the hips turned
     /// towards their steps and the chest on the aim (AN-02-S13, from the reference clips).
     pub yaw: f32,
+    /// Height added after the body tips prone (metres): the high crawl holds the body off the ground on elbows and
+    /// knees. Applied to every part; 0 in every other pose.
+    pub raise: f32,
 }
 
 /// The rifle slung on the back: rolled flat (magazine inwards), muzzle down, hung diagonally from the right
@@ -1736,9 +1739,9 @@ pub fn wgsl_literal(p: &PoseParams) -> String {
     let f = |x: f32| format!("{x:.6}");
     let v = |a: [f32; 2]| format!("vec2f({}, {})", f(a[0]), f(a[1]));
     format!(
-        "PP({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        "PP({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
         f(p.lean), v(p.hip), v(p.knee), v(p.shoulder), v(p.elbow), f(p.head), f(p.rifle), f(p.prone), f(p.drop),
-        v(p.reach), f(p.sling), f(p.bob), f(p.twist), f(p.look), v(p.abduct), f(p.rifle_yaw), v(p.side), f(p.flat), f(p.tilt), f(p.yaw)
+        v(p.reach), f(p.sling), f(p.bob), f(p.twist), f(p.look), v(p.abduct), f(p.rifle_yaw), v(p.side), f(p.flat), f(p.tilt), f(p.yaw), f(p.raise)
     )
 }
 
@@ -1980,7 +1983,7 @@ pub fn pose_rigid(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         // Mid-transition the bent knees would dip into the ground: lift a little, most at the halfway point.
         // Onto his front the body keeps the transition height (PRONE_LIFT_MID) until the very end, then settles
         // flat (PRONE_LIFT): hips and legs on the ground only once he is fully down.
-        q.z += prone_lift(p.prone);
+        q.z += prone_lift(p.prone) + p.raise;
     }
     q
 }
@@ -1998,7 +2001,7 @@ pub fn pose_upper(v: Vec3, p: &PoseParams) -> Vec3 {
     q.z += p.drop + p.bob;
     if p.prone != 0.0 {
         q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2 * p.prone);
-        q.z += prone_lift(p.prone);
+        q.z += prone_lift(p.prone) + p.raise;
     }
     q
 }
@@ -2008,7 +2011,7 @@ pub fn pose_upper(v: Vec3, p: &PoseParams) -> Vec3 {
 pub fn unpose_upper(w: Vec3, p: &PoseParams) -> Vec3 {
     let mut q = w;
     if p.prone != 0.0 {
-        q.z -= prone_lift(p.prone);
+        q.z -= prone_lift(p.prone) + p.raise;
         q = rot(q, 0.0, 0.0, std::f32::consts::FRAC_PI_2 * p.prone);
     }
     q.z -= p.drop + p.bob;
@@ -2063,6 +2066,7 @@ pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
         look: m(a.look, b.look),
         abduct: m2(a.abduct, b.abduct),
         yaw: m(a.yaw, b.yaw),
+        raise: m(a.raise, b.raise),
     }
 }
 

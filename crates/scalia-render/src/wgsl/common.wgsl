@@ -5,7 +5,7 @@ struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: v
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
-struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32, yaw: f32 };
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32, yaw: f32, raise: f32 };
 
 fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
   let s = sin(ang);
@@ -317,8 +317,8 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
-const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000);
+const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000);
+const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000);
 
 // AN-02-S11 forward crawl legs (mirrors CRAWL_FWD_LEGS in pose.rs): hip L, hip R, knee L, knee R, side L, side R.
 // Both crawling legs in turn (pose.rs `crawl_alternate`): d/t the drawing and trailing leg (hip, knee, side), dh/th
@@ -412,7 +412,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
   if (pose == 35u) { return DROP_PLANT_P; }
   let sw = sin(phase * 6.2831853);
-  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0, 0.0);
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0);
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
@@ -785,7 +785,7 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0,
              mix(a.reach, b.reach, w), mix(a.sling, b.sling, w), mix(a.bob, b.bob, w), mix(a.twist, b.twist, w),
-             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w), mix(a.yaw, b.yaw, w));
+             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w), mix(a.yaw, b.yaw, w), mix(a.raise, b.raise, w));
   p.side = mix(a.side, b.side, w);
   p.flat = mix(a.flat, b.flat, w);
   p.drop = select(select(ground_drop(p.hip, p.knee, p.side, p.flat), b.drop, w >= 1.0), a.drop, w <= 0.0);
@@ -1027,7 +1027,7 @@ fn pose_rigid(v: vec3f, part: u32, p: PP) -> vec3f {
   if (p.prone != 0.0) {
     // Positive onto his front, negative onto his back (pose.rs PRONE_LIFT 0.14, SUPINE_LIFT 0.16).
     q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
-    q.z = q.z + prone_lift(p.prone);
+    q.z = q.z + prone_lift(p.prone) + p.raise;
   }
   return q;
 }
@@ -1052,14 +1052,14 @@ fn pose_upper(v: vec3f, p: PP) -> vec3f {
   q.z = q.z + p.drop + p.bob;
   if (p.prone != 0.0) {
     q = rot(q, 0.0, 0.0, -1.5707963 * p.prone);
-    q.z = q.z + prone_lift(p.prone);
+    q.z = q.z + prone_lift(p.prone) + p.raise;
   }
   return q;
 }
 fn unpose_upper(w: vec3f, p: PP) -> vec3f {
   var q = w;
   if (p.prone != 0.0) {
-    q.z = q.z - prone_lift(p.prone);
+    q.z = q.z - prone_lift(p.prone) - p.raise;
     q = rot(q, 0.0, 0.0, 1.5707963 * p.prone);
   }
   q.z = q.z - p.drop - p.bob;

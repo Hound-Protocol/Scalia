@@ -2,6 +2,7 @@
 
 pub mod bend;
 pub mod camera;
+pub mod contact;
 pub mod mesh;
 pub mod pose;
 pub mod prims;
