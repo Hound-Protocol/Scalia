@@ -1,6 +1,6 @@
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of, Part};
-use scalia_render::pose::{reach_left, reload_target, blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, barrel_with_phases, Pose, PoseParams, Side, RIFLE_GUARD, RIFLE};
+use scalia_render::pose::{reach_left, reload_target, blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, barrel_with_phases, Pose, PoseParams, Side, params_dir, RIFLE_GUARD, RIFLE};
 
 /// All figure vertices in a pose at a gait phase, in the figure's own frame (facing +y).
 fn posed(pose: Pose, phase: f32) -> Vec<(Part, Vec3)> {
@@ -1054,6 +1054,48 @@ fn joints_close_their_seams_in_every_pose() {
                     let gap = pose_vertex(at, a, &pp).distance(pose_vertex(at, b, &pp));
                     assert!(gap < 0.02, "{pose:?}@{k}: {a:?}/{b:?} seam open {gap:.3} m at {at}");
                 }
+            }
+        }
+    }
+}
+
+/// Walk polish: going straight ahead or back, each leg does what the other did half a cycle earlier (no limp).
+#[test]
+fn walking_straight_legs_mirror_each_other_half_a_cycle_apart() {
+    let n = 96;
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        for dir in [0.0, std::f32::consts::PI] {
+            let p: Vec<_> = (0..n).map(|k| params_dir(pose, k as f32 / n as f32, dir)).collect();
+            let worst = (0..n)
+                .map(|k| {
+                    let o = &p[(k + n / 2) % n];
+                    (p[k].hip[0] - o.hip[1]).abs().max((p[k].knee[0] - o.knee[1]).abs())
+                })
+                .fold(0.0f32, f32::max);
+            assert!(worst < 0.03, "{pose:?} dir {dir}: legs differ by {worst:.3} rad half a cycle apart");
+        }
+    }
+}
+
+/// Walk polish: leg angles change smoothly round every gait loop, the seam included (no stutter).
+#[test]
+fn gait_legs_move_without_jolts() {
+    let n = 96;
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        for e in 0..8 {
+            let dir = e as f32 * std::f32::consts::FRAC_PI_4;
+            let p: Vec<_> = (0..n).map(|k| params_dir(pose, k as f32 / n as f32, dir)).collect();
+            for s in 0..2 {
+                let jerk = (0..n)
+                    .map(|k| {
+                        let f = |q: &scalia_render::pose::PoseParams| (q.hip[s], q.knee[s]);
+                        let (a, b, c) = (f(&p[k]), f(&p[(k + 1) % n]), f(&p[(k + 2) % n]));
+                        (c.0 - 2.0 * b.0 + a.0).abs().max((c.1 - 2.0 * b.1 + a.1).abs())
+                    })
+                    .fold(0.0f32, f32::max);
+                // Straight ahead and back are clean; strafes keep more of the capture (it was up to 0.31 rad).
+                let limit = if e % 4 == 0 { 0.05 } else { 0.15 };
+                assert!(jerk < limit, "{pose:?} dir {dir:.2} leg {s}: jolt {jerk:.3} rad between frames");
             }
         }
     }

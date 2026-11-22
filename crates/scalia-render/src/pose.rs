@@ -826,15 +826,123 @@ fn gait_loops(pose: Pose) -> Option<[&'static GaitLoop; 8]> {
         _ => return None,
     };
     // Ahead and back the legs are straightened; the strafes keep their hip turn (it is how they step sideways).
+    let rise = GAIT_RISE[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
+    let strafe = PLANT_STRAFE[match pose { Pose::Walk => 0, Pose::Run => 1, _ => 2 }];
     let loops = cell.get_or_init(|| {
         let mut i = 0;
         raw.map(|l| {
             let straight = i % 4 == 0;
             i += 1;
-            if straight { centre_leg_yaw(&smooth_lift(l)) } else { smooth_lift(l) }
+            if straight { polish_loop(&centre_leg_yaw(&smooth_lift(l)), true, PLANT_STRAIGHT, rise) } else { polish_loop(&smooth_lift(l), false, strafe, rise) }
         })
     });
     Some(std::array::from_fn(|i| &loops[i]))
+}
+
+/// Where a leg's boot is for a baked row (legs frame): the ankle, which a planted boot pivots about.
+fn gait_boot(hip: f32, knee: f32, side: f32, yaw: f32, px: f32) -> Vec3 {
+    turn(sideways(leg(Vec3::new(px, 0.0, ANKLE_Z), hip, knee), side, px), yaw)
+}
+
+/// Rows of smoothing (a circular Gaussian's sigma) applied to the boots' paths and the body's sway in a baked loop:
+/// it takes out the capture's frame-to-frame noise (legs that stutter, a jump at the loop seam) and only rounds the
+/// corners of a planted boot's path, which stays put (a fixed point smooths to itself).
+const GAIT_SMOOTH_ROWS: f32 = 1.0;
+/// How far off the planted speed (in units of it) a boot's smoothing starts and is full: going straight, and per gait
+/// on the strafes, which plant less cleanly (the step crosses over) and so keep more of their path as captured.
+const PLANT_STRAIGHT: [f32; 2] = [0.2, 0.6];
+/// Walk polish: how much taller (m) each gait stands than its clip. The rifle walk kept the knees bent past 40
+/// degrees the whole way round (a crouched waddle on our figure); walk, run, sprint.
+const GAIT_RISE: [f32; 3] = [0.05, 0.0, 0.0];
+const PLANT_STRAFE: [[f32; 2]; 3] = [[0.2, 0.6], [0.4, 1.0], [0.6, 1.4]];
+
+/// Walk polish: a baked loop with the boots' paths smoothed and, going straight (`mirror`), each boot made the other's
+/// mirror half a cycle on. The rifle clips lead with the rifle-side leg, which on our figure read as a limp (the
+/// legs differed by up to 0.6 rad). The work is done on where the boots are, then the legs are solved to put them
+/// there, so a planted boot stays planted. The body's sway follows suit: odd fields (legs turn, twist, tilt) mirror
+/// about their mean, even ones (lean, lift) average with half a cycle on.
+fn polish_loop(l: &GaitLoop, mirror: bool, plant: [f32; 2], rise: f32) -> GaitLoop {
+    let n = GAIT_ROWS;
+    let h = n / 2;
+    let px = [-HIP_X, HIP_X];
+    let flip = |v: Vec3| Vec3::new(-v.x, v.y, v.z);
+    let feet: Vec<[Vec3; 2]> = l.iter().map(|r| [0, 1].map(|i| gait_boot(r[i], r[2 + i], r[4 + i], r[6], px[i]))).collect();
+    // `rise`: the boots asked for this much lower against the hips, so the legs straighten and the body stands taller.
+    let feet: Vec<[Vec3; 2]> = feet.iter().map(|f| f.map(|v| v - Vec3::Z * rise)).collect();
+    let mut want = feet.clone();
+    let mut sway: Vec<[f32; 5]> = l.iter().map(|r| [r[6], r[7], r[8], r[9], r[10]]).collect();
+    if mirror {
+        let mean: Vec<f32> = (0..5).map(|f| sway.iter().map(|s| s[f]).sum::<f32>() / n as f32).collect();
+        // The clips' right heel strike is not exactly half a cycle after the left: line the right boot's path up
+        // with the left's first, so a planted boot is only ever averaged with a planted boot.
+        let lag = (0..n)
+            .min_by(|&a, &b| {
+                let miss = |o: usize| (0..n).map(|k| (feet[k][0] - flip(feet[(k + o) % n][1])).length_squared()).sum::<f32>();
+                miss(a).total_cmp(&miss(b))
+            })
+            .unwrap();
+        let left: Vec<Vec3> = (0..n).map(|k| (feet[k][0] + flip(feet[(k + lag) % n][1])) * 0.5).collect();
+        for k in 0..n {
+            let o = (k + h) % n;
+            want[k] = [left[k], flip(left[(k + n - h) % n])];
+            for f in 0..5 {
+                let (a, b) = (l[k][6 + f], l[o][6 + f]);
+                sway[k][f] = if matches!(f, 1 | 4) { (a + b) * 0.5 } else { mean[f] + (a - b) * 0.5 };
+            }
+        }
+    }
+    let kernel: Vec<f32> = (-4..=4).map(|d: i32| (-(d * d) as f32 / (2.0 * GAIT_SMOOTH_ROWS * GAIT_SMOOTH_ROWS)).exp()).collect();
+    let total: f32 = kernel.iter().sum();
+    let at = |k: usize, d: usize| (k + n + d - 4) % n;
+    let smoothed: Vec<[Vec3; 2]> =
+        (0..n).map(|k| [0, 1].map(|i| (0..9).map(|d| want[at(k, d)][i] * kernel[d]).sum::<Vec3>() / total)).collect();
+    // A planted boot sweeps back through the legs frame at the body's speed (the commonest velocity); it is kept
+    // exactly. Away from that speed (lift-off, the swing, landing) the path is smoothed: the clips' ankle turns from
+    // sweeping back to swinging forward within one row at toe-off, which read as a snap in every step.
+    let airborne: Vec<[f32; 2]> = {
+        let vel = |k: usize, i: usize| want[(k + 1) % n][i] - want[k][i];
+        let off: Vec<[f32; 2]> = (0..n)
+            .map(|k| {
+                [0, 1].map(|i| {
+                    let mut c: Vec<[f32; 3]> = (0..n).map(|j| vel(j, i).to_array()).collect();
+                    let planted = Vec3::from_array([0, 1, 2].map(|a| {
+                        c.sort_by(|x, y| x[a].total_cmp(&y[a]));
+                        c[n / 2][a]
+                    }));
+                    let unit = planted.length().max(1e-4);
+                    // Either step out of this row (to it, from it) off the planted speed counts.
+                    let d = (vel(k, i) - planted).length().max((vel((k + n - 1) % n, i) - planted).length());
+                    smooth(plant[0] * unit, plant[1] * unit, d)
+                })
+            })
+            .collect();
+        off
+    };
+    let mut out = *l;
+    // Each row's solve starts from the row before (twice round, so the seam starts from the loop's own end): left
+    // to start from the clip's own angles, the solver can land on another solution and the leg jumps.
+    let mut prev = [0, 1].map(|i| Vec3::new(l[0][i], l[0][2 + i], l[0][4 + i]));
+    for pass in 0..2 {
+        for k in 0..n {
+            let foot = |i: usize| want[k][i] + (smoothed[k][i] - want[k][i]) * airborne[k][i];
+            let r = &mut out[k];
+            if pass == 0 {
+                for f in 0..5 {
+                    r[6 + f] = sway[k][f];
+                }
+            }
+            for i in 0..2 {
+                // Strafes keep the clip's own angles as the start (their legs cross, and chaining can drift).
+                let start = if mirror { prev[i] } else { Vec3::new(l[k][i], l[k][2 + i], l[k][4 + i]) };
+                let v = solve_boot(&gait_boot, foot(i), start, r[6], px[i]);
+                prev[i] = v;
+                r[i] = v.x;
+                r[2 + i] = v.y;
+                r[4 + i] = v.z;
+            }
+        }
+    }
+    out
 }
 
 /// A baked loop with its body lift (field 10) smoothed round the cycle. The clips' lift steps up for the airborne
@@ -942,9 +1050,9 @@ fn smooth_lift(l: &GaitLoop) -> GaitLoop {
 /// the sweep `examples/fit_clip` pins each planted boot to (its `plant: boots sweep` line; examples/gait_strides
 /// measures it back). The game sets the cadence from it, so the boot on the ground stays put.
 pub const GAIT_STRIDE: [[f32; 8]; 3] = [
-    [1.56, 1.52, 1.60, 1.80, 1.61, 1.63, 1.58, 1.63], // Walk
-    [1.92, 1.63, 1.62, 1.86, 1.84, 1.51, 1.89, 2.03], // Run
-    [2.69, 2.65, 3.17, 3.19, 3.21, 2.74, 2.79, 2.86], // Sprint
+    [1.57, 1.57, 1.66, 1.81, 1.62, 1.68, 1.64, 1.63], // Walk
+    [1.91, 1.67, 1.64, 1.85, 1.84, 1.52, 1.91, 2.02], // Run
+    [2.70, 2.66, 3.18, 3.18, 3.20, 2.80, 2.85, 2.86], // Sprint
 ];
 
 /// Which eighth-of-a-turn loop `dir` falls in and how far towards the next (0..1).
