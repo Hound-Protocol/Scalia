@@ -5,7 +5,7 @@ struct U { m: mat4x4f, lm: mat4x4f, vdir: vec4f, pal: array<vec4f, 32>, light: v
 // c = (previous pose id, time of the change in seconds, unused, unused): poses blend over 0.35 s.
 // A figure faces +y; heading turns it around z. Poses port `pose.rs` (the tested reference) exactly.
 
-struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32, yaw: f32, raise: f32 };
+struct PP { lean: f32, hip: vec2f, knee: vec2f, sh: vec2f, el: vec2f, head: f32, rifle: f32, prone: f32, drop: f32, reach: vec2f, sling: f32, bob: f32, twist: f32, look: f32, abd: vec2f, ryaw: f32, side: vec2f, flat: f32, tilt: f32, yaw: f32, raise: f32, roll: vec2f };
 
 fn rot(q: vec3f, py: f32, pz: f32, ang: f32) -> vec3f {
   let s = sin(ang);
@@ -138,7 +138,7 @@ fn leg_roll(q: vec3f, p: PP, knee: f32, px: f32) -> vec3f {
   let t = clamp((knee - 0.2) / 0.2, 0.0, 1.0); // pose.rs LEG_ROLL_FROM, LEG_ROLL_FULL
   // Only lying flat: raised on the knees the legs kneel straight down (pose.rs LEG_ROLL_RAISE 0.1).
   let flat = 1.0 - clamp(p.raise / 0.1, 0.0, 1.0);
-  let a = 1.5707963 * pow(max(p.prone, 0.0), 12.0) * t * t * (3.0 - 2.0 * t) * flat * -sign(px);
+  let a = 1.5707963 * pow(max(p.prone, 0.0), 12.0) * t * t * (3.0 - 2.0 * t) * flat * -sign(px) + select(p.roll.y, p.roll.x, px < 0.0);
   if (a == 0.0) { return q; }
   let s = sin(a);
   let c = cos(a);
@@ -319,14 +319,14 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
-const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000);
-const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000);
+const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000));
+const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000));
 
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
   if (pose == 35u) { return DROP_PLANT_P; }
   let sw = sin(phase * 6.2831853);
-  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0);
+  var p = PP(0.0, vec2f(0.0), vec2f(0.0), vec2f(0.0), vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0), 0.0, vec2f(0.0), 0.0, 0.0, 0.0, 0.0, vec2f(0.0));
   if (pose == 0u) {
     carry(&p, 0u);
   } else if (pose == 1u) {
@@ -599,8 +599,8 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let wb = clamp((-0.2 - fwd) * 5.0, 0.0, 1.0);
     let ca = clip_pos(HIGH_CRAWL_AT, HIGH_CRAWL_F, HIGH_CRAWL_N, phase);
     let cb = clip_pos(HIGH_CRAWL_AT, HIGH_CRAWL_F, HIGH_CRAWL_N, -phase);
-    var r: array<f32, 19>;
-    for (var k = 0u; k < 19u; k = k + 1u) { r[k] = mix(clip_get(ca, k), clip_get(cb, k), wb); }
+    var r: array<f32, 21>;
+    for (var k = 0u; k < 21u; k = k + 1u) { r[k] = mix(clip_get(ca, k), clip_get(cb, k), wb); }
     p.prone = 1.0;
     p.hip = vec2f(r[0], r[1]);
     p.knee = vec2f(r[2], r[3]);
@@ -614,6 +614,7 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.twist = r[16];
     p.head = r[17];
     p.yaw = r[18];
+    p.roll = vec2f(r[19], r[20]);
     p.look = -0.4 * lateral;
     p.rifle = 0.0;
     p.ryaw = 1.5707963;
@@ -657,7 +658,7 @@ fn blend(a: PP, b: PP, w0: f32) -> PP {
   var p = PP(mix(a.lean, b.lean, w), mix(a.hip, b.hip, w), mix(a.knee, b.knee, w), mix(a.sh, b.sh, w),
              mix(a.el, b.el, w), mix(a.head, b.head, w), mix(a.rifle, b.rifle, w), mix(a.prone, b.prone, w), 0.0,
              mix(a.reach, b.reach, w), mix(a.sling, b.sling, w), mix(a.bob, b.bob, w), mix(a.twist, b.twist, w),
-             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w), mix(a.yaw, b.yaw, w), mix(a.raise, b.raise, w));
+             mix(a.look, b.look, w), mix(a.abd, b.abd, w), mix(a.ryaw, b.ryaw, w), vec2f(0.0), 0.0, mix(a.tilt, b.tilt, w), mix(a.yaw, b.yaw, w), mix(a.raise, b.raise, w), mix(a.roll, b.roll, w));
   p.side = mix(a.side, b.side, w);
   p.flat = mix(a.flat, b.flat, w);
   p.drop = select(select(ground_drop(p.hip, p.knee, p.side, p.flat), b.drop, w >= 1.0), a.drop, w <= 0.0);
@@ -1241,7 +1242,7 @@ const SPRINT_FR_AT: u32 = 12408u;
 const SPRINT_FR_F: u32 = 11u;
 const SPRINT_FR_N: u32 = 48u;
 const HIGH_CRAWL_AT: u32 = 12936u;
-const HIGH_CRAWL_F: u32 = 19u;
+const HIGH_CRAWL_F: u32 = 21u;
 const HIGH_CRAWL_N: u32 = 32u;
 // Where a loop of `n` rows of `f` fields at `at` is at `phase`: the two rows around it and the weight.
 struct ClipPos { a: u32, b: u32, w: f32 }

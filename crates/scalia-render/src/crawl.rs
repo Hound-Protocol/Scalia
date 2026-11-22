@@ -10,11 +10,11 @@ use glam::Vec3;
 /// Rows in the baked loop.
 pub const ROWS: usize = 32;
 /// Fields per row.
-pub const F: usize = 19;
+pub const F: usize = 21;
 /// Fields per row, in this order.
 pub const FIELDS: [&str; F] = [
     "hipL", "hipR", "kneeL", "kneeR", "sideL", "sideR", "shL", "shR", "elL", "elR", "abL", "abR", "reachL", "reachR", "lean", "raise", "twist",
-    "head", "hipRoll",
+    "head", "hipRoll", "rollL", "rollR",
 ];
 
 /// Distance one crawl cycle moves him (m). `pose::CRAWL_STRIDE` must equal it.
@@ -33,7 +33,7 @@ pub const PALM_H: [f32; 2] = [0.06, 0.13];
 /// How high a swinging knee and elbow lift (m).
 pub const LIFT: f32 = 0.05;
 /// Where each stroke is centred relative to its hip or shoulder (m, forward) and how far out it sits (m, sideways).
-pub const KNEE_AT: [f32; 2] = [0.0, 0.21];
+pub const KNEE_AT: [f32; 2] = [0.0, 0.17];
 pub const ELBOW_AT: [f32; 2] = [0.05, 0.12];
 
 /// Where a limb is in its stroke at `u` (0..1): (forward offset, lift). Planted it slides back as the body moves on;
@@ -79,30 +79,45 @@ fn shoulder_at(p: &PoseParams, i: usize) -> Vec3 {
     pose_rigid(Vec3::new(g * crate::pose::SHOULDER_X, 0.0, crate::pose::SHOULDER_Z), if i == 0 { Part::LeftArm } else { Part::RightArm }, p)
 }
 
-/// Least squares over two angles (numeric Gauss-Newton with a step that must lower the miss): moves `x` so `f(x)` nears zero.
-fn solve2(mut x: [f32; 2], f: impl Fn([f32; 2]) -> [f32; 3]) -> [f32; 2] {
-    for _ in 0..60 {
+/// Least squares over `N` angles and `M` misses (numeric Gauss-Newton; a step is taken only as far as it lowers the
+/// miss, halving otherwise, so it cannot bounce): moves `x` so `f(x)` nears zero.
+fn solve_n<const N: usize, const M: usize>(mut x: [f32; N], f: impl Fn([f32; N]) -> [f32; M]) -> [f32; N] {
+    let cost = |r: &[f32; M]| r.iter().map(|v| v * v).sum::<f32>();
+    for _ in 0..80 {
         let r = f(x);
+        let c0 = cost(&r);
         let h = 1e-3;
-        let j: [[f32; 3]; 2] = std::array::from_fn(|k| {
+        let j: [[f32; M]; N] = std::array::from_fn(|k| {
             let mut y = x;
             y[k] += h;
             let ry = f(y);
             std::array::from_fn(|m| (ry[m] - r[m]) / h)
         });
-        let dot = |a: &[f32; 3], b: &[f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-        let (a, b, c) = (dot(&j[0], &j[0]) + 1e-4, dot(&j[0], &j[1]), dot(&j[1], &j[1]) + 1e-4);
-        let (g0, g1) = (dot(&j[0], &r), dot(&j[1], &r));
-        let det = a * c - b * b;
-        let d0 = (c * g0 - b * g1) / det;
-        let d1 = (a * g1 - b * g0) / det;
-        // Take the step only as far as it lowers the miss (halving it otherwise), so it cannot bounce.
-        let cost = |r: [f32; 3]| r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
-        let c0 = cost(r);
+        // Normal equations with a little damping, by Gaussian elimination.
+        let mut a = [[0.0f32; N]; N];
+        let mut g = [0.0f32; N];
+        for p in 0..N {
+            for q in 0..N {
+                a[p][q] = (0..M).map(|m| j[p][m] * j[q][m]).sum::<f32>() + if p == q { 1e-4 } else { 0.0 };
+            }
+            g[p] = (0..M).map(|m| j[p][m] * r[m]).sum();
+        }
+        for c in 0..N {
+            for p in 0..N {
+                if p != c {
+                    let k = a[p][c] / a[c][c];
+                    for q in 0..N {
+                        a[p][q] -= k * a[c][q];
+                    }
+                    g[p] -= k * g[c];
+                }
+            }
+        }
+        let d: [f32; N] = std::array::from_fn(|p| g[p] / a[p][p]);
         let mut t = 1.0;
         loop {
-            let y = [x[0] - (d0 * t).clamp(-0.3, 0.3), x[1] - (d1 * t).clamp(-0.3, 0.3)];
-            if cost(f(y)) < c0 {
+            let y: [f32; N] = std::array::from_fn(|p| x[p] - (d[p] * t).clamp(-0.3, 0.3));
+            if cost(&f(y)) < c0 {
                 x = y;
                 break;
             }
@@ -113,6 +128,10 @@ fn solve2(mut x: [f32; 2], f: impl Fn([f32; 2]) -> [f32; 3]) -> [f32; 2] {
         }
     }
     x
+}
+
+fn solve2(x: [f32; 2], f: impl Fn([f32; 2]) -> [f32; 3]) -> [f32; 2] {
+    solve_n(x, f)
 }
 
 /// One angle by bisection so `f` crosses zero in `[lo, hi]` (`f` must change sign).
@@ -145,6 +164,7 @@ pub fn apply(p: &mut PoseParams, r: &[f32; F]) {
     p.twist = r[16];
     p.head = r[17];
     p.yaw = r[18];
+    p.roll = [r[19], r[20]];
 }
 
 /// Places the four limbs for the body set in `r` (hips, chest, roll): each knee and elbow on its spot (or as near as
@@ -160,25 +180,27 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
         let w = 1.0 - 0.7 * lift / LIFT;
         let hip = hip_at(&p, i);
         let want = Vec3::new(hip.x + g * KNEE_AT[1], hip.y + KNEE_AT[0] + along, KNEE_H + lift);
-        let [h, s] = solve2([r[i], r[4 + i]], |x| {
+        // Hip bend, side swing, thigh roll and knee bend together: the knee on its spot, the shin straight back
+        // behind it to the toes on the ground (the thigh turns out, the shin does not splay).
+        let ah = ANKLE_H + lift;
+        let [h, s, ro, kn] = solve_n([r[i], r[4 + i], r[19 + i], r[2 + i]], |x| {
             let mut q = p;
             q.hip[i] = x[0];
             q.side[i] = x[1];
+            q.roll[i] = x[2];
+            q.knee[i] = x[3];
             let k = knee_at(&q, i) - want;
-            [k.z * 4.0, k.y * 2.0, k.x * 2.0]
+            let a = ankle_at(&q, i);
+            let kk = knee_at(&q, i);
+            [k.z * 4.0, k.y * 2.0, k.x * 2.0, (a.z - ah) * 3.0, (a.x - kk.x) * 2.0, (a.y - kk.y + 0.3).max(0.0) * 3.0]
         });
         r[i] = h;
         r[4 + i] = s;
+        r[19 + i] = ro;
+        r[2 + i] = kn;
         apply(&mut p, r);
         let k = knee_at(&p, i) - want;
         miss[i * 3..i * 3 + 3].copy_from_slice(&[k.x * w, k.y * w, k.z * 2.0 * w]);
-        let ah = ANKLE_H + lift;
-        r[2 + i] = solve1(0.0, 2.6, |k| {
-            let mut q = p;
-            q.knee[i] = k;
-            ankle_at(&q, i).z - ah
-        });
-        apply(&mut p, r);
         let (along, lift) = stroke(phase + if i == 0 { 0.5 } else { 0.0 });
         let w = 1.0 - 0.7 * lift / LIFT;
         let sh = shoulder_at(&p, i);
@@ -210,7 +232,7 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
 /// Solves the row at `phase`, starting from `prev` (the previous row) so the angles run on continuously. The body's
 /// height, pitch and rolls (hips and chest) give way so the planted knees and elbows hold their spots.
 pub fn solve_row(phase: f32, prev: Option<&[f32; F]>) -> [f32; F] {
-    let mut r = prev.copied().unwrap_or([0.9, 0.9, 0.9, 0.9, -0.4, 0.4, 1.2, 1.2, 1.4, 1.4, 0.2, 0.2, 0.0, 0.0, 0.15, 0.25, 0.0, 0.9, 0.0]);
+    let mut r = prev.copied().unwrap_or([0.9, 0.9, 0.9, 0.9, -0.4, 0.4, 1.2, 1.2, 1.4, 1.4, 0.2, 0.2, 0.0, 0.0, 0.15, 0.25, 0.0, 0.9, 0.0, 0.0, 0.0]);
     // Start from the body's set height and pitch: hips at HIP_H, shoulders at SHOULDER_H, no roll.
     r[16] = 0.0;
     r[18] = 0.0;
