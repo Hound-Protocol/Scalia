@@ -21,7 +21,7 @@ pub const FIELDS: [&str; F] = [
 
 /// Share of a cycle a side spends drawing its knee up and reaching its forearm ahead; it then pushes and pulls until
 /// half way, then rests (leg straight back, forearm drawn in) while the other side works.
-pub const DRAW: f32 = 0.15;
+pub const DRAW: f32 = 0.18;
 /// How far the body rolls away from the drawn knee at full draw (rad): about 3 cm of lift at the hip.
 pub const ROLL: f32 = 0.17;
 /// How far the spine bends toward the drawn knee at full draw (rad): about 4 cm of swing at the shoulders.
@@ -32,7 +32,7 @@ pub const ROLL_LAG: f32 = 0.0;
 /// Share of the body's roll the head takes back.
 pub const HEAD_STEADY: f32 = 0.6;
 /// How far a push carries the body (m): the knee and the forearm go back this far against the body while planted.
-pub const PUSH: f32 = 0.24;
+pub const PUSH: f32 = 0.26;
 /// Distance one crawl cycle moves him (m): a push per half cycle, spread over the push's share so a planted knee or
 /// forearm holds its place. `pose::CRAWL_STRIDE` must equal it.
 pub const STRIDE: f32 = PUSH / (0.5 - DRAW);
@@ -50,10 +50,12 @@ pub const PALM_H: [f32; 2] = [0.06, 0.08];
 pub const LIFT: f32 = 0.03;
 /// How far round from straight ahead a reaching elbow plants (rad): nearly in line with its shoulder.
 pub const ELBOW_REACH: f32 = 0.12;
-/// The rifle along the right forearm: pitched to point ahead along the ground and rolled on its side (magazine out),
+/// The rifle along the right forearm: pitched to point ahead along the ground and rolled on its side the way the
+/// prone carry is (Patch: Animations 5; rolled the other way, setting off and stopping turned it half over through the
+/// ground),
 /// held in the right hand (rad). common.wgsl mirrors them.
 pub const RIFLE_PITCH: f32 = std::f32::consts::FRAC_PI_2;
-pub const RIFLE_ROLL: f32 = -std::f32::consts::FRAC_PI_2;
+pub const RIFLE_ROLL: f32 = std::f32::consts::FRAC_PI_2;
 
 /// Whether a side is pushing (knee) and pulling (opposite forearm) at stroke `u`: planted, the body slides over it.
 pub fn planted(u: f32) -> bool {

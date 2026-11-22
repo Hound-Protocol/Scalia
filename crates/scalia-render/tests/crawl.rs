@@ -216,3 +216,48 @@ fn the_body_rolls_and_bends_toward_the_drawn_knee() {
         assert!((0.02..0.08).contains(&swing), "phase {k}/32: the shoulders swing {swing:.3} m toward the drawn knee");
     }
 }
+
+/// Patch: Animations 5: an unhurried rhythm. At the ordinary crawl (0.55 m/s, scalia-wasm `CMD_CRAWL`) he makes at
+/// most 1.4 strokes a second (one per arm; it was 1.6, frantic sprinting); each stroke carries him further instead.
+#[test]
+fn the_crawl_keeps_an_unhurried_rhythm() {
+    let strokes = 2.0 * 0.55 / CRAWL_STRIDE;
+    assert!(strokes <= 1.4, "{strokes:.2} strokes a second at the ordinary crawl");
+}
+
+/// Patch: Animations 5: setting off into the crawl from lying prone and stopping back onto the prone legs, from any
+/// moment of the stroke and either way round: no joint snaps (faster than 15 rad/s over the 0.35 s blend, the
+/// anim_audit standard), the rifle never swings into the ground (rolled the other way round from the prone carry it
+/// turned half over through it, 20 cm deep), and knees and elbows press no more than 5 cm further into the ground
+/// on the way than they lie at either end, for a moment (blending joint angles, a knee swinging out to the side dips
+/// about that far; a start and stop matched to the stroke would keep them on top).
+#[test]
+fn starting_and_stopping_the_crawl_blend_smoothly() {
+    use scalia_render::pose::{blend, params, BLEND_S};
+    let angles = |p: &PoseParams| {
+        let mut v = vec![p.lean, p.head, p.rifle, p.rifle_yaw, p.twist, p.look, p.tilt, p.yaw, p.raise];
+        for pair in [p.hip, p.knee, p.side, p.shoulder, p.elbow, p.reach, p.abduct, p.roll] {
+            v.extend(pair);
+        }
+        v
+    };
+    let body = Body::new();
+    let prone = params(Pose::Prone, 0.0);
+    for k in 0..8 {
+        let crawl = params_dir(Pose::Crawl, k as f32 / 8.0, 0.0);
+        for (from, to, what) in [(&prone, &crawl, "setting off"), (&crawl, &prone, "stopping")] {
+            let mut prev = angles(from);
+            for i in 1..=20 {
+                let p = blend(from, to, i as f32 / 20.0);
+                let cur = angles(&p);
+                let fastest = cur.iter().zip(&prev).map(|(a, b)| (a - b).abs() / (BLEND_S / 20.0)).fold(0.0f32, f32::max);
+                assert!(fastest <= 15.0, "{what} at stroke {k}/8: a joint turns {fastest:.1} rad/s");
+                prev = cur;
+                let (s, a, b) = (body.stats(&p), body.stats(from), body.stats(to));
+                for (name, now, ends, give) in [("knee", s.knee, a.knee.min(b.knee), 0.05), ("elbow", s.elbow, a.elbow.min(b.elbow), 0.05), ("boot", s.boot, a.boot.min(b.boot), 0.05), ("rifle", s.rifle, a.rifle.min(b.rifle).min(0.0), 0.01)] {
+                    assert!(now > ends - give, "{what} at stroke {k}/8, {i}/20 of the way: the {name} dips to {now:.3} m (ends at {ends:.3})");
+                }
+            }
+        }
+    }
+}

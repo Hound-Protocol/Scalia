@@ -628,9 +628,9 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     // Patch: Animations 5: the spine bends toward the drawn knee; the head takes back most of the roll.
     p.tilt = r[21];
     p.look = r[22] - 0.4 * lateral;
-    // The rifle along the right forearm, muzzle ahead, on its side (crawl.rs RIFLE_PITCH 1.5707963, RIFLE_ROLL -1.5707963).
+    // The rifle along the right forearm, muzzle ahead, on its side (crawl.rs RIFLE_PITCH 1.5707963, RIFLE_ROLL 1.5707963).
     p.rifle = 1.5707963;
-    p.ryaw = -1.5707963;
+    p.ryaw = 1.5707963;
   }
 
  else if (pose == 28u) {
