@@ -526,13 +526,17 @@ pub fn prone_settle(a: f32) -> f32 {
 /// kneeling and the drop are unchanged; straight prone legs (knee under `LEG_ROLL_FROM`) are not rolled.
 pub fn leg_roll_angle(p: &PoseParams, i: usize) -> f32 {
     let t = ((p.knee[i] - LEG_ROLL_FROM) / (LEG_ROLL_FULL - LEG_ROLL_FROM)).clamp(0.0, 1.0);
-    let r = std::f32::consts::FRAC_PI_2 * prone_settle(p.prone.max(0.0)) * t * t * (3.0 - 2.0 * t);
+    // Only lying flat: raised on the knees (the high crawl, `raise`) the legs kneel straight down.
+    let flat = 1.0 - (p.raise / LEG_ROLL_RAISE).clamp(0.0, 1.0);
+    let r = std::f32::consts::FRAC_PI_2 * prone_settle(p.prone.max(0.0)) * t * t * (3.0 - 2.0 * t) * flat;
     // Inward: the bent knee tucks the foot in behind it, as in the reference crawl (fits the reference to 7 cm,
     // against 30 cm turning outward).
     if i == 0 { r } else { -r }
 }
 pub const LEG_ROLL_FROM: f32 = 0.2;
 pub const LEG_ROLL_FULL: f32 = 0.4;
+/// Body raise (m) at which the leg roll is gone (`leg_roll_angle`).
+pub const LEG_ROLL_RAISE: f32 = 0.1;
 
 /// A leg point turned by `leg_roll_angle` about the vertical through its hip (the leg's own axis when straight).
 fn leg_roll(q: Vec3, p: &PoseParams, i: usize) -> Vec3 {
@@ -684,7 +688,7 @@ pub fn stride_m(pose: Pose) -> f32 {
     }
 }
 /// One crawl cycle (both arms) moves him this far (m).
-pub const CRAWL_STRIDE: f32 = 0.6;
+pub const CRAWL_STRIDE: f32 = crate::crawl::STRIDE;
 pub const WALK_STRIDE: f32 = GAIT_STRIDE[0][0];
 pub const RUN_STRIDE: f32 = GAIT_STRIDE[1][0];
 pub const SPRINT_STRIDE: f32 = GAIT_STRIDE[2][0];
@@ -696,110 +700,6 @@ pub const CROUCH_STRIDE: f32 = 1.0;
 /// walking, high port when running, angled down across the body when sprinting, shouldered when aiming.
 pub fn params(pose: Pose, phase: f32) -> PoseParams {
     params_dir(pose, phase, 0.0)
-}
-
-/// AN-02-S06: forward crawl baked from the reference clip (Prone Forward). One loop of 24 samples, fields in
-/// order: knee L, knee R, hip L, hip R, shoulder L, shoulder R, elbow L, elbow R, twist, head.
-pub const CRAWL_FWD_BAKE: [[f32; 10]; 24] = [
-    [0.5798, 0.9948, 0.2597, 0.2838, 1.4744, 1.7901, 2.1390, 1.8476, -0.2758, 0.9824],
-    [0.6183, 1.0000, 0.2583, 0.2694, 1.5024, 1.8133, 2.1131, 1.8261, -0.2900, 1.0000],
-    [0.5339, 0.8971, 0.2259, 0.2868, 1.4621, 1.8200, 2.1504, 1.8200, -0.2681, 0.9716],
-    [0.4700, 0.7691, 0.2150, 0.3070, 1.4168, 1.7356, 2.1922, 1.8979, -0.2443, 0.9485],
-    [0.4251, 0.6277, 0.2037, 0.3340, 1.4353, 1.6729, 2.1751, 1.9558, -0.2429, 0.9435],
-    [0.3523, 0.4203, 0.1800, 0.3703, 1.4865, 1.6490, 2.1279, 1.9778, -0.2517, 0.9472],
-    [0.2680, 0.2115, 0.1994, 0.3800, 1.5698, 1.6332, 2.0510, 1.9924, -0.2631, 0.9555],
-    [0.2576, 0.0812, 0.2616, 0.3270, 1.6807, 1.5950, 1.9486, 2.0277, -0.2721, 0.9584],
-    [0.2716, 0.0500, 0.3224, 0.2425, 1.7554, 1.4500, 1.8796, 2.1615, -0.2497, 0.9526],
-    [0.1984, 0.0765, 0.3800, 0.2188, 1.8156, 1.3000, 1.8240, 2.3000, -0.2101, 0.9322],
-    [0.1358, 0.0976, 0.2830, 0.2481, 1.8177, 1.3264, 1.8221, 2.2756, -0.1941, 0.9167],
-    [0.1004, 0.1041, 0.2791, 0.2563, 1.7981, 1.4088, 1.8402, 2.1996, -0.1904, 0.9051],
-    [0.1629, 0.1159, 0.2449, 0.2628, 1.7795, 1.4453, 1.8574, 2.1659, -0.1900, 0.8939],
-    [0.0701, 0.1483, 0.2741, 0.2368, 1.8091, 1.4147, 1.8300, 2.1941, -0.1918, 0.8800],
-    [0.0500, 0.1992, 0.3277, 0.2134, 1.8200, 1.3862, 1.8200, 2.2204, -0.2065, 0.8836],
-    [0.1978, 0.2755, 0.3670, 0.1995, 1.8189, 1.3832, 1.8210, 2.2232, -0.2146, 0.8947],
-    [0.3198, 0.3653, 0.3764, 0.1918, 1.8041, 1.4134, 1.8347, 2.1953, -0.2233, 0.9029],
-    [0.4111, 0.4641, 0.3774, 0.1963, 1.7213, 1.4387, 1.9111, 2.1719, -0.2275, 0.9065],
-    [0.5030, 0.5658, 0.3602, 0.1859, 1.5913, 1.5265, 2.0311, 2.0909, -0.2333, 0.9263],
-    [0.5990, 0.6772, 0.3329, 0.1800, 1.4203, 1.6669, 2.1889, 1.9614, -0.2447, 0.9480],
-    [0.6360, 0.8120, 0.3061, 0.2196, 1.3419, 1.7513, 2.2613, 1.8834, -0.2495, 0.9582],
-    [0.6009, 0.9125, 0.2866, 0.2493, 1.3698, 1.7780, 2.2356, 1.8587, -0.2551, 0.9673],
-    [0.5964, 0.9697, 0.2689, 0.2708, 1.4304, 1.7784, 2.1796, 1.8584, -0.2669, 0.9733],
-    [0.5681, 0.9912, 0.2614, 0.2812, 1.4646, 1.7884, 2.1480, 1.8492, -0.2733, 0.9778],
-];
-
-/// AN-02-S11: forward crawl legs solved from the reference clip by position: per sample, the hip, knee and
-/// side swing that put our knees and ankles where the reference's are (scaled to our leg length), fitted by
-/// least squares (knee error 7 cm, ankle 7 cm on average). Order: hip L, hip R, knee L, knee R, side L, side R.
-pub const CRAWL_FWD_LEGS: [[f32; 6]; 24] = [
-    [0.0608, 0.0918, 0.1294, 1.0186, -0.4782, 0.1925],
-    [0.0230, 0.0924, 0.1295, 1.0199, -0.4637, 0.1932],
-    [0.0341, 0.1271, 0.1442, 1.1766, -0.4322, 0.2278],
-    [0.0422, 0.1786, 0.1606, 1.3913, -0.3983, 0.2793],
-    [0.0385, 0.2532, 0.1651, 1.6404, -0.3612, 0.3539],
-    [0.0437, 0.3734, 0.1474, 1.9935, -0.3131, 0.4741],
-    [0.0517, 0.5165, 0.1298, 2.3391, -0.2728, 0.6172],
-    [0.0269, 0.6429, 0.1196, 2.4000, -0.2635, 0.7436],
-    [0.0081, 0.6909, 0.1159, 2.4000, -0.2753, 0.7916],
-    [0.0445, 0.6752, 0.1152, 2.4000, -0.2635, 0.7759],
-    [0.1132, 0.6635, 0.1204, 2.4000, -0.2230, 0.7642],
-    [0.1517, 0.6599, 0.1221, 2.4000, -0.2173, 0.7607],
-    [0.1684, 0.6442, 0.1240, 2.4000, -0.2103, 0.7450],
-    [0.2425, 0.6098, 0.1297, 2.4000, -0.2237, 0.7105],
-    [0.2888, 0.5472, 0.1383, 2.3986, -0.2640, 0.6480],
-    [0.2663, 0.4405, 0.1509, 2.2749, -0.3418, 0.5413],
-    [0.2249, 0.3272, 0.1580, 2.1198, -0.4478, 0.4279],
-    [0.1805, 0.2385, 0.1675, 1.9488, -0.5230, 0.3392],
-    [0.1434, 0.1705, 0.1790, 1.7718, -0.5775, 0.2712],
-    [0.1163, 0.1175, 0.1867, 1.5773, -0.6173, 0.2182],
-    [0.0967, 0.0859, 0.1734, 1.4184, -0.6369, 0.1866],
-    [0.1012, 0.0626, 0.1631, 1.2518, -0.6203, 0.1634],
-    [0.0914, 0.0677, 0.1616, 1.1299, -0.5644, 0.1685],
-    [0.1028, 0.0796, 0.1486, 1.0597, -0.5110, 0.1803],
-];
-
-/// Interpolates `CRAWL_FWD_LEGS` at `phase` (one loop, wraps at 1.0).
-/// Both legs in turn from a reference crawl that draws only one knee up. `d` and `t` are the drawing and the
-/// trailing leg (hip, knee, side) at this phase, `dh` and `th` half a stride later; `draw` is the knee range over
-/// which a leg goes from trailing to drawing. The drawing side follows the draw and, out of it, trails like the
-/// mirrored trailing leg; the other side mirrors the draw half a stride later and otherwise trails as the
-/// reference does (so an extended leg is always the reference's, flat on the ground). Returns (drawing side,
-/// other side). common.wgsl `crawl_alternate` mirrors this.
-pub fn crawl_alternate(d: [f32; 3], t: [f32; 3], dh: [f32; 3], th: [f32; 3], draw: [f32; 2]) -> ([f32; 3], [f32; 3]) {
-    let w = |k: f32| {
-        let x = ((k - draw[0]) / (draw[1] - draw[0])).clamp(0.0, 1.0);
-        x * x * (3.0 - 2.0 * x)
-    };
-    let mix = |a: [f32; 3], b: [f32; 3], u: f32| -> [f32; 3] { std::array::from_fn(|i| a[i] + (b[i] - a[i]) * u) };
-    let mirror = |x: [f32; 3]| [x[0], x[1], -x[2]];
-    (mix(mirror(th), d, w(d[1])), mix(t, mirror(dh), w(dh[1])))
-}
-/// The low crawl's elbows (shoulder angle, rad): pulled back under the chest, and how much further a reach goes;
-/// and how much of the reference legs' side swing is kept (the full swing splays the legs out like a frog's).
-pub const CRAWL_ELBOW_BACK: f32 = 1.2;
-pub const CRAWL_ELBOW_REACH: f32 = 1.1;
-pub const CRAWL_SIDE: f32 = 0.55;
-/// Knee ranges over which a crawling leg goes from trailing to drawing up (rad): forward, backward.
-pub const CRAWL_FWD_DRAW: [f32; 2] = [1.1, 1.9];
-pub const CRAWL_BACK_DRAW: [f32; 2] = [0.5, 1.2];
-
-fn crawl_legs(phase: f32) -> [f32; 6] {
-    let x = phase.rem_euclid(1.0) * 24.0;
-    let i0 = (x.floor() as usize) % 24;
-    let i1 = (i0 + 1) % 24;
-    let f = x - x.floor();
-    std::array::from_fn(|k| CRAWL_FWD_LEGS[i0][k] + (CRAWL_FWD_LEGS[i1][k] - CRAWL_FWD_LEGS[i0][k]) * f)
-}
-
-/// Interpolates the baked forward crawl at `phase` (one loop, wraps at 1.0).
-fn crawl_bake(phase: f32) -> [f32; 10] {
-    let x = phase.rem_euclid(1.0) * 24.0;
-    let i0 = (x.floor() as usize) % 24;
-    let i1 = (i0 + 1) % 24;
-    let f = x - x.floor();
-    std::array::from_fn(|k| {
-        let (a, b) = (CRAWL_FWD_BAKE[i0][k], CRAWL_FWD_BAKE[i1][k]);
-        a + (b - a) * f
-    })
 }
 
 /// Interpolates a baked clip table (`scripts/clip_table.py`) at `phase`: one loop, wrapping at 1.0.
@@ -1349,91 +1249,30 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.head = 0.12;
         }
         Pose::Crawl => {
-            let fwd = dir.cos();
-            let lateral = dir.sin();
-            let lat_abs = lateral.abs();
-            let s = (phase * std::f32::consts::TAU + dir).sin();
-            let c = (phase * std::f32::consts::TAU + dir).cos();
-            // Alternating left/right knee drive: left pulls on -c, right pulls on +c.
-            let draw = [0.5 - 0.5 * c, 0.5 + 0.5 * c];
+            // Patch: Animations 2 high crawl: on elbows and knees, the body off the ground, the rifle cradled across
+            // the forearms in the right hand (`HIGH_CRAWL`, solved by `crawl.rs`). Backwards plays the loop in
+            // reverse; sideways keeps the stroke and leans the knees and chest toward the side.
+            // common.wgsl mirrors this.
+            let (fwd, lateral) = (dir.cos(), dir.sin());
+            let wb = ((-0.2 - fwd) * 5.0).clamp(0.0, 1.0);
+            let (a, b) = (clip_at(&HIGH_CRAWL, phase), clip_at(&HIGH_CRAWL, -phase));
+            let r: [f32; 19] = std::array::from_fn(|k| a[k] + (b[k] - a[k]) * wb);
             p.prone = 1.0;
-            // Right arm and rifle surge fore-and-aft while grip() keeps the left support hand on the handguard,
-            // driving both elbows forward to plant and pull the chest along the ground.
-            // Arms follow the knee draw (reference: right forearm peaks within 0.03 s of the right knee), so the
-            // arms and the legs on each side move together instead of a quarter cycle apart.
-            let surge = c * (1.0 - 0.35 * lat_abs);
-            p.shoulder = [2.8, 1.56 + 0.26 * surge];
-            p.elbow = [1.3, 2.06 - 0.24 * surge];
-            p.reach = [0.0, 0.42 + 0.12 * c * (1.0 - 0.3 * lat_abs)];
-            p.abduct = [0.0, 0.62 + 0.16 * lat_abs + 0.12 * surge.abs()];
-            p.rifle_yaw = 0.52 - 0.10 * surge - 0.08 * lateral;
-            // Keep hip pitch near zero so knees never plunge underground, while swinging side outward (~65 deg)
-            // in proportion to knee bend so the bent shin and boot stay flat on the ground rather than rising.
-            // Hips stay at the prone value (AN-02-S09): lying down, more hip bend drives the knee into the ground.
-            p.hip = [0.18, 0.16];
-            // Per-leg knee draw (AN-02-S04, reference clips): the right knee draws further than the left, as in
-            // the reference forward crawl (right knee swing about 91 deg, left about 18 deg).
-            // Both legs work in turn, each drawing its knee up in its half of the stride.
-            p.knee = [0.05 + (0.95 - 0.22 * lat_abs) * draw[0], 0.05 + (0.95 - 0.22 * lat_abs) * draw[1]];
-            let (lead_l, lead_r) = ((-lateral).max(0.0), lateral.max(0.0));
-            p.side = [
-                -0.14 - (1.08 - 0.18 * lat_abs) * draw[0] - 0.24 * lead_l + 0.08 * lead_r,
-                0.14 + (1.08 - 0.18 * lat_abs) * draw[1] + 0.24 * lead_r - 0.08 * lead_l,
-            ];
-            p.bob = 0.0;
-            p.twist = -0.24 + (0.03 + 0.02 * fwd) * s + 0.18 * lateral;
-            p.tilt = 0.0;
-            p.lean = -0.08;
-            p.look = 0.24 - 0.16 * s - 0.18 * lateral;
-            p.rifle = std::f32::consts::FRAC_PI_2;
-            p.head = 0.94 + 0.06 * fwd.max(0.0);
-            // AN-02-S06: straight-ahead crawl follows the baked reference loop; turning out of line blends back
-            // to the procedural terms above (weight = forward component).
-            let w = fwd.max(0.0);
-            let b = crawl_bake(phase);
-            let m = |a: f32, t: f32| a + (t - a) * w;
-            // The reference draws only the right knee (the left leg drags); the left plays the right's draw
-            // mirrored, half a stride later, so both legs work in turn.
-            let l = crawl_legs(phase);
-            let o = crawl_legs(phase + 0.5);
-            let (r, lf) = crawl_alternate([l[1], l[3], l[5]], [l[0], l[2], l[4]], [o[1], o[3], o[5]], [o[0], o[2], o[4]], CRAWL_FWD_DRAW);
-            p.hip = [m(p.hip[0], lf[0]), m(p.hip[1], r[0])];
-            p.knee = [m(p.knee[0], lf[1]), m(p.knee[1], r[1])];
-            p.side = [m(p.side[0], lf[2]), m(p.side[1], r[2])];
-            p.shoulder = [m(p.shoulder[0], b[4]), m(p.shoulder[1], b[5])];
-            p.elbow = [m(p.elbow[0], b[6]), m(p.elbow[1], b[7])];
-            p.twist = m(p.twist, b[8]);
-            p.head = m(p.head, b[9]);
-            // AN-02-S12: crawling backwards follows the baked reference loop the same way (weight = backward
-            // component). The right arm carries the rifle; grip() keeps the left hand on the handguard.
-            let wb = (-fwd).max(0.0);
-            // Its reference draws only the left knee: the right plays the left's draw mirrored, half a stride later.
-            let k = clip_at(&CRAWL_BACK, phase);
-            let kb = clip_at(&CRAWL_BACK, phase + 0.5);
-            let (lf, r) = crawl_alternate([k[0], k[2], k[4]], [k[1], k[3], k[5]], [kb[0], kb[2], kb[4]], [kb[1], kb[3], kb[5]], CRAWL_BACK_DRAW);
-            let mb = |a: f32, t: f32| a + (t - a) * wb;
-            p.hip = [mb(p.hip[0], lf[0]), mb(p.hip[1], r[0])];
-            p.knee = [mb(p.knee[0], lf[1]), mb(p.knee[1], r[1])];
-            p.side = [mb(p.side[0], lf[2]), mb(p.side[1], r[2])];
-            p.shoulder[1] = mb(p.shoulder[1], k[6]);
-            p.elbow[1] = mb(p.elbow[1], k[7]);
-            p.reach[1] = mb(p.reach[1], k[8]);
-            p.abduct[1] = mb(p.abduct[1], k[9]);
-            p.twist = mb(p.twist, k[10]);
-            // AN-03-S8 low crawl (the aimed crawl takes its arms from the ProneAim layer): the rifle lies across the
-            // forearms in the right hand, the left hand free; the elbows reach ahead and pull back under the chest
-            // in turn, the left reaching as the right knee draws up; the legs stay closer in.
-            let reach = [0.5 - 0.5 * c, 0.5 + 0.5 * c];
-            p.shoulder = [CRAWL_ELBOW_BACK + CRAWL_ELBOW_REACH * reach[0], CRAWL_ELBOW_BACK + CRAWL_ELBOW_REACH * reach[1]];
-            p.elbow = [2.5 - 1.4 * reach[0], 2.5 - 1.4 * reach[1]];
-            p.reach = [0.0, 0.0];
-            p.abduct = [0.0, 0.0];
+            p.hip = [r[0], r[1]];
+            p.knee = [r[2], r[3]];
+            p.side = [r[4] + 0.3 * lateral, r[5] + 0.3 * lateral];
+            p.shoulder = [r[6], r[7]];
+            p.elbow = [r[8], r[9]];
+            p.abduct = [r[10], r[11]];
+            p.reach = [r[12], r[13]];
+            p.lean = r[14];
+            p.raise = r[15];
+            p.twist = r[16];
+            p.head = r[17];
+            p.yaw = r[18];
+            p.look = -0.4 * lateral;
             p.rifle = 0.0;
             p.rifle_yaw = std::f32::consts::FRAC_PI_2;
-            p.twist = 0.08 * s;
-            p.look = -0.08 * s;
-            p.head = 0.75;
-            p.side = [p.side[0] * CRAWL_SIDE, p.side[1] * CRAWL_SIDE];
         }
         Pose::Drop => return drop_params(phase),
         Pose::DropReach => return drop_reach(),
@@ -1501,6 +1340,11 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         g[10]
     });
     p.drop = ground_drop_side(p.hip, p.knee, p.side, p.flat).max(lift);
+    if pose == Pose::Crawl {
+        // Lying down the grounding offset runs fore and aft: the crawl keeps the prone legs' value so the body does
+        // not surge with the stroke, and nothing shifts between lying and crawling. common.wgsl mirrors this.
+        p.drop = ground_drop_side([0.18, 0.16], [0.06, 0.04], [0.0, 0.0], 0.0);
+    }
     p
 }
 
@@ -2506,17 +2350,19 @@ pub const SPRINT_B_AT: u32 = 10824;
 pub const SPRINT_BR_AT: u32 = 11352;
 pub const SPRINT_R_AT: u32 = 11880;
 pub const SPRINT_FR_AT: u32 = 12408;
+pub const HIGH_CRAWL_AT: u32 = 12936;
 /// Floats in the clip buffer.
-pub const CLIP_FLOATS: u32 = 12936;
+pub const CLIP_FLOATS: u32 = 13544;
 /// Every baked clip table back to back, rows in order (uploaded once; common.wgsl reads it as `clips`).
 pub fn clip_buffer() -> Vec<f32> {
-    let mut v = Vec::with_capacity(12936);
+    let mut v = Vec::with_capacity(13544);
     v.extend(CRAWL_BACK.iter().flatten());
     for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
         for l in gait_loops(pose).expect("a baked gait") {
             v.extend(l.iter().flatten());
         }
     }
+    v.extend(HIGH_CRAWL.iter().flatten());
     v
 }
 // CLIP REGISTRY END
@@ -3841,3 +3687,43 @@ pub const SPRINT_FR: [[f32; 11]; 48] = [
 ];
 // CLIP SPRINT_FR END
 
+// CLIP HIGH_CRAWL BEGIN
+/// Patch: Animations 2: the high crawl (on elbows and knees, body off the ground, rifle cradled across the forearms),
+/// solved by `crawl::solve` (`cargo run -p scalia-render --example crawl_solve rows`); a test keeps them equal.
+/// 32 samples over one loop; fields: hipL, hipR, kneeL, kneeR, sideL, sideR, shL, shR, elL, elR, abL, abR, reachL,
+/// reachR, lean, raise, twist, head, hipRoll (yaw: lying prone it rolls the hips).
+pub const HIGH_CRAWL: [[f32; 19]; 32] = [
+    [0.9924, 1.0117, 0.9535, 0.9827, -2.0896, 1.2065, 1.1279, 2.3148, 1.9435, 1.1028, 2.0209, -0.7918, 0.0000, 0.0000, 0.1513, 0.2766, 0.0054, 1.1513, -0.0005],
+    [0.9945, 1.0024, 0.9609, 0.9719, -2.0436, 1.1556, 1.1305, 2.3045, 1.9538, 1.1193, 1.9185, -0.8242, 0.0000, 0.0000, 0.1512, 0.2751, 0.0053, 1.1512, -0.0005],
+    [1.0015, 0.9966, 0.9705, 0.9631, -1.9957, 1.1073, 1.1365, 2.2864, 1.9562, 1.1402, 1.8257, -0.8606, 0.0000, 0.0000, 0.1509, 0.2753, 0.0047, 1.1509, 0.0002],
+    [1.0115, 0.9946, 0.9816, 0.9560, -1.9454, 1.0610, 1.1448, 2.2620, 1.9521, 1.1648, 1.7425, -0.9011, 0.0000, 0.0000, 0.1507, 0.2769, 0.0038, 1.1507, 0.0004],
+    [1.0222, 0.9720, 0.9931, 0.9374, -1.8924, 1.0319, 1.1135, 2.2337, 2.0029, 1.1912, 1.6437, -0.9459, 0.0000, 0.0000, 0.1508, 0.2795, 0.0028, 1.1508, -0.0003],
+    [1.0320, 0.9520, 1.0039, 0.9254, -1.8372, 1.0468, 1.0739, 2.2038, 2.0557, 1.2179, 1.6297, -0.9954, 0.0000, 0.0000, 0.1510, 0.2823, 0.0018, 1.1510, -0.0019],
+    [1.0401, 0.9392, 1.0130, 0.9219, -1.7806, 1.1014, 1.0337, 2.1742, 2.0982, 1.2432, 1.6991, -1.0501, 0.0000, 0.0000, 0.1512, 0.2848, 0.0009, 1.1512, -0.0036],
+    [1.0464, 0.9315, 1.0199, 0.9238, -1.7231, 1.1934, 0.9884, 2.1458, 2.1338, 1.2664, 1.8431, -1.1107, 0.0000, 0.0000, 0.1514, 0.2868, 0.0000, 1.1514, -0.0048],
+    [1.0510, 0.9278, 1.0247, 0.9283, -1.6648, 1.3199, 0.9350, 2.1188, 2.1648, 1.2872, 2.0458, -1.1780, 0.0000, 0.0000, 0.1513, 0.2882, -0.0007, 1.1513, -0.0056],
+    [1.0539, 0.9272, 1.0276, 0.9323, -1.6061, 1.4726, 0.8783, 2.0930, 2.1907, 1.3054, 2.2712, -1.2526, 0.0000, 0.0000, 0.1511, 0.2891, -0.0012, 1.1511, -0.0061],
+    [1.0551, 0.9290, 1.0285, 0.9339, -1.5473, 1.6367, 0.8294, 2.0688, 2.2071, 1.3206, 2.4748, -1.3348, 0.0000, 0.0000, 0.1509, 0.2897, -0.0016, 1.1509, -0.0064],
+    [1.0541, 0.9321, 1.0272, 0.9322, -1.4886, 1.7933, 0.7942, 2.0473, 2.2115, 1.3318, 2.6323, -1.4241, 0.0000, 0.0000, 0.1507, 0.2897, -0.0019, 1.1507, -0.0065],
+    [1.0505, 0.9363, 1.0233, 0.9283, -1.4304, 1.9260, 0.7736, 2.0303, 2.2048, 1.3378, 2.7434, -1.5200, 0.0000, 0.0000, 0.1506, 0.2887, -0.0024, 1.1506, -0.0060],
+    [1.0438, 0.9418, 1.0163, 0.9246, -1.3727, 2.0253, 0.7654, 2.0194, 2.1897, 1.3375, 2.8173, -1.6214, 0.0000, 0.0000, 0.1508, 0.2865, -0.0031, 1.1508, -0.0047],
+    [1.0343, 0.9506, 1.0064, 0.9250, -1.3158, 2.0873, 0.7694, 2.0148, 2.1671, 1.3305, 2.8628, -1.7271, 0.0000, 0.0000, 0.1510, 0.2832, -0.0040, 1.1510, -0.0027],
+    [1.0229, 0.9663, 0.9947, 0.9334, -1.2602, 2.1102, 0.7882, 2.0143, 2.1352, 1.3184, 2.8860, -1.8352, 0.0000, 0.0000, 0.1513, 0.2796, -0.0048, 1.1513, -0.0007],
+    [1.0116, 0.9924, 0.9826, 0.9534, -1.2065, 2.0896, 0.8267, 2.0142, 2.0895, 1.3042, 2.8890, -1.9436, 0.0000, 0.0000, 0.1514, 0.2766, -0.0053, 1.1514, 0.0005],
+    [1.0024, 0.9945, 0.9719, 0.9608, -1.1556, 2.0436, 0.8370, 2.0114, 2.0897, 1.2908, 2.8623, -2.0501, 0.0000, 0.0000, 0.1512, 0.2751, -0.0052, 1.1512, 0.0005],
+    [0.9966, 1.0015, 0.9631, 0.9705, -1.1073, 1.9957, 0.8552, 2.0053, 2.0802, 1.2793, 2.8366, -2.1524, 0.0000, 0.0000, 0.1510, 0.2753, -0.0046, 1.1510, -0.0002],
+    [0.9946, 1.0115, 0.9560, 0.9816, -1.0610, 1.9454, 0.8795, 1.9970, 2.0625, 1.2690, 2.8115, -2.2490, 0.0000, 0.0000, 0.1508, 0.2769, -0.0038, 1.1508, -0.0004],
+    [0.9721, 1.0222, 0.9376, 0.9932, -1.0318, 1.8924, 0.9079, 2.0282, 2.0396, 1.2386, 2.7861, -2.2992, 0.0000, 0.0000, 0.1508, 0.2795, -0.0028, 1.1508, 0.0003],
+    [0.9521, 1.0321, 0.9255, 1.0039, -1.0468, 1.8372, 0.9378, 2.0679, 2.0145, 1.2162, 2.7590, -2.2596, 0.0000, 0.0000, 0.1510, 0.2823, -0.0018, 1.1510, 0.0019],
+    [0.9393, 1.0402, 0.9220, 1.0130, -1.1013, 1.7806, 0.9675, 2.1081, 1.9899, 1.2053, 2.7286, -2.1433, 0.0000, 0.0000, 0.1513, 0.2849, -0.0009, 1.1513, 0.0036],
+    [0.9317, 1.0465, 0.9239, 1.0200, -1.1933, 1.7230, 0.9959, 2.1533, 1.9673, 1.1997, 2.6937, -1.9539, 0.0000, 0.0000, 0.1514, 0.2868, -0.0000, 1.1514, 0.0049],
+    [0.9280, 1.0511, 0.9284, 1.0248, -1.3197, 1.6648, 1.0229, 2.2066, 1.9468, 1.1912, 2.6533, -1.7061, 0.0000, 0.0000, 0.1514, 0.2882, 0.0007, 1.1514, 0.0056],
+    [0.9274, 1.0540, 0.9325, 1.0276, -1.4724, 1.6061, 1.0487, 2.2632, 1.9283, 1.1733, 2.6068, -1.4405, 0.0000, 0.0000, 0.1512, 0.2892, 0.0012, 1.1512, 0.0061],
+    [0.9291, 1.0551, 0.9340, 1.0285, -1.6365, 1.5472, 1.0730, 2.3125, 1.9119, 1.1461, 2.5537, -1.2068, 0.0000, 0.0000, 0.1509, 0.2897, 0.0016, 1.1509, 0.0064],
+    [0.9322, 1.0541, 0.9322, 1.0272, -1.7932, 1.4886, 1.0945, 2.3476, 1.8995, 1.1161, 2.4923, -1.0309, 0.0000, 0.0000, 0.1507, 0.2897, 0.0020, 1.1507, 0.0065],
+    [0.9362, 1.0505, 0.9283, 1.0232, -1.9259, 1.4304, 1.1115, 2.3682, 1.8937, 1.0896, 2.4201, -0.9098, 0.0000, 0.0000, 0.1506, 0.2887, 0.0024, 1.1506, 0.0060],
+    [0.9417, 1.0438, 0.9246, 1.0163, -2.0253, 1.3727, 1.1224, 2.3763, 1.8969, 1.0709, 2.3348, -0.8321, 0.0000, 0.0000, 0.1507, 0.2865, 0.0032, 1.1507, 0.0047],
+    [0.9505, 1.0342, 0.9249, 1.0064, -2.0873, 1.3158, 1.1272, 2.3722, 1.9093, 1.0638, 2.2363, -0.7884, 0.0000, 0.0000, 0.1510, 0.2832, 0.0041, 1.1510, 0.0027],
+    [0.9662, 1.0229, 0.9334, 0.9946, -2.1102, 1.2601, 1.1277, 2.3534, 1.9270, 1.0728, 2.1291, -0.7744, 0.0000, 0.0000, 0.1512, 0.2796, 0.0049, 1.1512, 0.0007],
+];
+// CLIP HIGH_CRAWL END

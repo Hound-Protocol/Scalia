@@ -133,12 +133,9 @@ fn idle_animation_constants_match_between_rust_and_wgsl() {
 
 #[test]
 fn crawl_directional_terms_match_in_rust_and_wgsl() {
-    assert!(RS.contains("phase * std::f32::consts::TAU + dir"), "Rust crawl phase uses travel direction");
-    assert!(WGSL.contains("phase * 6.2831853 + dir"), "WGSL crawl phase uses travel direction");
-    for term in ["0.16 * lateral", "0.12 * lateral", "0.08 * lateral", "0.04 * lateral"] {
-        let rust = RS.contains(term);
-        let shader = WGSL.contains(term);
-        assert_eq!(rust, shader, "crawl directional parameter parity for {term}");
+    // The high crawl reads HIGH_CRAWL in both; its direction terms are written by hand in each.
+    for term in ["(-0.2 - fwd) * 5.0", "0.3 * lateral", "0.4 * lateral", "-phase"] {
+        assert!(RS.contains(term) && WGSL.contains(term), "crawl direction term `{term}` must be in pose.rs and common.wgsl");
     }
 }
 

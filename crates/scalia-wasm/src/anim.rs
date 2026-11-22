@@ -406,7 +406,9 @@ impl Animator {
             }
         } else {
             match (d.stance, moving) {
-                (Stance::Prone, true) => (Pose::Crawl, aim.then_some(Pose::ProneAim), speed / stride_m_dir(Pose::Crawl, self.dir)),
+                // The high crawl moves him; to aim he goes flat on the prone legs (no aiming from elbows and knees).
+                (Stance::Prone, true) if aim => (Pose::Prone, Some(Pose::ProneAim), 0.0),
+                (Stance::Prone, true) => (Pose::Crawl, None, speed / stride_m_dir(Pose::Crawl, self.dir)),
                 (Stance::Prone, false) => (Pose::Prone, aim.then_some(Pose::ProneAim), 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { Pose::CoverAim /* aimed from a kneel, in cover or not; the half crouch is only the moving layer */ } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),

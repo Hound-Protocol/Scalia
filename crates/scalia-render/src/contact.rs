@@ -21,6 +21,8 @@ pub struct ContactStats {
 
 /// The torso's rest shape as ellipses stacked every `SLICE` metres: (centre x, centre y, radius x, radius y).
 const SLICE: f32 = 0.03;
+/// Arm points this close to the shoulder pivot (m) are not counted against the torso.
+pub const SHOULDER_CLEAR: f32 = 0.16;
 
 pub struct Body {
     verts: Vec<Vertex>,
@@ -87,9 +89,12 @@ impl Body {
                 _ => continue,
             };
             *slot = slot.min(w.z);
-            // Arms against the torso: only arm points that are clear of it at rest (the cut at the armpit is not).
+            // Arms against the torso: arm points clear of it at rest, away from the shoulder (the shoulder turns into
+            // the torso on every forward swing, hidden by the seam blend, as is the shoulder cap above the pivot; the
+            // clipping that shows is further down).
             let arm = matches!(part, Part::LeftArm | Part::RightArm | Part::LeftForearm | Part::RightForearm);
-            if arm && self.depth_in_torso(at) == 0.0 {
+            let shoulder = Vec3::new(crate::pose::SHOULDER_X * at.x.signum(), 0.0, crate::pose::SHOULDER_Z);
+            if arm && self.depth_in_torso(at) == 0.0 && at.distance(shoulder) > SHOULDER_CLEAR && at.z < crate::pose::SHOULDER_Z {
                 s.arm_in = s.arm_in.max(self.depth_in_torso(unpose_upper(w, p)));
             }
         }

@@ -75,12 +75,12 @@ fn arm_xform(p: &PoseParams, i: usize, with_elbow: bool) -> Affine3A {
     if with_elbow { shoulder * pitch_at(ELBOW_Z, p.elbow[i]) } else { shoulder }
 }
 
-/// Whole-body placement: stance height and stride bob, then going prone (rotated flat and lifted).
+/// Whole-body placement: stance height and stride bob, then going prone (rotated flat and lifted, plus `raise`).
 fn posture(p: &PoseParams) -> Affine3A {
     let up = Affine3A::from_translation(Vec3::new(0.0, 0.0, p.drop + p.bob));
     if p.prone > 0.0 {
         let lift = PRONE_LIFT_MID * p.prone - (PRONE_LIFT_MID - PRONE_LIFT) * prone_settle(p.prone) + 0.12 * (std::f32::consts::PI * p.prone).sin();
-        Affine3A::from_translation(Vec3::new(0.0, 0.0, lift)) * pitch_at(0.0, -std::f32::consts::FRAC_PI_2 * p.prone) * up
+        Affine3A::from_translation(Vec3::new(0.0, 0.0, lift + p.raise)) * pitch_at(0.0, -std::f32::consts::FRAC_PI_2 * p.prone) * up
     } else {
         up
     }
