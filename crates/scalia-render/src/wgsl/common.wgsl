@@ -624,8 +624,9 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.yaw = r[18];
     p.roll = vec2f(r[19], r[20]);
     p.look = -0.4 * lateral;
-    p.rifle = 0.0;
-    p.ryaw = 1.5707963;
+    // The rifle along the right forearm, muzzle ahead, on its side (crawl.rs RIFLE_PITCH 1.5707963, RIFLE_ROLL -1.5707963).
+    p.rifle = 1.5707963;
+    p.ryaw = -1.5707963;
   }
 
  else if (pose == 28u) {

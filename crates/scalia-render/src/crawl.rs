@@ -19,35 +19,50 @@ pub const FIELDS: [&str; F] = [
     "head", "hipRoll", "rollL", "rollR",
 ];
 
-/// Distance one crawl cycle moves him (m). `pose::CRAWL_STRIDE` must equal it.
-pub const STRIDE: f32 = 0.45;
+/// Share of a cycle a side spends drawing its knee up and reaching its forearm ahead; it then pushes and pulls until
+/// half way, then rests (leg straight back, forearm drawn in) while the other side works.
+pub const DRAW: f32 = 0.15;
+/// How far a push carries the body (m): the knee and the forearm go back this far against the body while planted.
+pub const PUSH: f32 = 0.24;
+/// Distance one crawl cycle moves him (m): a push per half cycle, spread over the push's share so a planted knee or
+/// forearm holds its place. `pose::CRAWL_STRIDE` must equal it.
+pub const STRIDE: f32 = PUSH / (0.5 - DRAW);
 /// Shoulder joint height (m): the chest just up off the ground on the forearms. The hips lie on the ground.
 pub const SHOULDER_H: f32 = 0.24;
 /// How far the flat body is lifted (m): the chest pitching up on the forearms tips the lower belly down about the
 /// hips; this keeps it on the ground, not in it.
 pub const BODY_RAISE: f32 = 0.028;
-/// Joint centre heights on the ground (m): knee, elbow, ankle, palm left and right (the right hand on the grip).
+/// Joint centre heights on the ground (m): knee, elbow, ankle, palm left and right (the right hand on the rifle).
 pub const KNEE_H: f32 = 0.09;
 pub const ELBOW_H: f32 = 0.10;
 pub const ANKLE_H: f32 = 0.08;
-pub const PALM_H: [f32; 2] = [0.06, 0.10];
+pub const PALM_H: [f32; 2] = [0.06, 0.08];
 /// How far a drawing knee or reaching forearm lifts off the ground as it slides forward (m).
 pub const LIFT: f32 = 0.03;
-/// The knee's angle out from the straight-back leg (rad, round the hip, along the ground): lying back, drawn up.
-pub const KNEE_SWING: [f32; 2] = [0.15, 1.15];
-/// The elbow against its shoulder (m): forward when pulled back and when reaching, and out to the side.
-pub const ELBOW_PATH: [f32; 3] = [-0.10, 0.22, 0.10];
+/// How far round from straight ahead a reaching elbow plants (rad): nearly in line with its shoulder.
+pub const ELBOW_REACH: f32 = 0.12;
+/// The rifle along the right forearm: pitched to point ahead along the ground and rolled on its side (magazine out),
+/// held in the right hand (rad). common.wgsl mirrors them.
+pub const RIFLE_PITCH: f32 = std::f32::consts::FRAC_PI_2;
+pub const RIFLE_ROLL: f32 = -std::f32::consts::FRAC_PI_2;
 
-/// Where a limb is in its stroke at `u` (0..1): (how far drawn up or reached, 0..1; lift). The first half it slides
-/// forward (the knee draws up, the forearm reaches), the second it pushes or pulls back.
+/// Whether a side is pushing (knee) and pulling (opposite forearm) at stroke `u`: planted, the body slides over it.
+pub fn planted(u: f32) -> bool {
+    let u = u.rem_euclid(1.0);
+    (DRAW..0.5).contains(&u)
+}
+
+/// Where a side is in its stroke at `u` (0..1): (how far back from its forward mark it is, 0 at the mark to PUSH
+/// at rest; lift). Drawing up it slides forward, lifted; pushing it goes back at the body's speed; then it rests.
 pub fn stroke(u: f32) -> (f32, f32) {
     let u = u.rem_euclid(1.0);
-    let ease = |t: f32| t * t * (3.0 - 2.0 * t);
-    if u < 0.5 {
-        let t = u * 2.0;
-        (ease(t), LIFT * (std::f32::consts::PI * t).sin())
+    if u < DRAW {
+        let t = u / DRAW;
+        (PUSH * (1.0 - t * t * (3.0 - 2.0 * t)), LIFT * (std::f32::consts::PI * t).sin())
+    } else if u < 0.5 {
+        (PUSH * (u - DRAW) / (0.5 - DRAW), 0.0)
     } else {
-        (1.0 - ease((u - 0.5) * 2.0), 0.0)
+        (PUSH, 0.0)
     }
 }
 
@@ -127,24 +142,10 @@ fn solve_n<const N: usize, const M: usize>(mut x: [f32; N], f: impl Fn([f32; N])
     x
 }
 
-fn solve2(x: [f32; 2], f: impl Fn([f32; 2]) -> [f32; 3]) -> [f32; 2] {
-    solve_n(x, f)
-}
 
-/// One angle by bisection so `f` crosses zero in `[lo, hi]` (`f` must change sign).
-fn solve1(lo: f32, hi: f32, f: impl Fn(f32) -> f32) -> f32 {
-    let (mut a, mut b) = (lo, hi);
-    let fa = f(a);
-    for _ in 0..40 {
-        let m = (a + b) / 2.0;
-        if (f(m) > 0.0) == (fa > 0.0) { a = m } else { b = m }
-    }
-    (a + b) / 2.0
-}
-
-/// The pose parts every row shares: prone and flat, rifle cradled across the forearms in the right hand.
+/// The pose parts every row shares: prone and flat, the rifle along the right forearm in the right hand.
 pub fn base() -> PoseParams {
-    PoseParams { prone: 1.0, rifle: 0.0, rifle_yaw: std::f32::consts::FRAC_PI_2, ..Default::default() }
+    PoseParams { prone: 1.0, rifle: RIFLE_PITCH, rifle_yaw: RIFLE_ROLL, ..Default::default() }
 }
 
 /// Applies a solved row to a pose.
@@ -173,13 +174,15 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
     for i in 0..2 {
         let g = if i == 0 { -1.0 } else { 1.0 };
         // Each knee strokes with the opposite elbow: left knee and right elbow at `phase`, the others half a cycle on.
-        let (drawn, lift) = stroke(phase + if i == 0 { 0.0 } else { 0.5 });
+        let (back, lift) = stroke(phase + if i == 0 { 0.0 } else { 0.5 });
         let w = 1.0;
         let hip = hip_at(&p, i);
-        // Round the hip along the ground, from lying straight back to drawn up to the side.
-        let a = KNEE_SWING[0] + (KNEE_SWING[1] - KNEE_SWING[0]) * drawn;
+        // Round the hip along the ground: at rest straight back, drawn up to the side PUSH further forward; pushing,
+        // the knee goes straight back (along the way he moves) at the body's speed.
         let reach = (0.42f32 * 0.42 - (hip.z - KNEE_H).powi(2)).max(0.01).sqrt();
-        let want = Vec3::new(hip.x + g * reach * a.sin(), hip.y - reach * a.cos(), KNEE_H + lift);
+        let behind = reach - (PUSH - back);
+        let a = (behind / reach).clamp(-1.0, 1.0).acos();
+        let want = Vec3::new(hip.x + g * reach * a.sin(), hip.y - behind, KNEE_H + lift);
         // Hip bend, side swing, thigh roll and knee bend together: the knee on its spot, the shin straight back
         // behind it to the toes on the ground (the thigh turns out, the shin does not splay).
         let ah = ANKLE_H + lift;
@@ -201,30 +204,40 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
         apply(&mut p, r);
         let k = knee_at(&p, i) - want;
         miss[i * 3..i * 3 + 3].copy_from_slice(&[k.x * w, k.y * w, k.z * 2.0 * w]);
-        // The forearm opposite the knee: reaching as it draws up, pulling as it pushes.
-        let (reached, lift) = stroke(phase + if i == 0 { 0.5 } else { 0.0 });
+        // The forearm opposite the knee: reaching ahead as it draws up, pulling back as it pushes, in line with the
+        // shoulder; the arm's swing out to the side is held near rest (a swimmer's sweep otherwise).
+        let (back, lift) = stroke(phase + if i == 0 { 0.5 } else { 0.0 });
         let w = 1.0;
         let sh = shoulder_at(&p, i);
-        let want = Vec3::new(sh.x + g * ELBOW_PATH[2], sh.y + ELBOW_PATH[0] + (ELBOW_PATH[1] - ELBOW_PATH[0]) * reached, ELBOW_H + lift);
-        let [a, b] = solve2([r[6 + i], r[10 + i]], |x| {
+        // On the ground the elbow is an upper arm's reach from the shoulder: planted ahead in line with it, it sweeps
+        // round to beside the ribs as it pulls (the chest is lower than the arm is long).
+        let reach = (0.31f32 * 0.31 - (sh.z - ELBOW_H - lift).powi(2)).max(0.01).sqrt();
+        let ahead = reach * ELBOW_REACH.cos() - back;
+        let out = (reach * reach - ahead * ahead).max(0.0).sqrt();
+        let want = Vec3::new(sh.x + g * out, sh.y + ahead, ELBOW_H + lift);
+        // The whole arm at once (shoulder swing, swing out, inward turn, elbow bend): the elbow on its mark, the hand
+        // flat on the ground ahead of it, in line with its shoulder, so pulled back to the ribs the forearm angles in
+        // and the hand ends under the face (the right hand a little up, on the rifle).
+        // Start from an arm reaching ahead and down (prone, about 2.6 rad): hanging back toward the feet is a second
+        // solution that also reaches the ground.
+        let ph = PALM_H[i] + lift;
+        let [a, b, c, el] = solve_n([r[6 + i].max(2.2), r[10 + i], r[12 + i], r[8 + i].clamp(0.2, 1.5)], |x| {
             let mut q = p;
             q.shoulder[i] = x[0];
             q.abduct[i] = x[1];
+            q.reach[i] = x[2];
+            q.elbow[i] = x[3];
             let e = elbow_at(&q, i) - want;
-            [e.z * 4.0, e.y * 2.0, e.x * 2.0]
+            let (h, ee) = (palm_at(&q, i), elbow_at(&q, i));
+            [e.z * 4.0, e.y * 2.0, e.x * 2.0, (h.z - ph) * 3.0, (h.x - sh.x) * 1.5, (h.y - ee.y - 0.15).min(0.0) * 3.0, x[2] * 0.2]
         });
         r[6 + i] = a;
         r[10 + i] = b;
+        r[12 + i] = c;
+        r[8 + i] = el;
         apply(&mut p, r);
         let e = elbow_at(&p, i) - want;
         miss[6 + i * 3..9 + i * 3].copy_from_slice(&[e.x * 0.3 * w, e.y * w, e.z * 2.0 * w]);
-        // The forearm lies forward on the ground (the right hand a little up, on the rifle's grip).
-        let ph = PALM_H[i] + lift;
-        r[8 + i] = solve1(0.2, 2.9, |e| {
-            let mut q = p;
-            q.elbow[i] = e;
-            palm_at(&q, i).z - ph
-        });
         apply(&mut p, r);
     }
     miss

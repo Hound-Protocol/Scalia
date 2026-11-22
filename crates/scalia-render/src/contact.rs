@@ -18,6 +18,8 @@ pub struct ContactStats {
     pub arm_in: f32,
     /// The same, per arm: left (support), right (rifle).
     pub arm_side: [f32; 2],
+    /// How deep the rifle sinks into the torso (m).
+    pub rifle_in: f32,
     pub arm_at: f32,
 }
 
@@ -97,6 +99,9 @@ impl Body {
                 _ => continue,
             };
             *slot = slot.min(w.z);
+            if part == Part::Rifle {
+                s.rifle_in = s.rifle_in.max(self.depth_in_torso(unpose_upper(w, p)));
+            }
             // Arms against the torso: arm points clear of it at rest, away from the shoulder (the shoulder turns into
             // the torso on every forward swing, hidden by the seam blend, as is the shoulder cap above the pivot; the
             // clipping that shows is further down).
@@ -133,6 +138,7 @@ pub fn contact_stats(pose: Pose, dir: f32, n: usize) -> ContactStats {
         out.head = out.head.min(s.head);
         out.rifle = out.rifle.min(s.rifle);
         out.arm_side = [out.arm_side[0].max(s.arm_side[0]), out.arm_side[1].max(s.arm_side[1])];
+        out.rifle_in = out.rifle_in.max(s.rifle_in);
         if s.arm_in > out.arm_in {
             out.arm_in = s.arm_in;
             out.arm_at = phase;
