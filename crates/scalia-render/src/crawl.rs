@@ -12,18 +12,27 @@ use glam::Vec3;
 /// Rows in the baked loop.
 pub const ROWS: usize = 32;
 /// Fields per row.
-pub const F: usize = 21;
+pub const F: usize = 23;
 /// Fields per row, in this order.
 pub const FIELDS: [&str; F] = [
     "hipL", "hipR", "kneeL", "kneeR", "sideL", "sideR", "shL", "shR", "elL", "elR", "abL", "abR", "reachL", "reachR", "lean", "raise", "twist",
-    "head", "hipRoll", "rollL", "rollR",
+    "head", "hipRoll", "rollL", "rollR", "bend", "look",
 ];
 
 /// Share of a cycle a side spends drawing its knee up and reaching its forearm ahead; it then pushes and pulls until
 /// half way, then rests (leg straight back, forearm drawn in) while the other side works.
-pub const DRAW: f32 = 0.15;
+pub const DRAW: f32 = 0.18;
+/// How far the body rolls away from the drawn knee at full draw (rad): about 3 cm of lift at the hip.
+pub const ROLL: f32 = 0.17;
+/// How far the spine bends toward the drawn knee at full draw (rad): about 4 cm of swing at the shoulders.
+pub const BEND: f32 = 0.09;
+/// How far behind the knee's draw the roll and bend come (share of a cycle): they peak as the drawn leg pushes,
+/// not as the opposite elbow lands (where the arm has least reach to spare).
+pub const ROLL_LAG: f32 = 0.0;
+/// Share of the body's roll the head takes back.
+pub const HEAD_STEADY: f32 = 0.6;
 /// How far a push carries the body (m): the knee and the forearm go back this far against the body while planted.
-pub const PUSH: f32 = 0.24;
+pub const PUSH: f32 = 0.26;
 /// Distance one crawl cycle moves him (m): a push per half cycle, spread over the push's share so a planted knee or
 /// forearm holds its place. `pose::CRAWL_STRIDE` must equal it.
 pub const STRIDE: f32 = PUSH / (0.5 - DRAW);
@@ -41,10 +50,12 @@ pub const PALM_H: [f32; 2] = [0.06, 0.08];
 pub const LIFT: f32 = 0.03;
 /// How far round from straight ahead a reaching elbow plants (rad): nearly in line with its shoulder.
 pub const ELBOW_REACH: f32 = 0.12;
-/// The rifle along the right forearm: pitched to point ahead along the ground and rolled on its side (magazine out),
+/// The rifle along the right forearm: pitched to point ahead along the ground and rolled on its side the way the
+/// prone carry is (Patch: Animations 5; rolled the other way, setting off and stopping turned it half over through the
+/// ground),
 /// held in the right hand (rad). common.wgsl mirrors them.
 pub const RIFLE_PITCH: f32 = std::f32::consts::FRAC_PI_2;
-pub const RIFLE_ROLL: f32 = -std::f32::consts::FRAC_PI_2;
+pub const RIFLE_ROLL: f32 = std::f32::consts::FRAC_PI_2;
 
 /// Whether a side is pushing (knee) and pulling (opposite forearm) at stroke `u`: planted, the body slides over it.
 pub fn planted(u: f32) -> bool {
@@ -163,6 +174,8 @@ pub fn apply(p: &mut PoseParams, r: &[f32; F]) {
     p.head = r[17];
     p.yaw = r[18];
     p.roll = [r[19], r[20]];
+    p.tilt = r[21];
+    p.look = r[22];
 }
 
 /// Places the four limbs for the body set in `r` (hips, chest, roll): each knee and elbow on its spot (or as near as
@@ -208,7 +221,9 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
         // shoulder; the arm's swing out to the side is held near rest (a swimmer's sweep otherwise).
         let (back, lift) = stroke(phase + if i == 0 { 0.5 } else { 0.0 });
         let w = 1.0;
-        let sh = shoulder_at(&p, i);
+        // The elbow's mark is taken from the shoulder before the body's roll and bend, so it stays put on the ground
+        // while they move the shoulder over it (the arm reaches the difference).
+        let sh = shoulder_at(&PoseParams { tilt: 0.0, twist: 0.0, ..p }, i);
         // On the ground the elbow is an upper arm's reach from the shoulder: planted ahead in line with it, it sweeps
         // round to beside the ribs as it pulls (the chest is lower than the arm is long).
         let reach = (0.31f32 * 0.31 - (sh.z - ELBOW_H - lift).powi(2)).max(0.01).sqrt();
@@ -221,6 +236,8 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
         // Start from an arm reaching ahead and down (prone, about 2.6 rad): hanging back toward the feet is a second
         // solution that also reaches the ground.
         let ph = PALM_H[i] + lift;
+        // A planted elbow holds its place before the hand's line and height (it skates otherwise as the body rolls).
+        let hold = if planted(phase + if i == 0 { 0.5 } else { 0.0 }) { 6.0 } else { 2.0 };
         let [a, b, c, el] = solve_n([r[6 + i].max(2.2), r[10 + i], r[12 + i], r[8 + i].clamp(0.2, 1.5)], |x| {
             let mut q = p;
             q.shoulder[i] = x[0];
@@ -229,7 +246,7 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
             q.elbow[i] = x[3];
             let e = elbow_at(&q, i) - want;
             let (h, ee) = (palm_at(&q, i), elbow_at(&q, i));
-            [e.z * 4.0, e.y * 2.0, e.x * 2.0, (h.z - ph) * 3.0, (h.x - sh.x) * 1.5, (h.y - ee.y - 0.15).min(0.0) * 3.0, x[2] * 0.2]
+            [e.z * 4.0, e.y * hold, e.x * 2.0, (h.z - ph) * 3.0, (h.x - sh.x) * 1.5, (h.y - ee.y - 0.15).min(0.0) * 3.0, x[2] * 0.2]
         });
         r[6 + i] = a;
         r[10 + i] = b;
@@ -246,10 +263,9 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
 /// Solves the row at `phase`, starting from `prev` (the previous row) so the angles run on continuously: the body
 /// flat (no raise), the chest pitched so the shoulders sit at SHOULDER_H, then the limbs on their marks.
 pub fn solve_row(phase: f32, prev: Option<&[f32; F]>) -> [f32; F] {
-    let mut r = prev.copied().unwrap_or([0.3, 0.3, 0.3, 0.3, -0.3, 0.3, 1.4, 1.4, 1.6, 1.6, 0.2, 0.2, 0.0, 0.0, -0.2, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0]);
+    let mut r = prev.copied().unwrap_or([0.3, 0.3, 0.3, 0.3, -0.3, 0.3, 1.4, 1.4, 1.6, 1.6, 0.2, 0.2, 0.0, 0.0, -0.2, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0]);
     r[15] = BODY_RAISE;
-    r[16] = 0.0;
-    r[18] = 0.0;
+    body_roll(phase, &mut r);
     let mut p = base();
     for _ in 0..8 {
         apply(&mut p, &r);
@@ -264,6 +280,24 @@ pub fn solve_row(phase: f32, prev: Option<&[f32; F]>) -> [f32; F] {
     // Eyes ahead: the head takes back the chest's pitch.
     r[17] = 1.0 + r[14];
     r
+}
+
+/// How far the left knee is drawn up less the right: 1 with the left knee fully up (end of its draw), -1 the right.
+pub fn drawn(phase: f32) -> f32 {
+    let d = |u: f32| 1.0 - stroke(u).0 / PUSH;
+    d(phase) - d(phase + 0.5)
+}
+
+/// Patch: Animations 5: the body works with the stroke (set before the limbs are placed, so planted ones hold): it
+/// rolls onto its side away from the drawn knee, lifting that hip (ROLL, chest and hips together), and the spine
+/// bends toward the drawn knee (BEND), swinging the shoulders that way; the head takes back most of the roll
+/// (HEAD_STEADY) so the eyes stay level.
+fn body_roll(phase: f32, r: &mut [f32; F]) {
+    let s = drawn(phase - ROLL_LAG);
+    r[16] = ROLL * s;
+    r[18] = ROLL * s;
+    r[21] = -BEND * s; // tilt turns the shoulders the other way round
+    r[22] = -HEAD_STEADY * r[16];
 }
 
 /// The whole loop: solved twice round so the first row starts from the last, then the body's height, pitch and
@@ -282,7 +316,7 @@ pub fn solve() -> Vec<[f32; F]> {
     for _ in 0..3 {
         let old = rows.clone();
         for k in 0..ROWS {
-            for f in [14, 15, 16, 18] {
+            for f in [14, 15, 16, 18, 21, 22] {
                 let at = |d: isize| old[(k as isize + d).rem_euclid(ROWS as isize) as usize][f];
                 rows[k][f] = (at(-2) + 4.0 * at(-1) + 6.0 * at(0) + 4.0 * at(1) + at(2)) / 16.0;
             }

@@ -2,7 +2,19 @@
 
 Start at the [README](README.md) for all workstreams and [CONTRIBUTING.md](CONTRIBUTING.md) for how to deliver changes. Docs index: [docs/README.md](docs/README.md). Verify this page against Git and CI before relying on it.
 
-Last updated: 2026-11-22.
+Last updated: 2026-11-22 (Patch: Animations 5).
+
+## Patches: Animations 3 to 5 (2026-11-22): the low crawl
+
+The crawl is now the army low crawl, solved in `crawl.rs` and baked to `pose::HIGH_CRAWL` (name kept; 23 fields,
+`crawl::FIELDS`; regenerate with `cargo run -q --release -p scalia-render --example crawl_solve rows`). Patch 5: the
+body rolls away from the drawn knee and the spine bends toward it (`crawl::ROLL`, `BEND`, fields `twist`, `hipRoll`,
+`bend`, `look`; the legs' roll fades out crawling sideways), `PUSH` 0.26 over `DRAW` 0.18 (1.35 strokes/s at
+`CMD_CRAWL`), the rifle rolled as the prone carry (`RIFLE_ROLL` +pi/2) so crawl and prone blend without it swinging
+through the ground, and the shoulder cut follows the arm whole (`pose::SHOULDER_SPLIT`; upper arms no longer stretch
+into wedges, `examples/stretch_report`). Open: crawl and prone blend joint angles, so a knee can press about 5 cm into the
+ground for a moment (fix: start and stop matched to the stroke); the rifle-arm forearm rests 3 to 4 cm into the vest
+in the standing carries.
 
 ## Patch: Animations 2 (2026-11-22)
 
