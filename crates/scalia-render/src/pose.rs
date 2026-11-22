@@ -1863,6 +1863,10 @@ pub fn ground_drop_toe(hip: [f32; 2], knee: [f32; 2], side: [f32; 2], flat: f32,
 pub const SEAM_SCALE: f32 = 4096.0;
 /// How far from a cut (m) its blend reaches: ankle, knee, hip, crotch, elbow, shoulder, neck. The ankle's stops short
 /// of the sole, which stays flat on the ground.
+/// How much of the arm's turn the shoulder cut takes (`bake_seams`); 0.5 would share it evenly. All of it: the cut
+/// runs down the armpit, far from the pivot, so a shared turn drags the upper arm into a wedge once the arm swings
+/// overhead (the crawl); taken whole, the arm keeps its shape and the narrow band of torso beside it opens instead.
+pub const SHOULDER_SPLIT: f32 = 1.0;
 pub const SEAM_REACH: [f32; 7] = [0.045, 0.07, 0.08, 0.06, 0.06, 0.07, 0.05];
 
 /// The joint pivot (rest pose) between two parts, and which `SEAM_REACH` applies; None if they share no joint.
@@ -1937,7 +1941,13 @@ pub fn bake_seams(vertices: &mut [crate::mesh::Vertex]) {
         };
         for (a, b, set) in cuts.values() {
             if *a == part {
-                take(near(set, at) / SEAM_REACH[seam_joint(*a, *b).unwrap().1], *b, 0.5);
+                let arm = |p: Part| matches!(p, Part::LeftArm | Part::RightArm);
+                // The shoulder cut follows the arm (SHOULDER_SPLIT), as the crotch follows the pelvis.
+                match (arm(*a), arm(*b)) {
+                    (true, false) if *b == Part::Torso => take(near(set, at) / SEAM_REACH[5], *b, 1.0 - SHOULDER_SPLIT),
+                    (false, true) if *a == Part::Torso => take(near(set, at) / SEAM_REACH[5], *b, SHOULDER_SPLIT),
+                    _ => take(near(set, at) / SEAM_REACH[seam_joint(*a, *b).unwrap().1], *b, 0.5),
+                }
             }
         }
         if !crotch.is_empty() {

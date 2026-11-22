@@ -3,7 +3,7 @@
 scripts/closeup.py <out.png> <view>:<z lo>:<z hi> <pose@phase>...
 view is the camera's yaw in degrees (0 side with forward to the right, 90 front, -90 back, -135 back three-quarter);
 z lo..z hi is the band of the figure drawn (m above the ground). One row per view given with VIEWS="v:lo:hi,...",
-one column per pose. Draws flat-shaded faces with their outlines, as stance_sheet.py does, but bigger."""
+one column per pose. CX=<m> centres the views there (lying figures run off the default centre). Draws flat-shaded faces with their outlines, as stance_sheet.py does, but bigger."""
 import os, subprocess, sys
 import numpy as np
 import matplotlib
@@ -43,7 +43,7 @@ for i, spec in enumerate(specs):
         ax.add_collection(PolyCollection(polys, facecolors=cols, edgecolors=(0, 0, 0, 0.15), linewidths=0.3))
         q = np.concatenate(polys).reshape(-1, 2)
         q = q[(q[:, 1] >= lo) & (q[:, 1] <= hi)]
-        cx = (q[:, 0].min() + q[:, 0].max()) / 2
+        cx = float(os.environ['CX']) if 'CX' in os.environ else (q[:, 0].min() + q[:, 0].max()) / 2
         h = (hi - lo) / 2
         ax.set_xlim(cx - h, cx + h); ax.set_ylim(lo, hi)
         ax.axhline(0, color='#5a6a38', lw=2)

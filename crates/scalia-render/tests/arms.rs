@@ -14,3 +14,48 @@ fn the_support_arm_stays_out_of_the_torso() {
         }
     }
 }
+
+/// Worst edge stretch (posed length over rest length) over a pose's cycle: of the arm triangles (`arm`) or of the
+/// torso triangles blended toward an arm (the armpit band).
+fn shoulder_stretch(pose: scalia_render::pose::Pose, arm_side: bool) -> f32 {
+    use glam::Vec3;
+    use scalia_render::mesh::{figure, part_of, Part};
+    use scalia_render::pose::{params, pose_mesh_vertex, seam_of};
+    let fig = figure();
+    let arm = |p: Part| matches!(p, Part::LeftArm | Part::RightArm);
+    let pick = |c: f32| if arm_side { arm(part_of(c)) } else { part_of(c) == Part::Torso && seam_of(c).is_some_and(|(o, _)| arm(o)) };
+    let mut worst = 0.0f32;
+    for k in 0..16 {
+        let pp = params(pose, k as f32 / 16.0);
+        for t in fig.vertices.chunks(3).filter(|t| t.iter().any(|v| pick(v.color))) {
+            for i in 0..3 {
+                let (a, b) = (&t[i], &t[(i + 1) % 3]);
+                let r = Vec3::from(a.pos).distance(Vec3::from(b.pos));
+                if r < 0.01 {
+                    continue;
+                }
+                let s = pose_mesh_vertex(Vec3::from(a.pos), a.color, &pp).distance(pose_mesh_vertex(Vec3::from(b.pos), b.color, &pp));
+                worst = worst.max(s / r);
+            }
+        }
+    }
+    worst
+}
+
+/// The upper arm keeps its shape (Patch: Animations 5): no arm triangle is drawn out into a wedge, even with the arm
+/// swung overhead in the crawl (it was x5 there); the armpit band of torso beside it is no worse than before.
+#[test]
+fn upper_arms_keep_their_shape() {
+    use scalia_render::pose::Pose;
+    let mut over = Vec::new();
+    for (pose, band) in [(Pose::Walk, 2.3), (Pose::Run, 2.3), (Pose::StandAim, 2.7), (Pose::Prone, 3.8), (Pose::Crawl, 5.1)] {
+        let (a, t) = (shoulder_stretch(pose, true), shoulder_stretch(pose, false));
+        if a > 2.0 {
+            over.push(format!("{pose:?}: upper arm stretched x{a:.2} > x2.0"));
+        }
+        if t > band {
+            over.push(format!("{pose:?}: armpit band stretched x{t:.2} > x{band}"));
+        }
+    }
+    assert!(over.is_empty(), "{over:?}");
+}
