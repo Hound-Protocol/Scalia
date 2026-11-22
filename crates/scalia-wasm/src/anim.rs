@@ -449,8 +449,12 @@ impl Animator {
         self.phase = (self.phase + steps * dt).fract();
         let after = self.phase;
         let crossed = |at: f32| if after >= before { before < at && after >= at } else { before < at || after >= at };
-        let footfall = (steps > 0.0 && matches!(pose, Pose::Walk | Pose::Run | Pose::Sprint | Pose::CrouchWalk) && (crossed(0.0001) || crossed(0.5)))
-            .then(|| match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, _ => 0.5 });
+        // A step sounds as a boot comes down onto the ground (crawling, a knee), found on the posed legs.
+        let footfall = (steps > 0.0)
+            .then(|| pose::touchdowns(pose, self.dir))
+            .flatten()
+            .filter(|t| t.iter().any(|&at| crossed(at.max(0.0001))))
+            .map(|_| match pose { Pose::Sprint => 1.0, Pose::Run => 0.8, Pose::CrouchWalk => 0.35, Pose::Crawl => 0.2, _ => 0.5 });
         let (phase, cadence) = match (falling, dropping) {
             (Some((_, t)), _) => (t, -1.0),
             (None, Some(at)) => (at, -1.0),

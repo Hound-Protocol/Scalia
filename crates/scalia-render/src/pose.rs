@@ -3908,3 +3908,44 @@ pub const HIGH_CRAWL: [[f32; 21]; 32] = [
     [1.8827, 1.4087, 1.8561, 1.3868, 0.0114, -0.0093, 1.1722, 2.3165, 1.8520, 1.0989, 2.2082, -0.7756, 0.0000, 0.0000, 0.1551, 0.2929, 0.0049, 1.1551, -0.0012, 0.4416, -0.4357],
 ];
 // CLIP HIGH_CRAWL END
+
+/// Patch: Animations 2, footsteps on contact: the phases (0..1) at which the left and right boot touch the ground in
+/// `pose`'s cycle moving in `dir`, found on the posed boots themselves (the moment the lower end of the boot comes
+/// down onto the ground and stays). Crawling, the knees. The game plays a step as the phase crosses one. Worked out
+/// once per gait and eighth of a turn (the nearest is used); `None` for poses that do not step.
+pub fn touchdowns(pose: Pose, dir: f32) -> Option<[f32; 2]> {
+    static CACHE: std::sync::OnceLock<Vec<(Pose, [[f32; 2]; 8])>> = std::sync::OnceLock::new();
+    let table = CACHE.get_or_init(|| {
+        [Pose::Walk, Pose::Run, Pose::Sprint, Pose::CrouchWalk, Pose::Crawl]
+            .iter()
+            .map(|&pose| (pose, std::array::from_fn(|s| touchdowns_at(pose, s as f32 * std::f32::consts::FRAC_PI_4))))
+            .collect()
+    });
+    let (_, sectors) = table.iter().find(|(p, _)| *p == pose)?;
+    let s = (dir.rem_euclid(std::f32::consts::TAU) / std::f32::consts::FRAC_PI_4).round() as usize % 8;
+    Some(sectors[s])
+}
+
+fn touchdowns_at(pose: Pose, dir: f32) -> [f32; 2] {
+    const N: usize = 96;
+    std::array::from_fn(|i| {
+        let g = if i == 0 { -1.0 } else { 1.0 };
+        let low = |k: usize| {
+            let p = params_dir(pose, k as f32 / N as f32, dir);
+            if pose == Pose::Crawl {
+                pose_rigid(Vec3::new(g * HIP_X, 0.0, KNEE_Z), if i == 0 { Part::LeftShin } else { Part::RightShin }, &p).z
+            } else {
+                let part = if i == 0 { Part::LeftFoot } else { Part::RightFoot };
+                [HEEL_Y, TOE_Y].map(|y| pose_rigid(Vec3::new(g * HIP_X, y, 0.0), part, &p).z).into_iter().fold(f32::MAX, f32::min)
+            }
+        };
+        let h: Vec<f32> = (0..N).map(low).collect();
+        let floor = h.iter().copied().fold(f32::MAX, f32::min);
+        let down: Vec<bool> = h.iter().map(|z| *z < floor + 0.01).collect();
+        // Of the moments a boot comes down, the one that starts its longest stay on the ground.
+        (0..N)
+            .filter(|&k| down[k] && !down[(k + N - 1) % N])
+            .max_by_key(|&k| (0..N).take_while(|d| down[(k + d) % N]).count())
+            .map_or(0.0, |k| k as f32 / N as f32)
+    })
+}

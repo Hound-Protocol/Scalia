@@ -19,3 +19,34 @@ fn straight_gaits_strike_toe_up_and_push_off_heel_up_without_sinking() {
         }
     }
 }
+
+/// Footsteps sound on contact: each touchdown is a moment the boot (crawling, the knee) comes down onto the ground,
+/// lifted shortly before and down at that moment, and the two legs land about half a cycle apart.
+#[test]
+fn touchdowns_are_where_the_boots_land() {
+    use glam::Vec3;
+    use scalia_render::mesh::Part;
+    use scalia_render::pose::{pose_rigid, touchdowns, HEEL_Y, HIP_X, KNEE_Z, TOE_Y};
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint, Pose::CrouchWalk, Pose::Crawl] {
+        for dir in [0.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI] {
+            let t = touchdowns(pose, dir).unwrap();
+            let apart = (t[1] - t[0]).rem_euclid(1.0);
+            assert!((0.35..0.65).contains(&apart), "{pose:?} dir {dir:.2}: legs land {apart:.2} of a cycle apart");
+            for i in 0..2 {
+                let g = if i == 0 { -1.0 } else { 1.0 };
+                let low = |phase: f32| {
+                    let p = params_dir(pose, phase, dir);
+                    if pose == Pose::Crawl {
+                        pose_rigid(Vec3::new(g * HIP_X, 0.0, KNEE_Z), if i == 0 { Part::LeftShin } else { Part::RightShin }, &p).z
+                    } else {
+                        let part = if i == 0 { Part::LeftFoot } else { Part::RightFoot };
+                        [HEEL_Y, TOE_Y].map(|y| pose_rigid(Vec3::new(g * HIP_X, y, 0.0), part, &p).z).into_iter().fold(f32::MAX, f32::min)
+                    }
+                };
+                let floor = (0..96).map(|k| low(k as f32 / 96.0)).fold(f32::MAX, f32::min);
+                assert!(low(t[i]) < floor + 0.01, "{pose:?} dir {dir:.2} leg {i}: not down at its touchdown");
+                assert!(low(t[i] - 0.06) > floor + 0.005, "{pose:?} dir {dir:.2} leg {i}: already down before its touchdown");
+            }
+        }
+    }
+}
