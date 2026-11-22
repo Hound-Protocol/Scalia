@@ -2,9 +2,18 @@
 
 Start at the [README](README.md) for all workstreams and [CONTRIBUTING.md](CONTRIBUTING.md) for how to deliver changes. Docs index: [docs/README.md](docs/README.md). Verify this page against Git and CI before relying on it.
 
-Last updated: 2026-11-20.
+Last updated: 2026-11-22.
 
-## Current animation lane (AN-02, prone and crawl)
+## Patch: Animations 2 (2026-11-22)
+
+High crawl (`crates/scalia-render/src/crawl.rs`, baked to `pose::HIGH_CRAWL`), foot roll and planted boot heading in
+the baked gaits (`pose::foot_roll`, clip buffer `GAIT_TOE_AT`), footsteps on contact (`pose::touchdowns`), arms clear of
+the torso (`pose::clear_arms`), rifle-first turning (`anim.rs` `lag`, packed by `pose::pack_layer_lag`), prone turns
+about the hips (`Frame::shift`), springs for the body's settle (`prims.rs`). Measuring tools: `contact_report`,
+`foot_report`, `crawl_solve`; `anim_audit` and `gait_strides` now measure the point a boot stands on. Math map:
+the SCALIA project doc `claude/animation-math-reference.md`.
+
+## Earlier animation lane (AN-02, prone and crawl)
 
 Merged to `main`:
 - AN-02-S03 ([#67](https://github.com/Hound-Protocol/Scalia/pull/67)): prone aim independent of crawl gait.
