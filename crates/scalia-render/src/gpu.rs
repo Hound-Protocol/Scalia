@@ -47,9 +47,6 @@ pub struct FrameDesc<'a> {
     pub atmosphere: bool,
     /// Seconds for animation; keep it small (wrap it) so f32 stays precise.
     pub time_s: f32,
-    /// Seconds on the clock the skinned figures were stamped with (pose changes, gait phases): the battle lab's own
-    /// clock, which pauses and changes speed, or `time_s` when nothing else is playing.
-    pub anim_s: f32,
     /// Camera elevation above the horizon (radians); the game uses `camera::ELEV`.
     pub elev: f32,
     /// How far the flat planet map is bent into a globe (see `bend`).
@@ -96,10 +93,6 @@ struct Timing {
 struct Gpubuf {
     buf: wgpu::Buffer,
     count: u32,
-    /// Bumped whenever the buffer is reallocated (skin_gpu keys its bind groups on it).
-    generation: u64,
-    /// A skinned mesh (rigged.skin layout), drawn with the skinned pipelines (AN-03).
-    skinned: bool,
 }
 
 pub struct Gpu {
@@ -126,9 +119,6 @@ pub struct Gpu {
     pub software: bool,
     timing: Option<Timing>,
     instance: wgpu::Instance,
-    /// Skeletal animation: compute pass and skinned pipelines (AN-03).
-    skin: crate::skin_gpu::SkinGpu,
-    generations: u64,
     /// A second drawing surface (the tablet's map screen) with its own size and render targets.
     second: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration, Option<Targets>)>,
 }
@@ -322,14 +312,6 @@ impl Gpu {
             ],
         });
 
-        let skin = crate::skin_gpu::SkinGpu::new(&device, crate::skin_gpu::Shared {
-            scene_mod: &scene_mod,
-            shadow_mod: &shadow_mod,
-            uni: &uni,
-            shadow_view: &shadow_view,
-            cmp: &cmp,
-            instance_layout: vertex_layouts()[1].clone().expect("instance layout"),
-        });
         let timing = device.features().contains(wgpu::Features::TIMESTAMP_QUERY).then(|| Timing {
             set: device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("pass times"), ty: wgpu::QueryType::Timestamp, count: 6 }),
             resolve: device.create_buffer(&wgpu::BufferDescriptor {
@@ -353,7 +335,6 @@ impl Gpu {
             timing,
             device, queue, surface, config, fatal_error, pending_error, scene_pipe, shadow_pipe, blit_pipe, uni, b_uni, scene_bind, shadow_bind,
             shadow_view, one_instance, targets: None, buffers: HashMap::new(), adapter_name, software, instance, second: None,
-            skin, generations: 0,
         })
     }
 
@@ -410,15 +391,6 @@ impl Gpu {
         self.upload_records(key, bytes, 16);
     }
 
-    /// Stores (or replaces) a skinned mesh (`skin_gpu::SKIN_VERTEX_BYTES` per vertex, e.g. `skin::mesh_bytes`);
-    /// drawn with any instance buffer like a figure, posed by the skeletal animation (AN-03).
-    pub fn upload_skinned(&mut self, key: &str, bytes: &[u8]) {
-        self.upload_records(key, bytes, crate::skin_gpu::SKIN_VERTEX_BYTES as usize);
-        if let Some(b) = self.buffers.get_mut(key) {
-            b.skinned = true;
-        }
-    }
-
     /// Stores (or replaces) instances (`INSTANCE_BYTES` each).
     pub fn upload_instances(&mut self, key: &str, bytes: &[u8]) {
         self.upload_records(key, bytes, INSTANCE_BYTES);
@@ -434,13 +406,10 @@ impl Gpu {
             let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(key),
                 size: need.next_power_of_two(),
-                // Storage too: the skeletal animation compute pass reads instance records (AN-03).
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            self.generations += 1;
-            let skinned = self.buffers.get(key).is_some_and(|b| b.skinned);
-            self.buffers.insert(key.to_string(), Gpubuf { buf, count: 0, generation: self.generations, skinned });
+            self.buffers.insert(key.to_string(), Gpubuf { buf, count: 0 });
         }
         let b = self.buffers.get_mut(key).expect("just inserted");
         if !bytes.is_empty() {
@@ -589,50 +558,15 @@ impl Gpu {
             })
         };
         let mut enc = self.device.create_command_encoder(&Default::default());
-        // AN-03: pose every soldier drawn with a skinned mesh (once per instance buffer) before any pass draws them.
-        {
-            let (skin, buffers) = (&mut self.skin, &self.buffers);
-            let mut done: Vec<&str> = Vec::new();
-            for (mk, ik) in f.instanced.iter().chain(f.decor.iter()) {
-                if done.contains(&ik.as_str()) || !buffers.get(mk).is_some_and(|b| b.skinned && b.count > 0) {
-                    continue;
-                }
-                if let Some(ib) = buffers.get(ik) {
-                    skin.update(&self.device, &self.queue, &mut enc, ik, &ib.buf, ib.generation, ib.count, f.anim_s);
-                    done.push(ik);
-                }
-            }
-        }
-
         let draw_list = |pass: &mut wgpu::RenderPass<'_>, list: &[(String, String)]| {
             for (mk, ik) in list {
                 if let (Some(mb), Some(ib)) = (self.buffers.get(mk), self.buffers.get(ik)) {
-                    if mb.count > 0 && ib.count > 0 && !mb.skinned {
+                    if mb.count > 0 && ib.count > 0 {
                         pass.set_vertex_buffer(0, mb.buf.slice(..));
                         pass.set_vertex_buffer(1, ib.buf.slice(..));
                         pass.draw(0..mb.count, 0..ib.count);
                     }
                 }
-            }
-        };
-        // Skinned meshes in `list`, with the skinned pipeline and each instance buffer's joint transforms.
-        let draw_skinned = |pass: &mut wgpu::RenderPass<'_>, list: &[(String, String)], shadow: bool| {
-            let mut set = false;
-            for (mk, ik) in list {
-                let (Some(mb), Some(ib)) = (self.buffers.get(mk), self.buffers.get(ik)) else { continue };
-                let Some(palette) = self.skin.bind(ik, shadow) else { continue };
-                if !mb.skinned || mb.count == 0 || ib.count == 0 {
-                    continue;
-                }
-                if !set {
-                    pass.set_pipeline(if shadow { &self.skin.shadow_pipe } else { &self.skin.scene_pipe });
-                    pass.set_bind_group(0, if shadow { &self.skin.shadow_bind } else { &self.skin.scene_bind }, &[]);
-                    set = true;
-                }
-                pass.set_bind_group(1, palette, &[]);
-                pass.set_vertex_buffer(0, mb.buf.slice(..));
-                pass.set_vertex_buffer(1, ib.buf.slice(..));
-                pass.draw(0..mb.count, 0..ib.count);
             }
         };
         let draw_all = |pass: &mut wgpu::RenderPass<'_>| {
@@ -645,7 +579,7 @@ impl Gpu {
             }
             for (mk, ik) in f.instanced {
                 if let (Some(mb), Some(ib)) = (self.buffers.get(mk), self.buffers.get(ik)) {
-                    if mb.count > 0 && ib.count > 0 && !mb.skinned {
+                    if mb.count > 0 && ib.count > 0 {
                         pass.set_vertex_buffer(0, mb.buf.slice(..));
                         pass.set_vertex_buffer(1, ib.buf.slice(..));
                         pass.draw(0..mb.count, 0..ib.count);
@@ -668,7 +602,6 @@ impl Gpu {
             p.set_pipeline(&self.shadow_pipe);
             p.set_bind_group(0, &self.shadow_bind, &[]);
             draw_all(&mut p);
-            draw_skinned(&mut p, f.instanced, true);
         }
         {
             let clear = |c: wgpu::Color, view| {
@@ -697,8 +630,6 @@ impl Gpu {
             p.set_bind_group(0, &self.scene_bind, &[]);
             draw_all(&mut p);
             draw_list(&mut p, f.decor);
-            draw_skinned(&mut p, f.instanced, false);
-            draw_skinned(&mut p, f.decor, false);
         }
         {
             let mut p = enc.begin_render_pass(&wgpu::RenderPassDescriptor {

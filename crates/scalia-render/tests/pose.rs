@@ -1,6 +1,6 @@
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of, Part};
-use scalia_render::pose::{reach_left, reload_target, blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, barrel_with_phases, Pose, PoseParams, Side, RIFLE_GUARD, RIFLE};
+use scalia_render::pose::{reach_left, reload_target, blend, grip, grip_weight, two_handed, hand, held, idle, params, pose_vertex, barrel_with_phases, Pose, PoseParams, Side, params_dir, pose_mesh_vertex, RIFLE_GUARD, RIFLE};
 
 /// All figure vertices in a pose at a gait phase, in the figure's own frame (facing +y).
 fn posed(pose: Pose, phase: f32) -> Vec<(Part, Vec3)> {
@@ -18,14 +18,14 @@ fn bottom(v: &[(Part, Vec3)]) -> f32 {
 #[test]
 fn standing_legs_and_body_are_the_mesh_itself() {
     // Standing changes only the arms and rifle (safe hang); legs, torso and head stay as modelled (the torso's
-    // shoulder caps follow the arms, soft joints).
+    // shoulder caps blend with the arms across the seam, `bake_seams`).
     let pp = params(Pose::Stand, 0.0);
     for v in figure().vertices {
         let part = part_of(v.color);
-        let arm_seam = matches!(scalia_render::pose::soft_joint(Vec3::from(v.pos), part), Some((Part::LeftArm | Part::RightArm, _)));
+        let arm_seam = matches!(scalia_render::pose::seam_of(v.color), Some((Part::LeftArm | Part::RightArm, _)));
         if !arm_seam && matches!(part, Part::LeftThigh | Part::RightThigh | Part::LeftShin | Part::RightShin | Part::LeftFoot | Part::RightFoot | Part::Torso | Part::Head) {
             let p = Vec3::from(v.pos);
-            assert!((pose_vertex(p, part, &pp) - p).length() < 1e-5, "{part:?} moved");
+            assert!((pose_mesh_vertex(p, v.color, &pp) - p).length() < 1e-5, "{part:?} moved");
         }
     }
 }
@@ -1033,28 +1033,123 @@ fn sprinting_drives_the_rifle_across_the_body_with_the_shoulders() {
     assert!(sprint > 0.4 && sprint > 2.5 * run, "sprint muzzle sweeps {sprint:.3} m, run {run:.3} m");
 }
 
-/// S11: soft joints. Where two parts meet (hips, knees, shoulders, elbows), a point on the seam is drawn in the
-/// same place whichever part it belongs to, so bending a joint opens no gap in the mesh. Measured as the
-/// distance between the two parts' placements of each vertex within 1 cm of the joint.
+/// Walk polish: going straight ahead or back, each leg does what the other did half a cycle earlier (no limp).
 #[test]
-fn joints_close_their_seams_in_every_pose() {
-    use scalia_render::pose::{HIP_Z, KNEE_Z, ELBOW_Z};
-    let fig = figure();
-    let seams: [(Part, Part, f32); 6] = [
-        (Part::LeftThigh, Part::LeftShin, KNEE_Z), (Part::RightThigh, Part::RightShin, KNEE_Z),
-        (Part::LeftArm, Part::LeftForearm, ELBOW_Z), (Part::RightArm, Part::RightForearm, ELBOW_Z),
-        (Part::LeftThigh, Part::Torso, HIP_Z), (Part::RightThigh, Part::Torso, HIP_Z),
-    ];
-    for pose in [Pose::Run, Pose::Sprint, Pose::Crouch, Pose::CoverAim, Pose::StandAim, Pose::Prone, Pose::Crawl] {
-        for k in 0..4 {
-            let pp = params(pose, k as f32 / 4.0);
-            for (a, b, z) in seams {
-                for v in fig.vertices.iter().filter(|v| part_of(v.color) == a && (v.pos[2] - z).abs() < 0.01) {
-                    let at = Vec3::from(v.pos);
-                    let gap = pose_vertex(at, a, &pp).distance(pose_vertex(at, b, &pp));
-                    assert!(gap < 0.02, "{pose:?}@{k}: {a:?}/{b:?} seam open {gap:.3} m at {at}");
-                }
+fn walking_straight_legs_mirror_each_other_half_a_cycle_apart() {
+    let n = 96;
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        for dir in [0.0, std::f32::consts::PI] {
+            let p: Vec<_> = (0..n).map(|k| params_dir(pose, k as f32 / n as f32, dir)).collect();
+            let worst = (0..n)
+                .map(|k| {
+                    let o = &p[(k + n / 2) % n];
+                    (p[k].hip[0] - o.hip[1]).abs().max((p[k].knee[0] - o.knee[1]).abs())
+                })
+                .fold(0.0f32, f32::max);
+            assert!(worst < 0.03, "{pose:?} dir {dir}: legs differ by {worst:.3} rad half a cycle apart");
+        }
+    }
+}
+
+/// Walk polish: leg angles change smoothly round every gait loop, the seam included (no stutter).
+#[test]
+fn gait_legs_move_without_jolts() {
+    let n = 96;
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint] {
+        for e in 0..8 {
+            let dir = e as f32 * std::f32::consts::FRAC_PI_4;
+            let p: Vec<_> = (0..n).map(|k| params_dir(pose, k as f32 / n as f32, dir)).collect();
+            for s in 0..2 {
+                let jerk = (0..n)
+                    .map(|k| {
+                        let f = |q: &scalia_render::pose::PoseParams| (q.hip[s], q.knee[s]);
+                        let (a, b, c) = (f(&p[k]), f(&p[(k + 1) % n]), f(&p[(k + 2) % n]));
+                        (c.0 - 2.0 * b.0 + a.0).abs().max((c.1 - 2.0 * b.1 + a.1).abs())
+                    })
+                    .fold(0.0f32, f32::max);
+                // Straight ahead and back are clean; strafes keep more of the capture (it was up to 0.31 rad).
+                let limit = if e % 4 == 0 { 0.05 } else { 0.15 };
+                assert!(jerk < limit, "{pose:?} dir {dir:.2} leg {s}: jolt {jerk:.3} rad between frames");
             }
         }
+    }
+}
+
+/// Seams (the gaps at the ankle, seat and crotch): the soldier is one mesh cut into parts, so a vertex on a cut
+/// belongs to triangles of two parts. Posed as either, it must land in the same place, or the cut opens into a gap.
+fn shared_vertices() -> Vec<(Vec3, Vec<f32>)> {
+    let fig = figure();
+    let mut seen: Vec<(Vec3, Vec<f32>)> = Vec::new();
+    for v in &fig.vertices {
+        let at = Vec3::from(v.pos);
+        match seen.iter_mut().find(|(p, _)| p.distance(at) < 1e-4) {
+            Some((_, codes)) => if !codes.iter().any(|c| part_of(*c) == part_of(v.color)) { codes.push(v.color) },
+            None => seen.push((at, vec![v.color])),
+        }
+    }
+    seen.retain(|(_, codes)| codes.len() > 1);
+    seen
+}
+
+fn seam_poses() -> Vec<(String, PoseParams)> {
+    let mut out = Vec::new();
+    for pose in [Pose::Walk, Pose::Run, Pose::Sprint, Pose::CrouchWalk, Pose::Crouch, Pose::Prone, Pose::Crawl, Pose::StandAim, Pose::CrouchAim, Pose::Drop] {
+        for k in 0..8 {
+            out.push((format!("{pose:?}@{}", k as f32 / 8.0), params(pose, k as f32 / 8.0)));
+        }
+    }
+    out
+}
+
+#[test]
+fn cut_vertices_stay_together_so_no_seam_opens() {
+    let shared = shared_vertices();
+    assert!(shared.len() > 50, "only {} shared vertices: the weld failed", shared.len());
+    for (name, pp) in seam_poses() {
+        for (at, codes) in &shared {
+            let posed: Vec<Vec3> = codes.iter().map(|&c| pose_mesh_vertex(*at, c, &pp)).collect();
+            let gap = posed.iter().flat_map(|a| posed.iter().map(move |b| a.distance(*b))).fold(0.0f32, f32::max);
+            let parts: Vec<Part> = codes.iter().map(|&c| part_of(c)).collect();
+            assert!(gap < 0.002, "{name}: seam between {parts:?} opens {gap:.3} m at {at}");
+        }
+    }
+}
+
+/// Seams: a bent joint keeps its thickness. Every cut ring stays at least 90% as wide as at rest in every pose (a
+/// plain average of the two parts' positions pinches a deeply bent knee to a fraction of it: the rubbery look).
+#[test]
+fn bent_joints_keep_their_thickness() {
+    use scalia_render::pose::seam_joint;
+    let shared = shared_vertices();
+    let mut rings: Vec<((Part, Part), Vec<(Vec3, f32)>)> = Vec::new();
+    for (at, codes) in &shared {
+        if codes.len() != 2 { continue; }
+        let (a, b) = (part_of(codes[0]), part_of(codes[1]));
+        if seam_joint(a, b).is_none() { continue; }
+        let key = if (a as u32) < (b as u32) { (a, b) } else { (b, a) };
+        match rings.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, r)) => r.push((*at, codes[0])),
+            None => rings.push((key, vec![(*at, codes[0])])),
+        }
+    }
+    let width = |pts: &[Vec3]| pts.iter().flat_map(|a| pts.iter().map(move |b| a.distance(*b))).fold(0.0f32, f32::max);
+    for (name, pp) in seam_poses() {
+        for (key, ring) in &rings {
+            let rest = width(&ring.iter().map(|r| r.0).collect::<Vec<_>>());
+            let posed = width(&ring.iter().map(|&(at, c)| pose_mesh_vertex(at, c, &pp)).collect::<Vec<_>>());
+            assert!(posed > 0.9 * rest, "{name}: the {key:?} seam narrows to {:.0}% of its width", 100.0 * posed / rest);
+        }
+    }
+}
+
+/// Patch: Animations: kneeling down and standing up from the knee take 30% less time than other pose changes.
+#[test]
+fn kneeling_and_standing_up_are_quicker_than_other_pose_changes() {
+    use scalia_render::pose::{blend_s, BLEND_S};
+    for (a, b) in [(Pose::Stand, Pose::Crouch), (Pose::Ready, Pose::Crouch), (Pose::StandAim, Pose::CrouchAim), (Pose::Crouch, Pose::Ready)] {
+        assert!((blend_s(a, b) - BLEND_S / 1.3).abs() < 1e-4, "{a:?} to {b:?}");
+    }
+    for (a, b) in [(Pose::Walk, Pose::Run), (Pose::Ready, Pose::StandAim), (Pose::Crouch, Pose::CrouchWalk)] {
+        assert_eq!(blend_s(a, b), BLEND_S, "{a:?} to {b:?}");
     }
 }

@@ -376,6 +376,11 @@ pub struct Viewer {
     group_pose: HashMap<u32, (Pose, Pose, f32)>,
     /// Pose held in the soldier preview; None cycles through all of them.
     preview_pose: Option<usize>,
+    /// Model viewer, Commander mode: the soldier driven by keys through the game's own animation (`puppet::Puppet`).
+    view_cmd: Option<crate::puppet::Puppet>,
+    /// Model viewer: the clock held still (freeze-frame; the camera still orbits), and when the last frame was.
+    model_frozen: bool,
+    last_now: f64,
     /// Model viewer: soldier level of detail (0 full, 1 mid, 2 far) and colour variant.
     model_detail: u8,
     model_variant: u8,
@@ -548,6 +553,9 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
         stance: HashMap::new(),
         group_pose: HashMap::new(),
         preview_pose: None,
+        view_cmd: None,
+        model_frozen: false,
+        last_now: 0.0,
         model_detail: 0,
         model_variant: 0,
         model_elev: scalia_render::camera::ELEV,
@@ -1980,6 +1988,37 @@ impl Viewer {
     pub fn preview_pose(&mut self, i: i32) {
         self.preview_pose = (i >= 0).then_some(i as usize);
     }
+    /// Model viewer, Commander mode: drive the soldier with the keys (`commander_keys`, `commander_stance`) through
+    /// the same animation every soldier in the game uses, instead of showing a fixed pose (`viewer_stance` too).
+    pub fn set_commander(&mut self, on: bool) {
+        self.view_cmd = on.then(crate::puppet::Puppet::default);
+    }
+    /// Commander mode: movement wanted (x right, y ahead, each -1..1), sprinting, walking, rifle up.
+    pub fn commander_keys(&mut self, x: f32, y: f32, sprint: bool, walk: bool, aim: bool) {
+        if let Some(c) = self.view_cmd.as_mut() {
+            (c.keys, c.sprint, c.walk, c.aim) = ((x, y), sprint, walk, aim);
+        }
+    }
+    /// Commander mode: 0 stand, 1 crouch, 2 prone.
+    pub fn viewer_stance(&mut self, s: u8) {
+        if let Some(c) = self.view_cmd.as_mut() {
+            c.stance = match s { 1 => crate::anim::Stance::Crouch, 2 => crate::anim::Stance::Prone, _ => crate::anim::Stance::Stand };
+        }
+    }
+    /// Model viewer: hold the clock still (freeze-frame) or let it run.
+    pub fn set_frozen(&mut self, on: bool) {
+        self.model_frozen = on;
+    }
+    /// Model viewer: draw the soldier with its seams closed (true, as in the game) or as bare rigid parts, to compare.
+    pub fn set_seams(&mut self, on: bool) {
+        let mut f = figure();
+        if !on {
+            for v in &mut f.vertices {
+                v.color = v.color.floor();
+            }
+        }
+        self.gpu.upload("figure", f.bytes());
+    }
 
     /// Cycles the selected group's idle stance: stand, crouch, cover aim, prone, standing aim.
     pub fn cycle_stance(&mut self) -> String {
@@ -2230,9 +2269,7 @@ impl Viewer {
         };
         // Wrap once a day: f32 seconds stay precise to about 8 ms, and the jump comes only every 24 hours.
         let time_s = ((t / 1000.0) % 86_400.0) as f32;
-        // The lab's soldiers are stamped in lab time (see `ts` where they are drawn); skin them on that clock.
-        let anim_s = if self.assault.is_some() { ((self.lab_t / 1000.0) % 86_400.0) as f32 } else { time_s };
-        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, anim_s, bend, elev, lights: &self.fx_lights };
+        let desc = FrameDesc { meshes: &meshes, instanced: &instanced, decor: &decor, target, yaw, view_height, range, internal, outline: self.outline && !far_view, sky: sky_now, atmosphere, time_s, bend, elev, lights: &self.fx_lights };
         let drawn = if second { self.gpu.frame_second(&desc) } else { self.gpu.frame(&desc) };
         drawn?;
         self.last_internal = internal;
@@ -2515,6 +2552,13 @@ impl Viewer {
     }
 
     fn sim_ms(&mut self, now_ms: f64) -> f64 {
+        // Freeze-frame in the model viewer: the clock's start moves with it, so time stands still.
+        if self.model_frozen && self.scene == Scene::Ships {
+            if let Some(t0) = self.t0.as_mut() {
+                *t0 += (now_ms - self.last_now).max(0.0);
+            }
+        }
+        self.last_now = now_ms;
         let t0 = *self.t0.get_or_insert(now_ms);
         (now_ms - t0).max(0.0)
     }
@@ -2602,9 +2646,22 @@ impl Viewer {
                 (p, st, None, 0.0)
             });
             let ts = ((t / 1000.0) % 86_400.0) as f32;
+            let colour = VARIANTS[self.model_variant as usize % VARIANTS.len()].1;
+            if let Some(c) = self.view_cmd.as_mut() {
+                let (rec, line) = c.step(ts, colour);
+                self.gpu.upload_instances("figure1", bytes(&rec));
+                meshes.push("plinth".into());
+                let (mesh, detail) = match self.model_detail { 1 => ("figure_lo", "mid detail"), 2 => ("figure_far", "far detail"), _ => ("figure", "full detail") };
+                instanced.push((mesh.into(), "figure1".into()));
+                let yaw = self.ship_yaw.unwrap_or(self.model_yaw);
+                self.model_yaw = yaw;
+                let frozen = if self.model_frozen { ", frozen" } else { "" };
+                let lying = matches!(c.stance, crate::anim::Stance::Prone);
+                let (centre, size) = if lying { (Vec3::new(0.0, 0.8, 0.4), 3.4) } else { (Vec3::new(0.0, 0.0, 0.9), 2.6) };
+                return (centre, yaw, size * self.model_zoom, 10.0, format!("Commander, {detail}: {line}{frozen}"));
+            }
             let prev = if self.preview_pose.is_none() { SHOW[((t / 3000.0) as usize + SHOW.len() - 1) % SHOW.len()].0 } else { pose };
             let changed = ((t / 3000.0).floor() * 3.0) as f32 % 86_400.0;
-            let colour = VARIANTS[self.model_variant as usize % VARIANTS.len()].1;
             self.gpu.upload_instances("figure1", bytes(&[0.0, 0.0, 0.0, colour, 0.0, 0.0, steps, pose as u32 as f32, prev as u32 as f32, changed.min(ts), scalia_render::pose::pack_layer(upper, dir), 0.0]));
             meshes.push("plinth".into());
             let (mesh, tris, detail) = match self.model_detail {
@@ -4371,10 +4428,10 @@ fn base_mesh(props: &[Prop], h: f32) -> MeshBuilder {
 
 /// The enemy's outfit: the same soldier with a red helmet and red plate carrier, readable at any distance.
 fn enemy_kit(mut f: MeshBuilder) -> MeshBuilder {
-    use scalia_render::mesh::{code, kit, palette_of, part_of};
+    use scalia_render::mesh::{kit, palette_of, recolour};
     for v in &mut f.vertices {
         if v.color >= 0.0 && matches!(palette_of(v.color) as u8, kit::HELMET | kit::VEST) {
-            v.color = code(ENEMY_RED, part_of(v.color));
+            v.color = recolour(v.color, ENEMY_RED);
         }
     }
     f
@@ -4397,7 +4454,7 @@ const ENEMY_POSTS: [((f32, f32), (f32, f32), Pose); 8] = [
 
 /// The commander's figure: the soldier in black, with the armband patches in the instance (team) colour.
 fn commander_figure() -> MeshBuilder {
-    use scalia_render::mesh::{code, kit, palette_of, part_of};
+    use scalia_render::mesh::{kit, palette_of, recolour};
     let mut f = figure();
     for v in &mut f.vertices {
         let to = match palette_of(v.color) as u8 {
@@ -4408,7 +4465,7 @@ fn commander_figure() -> MeshBuilder {
         };
         if let Some(p) = to {
             if v.color >= 0.0 {
-                v.color = code(p, part_of(v.color));
+                v.color = recolour(v.color, p);
             }
         }
     }
@@ -4642,4 +4699,5 @@ mod audio_spatial_tests {
     }
 
 }
+
 

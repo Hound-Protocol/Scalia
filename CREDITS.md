@@ -8,10 +8,12 @@
   Changes: re-posed (arms down), fitted to our rig, recoloured to our palette, rifle decimated, team armband added
   (`scripts/glb_figure.py`; original kept at `assets/source/low_poly_soldier.glb`). The same model, rigged on
   Mixamo by the project lead, is the skinned soldier (`crates/scalia-render/assets/rigged.skin`, recoloured to our
-  kit palette, game rifle added; `scripts/skin_bake.py`).
+  kit palette, game rifle added; `scripts/skin_bake.py`). Kept as animation reference for the tools; the game
+  draws the procedural soldier.
 - **Soldier animation clips** (`crates/scalia-render/assets/anims.bin`): motion from [Mixamo](https://www.mixamo.com)
   (Adobe), sampled at 30 frames per second onto the rigged soldier by `scripts/skin_bake.py`. Clip list:
-  `scripts/skin_clips.txt`. The downloaded FBX packs are not in the repository.
+  `scripts/skin_clips.txt`. The downloaded FBX packs are not in the repository. Reference only: the clips shape the
+  procedural animation's baked tables and are not shipped in the game.
 - **Radio key click** (`web/sfx/radio-key.mp3`): "alexis_gaming_cam radio 338296", supplied by the project lead
   (Pixabay sound library naming).
 - **"Military Rugged PDA / Tactical Tablet"** by [Snupp](https://sketchfab.com/snuupp), licensed under

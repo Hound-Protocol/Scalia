@@ -68,6 +68,11 @@ pub fn palette_of(code: f32) -> u32 {
     if code < 0.0 { 0 } else { code as u32 % PALETTE_SIZE }
 }
 
+/// A colour code repainted with another palette index, keeping its part and seam blend (pose.rs `bake_seams`).
+pub fn recolour(code_in: f32, palette: u8) -> f32 {
+    code(palette, part_of(code_in)) + (code_in - code_in.floor())
+}
+
 /// Colour code for a palette index on a part.
 pub fn code(palette: u8, part: Part) -> f32 {
     (palette as u32 % PALETTE_SIZE + PALETTE_SIZE * part as u32) as f32
@@ -206,7 +211,9 @@ impl MeshBuilder {
 pub fn figure() -> MeshBuilder {
     const FIG: &[u8] = include_bytes!("../assets/soldier.fig");
     let f = |i: usize| f32::from_le_bytes([FIG[i], FIG[i + 1], FIG[i + 2], FIG[i + 3]]);
-    let vertices = (0..FIG.len() / 16).map(|k| Vertex { pos: [f(k * 16), f(k * 16 + 4), f(k * 16 + 8)], color: f(k * 16 + 12) }).collect();
+    let mut vertices: Vec<Vertex> = (0..FIG.len() / 16).map(|k| Vertex { pos: [f(k * 16), f(k * 16 + 4), f(k * 16 + 8)], color: f(k * 16 + 12) }).collect();
+    // Close the cuts between its parts (pose.rs `bake_seams`).
+    crate::pose::bake_seams(&mut vertices);
     MeshBuilder { vertices }
 }
 

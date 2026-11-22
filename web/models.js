@@ -45,6 +45,41 @@ try {
   model.value = location.hash ? location.hash.slice(1) : String(model.options.length - 1);
   pick();
 
+  // Commander mode: the soldier driven by the keys through the game's own animation. Keys move him relative to
+  // where he faces; he stays on the plinth while his legs do the moving.
+  const held = new Set();
+  let stance = 0, walk = false, aim = false;
+  const send = () => {
+    const x = (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0);
+    const y = (held.has('KeyW') ? 1 : 0) - (held.has('KeyS') ? 1 : 0);
+    v.commander_keys(x, y, held.has('ShiftLeft') || held.has('ShiftRight'), walk, aim);
+  };
+  const commander = $('commander'), freeze = $('freeze'), seams = $('seams');
+  commander.addEventListener('change', () => {
+    v.set_commander(commander.checked);
+    $('keys').hidden = !commander.checked;
+    stance = 0; walk = false; aim = false; held.clear();
+    if (commander.checked) { $('spin').checked = false; v.set_turntable(false); }
+  });
+  freeze.addEventListener('change', () => v.set_frozen(freeze.checked));
+  seams.addEventListener('change', () => v.set_seams(seams.checked));
+  const toggle = (box, f) => { box.checked = !box.checked; f(box.checked); };
+  addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') return;
+    if (e.code === 'Space') { e.preventDefault(); toggle(freeze, (on) => v.set_frozen(on)); return; }
+    if (e.code === 'KeyJ') { toggle(seams, (on) => v.set_seams(on)); return; }
+    if (!commander.checked) return;
+    if (e.repeat) return;
+    if (e.code === 'KeyC') { stance = stance === 1 ? 0 : 1; v.viewer_stance(stance); }
+    else if (e.code === 'KeyZ') { stance = stance === 2 ? 0 : 2; v.viewer_stance(stance); }
+    else if (e.code === 'KeyG') walk = !walk;
+    else if (e.code === 'KeyQ') aim = !aim;
+    else held.add(e.code);
+    send();
+  });
+  addEventListener('keyup', (e) => { held.delete(e.code); if (commander.checked) send(); });
+  addEventListener('blur', () => { held.clear(); if (commander.checked) send(); });
+
   // Drag orbits (and stops the turntable), the wheel zooms.
   let drag = null;
   canvas.addEventListener('pointerdown', (e) => {

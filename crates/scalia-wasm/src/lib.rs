@@ -14,6 +14,7 @@ pub mod anim;
 pub mod assault;
 pub mod effects;
 pub mod motion;
+pub mod puppet;
 #[cfg(target_arch = "wasm32")]
 pub mod viewer;
 pub mod ground;
