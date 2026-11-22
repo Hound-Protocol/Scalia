@@ -646,8 +646,37 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   else if (pose == 7u) { lift = bake_gait(&p, SPRINT_F_AT, phase, dir, SPRINT_TWIST, RUN_TILT); }
   p.drop = max(ground_drop(p.hip, p.knee, p.side, p.flat, p.toe), lift);
   // The crawl keeps the prone legs' grounding offset (pose.rs): lying down it runs fore and aft.
+  clear_arms(&p);
   if (pose == 32u) { p.drop = ground_drop(vec2f(0.18, 0.16), vec2f(0.06, 0.04), vec2f(0.0), 0.0, vec2f(0.0)); }
   return p;
+}
+
+// Arms clear of the body (pose.rs `clear_arms`, TORSO_RX 0.18 0.22, TORSO_RY 0.16, TORSO_Z 0.85 1.30, ARM_R 0.05):
+// an arm whose elbow, forearm or hand would sink into the torso swings out just enough. Upright poses only.
+fn clear_arms(p: ptr<function, PP>) {
+  if ((*p).prone != 0.0) { return; }
+  for (var i = 0; i < 2; i++) {
+    // The rifle arm moves only with the rifle slung (its stock sits in the shoulder).
+    if (i == 1 && (*p).sling < 1.0) { continue; }
+    let g = select(1.0, -1.0, i == 0);
+    for (var it = 0; it < 2; it++) {
+      var need = 0.0;
+      for (var j = 0; j < 3; j++) {
+        var q = vec3f(g * 0.18, 0.0, 1.09);
+        if (j == 1) { q = vec3f(g * 0.18, 0.0, 0.945); }
+        if (j == 2) { q = vec3f(g * 0.18, 0.0, 0.80); }
+        let w = arm(q, (*p).sh[i], (*p).el[i], (*p).reach[i], (*p).abd[i], g * 0.238);
+        if (w.z < 0.80 || w.z > 1.30) { continue; }
+        let t = clamp((w.z - 0.85) / 0.45, 0.0, 1.0);
+        let rx = 0.18 + 0.04 * t * t * (3.0 - 2.0 * t) + 0.05;
+        let yy = w.y / 0.21;
+        if (abs(yy) >= 1.0) { continue; }
+        let out = rx * sqrt(1.0 - yy * yy) - w.x * g;
+        if (out > 0.0) { need = max(need, out / max(1.40 - w.z, 0.15)); }
+      }
+      (*p).abd[i] = (*p).abd[i] + need;
+    }
+  }
 }
 
 // Port of pose.rs `ground_drop_toe` (boots rolled by `toe`).

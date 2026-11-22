@@ -16,6 +16,8 @@ pub struct ContactStats {
     pub head: f32,
     pub rifle: f32,
     pub arm_in: f32,
+    /// The same, per arm: left (support), right (rifle).
+    pub arm_side: [f32; 2],
     pub arm_at: f32,
 }
 
@@ -61,6 +63,12 @@ impl Body {
         Body { verts, rifle, z0, slices }
     }
 
+    /// The fitted ellipse at height `z` (centre x, centre y, radius x, radius y), if the torso reaches it.
+    pub fn slice(&self, z: f32) -> Option<[f32; 4]> {
+        let k = ((z - self.z0) / SLICE).round();
+        if k < 0.0 || k as usize >= self.slices.len() { None } else { self.slices[k as usize] }
+    }
+
     /// How far a point in the torso's rest frame lies inside the torso (m, 0 outside).
     pub fn depth_in_torso(&self, q: Vec3) -> f32 {
         let k = ((q.z - self.z0) / SLICE).round();
@@ -95,7 +103,10 @@ impl Body {
             let arm = matches!(part, Part::LeftArm | Part::RightArm | Part::LeftForearm | Part::RightForearm);
             let shoulder = Vec3::new(crate::pose::SHOULDER_X * at.x.signum(), 0.0, crate::pose::SHOULDER_Z);
             if arm && self.depth_in_torso(at) == 0.0 && at.distance(shoulder) > SHOULDER_CLEAR && at.z < crate::pose::SHOULDER_Z {
-                s.arm_in = s.arm_in.max(self.depth_in_torso(unpose_upper(w, p)));
+                let d = self.depth_in_torso(unpose_upper(w, p));
+                s.arm_in = s.arm_in.max(d);
+                let i = if matches!(part, Part::LeftArm | Part::LeftForearm) { 0 } else { 1 };
+                s.arm_side[i] = s.arm_side[i].max(d);
             }
         }
         s
@@ -121,6 +132,7 @@ pub fn contact_stats(pose: Pose, dir: f32, n: usize) -> ContactStats {
         out.belly = out.belly.min(s.belly);
         out.head = out.head.min(s.head);
         out.rifle = out.rifle.min(s.rifle);
+        out.arm_side = [out.arm_side[0].max(s.arm_side[0]), out.arm_side[1].max(s.arm_side[1])];
         if s.arm_in > out.arm_in {
             out.arm_in = s.arm_in;
             out.arm_at = phase;

@@ -204,3 +204,19 @@ fn blend_times_match() {
     assert_eq!(get("BLEND_S"), vec![BLEND_S]);
     assert_eq!(get("KNEEL_BLEND_S"), vec![KNEEL_BLEND_S]);
 }
+
+/// The arms' push-out (pose.rs `clear_arms`) is written into the shader by hand.
+#[test]
+fn clear_arms_constants_match() {
+    use scalia_render::pose::{ARM_R, ELBOW_X, ELBOW_Z, PALM, SHOULDER_X, SHOULDER_Z, TORSO_RX, TORSO_RY, TORSO_Z};
+    let body = &WGSL[WGSL.find("fn clear_arms(").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    for (what, v) in [
+        ("elbow x", ELBOW_X), ("elbow z", ELBOW_Z), ("palm z", PALM.z), ("mid forearm z", (ELBOW_Z + PALM.z) * 0.5), ("shoulder x", SHOULDER_X),
+        ("shoulder z", SHOULDER_Z), ("waist", TORSO_RX[0]), ("chest - waist", TORSO_RX[1] - TORSO_RX[0]), ("span", TORSO_Z[1] - TORSO_Z[0]),
+        ("low", TORSO_Z[0]), ("low - 0.05", TORSO_Z[0] - 0.05), ("top", TORSO_Z[1]), ("arm", ARM_R), ("depth", TORSO_RY + ARM_R),
+    ] {
+        assert!(nums(body).iter().any(|x| (x - v).abs() < 1e-4), "clear_arms in common.wgsl lacks {what} = {v}");
+    }
+    assert!((PALM.x - ELBOW_X).abs() < 1e-6 && PALM.y == 0.0, "the shader samples the hand at the elbow's x");
+}

@@ -1504,6 +1504,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
         g[10]
     });
     p.drop = ground_drop_toe(p.hip, p.knee, p.side, p.flat, p.toe).max(lift);
+    clear_arms(&mut p);
     if pose == Pose::Crawl {
         // Lying down the grounding offset runs fore and aft: the crawl keeps the prone legs' value so the body does
         // not surge with the stroke, and nothing shifts between lying and crawling. common.wgsl mirrors this.
@@ -3948,4 +3949,48 @@ fn touchdowns_at(pose: Pose, dir: f32) -> [f32; 2] {
             .max_by_key(|&k| (0..N).take_while(|d| down[(k + d) % N]).count())
             .map_or(0.0, |k| k as f32 / N as f32)
     })
+}
+
+/// Patch: Animations 2, arms clear of the body: the torso as an upright ellipse (half-width at the waist and the
+/// chest, half-depth, the heights it spans) and the arm's own thickness. common.wgsl `clear_arms` mirrors these.
+pub const TORSO_RX: [f32; 2] = [0.18, 0.22];
+pub const TORSO_RY: f32 = 0.16;
+pub const TORSO_Z: [f32; 2] = [0.85, 1.30];
+pub const ARM_R: f32 = 0.05;
+
+/// Swings an arm out (more `abduct`) just far enough that its elbow, forearm and hand stay outside the torso: the
+/// sprint's swing and the carries brought the forearm in through the vest. Upright poses only (lying, the arms rest
+/// on the ground). Points in front of or behind the torso (a rifle carried across the chest) are left alone, and so
+/// is the rifle arm unless the rifle is slung (its stock sits in the shoulder).
+pub fn clear_arms(p: &mut PoseParams) {
+    if p.prone != 0.0 {
+        return;
+    }
+    for i in 0..2 {
+        // The rifle hand is tied to the rifle and its stock to the shoulder: it moves only with the rifle slung.
+        if i == 1 && p.sling < 1.0 {
+            continue;
+        }
+        let (x0, g) = if i == 0 { (-SHOULDER_X, -1.0) } else { (SHOULDER_X, 1.0) };
+        for _ in 0..2 {
+            let mut need = 0.0f32;
+            for q in [Vec3::new(g * ELBOW_X, 0.0, ELBOW_Z), Vec3::new(g * ELBOW_X, 0.0, (ELBOW_Z + PALM.z) * 0.5), Vec3::new(g * PALM.x, PALM.y, PALM.z)] {
+                let w = arm(q, p.shoulder[i], p.elbow[i], p.reach[i], p.abduct[i], x0);
+                if w.z < TORSO_Z[0] - 0.05 || w.z > TORSO_Z[1] {
+                    continue;
+                }
+                let t = ((w.z - TORSO_Z[0]) / (TORSO_Z[1] - TORSO_Z[0])).clamp(0.0, 1.0);
+                let rx = TORSO_RX[0] + (TORSO_RX[1] - TORSO_RX[0]) * t * t * (3.0 - 2.0 * t) + ARM_R;
+                let yy = w.y / (TORSO_RY + ARM_R);
+                if yy.abs() >= 1.0 {
+                    continue;
+                }
+                let out = rx * (1.0 - yy * yy).sqrt() - w.x * g;
+                if out > 0.0 {
+                    need = need.max(out / (SHOULDER_Z - w.z).max(0.15));
+                }
+            }
+            p.abduct[i] += need;
+        }
+    }
 }
