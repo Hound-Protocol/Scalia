@@ -931,7 +931,7 @@ fn foot_roll(target: &[[Vec3; 2]], sway: &[[f32; 5]], roll: [f32; 3], straight: 
         let gain = along.abs() * if straight { 1.0 } else { STRAFE_ROLL };
         let (strike, off, hang) = (roll[0] * gain, roll[1] * gain, roll[2] * gain);
         // Ahead: heel first, ball last. Backwards: ball first, heel last.
-        let (land_y, leave_y, land, leave) = if k_on >= k_off { (HEEL_Y, BALL_Y, strike, off) } else { (BALL_Y, HEEL_Y, off * 0.6, strike * 1.5) };
+        let (land_y, leave_y, land, leave) = if k_on >= k_off { (HEEL_Y, BALL_Y, strike, off) } else { (BALL_Y, HEEL_Y, off * 0.6, roll[0].max(0.2) * 1.5 * gain) };
         let a = (0.15 * len as f32).max(1.0);
         let b = (0.35 * len as f32).max(1.0);
         let mut theta = vec![0.0f32; n];
@@ -1107,8 +1107,8 @@ fn smooth_lift(l: &GaitLoop) -> GaitLoop {
 /// measures it back). The game sets the cadence from it, so the boot on the ground stays put.
 pub const GAIT_STRIDE: [[f32; 8]; 3] = [
     [1.53, 1.56, 1.67, 1.79, 1.56, 1.67, 1.60, 1.61], // Walk
-    [1.89, 1.65, 1.65, 1.84, 1.81, 1.53, 1.92, 2.00], // Run
-    [2.63, 2.64, 3.17, 3.19, 3.18, 2.80, 2.84, 2.84], // Sprint
+    [1.89, 1.65, 1.65, 1.83, 1.79, 1.53, 1.92, 2.00], // Run
+    [2.63, 2.64, 3.17, 3.17, 3.14, 2.79, 2.84, 2.84], // Sprint
 ];
 
 /// Which eighth-of-a-turn loop `dir` falls in and how far towards the next (0..1).
