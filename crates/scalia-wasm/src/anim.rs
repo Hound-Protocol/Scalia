@@ -40,6 +40,13 @@ pub const LEG_STEP: f32 = 0.78;
 const LEG_EASE: f32 = 6.0;
 /// How fast the prone turning shift eases out once he is off the ground (1/s, exponential).
 const SHIFT_EASE: f32 = 4.0;
+/// The body's settle after a stop or a turn (`Animator::pitch`, `banked`): frequency (Hz) and damping.
+const SETTLE_HZ: f32 = 1.5;
+/// How quickly the acceleration the pitch spring feels follows the real one (1/s).
+const JOLT_FOLLOW: f32 = 12.0;
+const SETTLE_DAMP: f32 = 0.5;
+
+const SETTLE_RESPONSE: f32 = 0.0; // no anticipation: the spring only follows
 /// A body turns with weight: angular acceleration (rad/s²).
 pub const TURN_ACCEL: f32 = 28.0;
 const FALL_BACK_S: f32 = 1.1;
@@ -160,6 +167,12 @@ pub struct Animator {
     lag: f32,
     catching: bool,
     shift: (f32, f32),
+    /// The body's pitch with acceleration and bank into turns as drawn: springs, so a stop or the end of a turn
+    /// checks, rocks a little past and settles (Patch: Animations 2).
+    pitch: scalia_render::prims::Spring,
+    /// Acceleration followed quickly: what the pitch spring feels (the check is sharp, so the settle shows).
+    jolt: f32,
+    banked: scalia_render::prims::Spring,
     aim: AimTrack,
     speed: f32,
     dir: f32,
@@ -212,6 +225,9 @@ impl Animator {
             lag: 0.0,
             catching: false,
             shift: (0.0, 0.0),
+            jolt: 0.0,
+            pitch: scalia_render::prims::Spring::new(SETTLE_HZ, SETTLE_DAMP, SETTLE_RESPONSE, 0.0),
+            banked: scalia_render::prims::Spring::new(SETTLE_HZ, SETTLE_DAMP, SETTLE_RESPONSE, 0.0),
             aim: AimTrack::new(heading, 0.0),
             speed: 0.0,
             dir: 0.0,
@@ -283,6 +299,7 @@ impl Animator {
         let speed = (d.vel.0 * d.vel.0 + d.vel.1 * d.vel.1).sqrt();
         if dt > 0.0 {
             self.accel += ((speed - self.speed) / dt - self.accel) * (dt * ACCEL_FOLLOW).min(1.0);
+            self.jolt += ((speed - self.speed) / dt - self.jolt) * (dt * JOLT_FOLLOW).min(1.0);
         }
         let was_still = self.speed < WALK_DOWN;
         self.speed = speed;
@@ -514,7 +531,9 @@ impl Animator {
         let tilting = up && d.stance != Stance::Prone && dropping.is_none();
         let bank_to = if tilting { pose::bank(speed, self.spin) } else { 0.0 };
         self.bank += ((bank_to - self.bank) * (dt * BANK_FOLLOW).min(1.0)).clamp(-BANK_RATE * dt, BANK_RATE * dt);
-        let lean = if tilting { pose::pack_tilt(self.bank, pose::accel_pitch(self.accel)) } else { 0.0 };
+        let (bank, pitch) = if tilting { (self.bank, pose::accel_pitch(self.jolt)) } else { (0.0, 0.0) };
+        let (bank, pitch) = (self.banked.step(bank, dt), self.pitch.step(pitch, dt));
+        let lean = if tilting { pose::pack_tilt(bank, pitch) } else { 0.0 };
         Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall, lag: self.lag, shift: self.shift }
     }
 
@@ -741,6 +760,32 @@ mod tests {
         d.face = Face::Keep;
         let f = run(&mut a, 180, d);
         assert!(f.shift.0.hypot(f.shift.1) < 0.02, "standing up he is back on his feet: {:?}", f.shift);
+    }
+
+    /// Stopping, the body checks back against the stop, rocks a little past upright and settles (a spring, not a
+    /// freeze); turning, the bank does the same as the turn ends.
+    #[test]
+    fn stopping_and_turning_settle_with_a_little_overshoot() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.vel = (0.0, 1.7);
+        d.want = Some(d.vel);
+        run(&mut a, 120, d);
+        d.ts += 2.0;
+        d.vel = (0.0, 0.0);
+        d.want = Some((0.0, 0.0));
+        let mut pitch = Vec::new();
+        for _ in 0..120 {
+            d.ts += d.dt;
+            let f = a.step(&d);
+            pitch.push(pose::unpack_tilt(9.0 + f.lean).1);
+        }
+        let first = pitch.iter().copied().fold(0.0f32, |m, p| if p.abs() > m.abs() { p } else { m });
+        let peak_at = pitch.iter().position(|p| *p == first).unwrap();
+        let rebound = pitch[peak_at..].iter().copied().fold(0.0f32, |m, p| if p * first < 0.0 && p.abs() > m.abs() { p } else { m });
+        assert!(first.abs() > 0.01, "he checks against the stop ({first:.3} rad)");
+        assert!(rebound.abs() > 0.1 * first.abs(), "and rocks back past upright ({rebound:.4} after {first:.3})");
+        assert!(pitch[110..].iter().all(|p| p.abs() < 0.01), "then settles: {:.4}", pitch[119]);
     }
 
     #[test]
