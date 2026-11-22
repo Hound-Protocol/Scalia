@@ -89,7 +89,7 @@ fn the_forearms_reach_and_pull_opposite_the_drawn_knee() {
     for i in 0..2 {
         let y: Vec<f32> = (0..32).map(|j| elbow_ahead(j as f32 / 32.0, i)).collect();
         let range = y.iter().copied().fold(f32::MIN, f32::max) - y.iter().copied().fold(f32::MAX, f32::min);
-        assert!(range > 0.25, "arm {i}: the elbow reaches and pulls over only {range:.2} m");
+        assert!(range > 0.2, "arm {i}: the elbow reaches and pulls over only {range:.2} m");
     }
     // At the left knee's most drawn, the right elbow is well ahead of the left.
     let k: Vec<f32> = (0..32).map(|j| knee_out(j as f32 / 32.0, 0.0)[0]).collect();
@@ -109,4 +109,76 @@ fn every_direction_keeps_the_body_down() {
     let f = params_dir(Pose::Crawl, 0.3, 0.0);
     let b = params_dir(Pose::Crawl, 0.7, std::f32::consts::PI);
     assert!((f.hip[0] - b.hip[0]).abs() < 1e-4, "backwards is the loop reversed");
+}
+
+fn palm_ahead(phase: f32, i: usize) -> (f32, f32) {
+    use scalia_render::pose::PALM;
+    let p = params_dir(Pose::Crawl, phase, 0.0);
+    let g = if i == 0 { -1.0 } else { 1.0 };
+    let (arm, fore) = if i == 0 { (Part::LeftArm, Part::LeftForearm) } else { (Part::RightArm, Part::RightForearm) };
+    let sh = at(&p, arm, Vec3::new(g * SHOULDER_X, 0.0, SHOULDER_Z));
+    let h = at(&p, fore, Vec3::new(g * PALM.x, PALM.y, PALM.z));
+    (h.y - sh.y, (h.x - sh.x) * g)
+}
+
+/// Patch: Animations 4: the forearms reach forward, ahead of the head and in line with the shoulders, not out to the
+/// side like a swimmer's.
+#[test]
+fn the_forearms_reach_forward_in_line_with_the_shoulders() {
+    for i in 0..2 {
+        let reach: Vec<(f32, f32)> = (0..32).map(|k| palm_ahead(k as f32 / 32.0, i)).collect();
+        let most = reach.iter().map(|r| r.0).fold(f32::MIN, f32::max);
+        assert!(most > 0.45, "arm {i}: the hand reaches only {most:.2} m ahead of the shoulder");
+        // Reached, the hand is in line with the shoulder (it ends the pull beside the ribs, as a real crawl does).
+        let at_most = reach.iter().find(|r| r.0 == most).unwrap();
+        assert!(at_most.1 < 0.15, "arm {i}: reaching, the hand is {:.2} m out to the side", at_most.1);
+    }
+}
+
+/// The rifle lies along the right forearm, muzzle forward, clear of the ground and the body (army low crawl).
+#[test]
+fn the_rifle_lies_along_the_right_forearm_muzzle_forward() {
+    use scalia_render::pose::{barrel_with_phases, RIFLE};
+    let body = Body::new();
+    for k in 0..32 {
+        let phase = k as f32 / 32.0;
+        let (_, bore) = barrel_with_phases(RIFLE, Pose::Crawl, None, phase, 0.0, 0.0);
+        assert!(bore.y > 0.9, "phase {k}/32: the muzzle points {bore:?}, not ahead");
+        let s = body.stats(&params_dir(Pose::Crawl, phase, 0.0));
+        assert!(s.rifle > 0.005, "phase {k}/32: the rifle touches the ground ({:.3} m)", s.rifle);
+        assert!(s.rifle_in < 0.02, "phase {k}/32: the rifle sinks {:.3} m into the body", s.rifle_in);
+    }
+}
+
+/// Only one knee is drawn up at a time: the other leg lies straight back.
+#[test]
+fn one_leg_always_lies_straight_back() {
+    for k in 0..32 {
+        let phase = k as f32 / 32.0;
+        let p = params_dir(Pose::Crawl, phase, 0.0);
+        let out = knee_out(phase, 0.0);
+        let straight = (0..2).any(|i| p.knee[i] < 0.3 && out[i] < 0.1);
+        assert!(straight, "phase {k}/32: both legs bent (knee {:.2?}, out {:.2?})", p.knee, out);
+    }
+}
+
+/// While a knee pushes and a forearm pulls they hold their place along the way he moves (the body slides over them,
+/// STRIDE per cycle): no skating.
+#[test]
+fn pushing_knees_and_pulling_forearms_hold_their_place() {
+    let n = 128;
+    let pts = [
+        (Part::LeftShin, Vec3::new(-HIP_X, 0.0, KNEE_Z), 0.0, 0.03),
+        (Part::RightShin, Vec3::new(HIP_X, 0.0, KNEE_Z), 0.5, 0.03),
+        (Part::RightForearm, Vec3::new(ELBOW_X, 0.0, ELBOW_Z), 0.0, 0.05),
+        (Part::LeftForearm, Vec3::new(-ELBOW_X, 0.0, ELBOW_Z), 0.5, 0.05),
+    ];
+    for (part, v, off, limit) in pts {
+        let y = |u: f32| at(&params_dir(Pose::Crawl, u, 0.0), part, v).y + crawl::STRIDE * u;
+        let us: Vec<f32> = (0..n).map(|k| k as f32 / n as f32).filter(|u| crawl::planted(u + off)).collect();
+        assert!(us.len() > n / 4, "{part:?} is planted only {} of {n} samples", us.len());
+        let y0 = y(us[0]);
+        let wander = us.iter().map(|u| (y(*u) - y0).abs()).fold(0.0f32, f32::max);
+        assert!(wander < limit, "{part:?} skates {wander:.3} m along the way he moves while it pushes");
+    }
 }

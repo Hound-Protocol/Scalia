@@ -235,3 +235,13 @@ fn leg_roll_raise_matches() {
     use scalia_render::pose::LEG_ROLL_RAISE;
     assert!(WGSL.contains(&format!("clamp(p.raise / {LEG_ROLL_RAISE}, 0.0, 1.0)")), "common.wgsl leg_roll must fade by LEG_ROLL_RAISE {LEG_ROLL_RAISE}");
 }
+
+/// The crawl's rifle carry (crawl.rs RIFLE_PITCH, RIFLE_ROLL) is written into the shader by hand.
+#[test]
+fn crawl_rifle_carry_matches() {
+    use scalia_render::crawl::{RIFLE_PITCH, RIFLE_ROLL};
+    let body = &WGSL[WGSL.find("} else if (pose == 32u) {").unwrap()..];
+    let body = &body[..body.find("p.ryaw").unwrap() + 30];
+    assert!(nums(body).iter().any(|x| (x - RIFLE_PITCH).abs() < 1e-5), "crawl rifle pitch {RIFLE_PITCH}");
+    assert!(nums(body).iter().any(|x| (x - RIFLE_ROLL).abs() < 1e-5), "crawl rifle roll {RIFLE_ROLL}");
+}

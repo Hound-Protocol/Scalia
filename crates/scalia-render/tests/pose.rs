@@ -81,8 +81,11 @@ fn crawling_has_continuous_directional_cycles_forward_backward_and_sideways() {
     use scalia_render::pose::params_dir;
     let dirs = [0.0f32, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
     let poses: Vec<_> = dirs.iter().map(|&dir| params_dir(Pose::Crawl, 0.23, dir)).collect();
-    // AN-03-S8: the low crawl carries the rifle across the forearms (aiming, the ProneAim layer points it ahead).
-    assert!(poses.iter().all(|p| p.prone == 1.0 && p.rifle_yaw > 1.5), "crawl stays low with the rifle carried across");
+    // Patch: Animations 4: the low crawl carries the rifle along the right forearm, muzzle ahead (crawl.rs).
+    assert!(
+        poses.iter().all(|p| p.prone == 1.0 && p.rifle == scalia_render::crawl::RIFLE_PITCH && p.rifle_yaw == scalia_render::crawl::RIFLE_ROLL),
+        "crawl stays low with the rifle along the right forearm"
+    );
     assert_ne!(poses[0].knee, poses[1].knee, "backwards crawl reverses the diagonal limb phase");
     assert_ne!(poses[2].side, poses[3].side, "left and right crawl use opposite support patterns");
     for &dir in &dirs {
