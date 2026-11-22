@@ -10,7 +10,6 @@
 use crate::motion::{skidding, AimTrack, Skid};
 use scalia_render::pose::{self, Pose, LAYER_BLEND_S};
 // AN-03: cadence from the clips the soldier plays.
-use scalia_render::skin::stride_m_dir;
 
 /// Pace lines (m/s) for the legs, with a little give either way so easing off near a line does not flick poses.
 const SPRINT_UP: f32 = 4.0;
@@ -101,8 +100,6 @@ pub struct Drive {
     pub rifle: Rifle,
     /// Allowed to sprint (sprint legs need this as well as the pace).
     pub sprint: bool,
-    /// Drawn as the procedural figure (the commander): legs cycle at its stride, not the baked clips' (AN-03).
-    pub procedural: bool,
     /// Aiming from cover (crouched aim over a wall).
     pub in_cover: bool,
     /// Shot down (alive, on the ground) or killed.
@@ -115,7 +112,7 @@ pub struct Drive {
 
 impl Drive {
     pub fn new(dt: f32, ts: f32) -> Drive {
-        Drive { dt, ts, vel: (0.0, 0.0), want: None, face: Face::Keep, stance: Stance::Stand, rifle: Rifle::Ready, sprint: true, procedural: false, in_cover: false, down: false, dead: false, action: None }
+        Drive { dt, ts, vel: (0.0, 0.0), want: None, face: Face::Keep, stance: Stance::Stand, rifle: Rifle::Ready, sprint: true, in_cover: false, down: false, dead: false, action: None }
     }
 }
 
@@ -140,8 +137,6 @@ pub struct Frame {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Animator {
-    /// Drawn as the procedural figure (from the last `Drive`): its barrel is the procedural rifle's.
-    pub procedural: bool,
     pub heading: f32,
     pub spin: f32,
     /// How far he still has to turn (rad), and how long he has been turning hard one way (s): small corrections
@@ -193,7 +188,6 @@ fn wrap(mut d: f32) -> f32 {
 impl Animator {
     pub fn new(heading: f32) -> Animator {
         Animator {
-            procedural: false,
             heading,
             spin: 0.0,
             gap: 0.0,
@@ -265,7 +259,6 @@ impl Animator {
     pub fn step(&mut self, d: &Drive) -> Frame {
         let dt = d.dt.clamp(0.0, 0.1);
         self.clock = d.ts;
-        self.procedural = d.procedural;
         let alive_up = !d.dead && !d.down;
         let speed = (d.vel.0 * d.vel.0 + d.vel.1 * d.vel.1).sqrt();
         if dt > 0.0 {
@@ -387,7 +380,7 @@ impl Animator {
             }
         }
         let dropping = self.drop;
-        let stride_m_dir = |p: Pose, dir: f32| if d.procedural { pose::stride_m_dir(p, dir) } else { scalia_render::skin::stride_m_dir(p, dir) };
+        let stride_m_dir = pose::stride_m_dir;
         let carried = |legs: Pose| match d.rifle {
             Rifle::Aim => Some(Pose::StandAim),
             Rifle::Reload => Some(Pose::Reload),
@@ -524,14 +517,8 @@ impl Animator {
     }
 
     /// His muzzle and bore in the world (mm and unit vector), posed exactly as drawn; None when he cannot fire.
-    /// AN-03: drawn by the skeletal animation, so posed from the same instance record the GPU gets.
     pub fn barrel(&self, f: &Frame, at_mm: (f32, f32)) -> (Option<[f32; 3]>, [f32; 3]) {
-        let (q, b) = if self.procedural {
-            pose::barrel_with_phases(pose::RIFLE, f.pose, f.upper, f.phase, self.reload_phase, f.dir)
-        } else {
-            let rec = self.record(f, (0.0, 0.0, 0.0), 0.0, 0.0, 0.0, 0.0);
-            scalia_render::skin::muzzle(scalia_render::skin::anims(), &rec, self.clock)
-        };
+        let (q, b) = pose::barrel_with_phases(pose::RIFLE, f.pose, f.upper, f.phase, self.reload_phase, f.dir);
         let (roll, pitch) = pose::unpack_tilt(9.0 + f.lean);
         let bore = pose::figure_to_world(b, glam::Vec3::ZERO, f.heading, roll, pitch).to_array();
         let armed = pose::two_handed(f.upper.unwrap_or(f.pose)) > 0.0;
@@ -662,7 +649,7 @@ mod tests {
 
         d.vel = (1.05, 0.0);
         let resumed = advance(&mut a, &mut d);
-        let expected = (stopped.phase + d.dt * 1.05 / stride_m_dir(Pose::Crawl, stopped.dir)).fract();
+        let expected = (stopped.phase + d.dt * 1.05 / pose::stride_m_dir(Pose::Crawl, stopped.dir)).fract();
         assert!((resumed.phase - expected).abs() < 1e-5, "crawl resumes from the frozen stride, not a new step");
     }
 
@@ -705,8 +692,7 @@ mod tests {
         a.rifle = Rifle::Reload;
         b.rifle = Rifle::Reload;
         a.vel = (0.0, 1.0);
-        // AN-03: at 3 m/s the clip strides happen to bring both cycles to the same phase at the check.
-        b.vel = (0.0, 2.5);
+        b.vel = (0.0, 3.0);
         let (mut fa, mut fb) = (slow.step(&a), fast.step(&b));
         for k in 1..90 {
             a.ts = k as f32 / 60.0;
@@ -862,11 +848,10 @@ mod tests {
     }
 
     #[test]
-    fn procedural_figures_fire_from_the_procedural_rifle() {
-        // The commander is drawn procedurally: his rounds and flash must leave the barrel that is drawn.
+    fn every_soldier_fires_from_the_rifle_that_is_drawn() {
+        // Soldiers are drawn as the commander's procedural figure: rounds and flash leave that barrel.
         let mut a = Animator::new(0.0);
         let mut d = drive(0.0);
-        d.procedural = true;
         d.rifle = Rifle::Aim;
         let mut f = a.step(&d);
         for _ in 0..60 { d.ts += d.dt; f = a.step(&d); }
@@ -879,11 +864,11 @@ mod tests {
     }
 
     #[test]
-    fn procedural_figures_step_at_the_procedural_stride() {
-        // The commander is still the procedural figure: his legs must cycle at its stride, not the clips'.
+    fn every_soldier_steps_at_the_commanders_procedural_stride() {
+        // The commander's animation is the reference for every soldier: legs cycle at the procedural stride, not
+        // the Mixamo clips' (those stay as reference only).
         let mut a = Animator::new(0.0);
         let mut d = drive(0.0);
-        d.procedural = true;
         d.vel = (0.0, 1.2);
         d.want = Some(d.vel);
         let mut f = a.step(&d);

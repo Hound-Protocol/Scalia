@@ -293,7 +293,6 @@ mod commander_motion_tests {
             if moving { pos.0 += dir.0 * speed * dt; pos.1 += dir.1 * speed * dt; }
             let travel = (-dir.0).atan2(dir.1);
             let mut d = Drive::new(dt, ts);
-            d.procedural = true;
             d.vel = (dir.0 * speed, dir.1 * speed);
             d.want = Some(want);
             d.face = if skid == crate::motion::Skid::Cut && len > 0.01 { Face::Turn { heading: (-ix).atan2(iy), top: 8.0 } } else if moving { Face::Turn { heading: travel, top: 6.0 - 2.0 * (speed / CMD_SPRINT).min(1.0) } } else { Face::Keep };

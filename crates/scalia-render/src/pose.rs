@@ -1780,7 +1780,6 @@ pub fn pose_rigid(v: Vec3, part: Part, p: &PoseParams) -> Vec3 {
         // Positive tips him forward onto his front, negative back onto his back.
         q = rot(q, 0.0, 0.0, -std::f32::consts::FRAC_PI_2 * p.prone);
         // Mid-transition the bent knees would dip into the ground: lift a little, most at the halfway point.
-        let a = p.prone.abs();
         // Onto his front the body keeps the transition height (PRONE_LIFT_MID) until the very end, then settles
         // flat (PRONE_LIFT): hips and legs on the ground only once he is fully down.
         q.z += prone_lift(p.prone);

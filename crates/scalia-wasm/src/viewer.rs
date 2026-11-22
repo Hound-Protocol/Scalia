@@ -93,7 +93,7 @@ use scalia_core::world::World;
 use scalia_render::bend::{globe_point, Bend};
 use scalia_render::gpu::{FrameDesc, Gpu};
 use scalia_render::mesh::{figure, figure_far, figure_lo, grass_tuft, MeshBuilder};
-use scalia_render::skin::stride_m;
+use scalia_render::pose::stride_m;
 use scalia_render::pose::Pose;
 use scalia_render::sky::{clock, sky};
 use wasm_bindgen::prelude::*;
@@ -570,9 +570,6 @@ pub async fn start_viewer(canvas: web_sys::HtmlCanvasElement) -> Result<Viewer, 
     v.gpu.upload("enemy", enemy_kit(figure()).bytes());
     v.gpu.upload("enemy_lo", enemy_kit(figure_lo()).bytes());
     v.gpu.upload("enemy_far", enemy_kit(figure_far()).bytes());
-    // AN-03: the rigged soldier, posed on the GPU from the baked clips (near and mid detail).
-    v.gpu.upload_skinned("skin", &scalia_render::skin::mesh_bytes(&|p| p));
-    v.gpu.upload_skinned("skin_enemy", &scalia_render::skin::mesh_bytes(&|p| if matches!(p as u8, scalia_render::mesh::kit::VEST | scalia_render::mesh::kit::HELMET) { ENEMY_RED as u32 } else { p }));
     v.gpu.upload("tuft", grass_tuft().bytes());
     Ok(v)
 }
@@ -2566,7 +2563,7 @@ impl Viewer {
             // combinations the AI will use (checking a corner: crouched sidestep with the aim on top; dynamic entry:
             // combat-run legs under the aim).
             use std::f32::consts::{FRAC_PI_2, PI};
-            use scalia_render::skin::stride_m_dir;
+            use scalia_render::pose::stride_m_dir;
             let walk = |dir: f32| 1.2 / stride_m_dir(Pose::Walk, dir);
             let aimed_crawl = |dir| (Pose::Crawl, 0.55 / stride_m_dir(Pose::Crawl, dir), Some(Pose::ProneAim), dir);
             let combo: Option<(Pose, f32, Option<Pose>, f32)> = match self.preview_pose {
@@ -2613,7 +2610,7 @@ impl Viewer {
             let (mesh, tris, detail) = match self.model_detail {
                 1 => ("figure_lo", figure_lo().vertices.len() / 3, "mid detail, 70-250 m"),
                 2 => ("figure_far", figure_far().vertices.len() / 3, "far detail, beyond 250 m"),
-                _ => ("skin", scalia_render::skin::load_mesh(scalia_render::skin::SKIN_BYTES).len() / 3, "rigged soldier, baked clips (AN-03)"),
+                _ => ("figure", figure().vertices.len() / 3, "full detail, up to 70 m"),
             };
             instanced.push((mesh.into(), "figure1".into()));
             let yaw = self.ship_yaw.unwrap_or((t / 2500.0) as f32);
@@ -3006,11 +3003,15 @@ impl Viewer {
         self.gpu.upload_instances("assaulters", bytes(&assaulters));
         // Three levels of detail. Past 250 m a soldier is a few pixels tall: the 24-triangle figure, and no
         // shadow pass for it (its shadow would be smaller than a pixel).
-        // AN-03: up to 250 m soldiers are the rigged soldier playing the baked clips (skin_cs.wgsl).
-        if self.ground_view <= 250.0 {
-            instanced.push(("skin".into(), "soldiers".into()));
-            instanced.push(("skin_enemy".into(), "enemies".into()));
-            instanced.push(("skin".into(), "assaulters".into()));
+        // Every soldier is drawn as the commander is (the procedural figure); Mixamo clips are reference only.
+        if self.ground_view <= 70.0 {
+            instanced.push(("figure".into(), "soldiers".into()));
+            instanced.push(("enemy".into(), "enemies".into()));
+            instanced.push(("figure".into(), "assaulters".into()));
+        } else if self.ground_view <= 250.0 {
+            instanced.push(("figure_lo".into(), "soldiers".into()));
+            instanced.push(("enemy_lo".into(), "enemies".into()));
+            instanced.push(("figure_lo".into(), "assaulters".into()));
         } else {
             decor.push(("figure_far".into(), "soldiers".into()));
             decor.push(("enemy_far".into(), "enemies".into()));
@@ -3325,7 +3326,6 @@ impl Viewer {
         let travel = (-self.cmd_dir.0).atan2(self.cmd_dir.1);
         let reloading = self.assault.as_ref().and_then(|a| a.battle.soldiers.iter().find(|s| s.player)).is_some_and(|s| s.reloading_ms > 0);
         let mut d = crate::anim::Drive::new(dt, ts);
-        d.procedural = true;
         d.vel = (self.cmd_dir.0 * self.cmd_speed, self.cmd_dir.1 * self.cmd_speed);
         d.want = Some(want);
         // A body turns with weight: towards where the rifle points while it is up (keeping pace with the cursor),
