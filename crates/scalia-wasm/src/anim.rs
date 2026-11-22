@@ -33,6 +33,11 @@ const DIR_RATE: f32 = 20.0;
 const STOP_SETTLE: f32 = 0.3;
 /// Turning on the spot faster than this (rad/s), his feet step him round instead of sliding.
 const SHUFFLE_SPIN: f32 = 1.3;
+/// Rifle first (Patch: Animations 2): turning on the spot the chest and rifle go first and the feet stay planted,
+/// the legs trailing; past this (rad, about 45 degrees) he steps round until they are under him again.
+pub const LEG_STEP: f32 = 0.78;
+/// How fast trailing legs come back in line once he steps round or moves off (1/s, exponential).
+const LEG_EASE: f32 = 6.0;
 /// A body turns with weight: angular acceleration (rad/s²).
 pub const TURN_ACCEL: f32 = 28.0;
 const FALL_BACK_S: f32 = 1.1;
@@ -134,6 +139,8 @@ pub struct Frame {
     pub skid: Skid,
     /// A foot came down this frame: how loud (sprint 1, run 0.8, walk 0.5, crouched 0.35).
     pub footfall: Option<f32>,
+    /// How far his hips and legs trail his chest (rad, `pose::pack_layer_lag`): rifle first, the feet follow.
+    pub lag: f32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -144,6 +151,9 @@ pub struct Animator {
     /// (a man scanning his sector) are a twist of the body, not a shuffle of the feet.
     gap: f32,
     turning: f32,
+    /// Rifle first: how far the legs trail the chest, and whether he is stepping round to bring them under him.
+    lag: f32,
+    catching: bool,
     aim: AimTrack,
     speed: f32,
     dir: f32,
@@ -193,6 +203,8 @@ impl Animator {
             spin: 0.0,
             gap: 0.0,
             turning: 0.0,
+            lag: 0.0,
+            catching: false,
             aim: AimTrack::new(heading, 0.0),
             speed: 0.0,
             dir: 0.0,
@@ -275,6 +287,7 @@ impl Animator {
         // Through a quick reversal his feet keep going: no drop to standing, no fresh first step.
         let pressing_on = wants && gait(self.legs);
         let skid = if alive_up && d.stance == Stance::Stand { d.want.map_or(Skid::None, |w| skidding(d.vel, w)) } else { Skid::None };
+        let heading_before = self.heading;
         if alive_up {
             self.steer(d.face, dt);
         } else {
@@ -283,7 +296,24 @@ impl Animator {
         let travel = (-d.vel.0).atan2(d.vel.1);
         let hard = self.spin.abs() > SHUFFLE_SPIN;
         self.turning = if hard { self.turning + dt } else { 0.0 };
-        let shuffling = alive_up && !moving && hard && (self.gap.abs() > 0.35 || self.turning > 0.3) && d.stance == Stance::Stand && d.action.is_none();
+        // Rifle first: standing or kneeling still, the chest and rifle turn and the feet stay where they are, the
+        // legs trailing; past LEG_STEP he steps round (standing: a shuffle in place) until they are under him again.
+        // Moving, acting or stepping round, any trail eases out (the legs swing into the gait, no snap).
+        let upright = alive_up && matches!(d.stance, Stance::Stand | Stance::Crouch) && self.drop.is_none();
+        let planted = upright && !moving && !pressing_on && d.action.is_none() && !self.catching;
+        if planted {
+            self.lag = wrap(self.lag - wrap(self.heading - heading_before)).clamp(-pose::LEG_LAG_MAX, pose::LEG_LAG_MAX);
+            if self.lag.abs() > LEG_STEP {
+                self.catching = true;
+            }
+        } else {
+            self.lag *= (-LEG_EASE * dt).exp();
+        }
+        if self.catching && (self.lag.abs() < 0.03 || !upright || moving) {
+            self.catching = false;
+        }
+        let _ = (hard, self.turning, self.gap);
+        let shuffling = alive_up && !moving && self.catching && d.stance == Stance::Stand && d.action.is_none();
         let crawl_blending = self.shown.0 == Pose::Crawl
             || (self.shown.1 == Pose::Crawl && d.ts - self.shown.2 < pose::BLEND_S);
         self.dir = if moving {
@@ -294,7 +324,8 @@ impl Animator {
         } else if pressing_on {
             self.dir
         } else if shuffling {
-            self.spin.signum() * std::f32::consts::FRAC_PI_2
+            // Stepping round towards the chest: the legs turn against their trail.
+            -self.lag.signum() * std::f32::consts::FRAC_PI_2
         } else if d.stance == Stance::Prone && crawl_blending {
             // The outgoing crawl is still drawn. Its frozen phase also needs its last travel direction.
             self.dir
@@ -468,7 +499,7 @@ impl Animator {
         let bank_to = if tilting { pose::bank(speed, self.spin) } else { 0.0 };
         self.bank += ((bank_to - self.bank) * (dt * BANK_FOLLOW).min(1.0)).clamp(-BANK_RATE * dt, BANK_RATE * dt);
         let lean = if tilting { pose::pack_tilt(self.bank, pose::accel_pitch(self.accel)) } else { 0.0 };
-        Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall }
+        Frame { pose, upper, dir: self.dir, phase, cadence, heading: self.heading, speed, lean, skid, footfall, lag: self.lag }
     }
 
     /// Going down to prone or getting up from it (on the drop): his feet are planted.
@@ -518,7 +549,7 @@ impl Animator {
             pose::pack_kick(pose, kick),
             pose::pack_flinch(prev, flinch),
             since,
-            pose::pack_layer(f.upper, f.dir),
+            pose::pack_layer_lag(f.upper, f.dir, f.lag),
             pose::pack_fade_layer(fade, previous_upper, remaining),
         ]
     }
@@ -609,6 +640,64 @@ mod tests {
 
     fn drive(ts: f32) -> Drive {
         Drive::new(1.0 / 60.0, ts)
+    }
+
+    /// Steps him standing still for `secs` facing `face`, returning the last frame and the most the legs trailed.
+    fn turn_for(a: &mut Animator, d: &mut Drive, face: Face, secs: f32) -> (Frame, f32) {
+        d.face = face;
+        let mut most = 0.0f32;
+        let mut f = a.step(d);
+        for _ in 0..(secs * 60.0) as usize {
+            d.ts += d.dt;
+            f = a.step(d);
+            most = most.max(f.lag.abs());
+        }
+        (f, most)
+    }
+
+    #[test]
+    fn small_aim_turns_lead_with_the_rifle_and_leave_the_feet_planted() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.rifle = Rifle::Aim;
+        turn_for(&mut a, &mut d, Face::Aim { heading: 0.0 }, 1.0);
+        let (f, _) = turn_for(&mut a, &mut d, Face::Aim { heading: 0.4 }, 1.0);
+        assert!((f.heading - 0.4).abs() < 0.02, "the rifle is on the mark: {:.3}", f.heading);
+        assert!((f.heading + f.lag).abs() < 0.03, "the feet stayed where they were: legs face {:.3}", f.heading + f.lag);
+        assert_ne!(f.pose, Pose::Walk, "no steps for a small turn");
+    }
+
+    #[test]
+    fn big_aim_turns_bring_the_feet_round_after_the_rifle() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.rifle = Rifle::Aim;
+        turn_for(&mut a, &mut d, Face::Aim { heading: 0.0 }, 1.0);
+        let (f, most) = turn_for(&mut a, &mut d, Face::Aim { heading: 1.4 }, 2.5);
+        assert!(most <= LEG_STEP + 0.15, "the legs trailed {most:.2} rad before stepping round");
+        assert!(most > 0.4, "the rifle led the turn ({most:.2} rad)");
+        assert!((f.heading - 1.4).abs() < 0.02 && f.lag.abs() < 0.06, "settled with the feet under him: {:.3} lag {:.3}", f.heading, f.lag);
+    }
+
+    #[test]
+    fn moving_off_swings_the_trailing_legs_into_the_gait() {
+        let mut a = Animator::new(0.0);
+        let mut d = drive(0.0);
+        d.rifle = Rifle::Aim;
+        turn_for(&mut a, &mut d, Face::Aim { heading: 0.0 }, 1.0);
+        let (f, _) = turn_for(&mut a, &mut d, Face::Aim { heading: 0.4 }, 1.0);
+        assert!(f.lag.abs() > 0.3);
+        d.vel = (0.0, 1.5);
+        d.want = Some(d.vel);
+        let mut last = f.lag.abs();
+        for k in 0..30 {
+            d.ts += d.dt;
+            let g = a.step(&d);
+            assert!(g.lag.abs() <= last + 1e-4, "the lag only shrinks (frame {k})");
+            assert!(last - g.lag.abs() < 0.08, "no snap: {last:.3} -> {:.3}", g.lag.abs());
+            last = g.lag.abs();
+        }
+        assert!(last < 0.05, "legs in line with the gait after half a second: {last:.3}");
     }
 
     #[test]
@@ -772,7 +861,13 @@ mod tests {
         let mut a = Animator::new(0.0);
         let mut d = drive(0.0);
         d.face = Face::Turn { heading: 2.5, top: 6.0 };
-        let f = run(&mut a, 12, d);
+        // Rifle first: the chest turns, then once the legs trail LEG_STEP he steps round.
+        let mut f = a.step(&d);
+        for _ in 0..40 {
+            if f.pose == Pose::Walk { break; }
+            d.ts += d.dt;
+            f = a.step(&d);
+        }
         assert_eq!(f.pose, Pose::Walk, "stepping round");
         assert_eq!(f.upper, Some(Pose::Ready), "rifle held at ready while he steps round");
         assert!(f.dir.abs() > 1.0, "side steps into the turn");

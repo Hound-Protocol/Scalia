@@ -1021,9 +1021,13 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     let phase = select(select(0.0, fract(time * b.z + b.y), b.z > 0.0), fract(b.y), b.z < 0.0);
     let reload_phase = clamp(-b.z - 1.0, 0.0, 1.0);
     let w = clamp((time - d.y) / blend_s(u32(d.x), u32(b.w)), 0.0, 1.0);
-    // Instance c.z: upper-body pose id + 1, with movement direction in its fractional part.
+    // Instance c.z: upper-body pose id + 1; its fraction holds the movement direction (1/1024 turns) and the legs'
+    // lag behind the upper body (127ths of LEG_LAG_MAX 0.9 rad, signed) (pose.rs `pack_layer_lag`).
     let layer = floor(d.z);
-    let turn = fract(d.z) * 6.2831853;
+    let fx = round(fract(d.z) * 262144.0);
+    let lraw = floor(fx / 1024.0);
+    let turn = (fx - lraw * 1024.0) / 1024.0 * 6.2831853;
+    let lag = select(lraw, lraw - 256.0, lraw >= 128.0) / 127.0 * 0.9;
     let dir = select(turn, turn - 6.2831853, turn > 3.1415927);
     let base_phase = select(phase, reload_phase, u32(b.w) == 18u);
     var pp = pose_params(u32(b.w), base_phase, dir);
@@ -1061,6 +1065,8 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
         pp = idle(pp, base_id, idle_time, b.y);
       }
     }
+    // Rifle first (Patch: Animations 2): standing or kneeling, the hips and legs trail the chest by the lag.
+    if (pp.prone == 0.0) { pp.yaw = pp.yaw + lag; }
     // Recoil pressure, carried in the pose id's fraction.
     let kick = fract(b.w);
     if (kick > 0.0) {

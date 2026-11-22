@@ -643,16 +643,37 @@ pub fn stride_scale(dir: f32) -> f32 {
 /// and the way the soldier moves from his facing (fractional part: `dir` as a share of a turn). Every instance
 /// slot is taken, so the two share one float; a whole number alone still means "moving straight ahead".
 pub fn pack_layer(upper: Option<Pose>, dir: f32) -> f32 {
+    pack_layer_lag(upper, dir, 0.0)
+}
+
+/// How far the legs may trail the upper body when he turns on the spot (rad, `pack_layer_lag`).
+pub const LEG_LAG_MAX: f32 = 0.9;
+
+/// `pack_layer` with the legs' lag behind the upper body (rad, within `LEG_LAG_MAX`; positive: legs turned to the
+/// left of the chest). Patch: Animations 2, rifle first: the chest and rifle turn and the feet follow. The fraction
+/// holds the direction in 1/1024 turns and the lag in 127ths of `LEG_LAG_MAX` (signed, 0 being none), 18 bits in all,
+/// which an f32 keeps exactly for any upper pose id. common.wgsl `animate` unpacks it.
+pub fn pack_layer_lag(upper: Option<Pose>, dir: f32, lag: f32) -> f32 {
     let whole = upper.map_or(0.0, |p| p as u32 as f32 + 1.0);
-    let turn = (dir / std::f32::consts::TAU).rem_euclid(1.0);
-    whole + if turn >= 0.9999 { 0.0 } else { turn }
+    let dq = ((dir / std::f32::consts::TAU).rem_euclid(1.0) * 1024.0).round() as i32 % 1024;
+    let lq = ((lag / LEG_LAG_MAX).clamp(-1.0, 1.0) * 127.0).round() as i32;
+    whole + (dq + lq.rem_euclid(256) * 1024) as f32 / 262144.0
+}
+
+/// The inverse of `pack_layer_lag`: (upper pose id + 1 or 0, dir in -pi..pi, legs' lag).
+pub fn unpack_layer_lag(v: f32) -> (f32, f32, f32) {
+    let whole = v.floor();
+    let f = ((v - whole) * 262144.0).round() as i32;
+    let (dq, lraw) = (f % 1024, f / 1024);
+    let d = dq as f32 / 1024.0 * std::f32::consts::TAU;
+    let lq = if lraw >= 128 { lraw - 256 } else { lraw };
+    (whole, if d > std::f32::consts::PI { d - std::f32::consts::TAU } else { d }, lq as f32 / 127.0 * LEG_LAG_MAX)
 }
 
 /// The inverse of `pack_layer` (as common.wgsl reads it): (upper pose id + 1 or 0, dir in -pi..pi).
 pub fn unpack_layer(v: f32) -> (f32, f32) {
-    let whole = v.floor();
-    let d = (v - whole) * std::f32::consts::TAU;
-    (whole, if d > std::f32::consts::PI { d - std::f32::consts::TAU } else { d })
+    let (whole, d, _) = unpack_layer_lag(v);
+    (whole, d)
 }
 
 /// Ground covered per gait cycle moving in direction `dir` (see `stride_m`); the cadence is speed / this.

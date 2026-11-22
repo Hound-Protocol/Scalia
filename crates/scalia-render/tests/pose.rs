@@ -595,14 +595,19 @@ fn crouched_walk_stays_low_and_holds_the_rifle() {
 
 #[test]
 fn layer_and_direction_share_one_instance_value() {
-    use scalia_render::pose::{pack_layer, unpack_layer};
-    for upper in [None, Some(Pose::StandAim), Some(Pose::CrouchWalk)] {
+    use scalia_render::pose::{pack_layer, pack_layer_lag, unpack_layer, unpack_layer_lag, LEG_LAG_MAX};
+    for upper in [None, Some(Pose::StandAim), Some(Pose::CrouchWalk), Some(Pose::ProneAim)] {
         for dir in [0.0f32, 1.5707964, -1.5707964, 3.1, -3.1, 0.3] {
             let (whole, d) = unpack_layer(pack_layer(upper, dir));
             assert_eq!(whole, upper.map_or(0.0, |p| p as u32 as f32 + 1.0));
-            assert!((d - dir).abs() < 1e-3, "{upper:?} {dir} -> {d}");
+            assert!((d - dir).abs() < 4e-3, "{upper:?} {dir} -> {d}");
+            for lag in [0.0f32, 0.5, -0.5, LEG_LAG_MAX, -LEG_LAG_MAX, 0.01] {
+                let (w, d2, l) = unpack_layer_lag(pack_layer_lag(upper, dir, lag));
+                assert!(w == whole && (d2 - d).abs() < 1e-6 && (l - lag).abs() < 4e-3, "{upper:?} {dir} {lag} -> {w} {d2} {l}");
+            }
         }
     }
+    assert_eq!(unpack_layer_lag(pack_layer(None, 1.0)).2, 0.0, "no lag reads back as exactly none");
     // A plain whole number (what instances without a direction carry) means straight ahead.
     assert_eq!(unpack_layer(7.0), (7.0, 0.0));
 }

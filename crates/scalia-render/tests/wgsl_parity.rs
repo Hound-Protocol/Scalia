@@ -220,3 +220,11 @@ fn clear_arms_constants_match() {
     }
     assert!((PALM.x - ELBOW_X).abs() < 1e-6 && PALM.y == 0.0, "the shader samples the hand at the elbow's x");
 }
+
+/// Rifle first: the shader unpacks the legs' lag with the same limit (pose.rs LEG_LAG_MAX).
+#[test]
+fn leg_lag_unpacks_the_same() {
+    use scalia_render::pose::LEG_LAG_MAX;
+    assert!(WGSL.contains(&format!("/ 127.0 * {LEG_LAG_MAX}")), "common.wgsl must scale the lag by LEG_LAG_MAX {LEG_LAG_MAX}");
+    assert!(WGSL.contains("round(fract(d.z) * 262144.0)"), "common.wgsl unpacks 18 bits of the layer fraction");
+}
