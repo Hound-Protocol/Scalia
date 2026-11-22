@@ -6,7 +6,7 @@ use scalia_render::pose::{params_dir, Pose};
 #[test]
 fn straight_gaits_strike_toe_up_and_push_off_heel_up_without_sinking() {
     let body = Body::new();
-    for (pose, up, down) in [(Pose::Walk, 0.12, -0.45), (Pose::Run, 0.08, -0.5), (Pose::Sprint, 0.02, -0.45)] {
+    for (pose, up, down) in [(Pose::Walk, 0.12, -0.45), (Pose::Run, 0.08, -0.5), (Pose::Sprint, 0.02, -0.25)] {
         for dir in [0.0, std::f32::consts::PI] {
             let p: Vec<_> = (0..48).map(|k| params_dir(pose, k as f32 / 48.0, dir)).collect();
             let hi = p.iter().map(|q| q.toe[0]).fold(f32::MIN, f32::max);

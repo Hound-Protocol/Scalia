@@ -909,8 +909,8 @@ fn roll_about(q: Vec3, a: f32, x0: f32) -> Vec3 {
 pub const BALL_Y: f32 = TOE_Y;
 /// Boot roll per gait (radians): toe up at heel strike, heel up at toe-off, toe hanging mid-swing; walk, run, sprint.
 /// Share of `FOOT_ROLL` the strafing loops get.
-pub const STRAFE_ROLL: f32 = 0.5;
-pub const FOOT_ROLL: [[f32; 3]; 3] = [[0.21, -0.61, -0.17], [0.14, -0.70, -0.26], [0.05, -0.60, -0.30]];
+pub const STRAFE_ROLL: f32 = 0.3;
+pub const FOOT_ROLL: [[f32; 3]; 3] = [[0.21, -0.61, -0.17], [0.14, -0.70, -0.26], [0.05, -0.30, -0.30]];
 
 /// Foot roll for a polished loop (Patch: Animations 2): per row, each boot's roll and how far its ankle must move so
 /// the point it rolls on stays where it is. Planted (the longest run of rows the boot holds still), it strikes on
@@ -1127,9 +1127,9 @@ fn smooth_lift(l: &GaitLoop) -> GaitLoop {
 /// the sweep `examples/fit_clip` pins each planted boot to (its `plant: boots sweep` line; examples/gait_strides
 /// measures it back). The game sets the cadence from it, so the boot on the ground stays put.
 pub const GAIT_STRIDE: [[f32; 8]; 3] = [
-    [1.53, 1.56, 1.67, 1.79, 1.56, 1.67, 1.60, 1.61], // Walk
-    [1.89, 1.65, 1.65, 1.83, 1.79, 1.53, 1.92, 2.00], // Run
-    [2.63, 2.64, 3.17, 3.17, 3.14, 2.79, 2.84, 2.84], // Sprint
+    [1.53, 1.56, 1.63, 1.80, 1.56, 1.67, 1.60, 1.62], // Walk
+    [1.89, 1.67, 1.64, 1.84, 1.79, 1.53, 1.93, 2.02], // Run
+    [2.65, 2.65, 3.17, 3.18, 3.14, 2.78, 2.84, 2.85], // Sprint
 ];
 
 /// Which eighth-of-a-turn loop `dir` falls in and how far towards the next (0..1).
