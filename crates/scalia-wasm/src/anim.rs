@@ -305,10 +305,11 @@ impl Animator {
                     Face::Turn { heading, top } => {
                         let d = wrap(heading - self.heading);
                         self.gap = d;
-                        // The rate that would stop exactly on the target at full deceleration, capped; the last few
+                        // The rate that would stop on the target braking at half the turn's pickup (AN-05: room to ease onto it
+                        // without swinging past), capped; the last few
                         // degrees close smoothly (the square root alone is so steep near zero that, stepped per
                         // frame, it overshoots both ways every frame: a buzz, banked by speed squared at a sprint).
-                        (d.signum() * (2.0 * TURN_ACCEL * d.abs()).sqrt().min(STEER_SETTLE * d.abs())).clamp(-top, top)
+                        (d.signum() * (TURN_ACCEL * d.abs()).sqrt().min(STEER_SETTLE * d.abs())).clamp(-top, top)
                     }
                     _ => {
                         self.gap = 0.0;
@@ -855,6 +856,46 @@ mod tests {
             assert!(stepped[0] && stepped[1], "turning to {target}: both feet stepped round {stepped:?}");
             let f = feet(&prev);
             assert!(wrap(f[0] - target).abs() < 0.1 && wrap(f[1] - target).abs() < 0.1, "turning to {target}: the feet end under him {f:?}");
+        }
+    }
+
+    /// AN-05: the battle hands each soldier a new facing only every 50 ms step (3 frames at 60 fps): the animator
+    /// follows it smoothly, not in jerks: once he is turning, no frame turns him more than twice the average.
+    #[test]
+    fn turning_follows_stepped_facing_smoothly() {
+        for aim in [false, true] {
+            let mut a = Animator::new(0.0);
+            let mut d = drive(0.0);
+            d.rifle = if aim { Rifle::Aim } else { Rifle::Ready };
+            let mut heads = vec![];
+            for k in 0..120 {
+                let target = 0.1 * (k / 3) as f32;
+                d.face = if aim { Face::Aim { heading: target } } else { Face::Turn { heading: target, top: 5.0 } };
+                d.ts += d.dt;
+                heads.push(a.step(&d).heading);
+            }
+            let steps: Vec<f32> = heads.windows(2).map(|w| wrap(w[1] - w[0])).skip(40).collect();
+            let mean = steps.iter().sum::<f32>() / steps.len() as f32;
+            let most = steps.iter().copied().fold(0.0f32, f32::max);
+            assert!(most < 2.0 * mean, "aim {aim}: a frame turns {most:.4} rad against {mean:.4} on average");
+        }
+    }
+
+    /// AN-05: turns stop on the mark, aimed or not: he swings past it by no more than 0.03 rad (2 degrees).
+    #[test]
+    fn aim_turns_stop_on_the_mark() {
+        for (aim, target) in [(true, 0.3f32), (true, 1.0), (true, 2.5), (true, -1.2), (false, 1.5), (false, -2.5), (false, 0.4)] {
+            let mut a = Animator::new(0.0);
+            let mut d = drive(0.0);
+            d.rifle = if aim { Rifle::Aim } else { Rifle::Ready };
+            d.face = if aim { Face::Aim { heading: target } } else { Face::Turn { heading: target, top: 5.0 } };
+            let mut past = 0.0f32;
+            for _ in 0..180 {
+                d.ts += d.dt;
+                let h = a.step(&d).heading;
+                past = past.max(wrap(h - target) * target.signum());
+            }
+            assert!(past <= 0.03, "turning to {target} (aim {aim}): he swings {past:.3} rad past the mark");
         }
     }
 

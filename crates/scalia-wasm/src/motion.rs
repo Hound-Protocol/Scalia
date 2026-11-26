@@ -128,7 +128,8 @@ impl AimTrack {
         // ahead of it).
         let gap = wrap_pi(want - self.heading) - self.pace * dt;
         // Close the gap: braking-distance limited far out, eased (proportional) near the mark.
-        let close = gap.signum() * (2.0 * AIM_ACCEL * gap.abs()).sqrt().min(gap.abs() / AIM_SETTLE_S);
+        // (Braking on half the turn rate's pickup leaves room to ease onto the mark without swinging past it, AN-05.)
+        let close = gap.signum() * (AIM_ACCEL * gap.abs()).sqrt().min(gap.abs() / AIM_SETTLE_S);
         let target = (self.pace + close).clamp(-AIM_TOP, AIM_TOP);
         self.spin += (target - self.spin).clamp(-AIM_ACCEL * dt, AIM_ACCEL * dt);
         self.heading = wrap_pi(self.heading + self.spin * dt);
