@@ -36,6 +36,16 @@ const SHUFFLE_SPIN: f32 = 1.3;
 /// Rifle first (Patch: Animations 2): turning on the spot the chest and rifle go first and the feet stay planted,
 /// the legs trailing; past this (rad, about 45 degrees) he steps round until they are under him again.
 pub const LEG_STEP: f32 = 0.78;
+/// How fast he finishes a crawl stroke on stopping (cycles a second): at most half a cycle, so under a third of a second.
+const CRAWL_SETTLE_RATE: f32 = 1.6;
+/// How near a settle point (both legs straight back) the crawl's phase counts as there.
+const SETTLED: f32 = 0.002;
+
+/// How much of the crawl's cycle is left before both legs lie straight back again (stroke 0 or a half).
+fn settle_left(phase: f32) -> f32 {
+    let x = phase.rem_euclid(0.5);
+    if x < SETTLED || 0.5 - x < SETTLED { 0.0 } else { 0.5 - x }
+}
 /// How fast trailing legs come back in line once he steps round or moves off (1/s, exponential).
 const LEG_EASE: f32 = 6.0;
 /// How fast the prone turning shift eases out once he is off the ground (1/s, exponential).
@@ -389,7 +399,8 @@ impl Animator {
         };
         // Setting off from still, he steps out with a foot straight away (not from the middle of a stride).
         if was_still && was == Pose::Stand && moving && !(d.stance == Stance::Prone && crawl_blending) {
-            self.phase = 0.12;
+            // AN-04: the crawl sets off with both legs lying straight back (stroke 0), as he lies prone.
+            self.phase = if d.stance == Stance::Prone { 0.0 } else { 0.12 };
         }
         let aim = d.rifle == Rifle::Aim;
         let reload = d.rifle == Rifle::Reload;
@@ -473,6 +484,10 @@ impl Animator {
                 // The crawl moves him; to aim he holds still on the prone legs (no aiming mid-stroke from elbows and knees).
                 (Stance::Prone, true) if aim => (Pose::Prone, Some(Pose::ProneAim), 0.0),
                 (Stance::Prone, true) => (Pose::Crawl, None, speed / stride_m_dir(Pose::Crawl, self.dir)),
+                // AN-04: stopping mid-stroke he finishes it (briskly) and settles with both legs straight back.
+                (Stance::Prone, false) if !aim && self.shown.0 == Pose::Crawl && settle_left(self.phase) > SETTLED => {
+                    (Pose::Crawl, None, CRAWL_SETTLE_RATE.min(settle_left(self.phase) / dt.max(1e-4)))
+                }
                 (Stance::Prone, false) => (Pose::Prone, aim.then_some(Pose::ProneAim), 0.0),
                 (Stance::Crouch, true) => (Pose::CrouchWalk, if aim { Some(Pose::CrouchAim) } else if reload { Some(Pose::Reload) } else { None }, speed / stride_m_dir(Pose::CrouchWalk, self.dir)),
                 (Stance::Crouch, false) => (if reload { Pose::Reload } else if aim { Pose::CoverAim /* aimed from a kneel, in cover or not; the half crouch is only the moving layer */ } else { Pose::Crouch }, None, if reload { 0.4 } else { 0.0 }),
@@ -813,6 +828,58 @@ mod tests {
         d.face = Face::Keep;
         let crawling = run(&mut a, 5, d);
         assert_eq!((crawling.pose, crawling.upper), (Pose::Crawl, None), "unaimed, he moves in the crawl");
+    }
+
+    /// The crawl's stroke phase off a settle point (both legs lying straight back: 0 or a half).
+    fn off_settle(phase: f32) -> f32 {
+        let x = phase.rem_euclid(0.5);
+        x.min(0.5 - x)
+    }
+
+    /// AN-04: he sets off into the crawl with both legs lying straight back (stroke 0 or a half), not from the middle
+    /// of a stroke, so the blend from lying prone does not swing a drawn knee through the ground.
+    #[test]
+    fn the_crawl_sets_off_with_both_legs_back() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Prone, 2.2);
+        let mut d = drive(ts);
+        d.stance = Stance::Prone;
+        d.vel = (0.0, 0.55);
+        d.want = Some(d.vel);
+        let f = a.step(&d);
+        assert_eq!(f.pose, Pose::Crawl);
+        assert!(off_settle(f.phase) < 0.02, "he sets off at stroke {:.3}", f.phase);
+    }
+
+    /// AN-04: stopping mid-stroke he finishes the stroke (quickly, within 0.4 s) and only then settles onto the prone
+    /// legs, from both legs straight back.
+    #[test]
+    fn stopping_the_crawl_finishes_the_stroke() {
+        let mut a = Animator::new(0.0);
+        let mut ts = 0.0;
+        hold(&mut a, &mut ts, Stance::Prone, 2.2);
+        let mut d = drive(ts);
+        d.stance = Stance::Prone;
+        d.vel = (0.0, 0.55);
+        d.want = Some(d.vel);
+        let mut f = run(&mut a, 25, d);
+        assert_eq!(f.pose, Pose::Crawl);
+        assert!(off_settle(f.phase) > 0.05, "mid-stroke for the test: {:.3}", f.phase);
+        d.ts = ts + 25.0 / 60.0;
+        d.vel = (0.0, 0.0);
+        d.want = None;
+        let mut last = f;
+        let mut frames = 0;
+        while f.pose == Pose::Crawl && frames < 60 {
+            last = f;
+            d.ts += d.dt;
+            f = a.step(&d);
+            frames += 1;
+        }
+        assert_eq!(f.pose, Pose::Prone, "settled within a second");
+        assert!(frames <= 24, "the stroke took {frames} frames to finish");
+        assert!(off_settle(f.phase) < 0.02, "he settles from stroke {:.3} (last crawl frame {:.3})", f.phase, last.phase);
     }
 
     #[test]
