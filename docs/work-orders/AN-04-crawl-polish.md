@@ -2,7 +2,7 @@
 
 - **ID:** AN-04
 - **Revision:** v1.0
-- **Status:** in progress
+- **Status:** merged pending (branch anim-an04, Patch: Animations 6)
 - **Date:** 2026-11-25
 - **Owner:** animation lane
 - **Base:** main 56b0f13 (Patch: Animations 5, Alpha 0.1.48); branch anim-an04
@@ -90,10 +90,26 @@ Each item ends with a test that failed before the change and passes after it.
 
 ## Evidence
 
-Render images and the numeric dump go in the PR description. Keep merged, deployed and visually verified separate:
-merged (PR and SHA), deployed (`version.json` shows the new version), and visually verified (player verdict).
+Branch anim-an04 (Patch: Animations 6). Tools added: `scripts/anim_sheet.py` (filmstrips from any camera incl. top,
+travelled distance, heading, ZMAX), examples `crawl_joints`, `crawl_blend`, `low_parts`, `prone_fit`.
+
+Done, each with a test (red before, green after unless noted):
+- Forearms pull half a cycle and reach half (`crawl::arm_stroke`): `forearms_never_drag_along_the_ground` (85 of 128
+  steps dragged before, at most 8 now).
+- Nothing pokes through the ground in the stroke (`ELBOW_H` 0.11, `ARM_CLEAR`): `nothing_sinks_into_the_ground_through_the_stroke`.
+  The phase-0.75 "rifle drop" measured: the rifle never went under (lowest +0.045 m); the rear elbow did (-1.2 cm), fixed.
+- Roll and bend about 1.5x Patch 5 (`ROLL`/`CHEST_ROLL` 0.26, `BEND` 0.14; sideways x0.6): body-roll test, hip lift >= 4 cm.
+  Twice failed (rifle on the ground, forearms skating); the torso is one rigid part, so hips cannot lead the chest.
+- Start and stop: the crawl sets off at stroke 0 and finishes its stroke before settling (`anim.rs` `settle_left`), the
+  chest props up 0.1 rad mid-blend (`pose::crawl_prop`): blend test tightened from 5 cm to 1 cm; anim tests
+  `the_crawl_sets_off_with_both_legs_back`, `stopping_the_crawl_finishes_the_stroke`.
+- Prone fitted to the ground (`PRONE_REST_FIT`, `PRONE_AIM_FIT`): `tests/prone.rs` (aim support elbow was 7 cm up).
+- Guards that passed on first run (no change needed): `the_body_does_not_bob`, `prone_breathes_without_moving_his_contacts`,
+  and the existing `prone_turns_pivot_on_the_hips_and_rising_takes_the_shift_back` (item 7).
+
+Open: at rest prone the right forearm still rests 2 cm into the ground (an arm fit that keeps the rifle low did not
+converge); deployed and visually verified are pending the player's verdict.
 
 ## Next action
 
-Step 1 of Work items: add the elevation option to `scripts/closeup.py` and the numeric dump, then record the baseline
-at phases 0.70 to 0.80 before changing any crawl code.
+Player verdict in the game on the crawl, prone, starts and stops.

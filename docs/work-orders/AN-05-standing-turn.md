@@ -2,7 +2,7 @@
 
 - **ID:** AN-05
 - **Revision:** v1.0
-- **Status:** in progress
+- **Status:** merged pending (branch anim-an04, Patch: Animations 6)
 - **Date:** 2026-11-26
 - **Owner:** animation lane
 - **Base:** main 56b0f13; branch anim-an04 (shipped with AN-04)
@@ -60,6 +60,17 @@ Out:
 - [ ] Turn filmstrip (frames every 1/30 s through a 90 degree turn, top and side) shows steps, no jumps.
 - [ ] Player verdict in the game.
 
+## Evidence
+
+- Cause of the skip: on the spot he side-stepped in the walk gait with `dir` set straight to +-90 degrees, snapping back
+  to 0 mid-blend as the shuffle ended; meanwhile the whole lower body spun on the pelvis yaw.
+- New `Pose::TurnStep` (37, `pose::turn_step`, shader mirror): per-foot headings in `anim.rs` (`feet`, `step`); planted
+  feet hold their heading, the foot on the turning side steps first and lands slightly into the turn, then the other.
+  `LEG_LAG_MAX` 0.9 -> 1.3 (packing range). Test `standing_turns_step_round_one_foot_at_a_time`.
+- Stepped facing (50 ms battle steps) was already followed smoothly: `turning_follows_stepped_facing_smoothly` (guard).
+- Overshoot: aimed turns swung 0.054 rad past, unaimed 0.040: braking on half the pickup now, `aim_turns_stop_on_the_mark`.
+- Crouched turns: no `dir` snap any more (crouch keeps the ease-round, no shuffle).
+
 ## Next action
 
-Work item 1, the trace.
+Player verdict in the game on turning on the spot.
