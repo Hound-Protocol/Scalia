@@ -158,6 +158,23 @@ fn sideways(q: vec3f, a: f32, px: f32) -> vec3f {
 // Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
 // 4 ready up, 5 rush (combat run). Sets both arms and the rifle angle.
 // The athletic base of the ready and the aim (pose.rs `athletic`): feet staggered, knees flexed, boots flat.
+// pose.rs `turn_step`: the feet split by `dir` either side of the hips; the stepping foot (left over phase 0..0.5,
+// right over 0.5..1) lifts and comes down.
+const TURN_STEP_HIP: f32 = 0.18;
+const TURN_STEP_KNEE: f32 = 0.36;
+fn turn_step(p: ptr<function, PP>, phase: f32, dir: f32) {
+  let u = fract(phase);
+  let lift = sin(3.1415927 * fract(u * 2.0));
+  if (u < 0.5) {
+    (*p).hip.x = (*p).hip.x + TURN_STEP_HIP * lift;
+    (*p).knee.x = (*p).knee.x + TURN_STEP_KNEE * lift;
+  } else {
+    (*p).hip.y = (*p).hip.y + TURN_STEP_HIP * lift;
+    (*p).knee.y = (*p).knee.y + TURN_STEP_KNEE * lift;
+  }
+  (*p).roll = vec2f(dir * 0.5, -dir * 0.5);
+}
+
 fn athletic(p: ptr<function, PP>) {
   crouch_gait(p, 0.0, 0.13, 0.75, 0.0, 0.62, 0.0);
   (*p).flat = 1.0;
@@ -412,12 +429,14 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.lean = 0.1;
     p.rifle = p.rifle + 0.1;
     p.head = -0.45;
-  } else if (pose == 30u) {
+  } else if (pose == 30u || pose == 37u) {
     // Combat ready (pose.rs `Pose::Ready`): athletic base, low ready forward, READY_LEAN 0.16.
     athletic(&p);
     carry(&p, 6u);
     p.lean = 0.16;
     p.head = -0.16;
+    // AN-05: stepping round on the spot (pose.rs `Pose::TurnStep`, `turn_step`).
+    if (pose == 37u) { turn_step(&p, phase, dir); }
   } else if (pose == 8u) {
     carry(&p, 3u);
   } else if (pose == 15u) {
@@ -729,7 +748,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u || pose == 37u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -1035,12 +1054,12 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     let reload_phase = clamp(-b.z - 1.0, 0.0, 1.0);
     let w = clamp((time - d.y) / blend_s(u32(d.x), u32(b.w)), 0.0, 1.0);
     // Instance c.z: upper-body pose id + 1; its fraction holds the movement direction (1/1024 turns) and the legs'
-    // lag behind the upper body (127ths of LEG_LAG_MAX 0.9 rad, signed) (pose.rs `pack_layer_lag`).
+    // lag behind the upper body (127ths of LEG_LAG_MAX 1.3 rad, signed) (pose.rs `pack_layer_lag`).
     let layer = floor(d.z);
     let fx = round(fract(d.z) * 262144.0);
     let lraw = floor(fx / 1024.0);
     let turn = (fx - lraw * 1024.0) / 1024.0 * 6.2831853;
-    let lag = select(lraw, lraw - 256.0, lraw >= 128.0) / 127.0 * 0.9;
+    let lag = select(lraw, lraw - 256.0, lraw >= 128.0) / 127.0 * 1.3;
     let dir = select(turn, turn - 6.2831853, turn > 3.1415927);
     let base_phase = select(phase, reload_phase, u32(b.w) == 18u);
     var pp = pose_params(u32(b.w), base_phase, dir);

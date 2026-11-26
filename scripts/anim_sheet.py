@@ -3,13 +3,13 @@
 scripts/anim_sheet.py <out.png> <spec>...
 
 spec: anything `stance_dump` takes (`<pose>[+<upper>][@<phase>[~<dir>]]`, a blend `<a>><b>%<w>`, a leg lag `^<rad>`),
-then optionally `#<dy>` to draw the figure that far ahead (m), so a crawl or a step drawn at its travelled distance shows
-whether planted parts stay put on the ground grid.
+then optionally `*<heading rad>` to turn the figure that way (positive to his left) and `#<dy>` to draw it that far ahead
+(m), so a crawl, a step or a turn drawn where it really is shows whether planted parts stay put on the ground grid.
 
 VIEWS="top,side,front,back,q" (default) picks the rows; a view is a name or `<azimuth deg>:<elevation deg>` (azimuth 0
 looks at his right side with forward to the right, 90 at his face, -90 at his back). Every column of a row shares one
 frame, so motion between columns is real motion. The ground grid is 0.25 m; anything below the ground is outlined red.
-LABELS="a,b,..." names the columns; TITLE sets a title.
+LABELS="a,b,..." names the columns; TITLE sets a title; ZMAX=<m> draws only what is below that height.
 """
 import os, re, subprocess, sys
 import numpy as np
@@ -26,10 +26,11 @@ view_names = os.environ.get('VIEWS', 'top,side,front,back,q').split(',')
 labels = os.environ.get('LABELS', '').split(',') if os.environ.get('LABELS') else specs
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 raw = '/tmp/anim_sheet.bin'
-base, shift = [], []
+base, shift, turn = [], [], []
 for s in specs:
     a, _, dy = s.partition('#')
-    base.append(a); shift.append(float(dy) if dy else 0.0)
+    a, _, hd = a.partition('*')
+    base.append(a); shift.append(float(dy) if dy else 0.0); turn.append(float(hd) if hd else 0.0)
 subprocess.run(['cargo', 'run', '-q', '--release', '-p', 'scalia-render', '--example', 'stance_dump', '--', raw, *base],
                cwd=root, check=True)
 d = np.fromfile(raw, dtype='<f4').reshape(len(specs), -1, 4)
@@ -53,6 +54,9 @@ def basis(az, el):
 tris = []
 for i in range(len(specs)):
     t = d[i].reshape(-1, 3, 4).copy()
+    c, sn = np.cos(turn[i]), np.sin(turn[i])
+    x, y = t[:, :, 0].copy(), t[:, :, 1].copy()
+    t[:, :, 0], t[:, :, 1] = x * c - y * sn, x * sn + y * c
     t[:, :, 1] += shift[i]
     tris.append(t)
 allpts = np.concatenate([t[:, :, :3].reshape(-1, 3) for t in tris])
@@ -81,6 +85,9 @@ for row, (az, el) in enumerate(views):
         nrm = np.cross(pts[:, 1] - pts[:, 0], pts[:, 2] - pts[:, 0])
         nrm /= np.linalg.norm(nrm, axis=1, keepdims=True) + 1e-9
         order = np.argsort(-depth)
+        # ZMAX=<m>: leave out everything above that height (to see the feet from above).
+        if os.environ.get('ZMAX'):
+            order = [k for k in order if pts[k, :, 2].min() < float(os.environ['ZMAX'])]
         polys, cols, edges = [], [], []
         for k in order:
             shade = 0.45 + 0.55 * abs(float(nrm[k] @ light))

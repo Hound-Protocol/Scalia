@@ -98,6 +98,9 @@ pub enum Pose {
     DropPlant = 35,
     /// Prone, rifle shouldered and held on a target; can also be layered over the crawl legs.
     ProneAim = 36,
+    /// AN-05: stepping round on the spot, one foot at a time (standing turns). Phase: the left foot steps over
+    /// 0..0.5, the right over 0.5..1; `dir` is how far the left foot's heading is round from the right's.
+    TurnStep = 37,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -136,6 +139,7 @@ impl Pose {
             34 => Pose::DropReach,
             35 => Pose::DropPlant,
             36 => Pose::ProneAim,
+            37 => Pose::TurnStep,
             _ => Pose::Stand,
         }
     }
@@ -437,7 +441,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::Prone | Pose::ProneAim => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::TurnStep | Pose::Brake | Pose::Prone | Pose::ProneAim => 1.0,
         _ => 0.0,
     }
 }
@@ -655,7 +659,7 @@ pub fn pack_layer(upper: Option<Pose>, dir: f32) -> f32 {
 }
 
 /// How far the legs may trail the upper body when he turns on the spot (rad, `pack_layer_lag`).
-pub const LEG_LAG_MAX: f32 = 0.9;
+pub const LEG_LAG_MAX: f32 = 1.3;
 
 /// `pack_layer` with the legs' lag behind the upper body (rad, within `LEG_LAG_MAX`; positive: legs turned to the
 /// left of the chest). Patch: Animations 2, rifle first: the chest and rifle turn and the feet follow. The fraction
@@ -1521,7 +1525,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle += AIM_LEAN;
             p.head = AIM_HEAD - AIM_LEAN;
         }
-        Pose::Ready => {
+        Pose::Ready | Pose::TurnStep => {
             // Bladed like the aim (upper body turned by the rifle's turn across the chest), so the muzzle points
             // ahead and down; eyes up over it.
             athletic(&mut p);
@@ -1530,6 +1534,9 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.look = p.rifle_yaw;
             p.lean = READY_LEAN;
             p.head = -READY_LEAN;
+            if pose == Pose::TurnStep {
+                turn_step(&mut p, phase, dir);
+            }
         }
     }
     let lift = gait_bake(pose, phase, dir).map_or(f32::MIN, |mut g| {
@@ -1676,6 +1683,22 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
 /// shin lying back; torso upright.
 /// The athletic base of the ready and the aim: feet shoulder-width and staggered (left forward), knees flexed,
 /// boots flat (common.wgsl `athletic`).
+/// AN-05: stepping round on the spot (`Pose::TurnStep`) on the athletic base: the feet's headings split by `dir` either
+/// side of the hips (the left foot `dir / 2` round from them, the right the other way: the CPU keeps the planted one
+/// where it stands), and the foot stepping (left over phase 0..0.5, right over 0.5..1) lifts and comes down again.
+/// common.wgsl `turn_step` mirrors it.
+pub fn turn_step(p: &mut PoseParams, phase: f32, dir: f32) {
+    let u = phase.rem_euclid(1.0);
+    let i = if u < 0.5 { 0 } else { 1 };
+    let lift = (std::f32::consts::PI * (u * 2.0).fract()).sin();
+    p.hip[i] += TURN_STEP_HIP * lift;
+    p.knee[i] += TURN_STEP_KNEE * lift;
+    p.roll = [dir * 0.5, -dir * 0.5];
+}
+/// How far the stepping leg's hip and knee bend at the top of a turning step (rad).
+pub const TURN_STEP_HIP: f32 = 0.18;
+pub const TURN_STEP_KNEE: f32 = 0.36;
+
 fn athletic(p: &mut PoseParams) {
     // Stagger 0.13 m either side of the hip, ankle 0.75 m below it (knees flexed from a straight 0.80).
     (p.hip, p.knee, p.side) = crouch_gait(0.0, 0.13, 0.75, 0.0, 0.62, 0.0);
@@ -2159,7 +2182,7 @@ pub const KNEEL_BLEND_S: f32 = BLEND_S / 1.3;
 /// Seconds the change from `a` to `b` takes: `KNEEL_BLEND_S` between standing and kneeling, else `BLEND_S`.
 /// common.wgsl `blend_s` mirrors it.
 pub fn blend_s(a: Pose, b: Pose) -> f32 {
-    let standing = |p: Pose| matches!(p, Pose::Stand | Pose::Ready | Pose::StandAim);
+    let standing = |p: Pose| matches!(p, Pose::Stand | Pose::Ready | Pose::StandAim | Pose::TurnStep);
     let kneeling = |p: Pose| matches!(p, Pose::Crouch | Pose::CrouchAim);
     if (standing(a) && kneeling(b)) || (kneeling(a) && standing(b)) { KNEEL_BLEND_S } else { BLEND_S }
 }
