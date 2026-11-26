@@ -210,10 +210,12 @@ fn the_body_rolls_and_bends_toward_the_drawn_knee() {
         if s.abs() < 0.8 {
             continue;
         }
+        // AN-04: about half as much again as Patch 5's roll and bend (the player found them too slight; much more and
+        // the rifle side rolls onto the rifle and the forearms cannot hold their place).
         let lift = (hl.z - hr.z) * s.signum();
-        assert!((0.02..0.06).contains(&lift), "phase {k}/32: the drawn knee's hip is up {lift:.3} m");
+        assert!((0.04..0.10).contains(&lift), "phase {k}/32: the drawn knee's hip is up {lift:.3} m");
         let swing = ((sl.x + sr.x) / 2.0 - (hl.x + hr.x) / 2.0) * -s.signum();
-        assert!((0.02..0.08).contains(&swing), "phase {k}/32: the shoulders swing {swing:.3} m toward the drawn knee");
+        assert!((0.05..0.12).contains(&swing), "phase {k}/32: the shoulders swing {swing:.3} m toward the drawn knee");
     }
 }
 

@@ -22,10 +22,13 @@ pub const FIELDS: [&str; F] = [
 /// Share of a cycle a side spends drawing its knee up and reaching its forearm ahead; it then pushes and pulls until
 /// half way, then rests (leg straight back, forearm drawn in) while the other side works.
 pub const DRAW: f32 = 0.18;
-/// How far the body rolls away from the drawn knee at full draw (rad): about 3 cm of lift at the hip.
-pub const ROLL: f32 = 0.17;
+/// How far the legs roll with the body away from the drawn knee at full draw (rad, `yaw` lying prone).
+pub const ROLL: f32 = 0.26;
+/// How far the torso rolls away from the drawn knee at full draw (rad, `twist`): the drawn knee's hip lifts about 6 cm.
+/// The torso rolls as one piece, hips and chest together. AN-04: twice Patch 5's.
+pub const CHEST_ROLL: f32 = 0.26;
 /// How far the spine bends toward the drawn knee at full draw (rad): about 4 cm of swing at the shoulders.
-pub const BEND: f32 = 0.09;
+pub const BEND: f32 = 0.14;
 /// How far behind the knee's draw the roll and bend come (share of a cycle): they peak as the drawn leg pushes,
 /// not as the opposite elbow lands (where the arm has least reach to spare).
 pub const ROLL_LAG: f32 = 0.0;
@@ -323,7 +326,7 @@ pub fn drawn(phase: f32) -> f32 {
 /// (HEAD_STEADY) so the eyes stay level.
 fn body_roll(phase: f32, r: &mut [f32; F]) {
     let s = drawn(phase - ROLL_LAG);
-    r[16] = ROLL * s;
+    r[16] = CHEST_ROLL * s;
     r[18] = ROLL * s;
     r[21] = -BEND * s; // tilt turns the shoulders the other way round
     r[22] = -HEAD_STEADY * r[16];

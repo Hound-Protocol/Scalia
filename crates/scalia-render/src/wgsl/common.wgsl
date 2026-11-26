@@ -330,6 +330,8 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
 const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
 
+// Share of the crawl's body roll kept crawling sideways (pose.rs CRAWL_SIDE_TWIST).
+const CRAWL_SIDE_TWIST: f32 = 0.6;
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
   if (pose == 35u) { return DROP_PLANT_P; }
@@ -609,8 +611,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let cb = clip_pos(HIGH_CRAWL_AT, HIGH_CRAWL_F, HIGH_CRAWL_N, -phase);
     var r: array<f32, 23>;
     for (var k = 0u; k < 23u; k = k + 1u) { r[k] = mix(clip_get(ca, k), clip_get(cb, k), wb); }
-    // Patch: Animations 5: the legs' roll fades out crawling sideways (pose.rs).
-    r[18] = r[18] * abs(fwd);
+    // Sideways the body rolls less, legs and torso together (pose.rs CRAWL_SIDE_TWIST).
+    let side_roll = CRAWL_SIDE_TWIST + (1.0 - CRAWL_SIDE_TWIST) * abs(fwd);
+    r[18] = r[18] * side_roll;
+    r[16] = r[16] * side_roll;
     p.prone = 1.0;
     p.hip = vec2f(r[0], r[1]);
     p.knee = vec2f(r[2], r[3]);
