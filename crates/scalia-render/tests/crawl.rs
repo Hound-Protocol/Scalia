@@ -210,10 +210,12 @@ fn the_body_rolls_and_bends_toward_the_drawn_knee() {
         if s.abs() < 0.8 {
             continue;
         }
+        // AN-04: about half as much again as Patch 5's roll and bend (the player found them too slight; much more and
+        // the rifle side rolls onto the rifle and the forearms cannot hold their place).
         let lift = (hl.z - hr.z) * s.signum();
-        assert!((0.02..0.06).contains(&lift), "phase {k}/32: the drawn knee's hip is up {lift:.3} m");
+        assert!((0.04..0.10).contains(&lift), "phase {k}/32: the drawn knee's hip is up {lift:.3} m");
         let swing = ((sl.x + sr.x) / 2.0 - (hl.x + hr.x) / 2.0) * -s.signum();
-        assert!((0.02..0.08).contains(&swing), "phase {k}/32: the shoulders swing {swing:.3} m toward the drawn knee");
+        assert!((0.05..0.12).contains(&swing), "phase {k}/32: the shoulders swing {swing:.3} m toward the drawn knee");
     }
 }
 
@@ -225,15 +227,15 @@ fn the_crawl_keeps_an_unhurried_rhythm() {
     assert!(strokes <= 1.4, "{strokes:.2} strokes a second at the ordinary crawl");
 }
 
-/// Patch: Animations 5: setting off into the crawl from lying prone and stopping back onto the prone legs, from any
-/// moment of the stroke and either way round: no joint snaps (faster than 15 rad/s over the 0.35 s blend, the
-/// anim_audit standard), the rifle never swings into the ground (rolled the other way round from the prone carry it
-/// turned half over through it, 20 cm deep), and knees and elbows press no more than 5 cm further into the ground
-/// on the way than they lie at either end, for a moment (blending joint angles, a knee swinging out to the side dips
-/// about that far; a start and stop matched to the stroke would keep them on top).
+/// Setting off into the crawl from lying prone and stopping back onto the prone legs, as drawn (the support hand's grip
+/// blended in, and the chest's prop, `pose::crawl_prop`): no joint snaps (faster than 15 rad/s over the 0.35 s
+/// blend, the anim_audit standard), the rifle never swings into the ground, and nothing presses more than 1 cm further
+/// into the ground on the way than it lies at either end. AN-04: the crawl starts and settles only with both legs
+/// lying straight back (stroke 0 or a half, `anim.rs`), where nothing has to swing past the ground; before, from any
+/// moment of the stroke, knees and elbows dipped up to 5 cm.
 #[test]
 fn starting_and_stopping_the_crawl_blend_smoothly() {
-    use scalia_render::pose::{blend, params, BLEND_S};
+    use scalia_render::pose::{blend, crawl_prop, grip, grip_weight, params, BLEND_S};
     let angles = |p: &PoseParams| {
         let mut v = vec![p.lean, p.head, p.rifle, p.rifle_yaw, p.twist, p.look, p.tilt, p.yaw, p.raise];
         for pair in [p.hip, p.knee, p.side, p.shoulder, p.elbow, p.reach, p.abduct, p.roll] {
@@ -242,22 +244,79 @@ fn starting_and_stopping_the_crawl_blend_smoothly() {
         v
     };
     let body = Body::new();
+    let drawn = |a: Pose, pa: &PoseParams, b: Pose, pb: &PoseParams, w: f32| {
+        let mut p = blend(pa, pb, w);
+        p.lean -= crawl_prop(a, b, w);
+        grip(&p, grip_weight(a, b, w))
+    };
     let prone = params(Pose::Prone, 0.0);
-    for k in 0..8 {
-        let crawl = params_dir(Pose::Crawl, k as f32 / 8.0, 0.0);
-        for (from, to, what) in [(&prone, &crawl, "setting off"), (&crawl, &prone, "stopping")] {
-            let mut prev = angles(from);
+    for settle in [0.0, 0.5] {
+        let crawl = params_dir(Pose::Crawl, settle, 0.0);
+        for (a, pa, b, pb, what) in [(Pose::Prone, &prone, Pose::Crawl, &crawl, "setting off"), (Pose::Crawl, &crawl, Pose::Prone, &prone, "stopping")] {
+            let (ea, eb) = (body.stats(&drawn(a, pa, b, pb, 0.0)), body.stats(&drawn(a, pa, b, pb, 1.0)));
+            let mut prev = angles(&drawn(a, pa, b, pb, 0.0));
             for i in 1..=20 {
-                let p = blend(from, to, i as f32 / 20.0);
+                let p = drawn(a, pa, b, pb, i as f32 / 20.0);
                 let cur = angles(&p);
-                let fastest = cur.iter().zip(&prev).map(|(a, b)| (a - b).abs() / (BLEND_S / 20.0)).fold(0.0f32, f32::max);
-                assert!(fastest <= 15.0, "{what} at stroke {k}/8: a joint turns {fastest:.1} rad/s");
+                let fastest = cur.iter().zip(&prev).map(|(x, y)| (x - y).abs() / (BLEND_S / 20.0)).fold(0.0f32, f32::max);
+                assert!(fastest <= 15.0, "{what} at stroke {settle}: a joint turns {fastest:.1} rad/s");
                 prev = cur;
-                let (s, a, b) = (body.stats(&p), body.stats(from), body.stats(to));
-                for (name, now, ends, give) in [("knee", s.knee, a.knee.min(b.knee), 0.05), ("elbow", s.elbow, a.elbow.min(b.elbow), 0.05), ("boot", s.boot, a.boot.min(b.boot), 0.05), ("rifle", s.rifle, a.rifle.min(b.rifle).min(0.0), 0.01)] {
-                    assert!(now > ends - give, "{what} at stroke {k}/8, {i}/20 of the way: the {name} dips to {now:.3} m (ends at {ends:.3})");
+                let s = body.stats(&p);
+                for (name, now, ends) in [("knee", s.knee, ea.knee.min(eb.knee)), ("elbow", s.elbow, ea.elbow.min(eb.elbow)), ("boot", s.boot, ea.boot.min(eb.boot)), ("rifle", s.rifle, ea.rifle.min(eb.rifle).min(0.01))] {
+                    assert!(now > ends - 0.01, "{what} at stroke {settle}, {i}/20 of the way: the {name} dips to {now:.3} m (ends at {ends:.3})");
                 }
             }
         }
+    }
+}
+
+/// AN-04: a forearm is either planted and pulling (holding its place) or reaching forward off the ground; it never
+/// lies on the ground being dragged along with the body (before AN-04 each forearm rested half the cycle at the body's
+/// side, skating some 40 cm a stroke).
+#[test]
+fn forearms_never_drag_along_the_ground() {
+    let n = 128;
+    for (g, fore) in [(-1.0, Part::LeftForearm), (1.0, Part::RightForearm)] {
+        let el = |u: f32| at(&params_dir(Pose::Crawl, u, 0.0), fore, Vec3::new(g * ELBOW_X, 0.0, ELBOW_Z));
+        let body_step = crawl::STRIDE / n as f32;
+        let dragged = (0..n)
+            .filter(|k| {
+                let (u0, u1) = (*k as f32 / n as f32, (*k + 1) as f32 / n as f32);
+                let (a, b) = (el(u0), el(u1));
+                let world = (b.y + crawl::STRIDE * u1) - (a.y + crawl::STRIDE * u0);
+                a.z.min(b.z) < crawl::ELBOW_H + 0.012 && world > 0.3 * body_step
+            })
+            .count();
+        assert!(dragged <= n / 16, "{fore:?} is dragged along the ground {dragged} of {n} steps");
+    }
+}
+
+/// AN-04: through the whole stroke the small parts never poke into the ground: elbows and boots at most 5 mm (cloth on
+/// dirt), the legs (thighs at the hips and knees, where his weight rests with the belly) at most 1.5 cm, and the rifle
+/// stays at least 1 cm clear.
+#[test]
+fn nothing_sinks_into_the_ground_through_the_stroke() {
+    let body = Body::new();
+    for k in 0..64 {
+        let s = body.stats(&params_dir(Pose::Crawl, k as f32 / 64.0, 0.0));
+        assert!(s.knee > -0.015 && s.elbow > -0.005 && s.boot > -0.005, "phase {k}/64: {s:?}");
+        assert!(s.rifle > 0.01, "phase {k}/64: the rifle is {:.3} m off the ground", s.rifle);
+    }
+}
+
+/// AN-04: the body slides along the ground rather than bobbing: over the stroke the hips' and the chest's heights
+/// (between the shoulders) each vary by at most 1.5 cm.
+#[test]
+fn the_body_does_not_bob() {
+    let mid = |p: &PoseParams, x: f32, z: f32| (at(p, Part::Torso, Vec3::new(-x, 0.0, z)) + at(p, Part::Torso, Vec3::new(x, 0.0, z))) / 2.0;
+    let (mut hips, mut chest) = (vec![], vec![]);
+    for k in 0..64 {
+        let p = params_dir(Pose::Crawl, k as f32 / 64.0, 0.0);
+        hips.push(mid(&p, HIP_X, HIP_Z).z);
+        chest.push(mid(&p, SHOULDER_X, SHOULDER_Z).z);
+    }
+    for (what, h) in [("hips", hips), ("chest", chest)] {
+        let span = h.iter().copied().fold(f32::MIN, f32::max) - h.iter().copied().fold(f32::MAX, f32::min);
+        assert!(span <= 0.015, "the {what} bob {span:.3} m over the stroke");
     }
 }

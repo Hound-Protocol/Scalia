@@ -158,6 +158,23 @@ fn sideways(q: vec3f, a: f32, px: f32) -> vec3f {
 // Rifle carries (port of pose.rs `carry`): 0 safe hang, 1 low ready, 2 collapsed low ready, 3 high ready,
 // 4 ready up, 5 rush (combat run). Sets both arms and the rifle angle.
 // The athletic base of the ready and the aim (pose.rs `athletic`): feet staggered, knees flexed, boots flat.
+// pose.rs `turn_step`: the feet split by `dir` either side of the hips; the stepping foot (left over phase 0..0.5,
+// right over 0.5..1) lifts and comes down.
+const TURN_STEP_HIP: f32 = 0.18;
+const TURN_STEP_KNEE: f32 = 0.36;
+fn turn_step(p: ptr<function, PP>, phase: f32, dir: f32) {
+  let u = fract(phase);
+  let lift = sin(3.1415927 * fract(u * 2.0));
+  if (u < 0.5) {
+    (*p).hip.x = (*p).hip.x + TURN_STEP_HIP * lift;
+    (*p).knee.x = (*p).knee.x + TURN_STEP_KNEE * lift;
+  } else {
+    (*p).hip.y = (*p).hip.y + TURN_STEP_HIP * lift;
+    (*p).knee.y = (*p).knee.y + TURN_STEP_KNEE * lift;
+  }
+  (*p).roll = vec2f(dir * 0.5, -dir * 0.5);
+}
+
 fn athletic(p: ptr<function, PP>) {
   crouch_gait(p, 0.0, 0.13, 0.75, 0.0, 0.62, 0.0);
   (*p).flat = 1.0;
@@ -328,8 +345,12 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
 const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
-const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
+const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.008619, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
 
+// How far the chest props up half way through a crawl <-> prone blend (pose.rs CRAWL_PROP, crawl_prop).
+const CRAWL_PROP: f32 = 0.1;
+// Share of the crawl's body roll kept crawling sideways (pose.rs CRAWL_SIDE_TWIST).
+const CRAWL_SIDE_TWIST: f32 = 0.6;
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
   if (pose == 35u) { return DROP_PLANT_P; }
@@ -376,16 +397,18 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
-    // Chest up on the elbows, hips flat (pose.rs PRONE_LEAN -0.28, PRONE_AIM_LEAN -0.30); rifle and head take back
-    // the extra lean over the old -0.1.
-    p.lean = select(-0.30, -0.28, pose == 36u);
+    // Chest up on the elbows, hips flat (pose.rs PRONE_REST_FIT, PRONE_AIM_FIT); rifle and head take back the
+    // extra lean over the old -0.1.
+    // AN-04: fitted to the ground (pose.rs PRONE_AIM_FIT, PRONE_REST_FIT): 1.2 cm up, the aim's chest lower.
+    p.lean = select(-0.3, -0.207, pose == 36u);
+    p.raise = 0.012;
     let arch = p.lean + 0.1;
     p.rifle = p.rifle + arch;
     p.look = 0.55;
     if (pose == 36u) {
       // Aiming: shouldered, pointed ahead (pose.rs).
-      p.sh = vec2f(2.8, 1.571);
-      p.el = vec2f(1.3, 2.084);
+      p.sh = vec2f(2.845, 1.432);
+      p.el = vec2f(1.324, 2.159);
       p.reach = vec2f(0.0, 0.401);
       p.abd = vec2f(0.0, 0.604);
       p.head = 1.0 + arch;
@@ -406,12 +429,14 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.lean = 0.1;
     p.rifle = p.rifle + 0.1;
     p.head = -0.45;
-  } else if (pose == 30u) {
+  } else if (pose == 30u || pose == 37u) {
     // Combat ready (pose.rs `Pose::Ready`): athletic base, low ready forward, READY_LEAN 0.16.
     athletic(&p);
     carry(&p, 6u);
     p.lean = 0.16;
     p.head = -0.16;
+    // AN-05: stepping round on the spot (pose.rs `Pose::TurnStep`, `turn_step`).
+    if (pose == 37u) { turn_step(&p, phase, dir); }
   } else if (pose == 8u) {
     carry(&p, 3u);
   } else if (pose == 15u) {
@@ -609,8 +634,10 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     let cb = clip_pos(HIGH_CRAWL_AT, HIGH_CRAWL_F, HIGH_CRAWL_N, -phase);
     var r: array<f32, 23>;
     for (var k = 0u; k < 23u; k = k + 1u) { r[k] = mix(clip_get(ca, k), clip_get(cb, k), wb); }
-    // Patch: Animations 5: the legs' roll fades out crawling sideways (pose.rs).
-    r[18] = r[18] * abs(fwd);
+    // Sideways the body rolls less, legs and torso together (pose.rs CRAWL_SIDE_TWIST).
+    let side_roll = CRAWL_SIDE_TWIST + (1.0 - CRAWL_SIDE_TWIST) * abs(fwd);
+    r[18] = r[18] * side_roll;
+    r[16] = r[16] * side_roll;
     p.prone = 1.0;
     p.hip = vec2f(r[0], r[1]);
     p.knee = vec2f(r[2], r[3]);
@@ -721,7 +748,7 @@ fn held(v: vec3f, p: PP) -> vec3f {
 // Left palm and the rifle's handguard (ports of pose.rs `hand` and `held(RIFLE_GUARD)`).
 fn hand_l(p: PP) -> vec3f { return arm(vec3f(-0.18, 0.0, 0.80), p.sh.x, p.el.x, p.reach.x, p.abd.x, -0.238); }
 fn guard(p: PP) -> vec3f { return held(vec3f(0.238, 0.34, 0.82), p); }
-fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u); }
+fn two_handed(pose: u32) -> f32 { return select(0.0, 1.0, pose <= 8u || (pose >= 11u && pose <= 16u) || pose == 30u || pose == 31u || pose == 36u || pose == 37u); }
 // Port of pose.rs `grip_weight` (GRIP_SWAP 0.6).
 fn grip_weight(a: u32, b: u32, w0: f32) -> f32 {
   let ha = two_handed(a);
@@ -1027,18 +1054,21 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     let reload_phase = clamp(-b.z - 1.0, 0.0, 1.0);
     let w = clamp((time - d.y) / blend_s(u32(d.x), u32(b.w)), 0.0, 1.0);
     // Instance c.z: upper-body pose id + 1; its fraction holds the movement direction (1/1024 turns) and the legs'
-    // lag behind the upper body (127ths of LEG_LAG_MAX 0.9 rad, signed) (pose.rs `pack_layer_lag`).
+    // lag behind the upper body (127ths of LEG_LAG_MAX 1.3 rad, signed) (pose.rs `pack_layer_lag`).
     let layer = floor(d.z);
     let fx = round(fract(d.z) * 262144.0);
     let lraw = floor(fx / 1024.0);
     let turn = (fx - lraw * 1024.0) / 1024.0 * 6.2831853;
-    let lag = select(lraw, lraw - 256.0, lraw >= 128.0) / 127.0 * 0.9;
+    let lag = select(lraw, lraw - 256.0, lraw >= 128.0) / 127.0 * 1.3;
     let dir = select(turn, turn - 6.2831853, turn > 3.1415927);
     let base_phase = select(phase, reload_phase, u32(b.w) == 18u);
     var pp = pose_params(u32(b.w), base_phase, dir);
     if (w < 1.0) {
       let previous_phase = select(phase, reload_phase, u32(d.x) == 18u);
       pp = blend(pose_params(u32(d.x), previous_phase, dir), pp, w);
+      // AN-04: between the crawl and lying prone the chest props up on the forearms half way (pose.rs crawl_prop).
+      let ids = vec2u(u32(d.x), u32(b.w));
+      if ((ids.x == 32u && ids.y == 5u) || (ids.x == 5u && ids.y == 32u)) { pp.lean = pp.lean - CRAWL_PROP * 4.0 * w * (1.0 - w); }
     }
     let base = pp;
     var upper_id = 0u;

@@ -98,6 +98,9 @@ pub enum Pose {
     DropPlant = 35,
     /// Prone, rifle shouldered and held on a target; can also be layered over the crawl legs.
     ProneAim = 36,
+    /// AN-05: stepping round on the spot, one foot at a time (standing turns). Phase: the left foot steps over
+    /// 0..0.5, the right over 0.5..1; `dir` is how far the left foot's heading is round from the right's.
+    TurnStep = 37,
 }
 
 /// Where the tablet sits between the hands in the tablet pose (figure frame, metres).
@@ -136,6 +139,7 @@ impl Pose {
             34 => Pose::DropReach,
             35 => Pose::DropPlant,
             36 => Pose::ProneAim,
+            37 => Pose::TurnStep,
             _ => Pose::Stand,
         }
     }
@@ -437,7 +441,7 @@ pub const RELOAD_POUCH: Vec3 = Vec3::new(-0.04, 0.17, 1.08);
 /// 1 for poses that hold the rifle with both hands (left palm on the handguard), else 0.
 pub fn two_handed(pose: Pose) -> f32 {
     match pose {
-        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::Brake | Pose::Prone | Pose::ProneAim => 1.0,
+        Pose::Stand | Pose::Walk | Pose::Run | Pose::Sprint | Pose::Crouch | Pose::CoverAim | Pose::Cover | Pose::StandAim | Pose::CrouchWalk | Pose::LeanLeft | Pose::LeanRight | Pose::CrouchAim | Pose::Stack | Pose::Sweep | Pose::Ready | Pose::TurnStep | Pose::Brake | Pose::Prone | Pose::ProneAim => 1.0,
         _ => 0.0,
     }
 }
@@ -515,6 +519,14 @@ pub fn ankle_flat(hip: f32, knee: f32, flat: f32) -> f32 {
 /// Lying on his front the feet point back, boots flat on the ground, so the toes do not prop the body up.
 pub const PRONE_POINT: f32 = -1.2;
 /// Upper-body lean lying prone: back, so the chest rises off the ground onto the elbows (was `PRONE_LEAN_OLD`).
+/// AN-04: the prone poses fitted to the ground by examples/prone_fit.rs, as drawn with the grip: (lean, raise, boot
+/// roll, shoulders, elbows, left arm's swing out). Both lie 1.2 cm higher (shared, so aiming keeps the prone legs):
+/// the belly on the ground, not in it. At rest the arms are as they were (the rifle low across in front). Aiming, the
+/// chest is lower and the arms refitted so both elbows rest on the ground under the rifle (the support elbow hung 7 cm
+/// up). Aim fit: `RAISE=0.012 RAISE_HOLD=100 TOE=0 TOE_HOLD=100 LEAN_HOLD=0.05 prone_fit 36`.
+/// common.wgsl mirrors them.
+pub const PRONE_AIM_FIT: (f32, f32, [f32; 2], [f32; 2], [f32; 2], f32) = (-0.207, 0.012, [0.0, 0.0], [2.845, 1.432], [1.324, 2.159], 0.0);
+pub const PRONE_REST_FIT: (f32, f32, [f32; 2], [f32; 2], [f32; 2], f32) = (-0.30, 0.012, [0.0, 0.0], [1.75, 1.75], [1.45, 1.45], 0.0);
 pub const PRONE_LEAN: f32 = -0.28;
 /// The same, aiming: a little more, so the support forearm clears the ground under the rifle.
 pub const PRONE_AIM_LEAN: f32 = -0.30;
@@ -647,7 +659,7 @@ pub fn pack_layer(upper: Option<Pose>, dir: f32) -> f32 {
 }
 
 /// How far the legs may trail the upper body when he turns on the spot (rad, `pack_layer_lag`).
-pub const LEG_LAG_MAX: f32 = 0.9;
+pub const LEG_LAG_MAX: f32 = 1.3;
 
 /// `pack_layer` with the legs' lag behind the upper body (rad, within `LEG_LAG_MAX`; positive: legs turned to the
 /// left of the chest). Patch: Animations 2, rifle first: the chest and rifle turn and the feet follow. The fraction
@@ -716,6 +728,8 @@ pub fn stride_m(pose: Pose) -> f32 {
 }
 /// One crawl cycle (both arms) moves him this far (m).
 pub const CRAWL_STRIDE: f32 = crate::crawl::STRIDE;
+/// Share of the crawl's torso roll kept crawling sideways (AN-04).
+pub const CRAWL_SIDE_TWIST: f32 = 0.6;
 pub const WALK_STRIDE: f32 = GAIT_STRIDE[0][0];
 pub const RUN_STRIDE: f32 = GAIT_STRIDE[1][0];
 pub const SPRINT_STRIDE: f32 = GAIT_STRIDE[2][0];
@@ -1438,9 +1452,11 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             let wb = ((-0.2 - fwd) * 5.0).clamp(0.0, 1.0);
             let (a, b) = (clip_at(&HIGH_CRAWL, phase), clip_at(&HIGH_CRAWL, -phase));
             let mut r: [f32; 23] = std::array::from_fn(|k| a[k] + (b[k] - a[k]) * wb);
-            // Patch: Animations 5: the legs' roll is solved for crawling ahead (or back); sideways the knees swing out on
-            // top of the stroke, so it fades out there (a rolled-up leg would lift its knee off the ground).
-            r[18] *= fwd.abs();
+            // The body's roll is solved for crawling ahead (or back); sideways the knees swing out on top of the stroke,
+            // so the body rolls less there, legs and torso together (AN-04; the legs were solved rolling with it).
+            let side_roll = CRAWL_SIDE_TWIST + (1.0 - CRAWL_SIDE_TWIST) * fwd.abs();
+            r[18] *= side_roll;
+            r[16] *= side_roll;
             p.prone = 1.0;
             p.hip = [r[0], r[1]];
             p.knee = [r[2], r[3]];
@@ -1474,13 +1490,17 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.look = 0.55;
             // Chest up on the elbows, hips and legs flat on the ground (AN-02-S09); rifle and head take back the
             // extra lean so the aim and the eyes stay where they were.
-            p.lean = if pose == Pose::ProneAim { PRONE_LEAN } else { PRONE_AIM_LEAN };
+            // AN-04: fitted to the ground (examples/prone_fit.rs): boots, elbows and belly on it, not in it.
+            p.lean = if pose == Pose::ProneAim { PRONE_AIM_FIT.0 } else { PRONE_REST_FIT.0 };
+            let fit = if pose == Pose::ProneAim { PRONE_AIM_FIT } else { PRONE_REST_FIT };
+            p.raise = fit.1;
+            p.toe = fit.2;
             let arch = p.lean - PRONE_LEAN_OLD;
             p.rifle += arch;
             if pose == Pose::ProneAim {
                 // Aiming: the rifle shouldered and pointed ahead along the ground.
-                p.shoulder = [2.8, 1.571];
-                p.elbow = [1.3, 2.084];
+                p.shoulder = fit.3;
+                p.elbow = fit.4;
                 p.reach = [0.0, 0.401];
                 p.abduct = [0.0, 0.604];
                 p.head = 1.0 + arch;
@@ -1491,8 +1511,8 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
                 p.rifle_yaw = std::f32::consts::FRAC_PI_2;
                 p.twist = 0.0;
                 p.look = 0.0;
-                p.shoulder = [1.75, 1.75];
-                p.elbow = [1.45, 1.45];
+                p.shoulder = fit.3;
+                p.elbow = fit.4;
                 p.head = 0.8 + arch;
             }
         }
@@ -1505,7 +1525,7 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.rifle += AIM_LEAN;
             p.head = AIM_HEAD - AIM_LEAN;
         }
-        Pose::Ready => {
+        Pose::Ready | Pose::TurnStep => {
             // Bladed like the aim (upper body turned by the rifle's turn across the chest), so the muzzle points
             // ahead and down; eyes up over it.
             athletic(&mut p);
@@ -1514,6 +1534,9 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.look = p.rifle_yaw;
             p.lean = READY_LEAN;
             p.head = -READY_LEAN;
+            if pose == Pose::TurnStep {
+                turn_step(&mut p, phase, dir);
+            }
         }
     }
     let lift = gait_bake(pose, phase, dir).map_or(f32::MIN, |mut g| {
@@ -1660,6 +1683,22 @@ pub fn idle(p: &PoseParams, pose: Pose, t: f32, seed: f32) -> PoseParams {
 /// shin lying back; torso upright.
 /// The athletic base of the ready and the aim: feet shoulder-width and staggered (left forward), knees flexed,
 /// boots flat (common.wgsl `athletic`).
+/// AN-05: stepping round on the spot (`Pose::TurnStep`) on the athletic base: the feet's headings split by `dir` either
+/// side of the hips (the left foot `dir / 2` round from them, the right the other way: the CPU keeps the planted one
+/// where it stands), and the foot stepping (left over phase 0..0.5, right over 0.5..1) lifts and comes down again.
+/// common.wgsl `turn_step` mirrors it.
+pub fn turn_step(p: &mut PoseParams, phase: f32, dir: f32) {
+    let u = phase.rem_euclid(1.0);
+    let i = if u < 0.5 { 0 } else { 1 };
+    let lift = (std::f32::consts::PI * (u * 2.0).fract()).sin();
+    p.hip[i] += TURN_STEP_HIP * lift;
+    p.knee[i] += TURN_STEP_KNEE * lift;
+    p.roll = [dir * 0.5, -dir * 0.5];
+}
+/// How far the stepping leg's hip and knee bend at the top of a turning step (rad).
+pub const TURN_STEP_HIP: f32 = 0.18;
+pub const TURN_STEP_KNEE: f32 = 0.36;
+
 fn athletic(p: &mut PoseParams) {
     // Stagger 0.13 m either side of the hip, ankle 0.75 m below it (knees flexed from a straight 0.80).
     (p.hip, p.knee, p.side) = crouch_gait(0.0, 0.13, 0.75, 0.0, 0.62, 0.0);
@@ -2078,6 +2117,18 @@ fn turn(q: Vec3, a: f32) -> Vec3 {
     Vec3::new(q.x * c - q.y * s, q.x * s + q.y * c, q.z)
 }
 
+/// How far the chest props up on the forearms (rad, taken off `lean`) part way through a blend between the crawl and
+/// lying prone, `w` of the way (AN-04): the arms swing between the two holds over the ground, not through it.
+/// common.wgsl mirrors it.
+pub fn crawl_prop(a: Pose, b: Pose, w: f32) -> f32 {
+    let w = w.clamp(0.0, 1.0);
+    let crawl_prone = matches!((a, b), (Pose::Crawl, Pose::Prone) | (Pose::Prone, Pose::Crawl));
+    if crawl_prone { CRAWL_PROP * 4.0 * w * (1.0 - w) } else { 0.0 }
+}
+
+/// How far the chest props up half way through a crawl <-> prone blend (rad, `crawl_prop`).
+pub const CRAWL_PROP: f32 = 0.1;
+
 /// Linear blend between two poses (`w` 0 gives `a`, 1 gives `b`); the shader blends over `BLEND_S` after a change.
 pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
     // Eased: pose changes start and settle gently (motion guide rule 5). The ends are exact.
@@ -2131,7 +2182,7 @@ pub const KNEEL_BLEND_S: f32 = BLEND_S / 1.3;
 /// Seconds the change from `a` to `b` takes: `KNEEL_BLEND_S` between standing and kneeling, else `BLEND_S`.
 /// common.wgsl `blend_s` mirrors it.
 pub fn blend_s(a: Pose, b: Pose) -> f32 {
-    let standing = |p: Pose| matches!(p, Pose::Stand | Pose::Ready | Pose::StandAim);
+    let standing = |p: Pose| matches!(p, Pose::Stand | Pose::Ready | Pose::StandAim | Pose::TurnStep);
     let kneeling = |p: Pose| matches!(p, Pose::Crouch | Pose::CrouchAim);
     if (standing(a) && kneeling(b)) || (kneeling(a) && standing(b)) { KNEEL_BLEND_S } else { BLEND_S }
 }
@@ -3911,38 +3962,38 @@ pub const SPRINT_FR: [[f32; 11]; 48] = [
 /// 32 samples over one loop; fields: hipL, hipR, kneeL, kneeR, sideL, sideR, shL, shR, elL, elR, abL, abR, reachL,
 /// reachR, lean, raise, twist, head, hipRoll (yaw: lying prone it rolls the hips), rollL, rollR (thigh roll).
 pub const HIGH_CRAWL: [[f32; 23]; 32] = [
-    [0.1879, 0.1857, 0.1612, 0.1590, -0.0000, 0.0000, 1.5806, 1.5779, 2.4082, 2.4587, 0.7458, 0.6444, -1.2029, -1.2306, -0.1389, 0.0280, 0.0046, 0.8611, 0.0046, -0.0046, -0.0046, -0.0024, -0.0028],
-    [0.4064, 0.1799, 0.3430, 0.1532, 0.0585, 0.0000, 1.6188, 1.6767, 2.3814, 2.4153, 0.7499, 0.4787, -1.1774, -1.3740, -0.1389, 0.0280, 0.0285, 0.8611, 0.0285, 1.1417, -0.0285, -0.0151, -0.0171],
-    [0.7116, 0.1730, 0.6094, 0.1464, 0.1003, 0.0000, 1.6651, 1.8433, 2.3482, 2.2635, 0.7557, 0.3323, -1.1474, -1.4839, -0.1389, 0.0280, 0.0570, 0.8611, 0.0570, 1.3107, -0.0570, -0.0302, -0.0342],
-    [0.9554, 0.1656, 0.8485, 0.1390, 0.1059, 0.0000, 1.7166, 2.0403, 2.3107, 1.8938, 0.7623, 0.2339, -1.1157, -1.5296, -0.1389, 0.0280, 0.0876, 0.8611, 0.0876, 1.3233, -0.0876, -0.0464, -0.0526],
-    [1.1347, 0.1589, 1.0409, 0.1323, 0.0931, -0.0000, 1.7640, 2.2731, 2.2755, 1.3457, 0.7692, 0.1788, -1.0871, -1.4953, -0.1389, 0.0280, 0.1155, 0.8611, 0.1155, 1.2889, -0.1155, -0.0612, -0.0693],
-    [1.2464, 0.1542, 1.1662, 0.1276, 0.0794, -0.0000, 1.7978, 2.6188, 2.2501, 0.2784, 0.7746, -0.3015, -1.0671, -0.3987, -0.1389, 0.0280, 0.1352, 0.8611, 0.1352, 1.2386, -0.1352, -0.0716, -0.0811],
-    [1.2570, 0.1523, 1.1845, 0.1256, 0.0714, -0.0000, 1.8119, 2.4178, 2.2393, 0.6644, 0.7770, -0.0074, -1.0588, -1.0023, -0.1389, 0.0280, 0.1434, 0.8611, 0.1434, 1.1980, -0.1434, -0.0759, -0.0861],
-    [1.1904, 0.1529, 1.1182, 0.1263, 0.0710, 0.0000, 1.8072, 2.2922, 2.2429, 1.1376, 0.7763, 0.1681, -1.0616, -1.3902, -0.1389, 0.0280, 0.1407, 0.8611, 0.1407, 1.1963, -0.1407, -0.0745, -0.0844],
-    [1.1228, 0.1554, 1.0492, 0.1288, 0.0721, -0.0000, 1.7891, 2.1964, 2.2566, 1.3914, 0.7732, 0.2115, -1.0722, -1.4495, -0.1389, 0.0280, 0.1302, 0.8611, 0.1302, 1.2028, -0.1302, -0.0689, -0.0781],
-    [1.0528, 0.1589, 0.9772, 0.1322, 0.0739, -0.0000, 1.7642, 2.1148, 2.2753, 1.5907, 0.7693, 0.2454, -1.0870, -1.4617, -0.1389, 0.0280, 0.1156, 0.8611, 0.1156, 1.2126, -0.1156, -0.0612, -0.0694],
-    [0.9791, 0.1628, 0.9014, 0.1361, 0.0756, 0.0000, 1.7366, 2.0414, 2.2959, 1.7614, 0.7652, 0.2794, -1.1034, -1.4562, -0.1389, 0.0280, 0.0995, 0.8611, 0.0995, 1.2217, -0.0995, -0.0527, -0.0597],
-    [0.8999, 0.1667, 0.8208, 0.1401, 0.0767, 0.0000, 1.7086, 1.9732, 2.3166, 1.9120, 0.7614, 0.3163, -1.1204, -1.4414, -0.1389, 0.0280, 0.0830, 0.8611, 0.0830, 1.2278, -0.0830, -0.0439, -0.0498],
-    [0.8129, 0.1707, 0.7336, 0.1441, 0.0765, 0.0000, 1.6809, 1.9087, 2.3368, 2.0452, 0.7576, 0.3582, -1.1376, -1.4201, -0.1389, 0.0280, 0.0664, 0.8611, 0.0664, 1.2284, -0.0664, -0.0352, -0.0398],
-    [0.7144, 0.1747, 0.6370, 0.1481, 0.0740, -0.0000, 1.6536, 1.8471, 2.3565, 2.1632, 0.7540, 0.4074, -1.1551, -1.3930, -0.1389, 0.0280, 0.0498, 0.8611, 0.0498, 1.2192, -0.0498, -0.0264, -0.0299],
-    [0.5974, 0.1788, 0.5256, 0.1521, 0.0675, 0.0000, 1.6260, 1.7878, 2.3763, 2.2669, 0.7509, 0.4664, -1.1727, -1.3595, -0.1389, 0.0280, 0.0330, 0.8611, 0.0330, 1.1900, -0.0330, -0.0175, -0.0198],
-    [0.4458, 0.1831, 0.3867, 0.1564, 0.0532, -0.0000, 1.5976, 1.7281, 2.3963, 2.3429, 0.7477, 0.5290, -1.1914, -1.3149, -0.1389, 0.0280, 0.0153, 0.8611, 0.0153, 1.1027, -0.0153, -0.0081, -0.0092],
-    [0.1857, 0.1879, 0.1590, 0.1612, -0.0000, -0.0000, 1.5666, 1.5909, 2.4180, 2.4490, 0.7439, 0.6482, -1.2131, -1.2187, -0.1389, 0.0280, -0.0046, 0.8611, -0.0046, 0.0046, 0.0046, 0.0024, 0.0028],
-    [0.1799, 0.4064, 0.1532, 0.3430, -0.0000, -0.0584, 1.6806, 1.6253, 2.3828, 2.4231, 0.5736, 0.6578, -1.3762, -1.1882, -0.1389, 0.0280, -0.0285, 0.8611, -0.0285, 0.0285, -1.1416, 0.0151, 0.0171],
-    [0.1730, 0.7114, 0.1464, 0.6094, -0.0000, -0.1001, 1.8560, 1.6674, 2.2301, 2.3911, 0.4096, 0.6696, -1.5027, -1.1526, -0.1389, 0.0280, -0.0570, 0.8611, -0.0570, 0.0570, -1.3106, 0.0302, 0.0342],
-    [0.1656, 0.9552, 0.1390, 0.8485, 0.0000, -0.1058, 2.0537, 1.7145, 1.8701, 2.3547, 0.2937, 0.6823, -1.5580, -1.1153, -0.1389, 0.0280, -0.0876, 0.8611, -0.0876, 0.0876, -1.3233, 0.0464, 0.0526],
-    [0.1589, 1.1345, 0.1323, 1.0409, -0.0000, -0.0930, 2.2835, 1.7585, 1.3395, 2.3203, 0.2290, 0.6942, -1.5355, -1.0823, -0.1389, 0.0280, -0.1155, 0.8611, -0.1155, 0.1155, -1.2889, 0.0612, 0.0693],
-    [0.1542, 1.2463, 0.1276, 1.1662, 0.0000, -0.0793, 2.6455, 1.7900, 0.1955, 2.2954, -0.3517, 0.7028, -0.2810, -1.0594, -0.1389, 0.0280, -0.1352, 0.8611, -0.1352, 0.1352, -1.2386, 0.0716, 0.0811],
-    [0.1523, 1.2570, 0.1256, 1.1845, 0.0000, -0.0714, 2.4261, 1.8032, 0.5784, 2.2850, -0.0062, 0.7066, -0.9644, -1.0498, -0.1389, 0.0280, -0.1434, 0.8611, -0.1434, 0.1434, -1.1980, 0.0759, 0.0861],
-    [0.1529, 1.1904, 0.1263, 1.1182, 0.0000, -0.0710, 2.3100, 1.7987, 1.1077, 2.2885, 0.2166, 0.7054, -1.4287, -1.0530, -0.1389, 0.0280, -0.1407, 0.8611, -0.1407, 0.1407, -1.1963, 0.0745, 0.0844],
-    [0.1554, 1.1228, 0.1288, 1.0492, 0.0000, -0.0721, 2.2149, 1.7819, 1.3621, 2.3018, 0.2616, 0.7007, -1.4833, -1.0651, -0.1389, 0.0280, -0.1302, 0.8611, -0.1302, 0.1302, -1.2028, 0.0689, 0.0781],
-    [0.1589, 1.0528, 0.1322, 0.9772, 0.0000, -0.0739, 2.1336, 1.7586, 1.5588, 2.3202, 0.2976, 0.6941, -1.4916, -1.0820, -0.1389, 0.0280, -0.1156, 0.8611, -0.1156, 0.1156, -1.2126, 0.0612, 0.0694],
-    [0.1628, 0.9791, 0.1361, 0.9014, -0.0000, -0.0756, 2.0606, 1.7332, 1.7257, 2.3401, 0.3342, 0.6873, -1.4828, -1.1011, -0.1389, 0.0280, -0.0995, 0.8611, -0.0995, 0.0995, -1.2217, 0.0527, 0.0597],
-    [0.1667, 0.8999, 0.1401, 0.8208, -0.0000, -0.0767, 1.9927, 1.7073, 1.8714, 2.3603, 0.3740, 0.6803, -1.4649, -1.1209, -0.1389, 0.0280, -0.0830, 0.8611, -0.0830, 0.0830, -1.2278, 0.0439, 0.0498],
-    [0.1707, 0.8129, 0.1441, 0.7336, 0.0000, -0.0765, 1.9284, 1.6818, 1.9997, 2.3800, 0.4189, 0.6734, -1.4406, -1.1410, -0.1389, 0.0280, -0.0664, 0.8611, -0.0664, 0.0664, -1.2284, 0.0352, 0.0398],
-    [0.1747, 0.7144, 0.1481, 0.6370, 0.0000, -0.0740, 1.8667, 1.6566, 2.1122, 2.3993, 0.4708, 0.6666, -1.4103, -1.1614, -0.1389, 0.0280, -0.0498, 0.8611, -0.0498, 0.0498, -1.2192, 0.0264, 0.0299],
-    [0.1788, 0.5974, 0.1521, 0.5256, 0.0000, -0.0675, 1.8070, 1.6317, 2.2108, 2.4183, 0.5319, 0.6599, -1.3733, -1.1824, -0.1389, 0.0280, -0.0330, 0.8611, -0.0330, 0.0330, -1.1900, 0.0175, 0.0198],
-    [0.1831, 0.4458, 0.1564, 0.3867, -0.0000, -0.0532, 1.7489, 1.6061, 2.2953, 2.4376, 0.6053, 0.6524, -1.3271, -1.2049, -0.1389, 0.0280, -0.0153, 0.8611, -0.0153, 0.0153, -1.1027, 0.0081, 0.0092],
+    [0.1885, 0.1851, 0.1618, 0.1584, -0.0000, -0.0000, 1.7121, 2.3127, 2.3297, 1.6622, 0.6646, 0.1670, -1.3044, -1.5335, -0.1389, 0.0280, 0.0070, 0.8611, 0.0070, -0.0070, -0.0070, -0.0038, -0.0042],
+    [0.4045, 0.1762, 0.3444, 0.1496, 0.0552, -0.0000, 1.6678, 2.4574, 2.3555, 1.2373, 0.7442, 0.1485, -1.2100, -1.5225, -0.1389, 0.0280, 0.0436, 0.8611, 0.0436, 1.1167, -0.0436, -0.0235, -0.0262],
+    [0.6989, 0.1658, 0.6110, 0.1391, 0.0862, -0.0000, 1.6262, 2.8160, 2.3666, 0.0780, 0.8337, -0.3528, -1.0943, -0.1159, -0.1389, 0.0280, 0.0871, 0.8611, 0.0871, 1.2683, -0.0871, -0.0469, -0.0523],
+    [0.9362, 0.1545, 0.8506, 0.1278, 0.0850, 0.0000, 1.5795, 2.8245, 2.3760, 0.1025, 0.9212, -0.3210, -0.9705, -0.0509, -0.1389, 0.0280, 0.1340, 0.8611, 0.1340, 1.2625, -0.1340, -0.0722, -0.0804],
+    [1.1169, 0.1444, 1.0438, 0.1177, 0.0731, 0.0000, 1.5106, 2.8236, 2.3883, 0.1172, 1.0093, -0.3859, -0.8358, -0.0657, -0.1389, 0.0280, 0.1767, 0.8611, 0.1767, 1.2111, -0.1767, -0.0952, -0.1060],
+    [1.2327, 0.1373, 1.1698, 0.1106, 0.0628, -0.0000, 1.3860, 2.8016, 2.4020, 0.1483, 1.1043, -0.4320, -0.6654, -0.0917, -0.1389, 0.0280, 0.2068, 0.8611, 0.2068, 1.1487, -0.2068, -0.1113, -0.1241],
+    [1.2462, 0.1343, 1.1885, 0.1076, 0.0573, 0.0000, 0.8332, 2.3625, 2.4260, 0.8796, 1.2013, 0.0789, -0.1091, -1.5115, -0.1389, 0.0280, 0.2193, 0.8611, 0.2193, 1.1028, -0.2193, -0.1181, -0.1316],
+    [1.1800, 0.1353, 1.1222, 0.1086, 0.0572, 0.0000, 0.7883, 2.2303, 2.4512, 1.2213, 1.2002, 0.1530, -0.0953, -1.6242, -0.1389, 0.0280, 0.2152, 0.8611, 0.2152, 1.1024, -0.2152, -0.1159, -0.1291],
+    [1.1125, 0.1391, 1.0530, 0.1124, 0.0587, 0.0000, 0.7505, 2.1396, 2.5206, 1.4365, 1.2073, 0.1909, -0.1456, -1.6280, -0.1389, 0.0280, 0.1991, 0.8611, 0.1991, 1.1153, -0.1991, -0.1072, -0.1195],
+    [1.0428, 0.1443, 0.9807, 0.1177, 0.0610, 0.0000, 0.7470, 2.0662, 2.5853, 1.6198, 1.2206, 0.2239, -0.2349, -1.6106, -0.1389, 0.0280, 0.1769, 0.8611, 0.1769, 1.1341, -0.1769, -0.0952, -0.1061],
+    [0.9696, 0.1502, 0.9045, 0.1235, 0.0635, -0.0000, 0.7661, 2.0020, 2.6404, 1.7841, 1.2385, 0.2576, -0.3405, -1.5846, -0.1389, 0.0280, 0.1522, 0.8611, 0.1522, 1.1534, -0.1522, -0.0820, -0.0913],
+    [0.8913, 0.1562, 0.8235, 0.1295, 0.0659, -0.0000, 1.4846, 1.9433, 2.6302, 1.9311, 0.7956, 0.2959, -1.1776, -1.5520, -0.1389, 0.0280, 0.1269, 0.8611, 0.1269, 1.1699, -0.1269, -0.0684, -0.0762],
+    [0.8058, 0.1623, 0.7359, 0.1356, 0.0674, 0.0000, 1.7559, 1.8887, 2.4598, 2.0619, 0.4614, 0.3406, -1.3874, -1.5150, -0.1389, 0.0280, 0.1016, 0.8611, 0.1016, 1.1811, -0.1016, -0.0547, -0.0609],
+    [0.7091, 0.1684, 0.6388, 0.1417, 0.0671, 0.0000, 1.9212, 1.8374, 2.2985, 2.1775, 0.3420, 0.3939, -1.4646, -1.4737, -0.1389, 0.0280, 0.0762, 0.8611, 0.0762, 1.1827, -0.0762, -0.0410, -0.0457],
+    [0.5945, 0.1746, 0.5270, 0.1479, 0.0633, -0.0000, 2.0649, 1.7890, 2.1404, 2.2769, 0.2792, 0.4577, -1.5157, -1.4269, -0.1389, 0.0280, 0.0505, 0.8611, 0.0505, 1.1646, -0.0505, -0.0272, -0.0303],
+    [0.4452, 0.1811, 0.3875, 0.1544, 0.0518, -0.0000, 2.1924, 1.7397, 1.9887, 2.3376, 0.2442, 0.5199, -1.5554, -1.3681, -0.1389, 0.0280, 0.0235, 0.8611, 0.0235, 1.0899, -0.0235, -0.0126, -0.0141],
+    [0.1851, 0.1885, 0.1584, 0.1618, 0.0000, -0.0000, 2.3268, 1.6927, 1.6539, 2.3802, 0.2154, 0.5887, -1.5755, -1.2957, -0.1389, 0.0280, -0.0070, 0.8611, -0.0070, 0.0070, 0.0070, 0.0038, 0.0042],
+    [0.1762, 0.4045, 0.1496, 0.3444, -0.0000, -0.0551, 2.4665, 1.6508, 1.2500, 2.4101, 0.1923, 0.6704, -1.5740, -1.2055, -0.1389, 0.0280, -0.0436, 0.8611, -0.0436, 0.0436, -1.1166, 0.0235, 0.0262],
+    [0.1658, 0.6987, 0.1391, 0.6110, -0.0000, -0.0861, 2.8508, 1.6127, -0.0061, 2.4251, -0.3931, 0.7647, 0.0090, -1.0940, -0.1389, 0.0280, -0.0871, 0.8611, -0.0871, 0.0871, -1.2682, 0.0469, 0.0523],
+    [0.1545, 0.9359, 0.1278, 0.8506, -0.0000, -0.0848, 2.8306, 1.5698, 0.0352, 2.4271, -0.3349, 0.8679, -0.0172, -0.9623, -0.1389, 0.0280, -0.1340, 0.8611, -0.1340, 0.1340, -1.2624, 0.0722, 0.0804],
+    [0.1444, 1.1168, 0.1177, 1.0437, -0.0000, -0.0730, 2.8334, 1.5033, 0.0493, 2.4229, -0.4016, 0.9749, -0.0275, -0.8102, -0.1389, 0.0280, -0.1767, 0.8611, -0.1767, 0.1767, -1.2111, 0.0952, 0.1060],
+    [0.1373, 1.2326, 0.1106, 1.1698, -0.0000, -0.0627, 2.8276, 1.3810, 0.0693, 2.4209, -0.4498, 1.0806, -0.0416, -0.6251, -0.1389, 0.0280, -0.2068, 0.8611, -0.2068, 0.2068, -1.1487, 0.1113, 0.1241],
+    [0.1343, 1.2462, 0.1076, 1.1885, -0.0000, -0.0573, 2.3783, 0.8801, 0.8823, 2.4541, 0.1349, 1.1862, -1.5826, -0.1255, -0.1389, 0.0280, -0.2193, 0.8611, -0.2193, 0.2193, -1.1028, 0.1181, 0.1316],
+    [0.1353, 1.1800, 0.1086, 1.1222, -0.0000, -0.0572, 2.2475, 0.7938, 1.2102, 2.5198, 0.2046, 1.1892, -1.6676, -0.1067, -0.1389, 0.0280, -0.2152, 0.8611, -0.2152, 0.2152, -1.1024, 0.1159, 0.1291],
+    [0.1391, 1.1125, 0.1124, 1.0530, 0.0000, -0.0587, 2.1572, 0.7519, 1.4191, 2.5884, 0.2438, 1.1966, -1.6628, -0.1529, -0.1389, 0.0280, -0.1991, 0.8611, -0.1991, 0.1991, -1.1153, 0.1072, 0.1195],
+    [0.1443, 1.0428, 0.1177, 0.9807, 0.0000, -0.0610, 2.0842, 0.7413, 1.5998, 2.6521, 0.2779, 1.2107, -1.6429, -0.2349, -0.1389, 0.0280, -0.1769, 0.8611, -0.1769, 0.1769, -1.1341, 0.0952, 0.1061],
+    [0.1502, 0.9696, 0.1235, 0.9045, -0.0000, -0.0635, 2.0205, 0.7463, 1.7557, 2.7064, 0.3156, 1.2314, -1.6104, -0.3257, -0.1389, 0.0280, -0.1522, 0.8611, -0.1522, 0.1522, -1.1534, 0.0820, 0.0913],
+    [0.1562, 0.8913, 0.1295, 0.8235, 0.0000, -0.0659, 1.9625, 1.5414, 1.8967, 2.6496, 0.3569, 0.6037, -1.5749, -1.2397, -0.1389, 0.0280, -0.1269, 0.8611, -0.1269, 0.1269, -1.1699, 0.0684, 0.0762],
+    [0.1623, 0.8058, 0.1356, 0.7359, -0.0000, -0.0674, 1.9083, 1.7474, 2.0212, 2.4838, 0.4045, 0.3605, -1.5352, -1.3761, -0.1389, 0.0280, -0.1016, 0.8611, -0.1016, 0.1016, -1.1811, 0.0547, 0.0609],
+    [0.1684, 0.7091, 0.1417, 0.6388, -0.0000, -0.0671, 1.8573, 1.9074, 2.1298, 2.3182, 0.4601, 0.2616, -1.4910, -1.4402, -0.1389, 0.0280, -0.0762, 0.8611, -0.0762, 0.0762, -1.1827, 0.0410, 0.0457],
+    [0.1746, 0.5945, 0.1479, 0.5270, 0.0000, -0.0633, 1.8088, 2.0495, 2.2231, 2.1573, 0.5256, 0.2116, -1.4413, -1.4834, -0.1389, 0.0280, -0.0505, 0.8611, -0.0505, 0.0505, -1.1646, 0.0272, 0.0303],
+    [0.1811, 0.4452, 0.1544, 0.3875, -0.0000, -0.0518, 1.7609, 2.1760, 2.2910, 2.0039, 0.5962, 0.1855, -1.3811, -1.5166, -0.1389, 0.0280, -0.0235, 0.8611, -0.0235, 0.0235, -1.0899, 0.0126, 0.0141],
 ];
 // CLIP HIGH_CRAWL END
 

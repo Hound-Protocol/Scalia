@@ -2,7 +2,13 @@
 
 Start at the [README](README.md) for all workstreams and [CONTRIBUTING.md](CONTRIBUTING.md) for how to deliver changes. Docs index: [docs/README.md](docs/README.md). Verify this page against Git and CI before relying on it.
 
-Last updated: 2026-11-22 (Patch: Animations 5).
+Last updated: 2026-11-26 (Patch: Animations 6).
+
+## Patch: Animations 6 (2026-11-26): AN-04 prone and crawl, AN-05 standing turns
+
+See [AN-04](docs/work-orders/AN-04-crawl-polish.md) and [AN-05](docs/work-orders/AN-05-standing-turn.md) (Evidence
+sections list every change and test). Review renders: `scripts/anim_sheet.py` (`VIEWS=top,side,front,back,q`, `*heading`,
+`#distance`, `ZMAX`); numbers: examples `crawl_joints`, `crawl_blend`, `low_parts`, `prone_fit`.
 
 ## Patches: Animations 3 to 5 (2026-11-22): the low crawl
 

@@ -344,7 +344,7 @@ pub fn pose_clips(pose: u32) -> (Play, Vec<&'static str>) {
         32 => (Loop, vec!["crawl_f", "crawl_b"]),
         3 | 20 | 22 | 23 => (Clock, vec!["crouch"]),
         14 => (Clock, vec!["crouch_aim"]),
-        4 | 6 | 12 | 13 | 15 | 16 | 30 => (Clock, vec!["idle_aim"]),
+        4 | 6 | 12 | 13 | 15 | 16 | 30 | 37 => (Clock, vec!["idle_aim"]),
         5 => (Clock, vec!["prone"]),
         36 => (Clock, vec!["prone_fire"]),
         8 => (Clock, vec!["cover"]),
@@ -362,7 +362,7 @@ pub fn pose_clips(pose: u32) -> (Play, Vec<&'static str>) {
 }
 
 /// Highest pose id (pose.rs).
-pub const POSE_IDS: u32 = 37;
+pub const POSE_IDS: u32 = 38;
 
 impl Anims {
     /// Joints from the spine up: the upper-body layer replaces these.
