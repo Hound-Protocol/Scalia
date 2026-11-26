@@ -4,6 +4,15 @@ Start at the [README](README.md) for all workstreams and [CONTRIBUTING.md](CONTR
 
 Last updated: 2026-11-26 (Patch: Animations 6).
 
+## Patch: Animations 7 (2026-11-26): AN-07 the crawl grips and surges
+
+- Planted contacts were skating (knees 32 cm, elbows 20 cm while "planted"). Now the pushing boot and the pulling hand
+  hold their spots (0.9 / 0.3 cm); the body surges 0.4 to 1.6 times its average speed and rises 2 to 3 cm per stroke;
+  the head lags. Solver rows no longer jump (worst 0.44 rad, was 1.58).
+- Measure with `cargo run -q --release -p scalia-render --example crawl_motion rows`. Rebake the table with
+  `crawl_solve rows` into `pose::HIGH_CRAWL`.
+- Patch 6 verdicts recorded in AN-04 and AN-05. AN-07 verdict pending; next AN-06.
+
 ## Patch: Animations 6 (2026-11-26): AN-04 prone and crawl, AN-05 standing turns
 
 See [AN-04](docs/work-orders/AN-04-crawl-polish.md) and [AN-05](docs/work-orders/AN-05-standing-turn.md) (Evidence

@@ -32,9 +32,12 @@ fn the_body_lies_flat_on_the_ground() {
         let p = params_dir(Pose::Crawl, k as f32 / 32.0, 0.0);
         let s = body.stats(&p);
         assert!(s.belly < 0.04, "phase {k}/32: the belly is {:.3} m off the ground", s.belly);
-        assert!(p.raise < 0.03, "phase {k}/32: the body is raised {:.3} m", p.raise);
+        // AN-07: the hips rise a few centimetres as a leg pushes (crawl::HIP_RISE), no more.
+        assert!(p.raise < 0.065, "phase {k}/32: the body is raised {:.3} m", p.raise);
         let hips = at(&p, Part::LeftThigh, Vec3::new(-HIP_X, 0.0, HIP_Z)).z.max(at(&p, Part::RightThigh, Vec3::new(HIP_X, 0.0, HIP_Z)).z);
-        assert!(hips < 0.2, "phase {k}/32: the hips are {hips:.3} m up");
+        // AN-07: 22 cm, the drawn knee's hip rolled up and the hips risen with the push (measured 21.1; it was 20 cm with no rise);
+        // on knees and elbows they stood near 30 cm.
+        assert!(hips < 0.22, "phase {k}/32: the hips are {hips:.3} m up");
     }
 }
 
@@ -80,21 +83,18 @@ fn one_knee_draws_up_to_the_side_while_the_other_leg_lies_back_then_they_swap() 
 /// The forearms reach ahead and pull back in turn, the reaching arm opposite the drawn knee.
 #[test]
 fn the_forearms_reach_and_pull_opposite_the_drawn_knee() {
-    let elbow_ahead = |phase: f32, i: usize| {
-        let p = params_dir(Pose::Crawl, phase, 0.0);
-        let g = if i == 0 { -1.0 } else { 1.0 };
-        let (arm, fore) = if i == 0 { (Part::LeftArm, Part::LeftForearm) } else { (Part::RightArm, Part::RightForearm) };
-        at(&p, fore, Vec3::new(g * ELBOW_X, 0.0, ELBOW_Z)).y - at(&p, arm, Vec3::new(g * SHOULDER_X, 0.0, SHOULDER_Z)).y
-    };
+    // AN-07: the hand is what grips (the elbow swings out round it as the arm folds), so it is the hand that reaches
+    // and pulls.
+    let hand_ahead = |phase: f32, i: usize| palm_ahead(phase, i).0;
     for i in 0..2 {
-        let y: Vec<f32> = (0..32).map(|j| elbow_ahead(j as f32 / 32.0, i)).collect();
+        let y: Vec<f32> = (0..32).map(|j| hand_ahead(j as f32 / 32.0, i)).collect();
         let range = y.iter().copied().fold(f32::MIN, f32::max) - y.iter().copied().fold(f32::MAX, f32::min);
-        assert!(range > 0.2, "arm {i}: the elbow reaches and pulls over only {range:.2} m");
+        assert!(range > 0.3, "arm {i}: the hand reaches and pulls over only {range:.2} m");
     }
-    // At the left knee's most drawn, the right elbow is well ahead of the left.
+    // At the left knee's most drawn, the right hand is well ahead of the left.
     let k: Vec<f32> = (0..32).map(|j| knee_out(j as f32 / 32.0, 0.0)[0]).collect();
     let j = k.iter().position(|o| *o == k.iter().copied().fold(f32::MIN, f32::max)).unwrap() as f32 / 32.0;
-    assert!(elbow_ahead(j, 1) > elbow_ahead(j, 0) + 0.1, "the right arm reaches as the left knee draws up");
+    assert!(hand_ahead(j, 1) > hand_ahead(j, 0) + 0.1, "the right arm reaches as the left knee draws up");
 }
 
 #[test]
@@ -162,24 +162,44 @@ fn one_leg_always_lies_straight_back() {
     }
 }
 
-/// While a knee pushes and a forearm pulls they hold their place along the way he moves (the body slides over them,
-/// STRIDE per cycle): no skating.
+/// Where the boot and the hand of each side are in the world (the root moving STRIDE per cycle, as the game moves him).
+fn grips(u: f32) -> [[Vec3; 2]; 2] {
+    use scalia_render::pose::{ANKLE_Z, PALM};
+    let p = params_dir(Pose::Crawl, u, 0.0);
+    let ahead = Vec3::new(0.0, crawl::STRIDE * u, 0.0);
+    [
+        [at(&p, Part::LeftShin, Vec3::new(-HIP_X, 0.0, ANKLE_Z)) + ahead, at(&p, Part::RightShin, Vec3::new(HIP_X, 0.0, ANKLE_Z)) + ahead],
+        [at(&p, Part::LeftForearm, Vec3::new(-PALM.x, PALM.y, PALM.z)) + ahead, at(&p, Part::RightForearm, Vec3::new(PALM.x, PALM.y, PALM.z)) + ahead],
+    ]
+}
+
+/// AN-07: a pushing boot and a pulling hand hold their spot on the ground, along the way he moves and across it, while
+/// the body surges over them. Before, the knees "pushed" while sweeping 32 cm in toward the body and the elbows
+/// "pulled" while sweeping 20 cm out: the crawl skated.
 #[test]
-fn pushing_knees_and_pulling_forearms_hold_their_place() {
+fn pushing_boots_and_pulling_hands_hold_their_spot() {
     let n = 128;
-    let pts = [
-        (Part::LeftShin, Vec3::new(-HIP_X, 0.0, KNEE_Z), 0.0, 0.03),
-        (Part::RightShin, Vec3::new(HIP_X, 0.0, KNEE_Z), 0.5, 0.03),
-        (Part::RightForearm, Vec3::new(ELBOW_X, 0.0, ELBOW_Z), 0.0, 0.05),
-        (Part::LeftForearm, Vec3::new(-ELBOW_X, 0.0, ELBOW_Z), 0.5, 0.05),
-    ];
-    for (part, v, off, limit) in pts {
-        let y = |u: f32| at(&params_dir(Pose::Crawl, u, 0.0), part, v).y + crawl::STRIDE * u;
-        let us: Vec<f32> = (0..n).map(|k| k as f32 / n as f32).filter(|u| crawl::planted(u + off)).collect();
-        assert!(us.len() > n / 4, "{part:?} is planted only {} of {n} samples", us.len());
-        let y0 = y(us[0]);
-        let wander = us.iter().map(|u| (y(*u) - y0).abs()).fold(0.0f32, f32::max);
-        assert!(wander < limit, "{part:?} skates {wander:.3} m along the way he moves while it pushes");
+    let planted = |u: f32, c: usize, i: usize| if c == 0 { crawl::planted(u + if i == 0 { 0.0 } else { 0.5 }) } else { crawl::arm_planted(crawl::arm_u(u, i)) };
+    for (c, what, limit) in [(0, "boot", 0.015), (1, "hand", 0.015)] {
+        for i in 0..2 {
+            let mut land: Option<Vec3> = None;
+            let mut worst = 0.0f32;
+            let mut planted_for = 0;
+            // Twice round, so a stroke that spans the loop's seam is measured whole.
+            for k in 0..2 * n {
+                let u = k as f32 / n as f32;
+                if planted(u, c, i) {
+                    let at = grips(u)[c][i];
+                    let l = *land.get_or_insert(at);
+                    worst = worst.max((at - l).truncate().length());
+                    planted_for += 1;
+                } else {
+                    land = None;
+                }
+            }
+            assert!(planted_for > n / 2, "{what} {i} is planted only {planted_for} of {} samples", 2 * n);
+            assert!(worst < limit, "{what} {i} skates {worst:.3} m over the ground while it grips");
+        }
     }
 }
 
@@ -275,19 +295,18 @@ fn starting_and_stopping_the_crawl_blend_smoothly() {
 /// side, skating some 40 cm a stroke).
 #[test]
 fn forearms_never_drag_along_the_ground() {
+    // AN-07: the hand grips; down on the ground it never moves ahead with the body (only reaching, lifted, does it).
     let n = 128;
-    for (g, fore) in [(-1.0, Part::LeftForearm), (1.0, Part::RightForearm)] {
-        let el = |u: f32| at(&params_dir(Pose::Crawl, u, 0.0), fore, Vec3::new(g * ELBOW_X, 0.0, ELBOW_Z));
+    for i in 0..2 {
         let body_step = crawl::STRIDE / n as f32;
         let dragged = (0..n)
             .filter(|k| {
                 let (u0, u1) = (*k as f32 / n as f32, (*k + 1) as f32 / n as f32);
-                let (a, b) = (el(u0), el(u1));
-                let world = (b.y + crawl::STRIDE * u1) - (a.y + crawl::STRIDE * u0);
-                a.z.min(b.z) < crawl::ELBOW_H + 0.012 && world > 0.3 * body_step
+                let (a, b) = (grips(u0)[1][i], grips(u1)[1][i]);
+                a.z.min(b.z) < crawl::PALM_H[i] + 0.008 && b.y - a.y > 0.3 * body_step
             })
             .count();
-        assert!(dragged <= n / 16, "{fore:?} is dragged along the ground {dragged} of {n} steps");
+        assert!(dragged <= n / 16, "hand {i} is dragged along the ground {dragged} of {n} steps");
     }
 }
 
@@ -304,19 +323,43 @@ fn nothing_sinks_into_the_ground_through_the_stroke() {
     }
 }
 
-/// AN-04: the body slides along the ground rather than bobbing: over the stroke the hips' and the chest's heights
-/// (between the shoulders) each vary by at most 1.5 cm.
+/// AN-07: the body works like a body, not a sled. It surges: fastest while a leg pushes, slowest while it draws up
+/// (the pelvis at under 0.6 and over 1.4 times the crawl's average speed; before, exactly 1). It rises and falls
+/// with the stroke, 1.5 to 4 cm at the hips and at the chest (before, flat to the millimetre), the chest a little
+/// after the hips; and the head lags the surge.
 #[test]
-fn the_body_does_not_bob() {
+fn the_body_surges_and_rises_with_the_stroke() {
+    use scalia_render::pose::NECK_Z;
+    let n = 64;
     let mid = |p: &PoseParams, x: f32, z: f32| (at(p, Part::Torso, Vec3::new(-x, 0.0, z)) + at(p, Part::Torso, Vec3::new(x, 0.0, z))) / 2.0;
-    let (mut hips, mut chest) = (vec![], vec![]);
-    for k in 0..64 {
-        let p = params_dir(Pose::Crawl, k as f32 / 64.0, 0.0);
-        hips.push(mid(&p, HIP_X, HIP_Z).z);
-        chest.push(mid(&p, SHOULDER_X, SHOULDER_Z).z);
+    let (mut hips, mut chest, mut head) = (vec![], vec![], vec![]);
+    for k in 0..=n {
+        let u = k as f32 / n as f32;
+        let p = params_dir(Pose::Crawl, u, 0.0);
+        let ahead = Vec3::new(0.0, crawl::STRIDE * u, 0.0);
+        hips.push(mid(&p, HIP_X, HIP_Z) + ahead);
+        chest.push(mid(&p, SHOULDER_X, SHOULDER_Z) + ahead);
+        head.push(at(&p, Part::Head, Vec3::new(0.0, 0.1, NECK_Z + 0.12)) + ahead);
     }
-    for (what, h) in [("hips", hips), ("chest", chest)] {
-        let span = h.iter().copied().fold(f32::MIN, f32::max) - h.iter().copied().fold(f32::MAX, f32::min);
-        assert!(span <= 0.015, "the {what} bob {span:.3} m over the stroke");
+    let speed = |s: &[Vec3]| -> Vec<f32> { (0..n).map(|k| (s[k + 1].y - s[k].y) / (crawl::STRIDE / n as f32)).collect() };
+    let span = |v: &[f32]| (v.iter().copied().fold(f32::MAX, f32::min), v.iter().copied().fold(f32::MIN, f32::max));
+    let (slow, fast) = span(&speed(&hips));
+    assert!(slow < 0.6 && fast > 1.4, "the pelvis moves at {slow:.2} to {fast:.2} times the average: no surge");
+    let height = |s: &[Vec3]| s[..n].iter().map(|v| v.z).collect::<Vec<f32>>();
+    for (what, s) in [("hips", &hips), ("chest", &chest)] {
+        let (lo, hi) = span(&height(s));
+        assert!((0.015..0.04).contains(&(hi - lo)), "the {what} rise and fall {:.3} m over the stroke", hi - lo);
     }
+    let peak = |s: &[Vec3]| (0..n / 2).max_by(|a, b| s[*a].z.total_cmp(&s[*b].z)).unwrap();
+    let (h, c) = (peak(&hips), peak(&chest));
+    assert!(c > h && c - h <= n / 8, "the chest peaks at {c}/{n}, the hips at {h}/{n}: want the chest a little after");
+    // The head lags: it tips back as the body speeds up, a little after (its nod against the chest's pitch).
+    let sp = speed(&hips);
+    let accel: Vec<f32> = (0..n / 2).map(|k| sp[k + 1] - sp[k]).collect();
+    let nods: Vec<f32> = (0..n / 2).map(|k| { let p = params_dir(Pose::Crawl, (k as f32 + 0.5) / n as f32, 0.0); p.head - 1.0 - p.lean }).collect();
+    let top = |v: &[f32]| (0..v.len()).max_by(|a, b| v[*a].total_cmp(&v[*b])).unwrap();
+    let (ta, tn) = (top(&accel), top(&nods));
+    let (lo, hi) = span(&nods);
+    assert!(hi - lo > 0.06, "the head nods only {:.3} rad with the surge", hi - lo);
+    assert!(tn > ta && tn - ta <= n / 16, "the head tips back most at {tn}/{n}, the body speeds up most at {ta}/{n}");
 }

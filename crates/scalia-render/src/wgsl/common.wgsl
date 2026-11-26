@@ -351,6 +351,8 @@ const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000,
 const CRAWL_PROP: f32 = 0.1;
 // Share of the crawl's body roll kept crawling sideways (pose.rs CRAWL_SIDE_TWIST).
 const CRAWL_SIDE_TWIST: f32 = 0.6;
+// AN-07: how far the body surges ahead of the steady crawl and falls back (m; crawl.rs `surge`: SURGE STRIDE / 4 pi).
+const CRAWL_SURGE: f32 = 0.0387940;
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
   if (pose == 34u) { return DROP_REACH_P; }
   if (pose == 35u) { return DROP_PLANT_P; }
@@ -658,6 +660,8 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     // The rifle along the right forearm, muzzle ahead, on its side (crawl.rs RIFLE_PITCH 1.5707963, RIFLE_ROLL 1.5707963).
     p.rifle = 1.5707963;
     p.ryaw = 1.5707963;
+    // AN-07: the body surges over its planted hands and boots (crawl.rs `surge`; lying prone `bob` runs along the body).
+    p.bob = -CRAWL_SURGE * sin(12.566371 * phase) * (1.0 - 2.0 * wb) * abs(fwd);
   }
 
  else if (pose == 28u) {
