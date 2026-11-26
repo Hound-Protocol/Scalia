@@ -45,3 +45,29 @@ fn prone_lies_on_the_ground() {
         assert!(rifle > 0.01, "{pose:?}: the rifle is {rifle:.3} m off the ground");
     }
 }
+
+/// AN-04: lying still he breathes (pose.rs `idle`: a slow rise of the chest on the elbows, about every 4 s) without
+/// pushing an arm into the ground or lifting the belly off it.
+#[test]
+fn prone_breathes_without_moving_his_contacts() {
+    use scalia_render::pose::idle;
+    let base = params(Pose::Prone, 0.0);
+    let mut arm = f32::MAX;
+    let mut belly = (f32::MAX, f32::MIN);
+    for k in 0..40 {
+        let p = grip(&idle(&base, Pose::Prone, k as f32 * 0.1, 0.3), 1.0);
+        let mut l = [f32::MAX; 2];
+        for v in &figure().vertices {
+            let z = pose_mesh_vertex(Vec3::from(v.pos), v.color, &p).z;
+            match part_of(v.color) {
+                Part::LeftArm | Part::LeftForearm | Part::RightArm | Part::RightForearm => l[0] = l[0].min(z),
+                Part::Torso | Part::Body => l[1] = l[1].min(z),
+                _ => {}
+            }
+        }
+        arm = arm.min(l[0]);
+        belly = (belly.0.min(l[1]), belly.1.max(l[1]));
+    }
+    assert!(arm > -0.03, "breathing, an arm sinks {:.3} m", -arm);
+    assert!(belly.0 > -0.012 && belly.1 < 0.01, "breathing, the belly's lowest point runs {:.3}..{:.3} m", belly.0, belly.1);
+}
