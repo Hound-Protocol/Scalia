@@ -2,7 +2,7 @@
 
 - **ID:** AN-04
 - **Revision:** v1.0
-- **Status:** merged pending (branch anim-an04, Patch: Animations 6)
+- **Status:** shipped (Patch: Animations 6, Alpha 0.1.49); player verdicts: crawl arms right, roll right, starts and stops smooth
 - **Date:** 2026-11-25
 - **Owner:** animation lane
 - **Base:** main 56b0f13 (Patch: Animations 5, Alpha 0.1.48); branch anim-an04

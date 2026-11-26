@@ -2,7 +2,7 @@
 
 - **ID:** AN-05
 - **Revision:** v1.0
-- **Status:** merged pending (branch anim-an04, Patch: Animations 6)
+- **Status:** shipped (Patch: Animations 6, Alpha 0.1.49); player verdict: smooth, steps read right
 - **Date:** 2026-11-26
 - **Owner:** animation lane
 - **Base:** main 56b0f13; branch anim-an04 (shipped with AN-04)

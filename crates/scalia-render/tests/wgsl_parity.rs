@@ -253,6 +253,10 @@ fn an04_crawl_and_prone_constants_match() {
     let get = |name: &str| nums(WGSL.lines().find(|l| l.starts_with(&format!("const {name}:"))).unwrap_or("").split_once('=').map_or("", |x| x.1));
     assert_eq!(get("CRAWL_PROP"), vec![CRAWL_PROP]);
     assert_eq!(get("CRAWL_SIDE_TWIST"), vec![CRAWL_SIDE_TWIST]);
+    // AN-07: the crawl's surge.
+    let surge = scalia_render::crawl::SURGE * scalia_render::crawl::STRIDE / (4.0 * std::f32::consts::PI);
+    assert!((get("CRAWL_SURGE")[0] - surge).abs() < 1e-6, "common.wgsl CRAWL_SURGE is not crawl::surge's {surge}");
+    assert!((scalia_render::crawl::surge(0.125) + surge).abs() < 1e-6);
     for (fit, what) in [(PRONE_AIM_FIT, "aim"), (PRONE_REST_FIT, "rest")] {
         for v in [fit.0, fit.1, fit.2[0], fit.2[1], fit.3[0], fit.3[1], fit.4[0], fit.4[1], fit.5] {
             assert!(v == 0.0 || WGSL.contains(&format!("{v}")), "common.wgsl lacks the prone {what} fit value {v}");

@@ -12,6 +12,7 @@ Start with [../README.md](../README.md), [../CONTRIBUTING.md](../CONTRIBUTING.md
 | [work-orders/TEMPLATE.md](work-orders/TEMPLATE.md) | current | Template for new work orders |
 | [work-orders/AN-04-crawl-polish.md](work-orders/AN-04-crawl-polish.md) | current | Prone and low crawl polish |
 | [work-orders/AN-05-standing-turn.md](work-orders/AN-05-standing-turn.md) | current | Standing turns step round smoothly |
+| [work-orders/AN-07-crawl-grip-and-surge.md](work-orders/AN-07-crawl-grip-and-surge.md) | current | The crawl grips the ground and surges |
 
 ## Animation
 
