@@ -245,3 +245,17 @@ fn crawl_rifle_carry_matches() {
     assert!(nums(body).iter().any(|x| (x - RIFLE_PITCH).abs() < 1e-5), "crawl rifle pitch {RIFLE_PITCH}");
     assert!(nums(body).iter().any(|x| (x - RIFLE_ROLL).abs() < 1e-5), "crawl rifle roll {RIFLE_ROLL}");
 }
+
+/// AN-04: the crawl and prone values written into the shader by hand.
+#[test]
+fn an04_crawl_and_prone_constants_match() {
+    use scalia_render::pose::{CRAWL_PROP, CRAWL_SIDE_TWIST, PRONE_AIM_FIT, PRONE_REST_FIT};
+    let get = |name: &str| nums(WGSL.lines().find(|l| l.starts_with(&format!("const {name}:"))).unwrap_or("").split_once('=').map_or("", |x| x.1));
+    assert_eq!(get("CRAWL_PROP"), vec![CRAWL_PROP]);
+    assert_eq!(get("CRAWL_SIDE_TWIST"), vec![CRAWL_SIDE_TWIST]);
+    for (fit, what) in [(PRONE_AIM_FIT, "aim"), (PRONE_REST_FIT, "rest")] {
+        for v in [fit.0, fit.1, fit.2[0], fit.2[1], fit.3[0], fit.3[1], fit.4[0], fit.4[1], fit.5] {
+            assert!(v == 0.0 || WGSL.contains(&format!("{v}")), "common.wgsl lacks the prone {what} fit value {v}");
+        }
+    }
+}

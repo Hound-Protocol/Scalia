@@ -6,7 +6,7 @@
 //! `^<rad>`: the hips and legs trail the chest by that much (the rifle-first lag, as the shader adds it).
 use glam::Vec3;
 use scalia_render::mesh::figure;
-use scalia_render::pose::{blend, grip, layer, params, params_dir, pose_mesh_vertex, two_handed, Pose, PoseParams};
+use scalia_render::pose::{blend, crawl_prop, grip, layer, params, params_dir, pose_mesh_vertex, two_handed, Pose, PoseParams};
 
 /// One `<pose>[+<upper>][@<phase>[~<dir>]]` spec posed as the shader draws it.
 fn one(spec: &str) -> PoseParams {
@@ -30,7 +30,11 @@ fn spec_params(spec: &str) -> PoseParams {
     let mut p = match spec.split_once('>') {
         Some((a, rest)) => {
             let (b, w) = rest.split_once('%').unwrap();
-            blend(&one(a), &one(b), w.parse().unwrap())
+            let w: f32 = w.parse().unwrap();
+            let id = |s: &str| Pose::from_id(s.split(['+', '@']).next().unwrap().parse().unwrap());
+            let mut p = blend(&one(a), &one(b), w);
+            p.lean -= crawl_prop(id(a), id(b), w);
+            p
         }
         None => one(spec),
     };

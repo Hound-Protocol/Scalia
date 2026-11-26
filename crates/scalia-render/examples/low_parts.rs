@@ -1,12 +1,14 @@
-//! Lowest point of every part of a posed figure (`low_parts <pose id> <phase> [dir]`): what touches the ground.
+//! Lowest point of every part of a posed figure, as drawn (`low_parts <pose id> <phase> [dir]`): what touches the
+//! ground.
 use glam::Vec3;
 use scalia_render::mesh::{figure, part_of};
-use scalia_render::pose::{params_dir, pose_mesh_vertex, Pose};
+use scalia_render::pose::{grip, params_dir, pose_mesh_vertex, two_handed, Pose};
 use std::collections::BTreeMap;
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let pose = Pose::from_id(a[1].parse().unwrap());
-    let p = params_dir(pose, a[2].parse().unwrap(), a.get(3).map_or(0.0, |s| s.parse().unwrap()));
+    // Posed as the shader draws it: the two-handed grip on top (the support hand on the handguard).
+    let p = grip(&params_dir(pose, a[2].parse().unwrap(), a.get(3).map_or(0.0, |s| s.parse().unwrap())), two_handed(pose));
     let mut low: BTreeMap<String, (f32, Vec3)> = BTreeMap::new();
     for v in &figure().vertices {
         let q = pose_mesh_vertex(Vec3::from(v.pos), v.color, &p);

@@ -328,8 +328,10 @@ fn turn(q: vec3f, a: f32) -> vec3f {
 // The drop's middle keys (pose.rs `drop_reach`, `drop_plant`), as literals: the CPU hands the shader the two keys
 // of the drop around its phase (pose.rs `drop_keys`) so the drop costs no extra pose evaluations per vertex.
 const DROP_REACH_P: PP = PP(1.550000, vec2f(1.550000, -0.100000), vec2f(1.800000, 1.750000), vec2f(1.000000, -0.090000), vec2f(0.100000, 1.920000), 0.900000, 0.900000, 0.000000, -0.390930, vec2f(0.100000, 0.870000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.530000), 0.740000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
-const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
+const DROP_PLANT_P: PP = PP(1.100000, vec2f(0.900000, 0.900000), vec2f(1.350000, 1.350000), vec2f(0.900000, 0.600000), vec2f(0.500000, 2.200000), 0.600000, 0.000000, 0.650000, -0.143823, vec2f(0.100000, 0.245123), 0.000000, 0.000000, 0.000000, 0.000000, vec2f(0.150000, 0.149328), 1.500000, vec2f(0.000000, 0.000000), 0.000000, 0.000000, 0.000000, 0.008619, vec2f(0.000000, 0.000000), vec2f(0.000000, 0.000000));
 
+// How far the chest props up half way through a crawl <-> prone blend (pose.rs CRAWL_PROP, crawl_prop).
+const CRAWL_PROP: f32 = 0.1;
 // Share of the crawl's body roll kept crawling sideways (pose.rs CRAWL_SIDE_TWIST).
 const CRAWL_SIDE_TWIST: f32 = 0.6;
 fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
@@ -378,16 +380,18 @@ fn pose_params(pose: u32, phase: f32, dir: f32) -> PP {
     p.rifle = 1.5707963;
     p.ryaw = 0.55;
     p.twist = -0.55;
-    // Chest up on the elbows, hips flat (pose.rs PRONE_LEAN -0.28, PRONE_AIM_LEAN -0.30); rifle and head take back
-    // the extra lean over the old -0.1.
-    p.lean = select(-0.30, -0.28, pose == 36u);
+    // Chest up on the elbows, hips flat (pose.rs PRONE_REST_FIT, PRONE_AIM_FIT); rifle and head take back the
+    // extra lean over the old -0.1.
+    // AN-04: fitted to the ground (pose.rs PRONE_AIM_FIT, PRONE_REST_FIT): 1.2 cm up, the aim's chest lower.
+    p.lean = select(-0.3, -0.207, pose == 36u);
+    p.raise = 0.012;
     let arch = p.lean + 0.1;
     p.rifle = p.rifle + arch;
     p.look = 0.55;
     if (pose == 36u) {
       // Aiming: shouldered, pointed ahead (pose.rs).
-      p.sh = vec2f(2.8, 1.571);
-      p.el = vec2f(1.3, 2.084);
+      p.sh = vec2f(2.845, 1.432);
+      p.el = vec2f(1.324, 2.159);
       p.reach = vec2f(0.0, 0.401);
       p.abd = vec2f(0.0, 0.604);
       p.head = 1.0 + arch;
@@ -1043,6 +1047,9 @@ fn animate(v: vec3f, c: f32, a: vec4f, b: vec4f, d: vec4f, time: f32, hands: boo
     if (w < 1.0) {
       let previous_phase = select(phase, reload_phase, u32(d.x) == 18u);
       pp = blend(pose_params(u32(d.x), previous_phase, dir), pp, w);
+      // AN-04: between the crawl and lying prone the chest props up on the forearms half way (pose.rs crawl_prop).
+      let ids = vec2u(u32(d.x), u32(b.w));
+      if ((ids.x == 32u && ids.y == 5u) || (ids.x == 5u && ids.y == 32u)) { pp.lean = pp.lean - CRAWL_PROP * 4.0 * w * (1.0 - w); }
     }
     let base = pp;
     var upper_id = 0u;

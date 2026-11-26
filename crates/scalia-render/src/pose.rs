@@ -515,6 +515,14 @@ pub fn ankle_flat(hip: f32, knee: f32, flat: f32) -> f32 {
 /// Lying on his front the feet point back, boots flat on the ground, so the toes do not prop the body up.
 pub const PRONE_POINT: f32 = -1.2;
 /// Upper-body lean lying prone: back, so the chest rises off the ground onto the elbows (was `PRONE_LEAN_OLD`).
+/// AN-04: the prone poses fitted to the ground by examples/prone_fit.rs, as drawn with the grip: (lean, raise, boot
+/// roll, shoulders, elbows, left arm's swing out). Both lie 1.2 cm higher (shared, so aiming keeps the prone legs):
+/// the belly on the ground, not in it. At rest the arms are as they were (the rifle low across in front). Aiming, the
+/// chest is lower and the arms refitted so both elbows rest on the ground under the rifle (the support elbow hung 7 cm
+/// up). Aim fit: `RAISE=0.012 RAISE_HOLD=100 TOE=0 TOE_HOLD=100 LEAN_HOLD=0.05 prone_fit 36`.
+/// common.wgsl mirrors them.
+pub const PRONE_AIM_FIT: (f32, f32, [f32; 2], [f32; 2], [f32; 2], f32) = (-0.207, 0.012, [0.0, 0.0], [2.845, 1.432], [1.324, 2.159], 0.0);
+pub const PRONE_REST_FIT: (f32, f32, [f32; 2], [f32; 2], [f32; 2], f32) = (-0.30, 0.012, [0.0, 0.0], [1.75, 1.75], [1.45, 1.45], 0.0);
 pub const PRONE_LEAN: f32 = -0.28;
 /// The same, aiming: a little more, so the support forearm clears the ground under the rifle.
 pub const PRONE_AIM_LEAN: f32 = -0.30;
@@ -1478,13 +1486,17 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
             p.look = 0.55;
             // Chest up on the elbows, hips and legs flat on the ground (AN-02-S09); rifle and head take back the
             // extra lean so the aim and the eyes stay where they were.
-            p.lean = if pose == Pose::ProneAim { PRONE_LEAN } else { PRONE_AIM_LEAN };
+            // AN-04: fitted to the ground (examples/prone_fit.rs): boots, elbows and belly on it, not in it.
+            p.lean = if pose == Pose::ProneAim { PRONE_AIM_FIT.0 } else { PRONE_REST_FIT.0 };
+            let fit = if pose == Pose::ProneAim { PRONE_AIM_FIT } else { PRONE_REST_FIT };
+            p.raise = fit.1;
+            p.toe = fit.2;
             let arch = p.lean - PRONE_LEAN_OLD;
             p.rifle += arch;
             if pose == Pose::ProneAim {
                 // Aiming: the rifle shouldered and pointed ahead along the ground.
-                p.shoulder = [2.8, 1.571];
-                p.elbow = [1.3, 2.084];
+                p.shoulder = fit.3;
+                p.elbow = fit.4;
                 p.reach = [0.0, 0.401];
                 p.abduct = [0.0, 0.604];
                 p.head = 1.0 + arch;
@@ -1495,8 +1507,8 @@ pub fn params_dir(pose: Pose, phase: f32, dir: f32) -> PoseParams {
                 p.rifle_yaw = std::f32::consts::FRAC_PI_2;
                 p.twist = 0.0;
                 p.look = 0.0;
-                p.shoulder = [1.75, 1.75];
-                p.elbow = [1.45, 1.45];
+                p.shoulder = fit.3;
+                p.elbow = fit.4;
                 p.head = 0.8 + arch;
             }
         }
@@ -2081,6 +2093,18 @@ fn turn(q: Vec3, a: f32) -> Vec3 {
     let (s, c) = a.sin_cos();
     Vec3::new(q.x * c - q.y * s, q.x * s + q.y * c, q.z)
 }
+
+/// How far the chest props up on the forearms (rad, taken off `lean`) part way through a blend between the crawl and
+/// lying prone, `w` of the way (AN-04): the arms swing between the two holds over the ground, not through it.
+/// common.wgsl mirrors it.
+pub fn crawl_prop(a: Pose, b: Pose, w: f32) -> f32 {
+    let w = w.clamp(0.0, 1.0);
+    let crawl_prone = matches!((a, b), (Pose::Crawl, Pose::Prone) | (Pose::Prone, Pose::Crawl));
+    if crawl_prone { CRAWL_PROP * 4.0 * w * (1.0 - w) } else { 0.0 }
+}
+
+/// How far the chest props up half way through a crawl <-> prone blend (rad, `crawl_prop`).
+pub const CRAWL_PROP: f32 = 0.1;
 
 /// Linear blend between two poses (`w` 0 gives `a`, 1 gives `b`); the shader blends over `BLEND_S` after a change.
 pub fn blend(a: &PoseParams, b: &PoseParams, w: f32) -> PoseParams {
