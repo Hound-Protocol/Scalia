@@ -43,7 +43,7 @@ pub const SHOULDER_H: f32 = 0.24;
 pub const BODY_RAISE: f32 = 0.028;
 /// Joint centre heights on the ground (m): knee, elbow, ankle, palm left and right (the right hand on the rifle).
 pub const KNEE_H: f32 = 0.09;
-pub const ELBOW_H: f32 = 0.10;
+pub const ELBOW_H: f32 = 0.11;
 pub const ANKLE_H: f32 = 0.08;
 pub const PALM_H: [f32; 2] = [0.06, 0.08];
 /// How far a drawing knee or reaching forearm lifts off the ground as it slides forward (m).
@@ -57,7 +57,36 @@ pub const ELBOW_REACH: f32 = 0.12;
 pub const RIFLE_PITCH: f32 = std::f32::consts::FRAC_PI_2;
 pub const RIFLE_ROLL: f32 = std::f32::consts::FRAC_PI_2;
 
-/// Whether a side is pushing (knee) and pulling (opposite forearm) at stroke `u`: planted, the body slides over it.
+/// How far a forearm pulls the body (m): it is planted half the cycle, so it pulls half a stride (AN-04).
+pub const ARM_PULL: f32 = STRIDE * 0.5;
+/// How high a reaching forearm's elbow lifts off the ground (m).
+pub const ARM_LIFT: f32 = 0.08;
+
+/// Where a forearm is in its stroke at `u` (0..1, `arm_u`): (how far back from its forward mark, lift). AN-04: from
+/// landing on its mark it pulls back ARM_PULL over half a cycle at the body's speed (planted), then reaches forward off
+/// the ground over the other half, leaving and landing at the ground's speed (no jolt); one forearm is always pulling,
+/// neither is ever dragged along with the body.
+pub fn arm_stroke(u: f32) -> (f32, f32) {
+    let u = u.rem_euclid(1.0);
+    if u < 0.5 {
+        (ARM_PULL * u / 0.5, 0.0)
+    } else {
+        let t = (u - 0.5) / 0.5;
+        (ARM_PULL * (4.0 * t * t * t - 6.0 * t * t + t + 1.0), ARM_LIFT * (std::f32::consts::PI * t).sin())
+    }
+}
+
+/// Whether a forearm is planted (pulling) at its stroke `u`.
+pub fn arm_planted(u: f32) -> bool {
+    u.rem_euclid(1.0) < 0.5
+}
+
+/// Forearm `i`'s stroke at `phase`: each lands as the opposite knee finishes drawing up (the right with the left knee).
+pub fn arm_u(phase: f32, i: usize) -> f32 {
+    phase - DRAW + if i == 0 { 0.5 } else { 0.0 }
+}
+
+/// Whether a side is pushing (knee) at stroke `u`: planted, the body slides over it.
 pub fn planted(u: f32) -> bool {
     let u = u.rem_euclid(1.0);
     (DRAW..0.5).contains(&u)
@@ -180,7 +209,7 @@ pub fn apply(p: &mut PoseParams, r: &[f32; F]) {
 
 /// Places the four limbs for the body set in `r` (hips, chest, roll): each knee and elbow on its spot (or as near as
 /// it reaches), shins down to the toes, forearms forward. Returns the misses, weighted: planted limbs count fully.
-fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
+fn place_limbs(phase: f32, r: &mut [f32; F], up: [f32; 2]) -> [f32; 12] {
     let mut p = base();
     apply(&mut p, r);
     let mut miss = [0.0; 12];
@@ -219,7 +248,7 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
         miss[i * 3..i * 3 + 3].copy_from_slice(&[k.x * w, k.y * w, k.z * 2.0 * w]);
         // The forearm opposite the knee: reaching ahead as it draws up, pulling back as it pushes, in line with the
         // shoulder; the arm's swing out to the side is held near rest (a swimmer's sweep otherwise).
-        let (back, lift) = stroke(phase + if i == 0 { 0.5 } else { 0.0 });
+        let (back, lift) = arm_stroke(arm_u(phase, i));
         let w = 1.0;
         // The elbow's mark is taken from the shoulder before the body's roll and bend, so it stays put on the ground
         // while they move the shoulder over it (the arm reaches the difference).
@@ -229,15 +258,15 @@ fn place_limbs(phase: f32, r: &mut [f32; F]) -> [f32; 12] {
         let reach = (0.31f32 * 0.31 - (sh.z - ELBOW_H - lift).powi(2)).max(0.01).sqrt();
         let ahead = reach * ELBOW_REACH.cos() - back;
         let out = (reach * reach - ahead * ahead).max(0.0).sqrt();
-        let want = Vec3::new(sh.x + g * out, sh.y + ahead, ELBOW_H + lift);
+        let want = Vec3::new(sh.x + g * out, sh.y + ahead, ELBOW_H + lift + up[i]);
         // The whole arm at once (shoulder swing, swing out, inward turn, elbow bend): the elbow on its mark, the hand
         // flat on the ground ahead of it, in line with its shoulder, so pulled back to the ribs the forearm angles in
         // and the hand ends under the face (the right hand a little up, on the rifle).
         // Start from an arm reaching ahead and down (prone, about 2.6 rad): hanging back toward the feet is a second
         // solution that also reaches the ground.
-        let ph = PALM_H[i] + lift;
+        let ph = PALM_H[i] + lift + up[i];
         // A planted elbow holds its place before the hand's line and height (it skates otherwise as the body rolls).
-        let hold = if planted(phase + if i == 0 { 0.5 } else { 0.0 }) { 6.0 } else { 2.0 };
+        let hold = if arm_planted(arm_u(phase, i)) { 6.0 } else { 2.0 };
         let [a, b, c, el] = solve_n([r[6 + i].max(2.2), r[10 + i], r[12 + i], r[8 + i].clamp(0.2, 1.5)], |x| {
             let mut q = p;
             q.shoulder[i] = x[0];
@@ -276,7 +305,7 @@ pub fn solve_row(phase: f32, prev: Option<&[f32; F]>) -> [f32; F] {
         let now = ((hip.z - sh.z) / len).clamp(-0.9, 0.9).asin();
         r[14] += want - now;
     }
-    place_limbs(phase, &mut r);
+    place_limbs(phase, &mut r, [0.0; 2]);
     // Eyes ahead: the head takes back the chest's pitch.
     r[17] = 1.0 + r[14];
     r
@@ -322,13 +351,58 @@ pub fn solve() -> Vec<[f32; F]> {
             }
         }
     }
-    for k in 0..ROWS {
-        let mut r = rows[k];
-        place_limbs(k as f32 / ROWS as f32, &mut r);
-        r[17] = 1.0 + r[14];
-        rows[k] = r;
+    // AN-04: each arm is lifted where its skin would touch down below the ground (the elbow's centre sits on its mark,
+    // but a roll or a landing can tip the elbow's point under), so nothing pokes through.
+    let mut up = vec![[0.0f32; 2]; ROWS];
+    for pass in 0..4 {
+        for k in 0..ROWS {
+            let mut r = rows[k];
+            if pass == 0 {
+                place_limbs(k as f32 / ROWS as f32, &mut r, up[k]);
+            }
+            let mut p = base();
+            apply(&mut p, &r);
+            let low = arm_low(&p);
+            let mut again = false;
+            for i in 0..2 {
+                if low[i] < ARM_CLEAR {
+                    up[k][i] += ARM_CLEAR - low[i];
+                    again = true;
+                }
+            }
+            if again {
+                place_limbs(k as f32 / ROWS as f32, &mut r, up[k]);
+            }
+            r[17] = 1.0 + r[14];
+            rows[k] = r;
+        }
     }
     rows
+}
+
+/// How far an arm's skin stays above the ground at least (m, `solve`).
+pub const ARM_CLEAR: f32 = 0.012;
+
+/// The lowest point of each arm's skin (upper arm and forearm; m).
+fn arm_low(p: &PoseParams) -> [f32; 2] {
+    use std::sync::OnceLock;
+    static ARMS: OnceLock<Vec<(Vec3, f32, usize)>> = OnceLock::new();
+    let arms = ARMS.get_or_init(|| {
+        crate::mesh::figure()
+            .vertices
+            .iter()
+            .filter_map(|v| match crate::mesh::part_of(v.color) {
+                Part::LeftArm | Part::LeftForearm => Some((Vec3::from(v.pos), v.color, 0)),
+                Part::RightArm | Part::RightForearm => Some((Vec3::from(v.pos), v.color, 1)),
+                _ => None,
+            })
+            .collect()
+    });
+    let mut low = [f32::MAX; 2];
+    for (at, c, i) in arms {
+        low[*i] = low[*i].min(crate::pose::pose_mesh_vertex(*at, *c, p).z);
+    }
+    low
 }
 
 /// Sanity: the hips' lift at full prone (`pose::PRONE_LIFT`), so `raise` reads as height above lying flat.

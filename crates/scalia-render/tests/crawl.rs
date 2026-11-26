@@ -261,3 +261,37 @@ fn starting_and_stopping_the_crawl_blend_smoothly() {
         }
     }
 }
+
+/// AN-04: a forearm is either planted and pulling (holding its place) or reaching forward off the ground; it never
+/// lies on the ground being dragged along with the body (before AN-04 each forearm rested half the cycle at the body's
+/// side, skating some 40 cm a stroke).
+#[test]
+fn forearms_never_drag_along_the_ground() {
+    let n = 128;
+    for (g, fore) in [(-1.0, Part::LeftForearm), (1.0, Part::RightForearm)] {
+        let el = |u: f32| at(&params_dir(Pose::Crawl, u, 0.0), fore, Vec3::new(g * ELBOW_X, 0.0, ELBOW_Z));
+        let body_step = crawl::STRIDE / n as f32;
+        let dragged = (0..n)
+            .filter(|k| {
+                let (u0, u1) = (*k as f32 / n as f32, (*k + 1) as f32 / n as f32);
+                let (a, b) = (el(u0), el(u1));
+                let world = (b.y + crawl::STRIDE * u1) - (a.y + crawl::STRIDE * u0);
+                a.z.min(b.z) < crawl::ELBOW_H + 0.012 && world > 0.3 * body_step
+            })
+            .count();
+        assert!(dragged <= n / 16, "{fore:?} is dragged along the ground {dragged} of {n} steps");
+    }
+}
+
+/// AN-04: through the whole stroke the small parts never poke into the ground: elbows and boots at most 5 mm (cloth on
+/// dirt), the legs (thighs at the hips and knees, where his weight rests with the belly) at most 1.5 cm, and the rifle
+/// stays at least 1 cm clear.
+#[test]
+fn nothing_sinks_into_the_ground_through_the_stroke() {
+    let body = Body::new();
+    for k in 0..64 {
+        let s = body.stats(&params_dir(Pose::Crawl, k as f32 / 64.0, 0.0));
+        assert!(s.knee > -0.015 && s.elbow > -0.005 && s.boot > -0.005, "phase {k}/64: {s:?}");
+        assert!(s.rifle > 0.01, "phase {k}/64: the rifle is {:.3} m off the ground", s.rifle);
+    }
+}
